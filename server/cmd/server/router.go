@@ -387,9 +387,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// Artifacts
 			r.Route("/api/artifacts", func(r chi.Router) {
+				r.Get("/", h.SearchArtifacts)
 				r.Post("/", h.CreateArtifact)
 				r.Get("/{id}", h.GetArtifact)
 				r.Put("/{id}", h.UpdateArtifact)
+				r.Put("/{id}/scope", h.UpdateArtifactScope)
 				r.Delete("/{id}", h.DeleteArtifact)
 			})
 

@@ -237,6 +237,79 @@ func (q *Queries) ListArtifactsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const searchArtifactsInWorkspace = `-- name: SearchArtifactsInWorkspace :many
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at FROM artifact
+WHERE workspace_id = $1
+  AND ($4::text IS NULL OR kind = $4)
+  AND (
+        $5::text IS NULL
+     OR $5::text = 'all'
+     OR ($5::text = 'workspace' AND project_id IS NULL AND issue_id IS NULL)
+     OR ($5::text = 'project'   AND project_id IS NOT NULL)
+     OR ($5::text = 'issue'     AND issue_id IS NOT NULL)
+  )
+  AND (
+        $6::text IS NULL
+     OR title ILIKE '%' || $6::text || '%'
+     OR body  ILIKE '%' || $6::text || '%'
+  )
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type SearchArtifactsInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+	Kind        pgtype.Text `json:"kind"`
+	Scope       pgtype.Text `json:"scope"`
+	Q           pgtype.Text `json:"q"`
+}
+
+// Cross-scope search across the entire workspace. All filter parameters are
+// nullable; pass NULL to skip the filter. The scope filter values are:
+// 'workspace' (no project_id, no issue_id), 'project' (project_id IS NOT NULL),
+// 'issue' (issue_id IS NOT NULL), or NULL/'all' (no scope filter).
+func (q *Queries) SearchArtifactsInWorkspace(ctx context.Context, arg SearchArtifactsInWorkspaceParams) ([]Artifact, error) {
+	rows, err := q.db.Query(ctx, searchArtifactsInWorkspace,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.Offset,
+		arg.Kind,
+		arg.Scope,
+		arg.Q,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Artifact{}
+	for rows.Next() {
+		var i Artifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.IssueID,
+			&i.Kind,
+			&i.Title,
+			&i.Body,
+			&i.Metadata,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateArtifact = `-- name: UpdateArtifact :one
 UPDATE artifact SET
     title = $2,
@@ -262,6 +335,49 @@ func (q *Queries) UpdateArtifact(ctx context.Context, arg UpdateArtifactParams) 
 		arg.Body,
 		arg.Metadata,
 		arg.WorkspaceID,
+	)
+	var i Artifact
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.IssueID,
+		&i.Kind,
+		&i.Title,
+		&i.Body,
+		&i.Metadata,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateArtifactScope = `-- name: UpdateArtifactScope :one
+UPDATE artifact SET
+    project_id = $3,
+    issue_id   = $4,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at
+`
+
+type UpdateArtifactScopeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Re-scope an artifact (workspace ↔ project ↔ issue). At most one of
+// project_id/issue_id may be non-null; both null = workspace scope.
+func (q *Queries) UpdateArtifactScope(ctx context.Context, arg UpdateArtifactScopeParams) (Artifact, error) {
+	row := q.db.QueryRow(ctx, updateArtifactScope,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.IssueID,
 	)
 	var i Artifact
 	err := row.Scan(

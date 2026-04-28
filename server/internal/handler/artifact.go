@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -354,6 +355,180 @@ func (h *Handler) UpdateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	resp := artifactToResponse(updated)
 	h.publish(EventArtifactUpdated, workspaceID, authorType, authorID, map[string]any{
+		"artifact": resp,
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// SearchArtifacts — GET /api/artifacts?kind=&scope=&q=&limit=&offset=
+// ---------------------------------------------------------------------------
+
+func (h *Handler) SearchArtifacts(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	q := r.URL.Query()
+
+	params := db.SearchArtifactsInWorkspaceParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Limit:       50,
+		Offset:      0,
+	}
+
+	if v := q.Get("kind"); v != "" {
+		if !validArtifactKinds[v] {
+			writeError(w, http.StatusBadRequest, "invalid kind filter")
+			return
+		}
+		params.Kind = pgtype.Text{String: v, Valid: true}
+	}
+	if v := q.Get("scope"); v != "" {
+		switch v {
+		case "all", "workspace", "project", "issue":
+			params.Scope = pgtype.Text{String: v, Valid: true}
+		default:
+			writeError(w, http.StatusBadRequest, "invalid scope; expected all|workspace|project|issue")
+			return
+		}
+	}
+	if v := q.Get("q"); v != "" {
+		params.Q = pgtype.Text{String: v, Valid: true}
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusBadRequest, "invalid limit (1-200)")
+			return
+		}
+		params.Limit = int32(n)
+	}
+	if v := q.Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid offset")
+			return
+		}
+		params.Offset = int32(n)
+	}
+
+	artifacts, err := h.Queries.SearchArtifactsInWorkspace(r.Context(), params)
+	if err != nil {
+		slog.Error("search artifacts failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to search artifacts")
+		return
+	}
+
+	resp := make([]ArtifactResponse, len(artifacts))
+	for i, a := range artifacts {
+		resp[i] = artifactToResponse(a)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// UpdateArtifactScope — PUT /api/artifacts/{id}/scope
+// ---------------------------------------------------------------------------
+
+type UpdateArtifactScopeRequest struct {
+	ProjectID *string `json:"project_id"`
+	IssueID   *string `json:"issue_id"`
+}
+
+func (h *Handler) UpdateArtifactScope(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	existing, err := h.Queries.GetArtifact(r.Context(), db.GetArtifactParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
+
+	authorType, authorID := h.resolveActor(r, userID, workspaceID)
+	isAuthor := existing.AuthorType == authorType && uuidToString(existing.AuthorID) == authorID
+	isAdmin := member.Role == "admin" || member.Role == "owner"
+	if !isAuthor && !isAdmin {
+		writeError(w, http.StatusForbidden, "not authorized to move this artifact")
+		return
+	}
+
+	var req UpdateArtifactScopeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ProjectID != nil && req.IssueID != nil {
+		writeError(w, http.StatusBadRequest, "scope is exclusive: provide project_id, issue_id, or neither (workspace)")
+		return
+	}
+
+	var projectID, issueID pgtype.UUID
+	if req.ProjectID != nil {
+		project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          parseUUID(*req.ProjectID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		projectID = project.ID
+	}
+	if req.IssueID != nil {
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parseUUID(*req.IssueID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		issueID = issue.ID
+	}
+
+	updated, err := h.Queries.UpdateArtifactScope(r.Context(), db.UpdateArtifactScopeParams{
+		ID:          existing.ID,
+		WorkspaceID: existing.WorkspaceID,
+		ProjectID:   projectID,
+		IssueID:     issueID,
+	})
+	if err != nil {
+		slog.Error("update artifact scope failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to move artifact")
+		return
+	}
+
+	resp := artifactToResponse(updated)
+	// Emit BOTH delete (to clear from old scope's list) and updated (to surface
+	// in new scope's list). The server can't easily diff old vs new scope on
+	// the client side; sending both is simpler than crafting per-scope events.
+	previous := artifactToResponse(existing)
+	h.publish(EventArtifactDeleted, workspaceID, authorType, authorID, map[string]any{
+		"artifact": previous,
+	})
+	h.publish(EventArtifactCreated, workspaceID, authorType, authorID, map[string]any{
 		"artifact": resp,
 	})
 	writeJSON(w, http.StatusOK, resp)

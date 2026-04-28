@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -165,6 +167,97 @@ If it's project-wide reference material, scope it to the project.`,
 
 		var result []map[string]any
 		if err := client.GetJSON(ctx, path, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// -----------------------------------------------------------------------
+	// search_artifacts
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "search_artifacts",
+		Description: `Search artifacts across the entire workspace, filtering by kind, scope, or a free-text query against title and body. Use this to find existing reports, plans, or decisions before creating new ones — agents and humans alike accumulate documents over time, and duplicate work is wasteful.
+
+SCOPE values:
+- "all"       — every artifact (default if scope is omitted)
+- "workspace" — workspace-level artifacts (no project, no issue)
+- "project"   — artifacts scoped to any project
+- "issue"     — artifacts scoped to any issue`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"kind":   map[string]any{"type": "string", "enum": []string{"report", "plan", "decision", "diagram", "note"}, "description": "Restrict to artifacts of this kind"},
+				"scope":  map[string]any{"type": "string", "enum": []string{"all", "workspace", "project", "issue"}, "description": "Restrict by scope"},
+				"q":      map[string]any{"type": "string", "description": "Substring match on title or body"},
+				"limit":  map[string]any{"type": "integer", "description": "Max results (default 50, cap 200)"},
+				"offset": map[string]any{"type": "integer", "description": "Pagination offset"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		query := url.Values{}
+		if v := optString(args, "kind"); v != "" {
+			query.Set("kind", v)
+		}
+		if v := optString(args, "scope"); v != "" {
+			query.Set("scope", v)
+		}
+		if v := optString(args, "q"); v != "" {
+			query.Set("q", v)
+		}
+		if _, ok := args["limit"]; ok {
+			query.Set("limit", strconv.Itoa(optInt(args, "limit", 50)))
+		}
+		if _, ok := args["offset"]; ok {
+			query.Set("offset", strconv.Itoa(optInt(args, "offset", 0)))
+		}
+		path := "/api/artifacts"
+		if encoded := query.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+		var result []map[string]any
+		if err := client.GetJSON(ctx, path, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// -----------------------------------------------------------------------
+	// move_artifact
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "move_artifact",
+		Description: `Re-scope an existing artifact. Use to promote an issue-scoped artifact to its project (durable beyond the issue), or to demote a project artifact to workspace scope, or to attach a workspace artifact to a specific issue or project.
+
+Pass exactly one of project_id or issue_id, or neither (workspace scope). Only the original author or a workspace admin can move an artifact.`,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"id"},
+			"properties": map[string]any{
+				"id":         map[string]any{"type": "string", "description": "Artifact ID"},
+				"project_id": map[string]any{"type": "string", "description": "Move to this project (mutually exclusive with issue_id)"},
+				"issue_id":   map[string]any{"type": "string", "description": "Move to this issue (mutually exclusive with project_id)"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		projectID := optString(args, "project_id")
+		issueID := optString(args, "issue_id")
+		if projectID != "" && issueID != "" {
+			return mcp.ErrorResult("provide at most one of project_id or issue_id"), nil
+		}
+		body := map[string]any{}
+		if projectID != "" {
+			body["project_id"] = projectID
+		}
+		if issueID != "" {
+			body["issue_id"] = issueID
+		}
+		var result map[string]any
+		if err := client.PutJSON(ctx, "/api/artifacts/"+id+"/scope", body, &result); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 		return jsonText(result)

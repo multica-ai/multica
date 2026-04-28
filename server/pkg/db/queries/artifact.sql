@@ -38,3 +38,36 @@ RETURNING *;
 
 -- name: DeleteArtifact :exec
 DELETE FROM artifact WHERE id = $1 AND workspace_id = $2;
+
+-- name: SearchArtifactsInWorkspace :many
+-- Cross-scope search across the entire workspace. All filter parameters are
+-- nullable; pass NULL to skip the filter. The scope filter values are:
+-- 'workspace' (no project_id, no issue_id), 'project' (project_id IS NOT NULL),
+-- 'issue' (issue_id IS NOT NULL), or NULL/'all' (no scope filter).
+SELECT * FROM artifact
+WHERE workspace_id = $1
+  AND (sqlc.narg('kind')::text IS NULL OR kind = sqlc.narg('kind'))
+  AND (
+        sqlc.narg('scope')::text IS NULL
+     OR sqlc.narg('scope')::text = 'all'
+     OR (sqlc.narg('scope')::text = 'workspace' AND project_id IS NULL AND issue_id IS NULL)
+     OR (sqlc.narg('scope')::text = 'project'   AND project_id IS NOT NULL)
+     OR (sqlc.narg('scope')::text = 'issue'     AND issue_id IS NOT NULL)
+  )
+  AND (
+        sqlc.narg('q')::text IS NULL
+     OR title ILIKE '%' || sqlc.narg('q')::text || '%'
+     OR body  ILIKE '%' || sqlc.narg('q')::text || '%'
+  )
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: UpdateArtifactScope :one
+-- Re-scope an artifact (workspace ↔ project ↔ issue). At most one of
+-- project_id/issue_id may be non-null; both null = workspace scope.
+UPDATE artifact SET
+    project_id = sqlc.narg('project_id'),
+    issue_id   = sqlc.narg('issue_id'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;

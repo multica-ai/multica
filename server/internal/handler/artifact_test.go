@@ -229,6 +229,145 @@ func TestArtifact_UpdateAndDelete(t *testing.T) {
 	}
 }
 
+func TestArtifact_SearchByKindAndQuery(t *testing.T) {
+	projectID := createTestProject(t, "Project for search test")
+
+	// Seed: one report, one plan, one decision.
+	for _, item := range []struct{ kind, title, body string }{
+		{"report", "Q1 latency report", "Investigation findings"},
+		{"plan", "Q2 plan", "Goal and tasks"},
+		{"decision", "ADR-001", "Use Postgres"},
+	} {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/artifacts", map[string]any{
+			"kind":       item.kind,
+			"title":      item.title,
+			"body":       item.body,
+			"project_id": projectID,
+		})
+		testHandler.CreateArtifact(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("seed create %s: %d %s", item.kind, w.Code, w.Body.String())
+		}
+	}
+
+	// kind=plan should return only the plan.
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/artifacts?kind=plan", nil)
+	testHandler.SearchArtifacts(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search by kind: %d %s", w.Code, w.Body.String())
+	}
+	var byKind []ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&byKind)
+	if len(byKind) != 1 || byKind[0].Kind != "plan" {
+		t.Fatalf("expected 1 plan artifact, got %d %+v", len(byKind), byKind)
+	}
+
+	// q=Postgres should match the decision body.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/artifacts?q=Postgres", nil)
+	testHandler.SearchArtifacts(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search by q: %d %s", w.Code, w.Body.String())
+	}
+	var byQuery []ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&byQuery)
+	if len(byQuery) != 1 || byQuery[0].Kind != "decision" {
+		t.Fatalf("expected 1 decision matching 'Postgres', got %d %+v", len(byQuery), byQuery)
+	}
+
+	// scope=project should include all 3.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/artifacts?scope=project", nil)
+	testHandler.SearchArtifacts(w, req)
+	var byScope []ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&byScope)
+	if len(byScope) < 3 {
+		t.Fatalf("expected ≥3 project-scoped artifacts, got %d", len(byScope))
+	}
+}
+
+func TestArtifact_MoveScope_PromoteIssueToProject(t *testing.T) {
+	projectID := createTestProject(t, "Promotion target project")
+	issueID := createTestIssue(t, "Issue with artifact to promote")
+
+	// Create on issue.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/artifacts", map[string]any{
+		"kind":     "report",
+		"title":    "Worth promoting",
+		"body":     "Useful beyond this issue",
+		"issue_id": issueID,
+	})
+	testHandler.CreateArtifact(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup: %d %s", w.Code, w.Body.String())
+	}
+	var created ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	// Promote to project.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/artifacts/"+created.ID+"/scope", map[string]any{
+		"project_id": projectID,
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateArtifactScope(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("promote: %d %s", w.Code, w.Body.String())
+	}
+	var moved ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&moved)
+	if moved.IssueID != nil {
+		t.Fatalf("expected issue_id cleared after promotion, got %v", moved.IssueID)
+	}
+	if moved.ProjectID == nil || *moved.ProjectID != projectID {
+		t.Fatalf("expected project_id %s, got %v", projectID, moved.ProjectID)
+	}
+
+	// Demote to workspace (clear all scope).
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/artifacts/"+created.ID+"/scope", map[string]any{})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateArtifactScope(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("demote: %d %s", w.Code, w.Body.String())
+	}
+	var workspaceScoped ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&workspaceScoped)
+	if workspaceScoped.ProjectID != nil || workspaceScoped.IssueID != nil {
+		t.Fatalf("expected workspace scope (both nil), got project=%v issue=%v", workspaceScoped.ProjectID, workspaceScoped.IssueID)
+	}
+}
+
+func TestArtifact_MoveScope_RejectsBothTargets(t *testing.T) {
+	projectID := createTestProject(t, "Move-target project")
+	issueID := createTestIssue(t, "Move-target issue")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/artifacts", map[string]any{
+		"kind":       "note",
+		"title":      "x",
+		"body":       "x",
+		"project_id": projectID,
+	})
+	testHandler.CreateArtifact(w, req)
+	var a ArtifactResponse
+	json.NewDecoder(w.Body).Decode(&a)
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/artifacts/"+a.ID+"/scope", map[string]any{
+		"project_id": projectID,
+		"issue_id":   issueID,
+	})
+	req = withURLParam(req, "id", a.ID)
+	testHandler.UpdateArtifactScope(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for both scopes, got %d", w.Code)
+	}
+}
+
 func TestArtifact_RequiresWorkspaceMembership(t *testing.T) {
 	issueID := createTestIssue(t, "Issue for membership test")
 
