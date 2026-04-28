@@ -42,6 +42,9 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  Artifact,
+  CreateArtifactRequest,
+  UpdateArtifactRequest,
   ChatSession,
   ChatMessage,
   ChatPendingTask,
@@ -966,5 +969,36 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Artifacts
+  async createArtifact(data: CreateArtifactRequest): Promise<Artifact> {
+    return this.fetch("/api/artifacts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getArtifact(id: string): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}`);
+  }
+
+  async listArtifactsByIssue(issueId: string): Promise<Artifact[]> {
+    return this.fetch(`/api/issues/${issueId}/artifacts`);
+  }
+
+  async listArtifactsByProject(projectId: string): Promise<Artifact[]> {
+    return this.fetch(`/api/projects/${projectId}/artifacts`);
+  }
+
+  async updateArtifact(id: string, data: UpdateArtifactRequest): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteArtifact(id: string): Promise<void> {
+    await this.fetch(`/api/artifacts/${id}`, { method: "DELETE" });
   }
 }
