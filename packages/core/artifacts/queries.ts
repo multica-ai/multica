@@ -20,6 +20,8 @@ export const artifactKeys = {
       params.limit ?? 50,
       params.offset ?? 0,
     ] as const,
+  folders: (wsId: string) =>
+    [...artifactKeys.all(wsId), "folders"] as const,
 };
 
 export function artifactsByIssueOptions(wsId: string, issueId: string) {
@@ -50,6 +52,14 @@ export function artifactSearchOptions(wsId: string, params: ListArtifactsParams)
   return queryOptions({
     queryKey: artifactKeys.search(wsId, params),
     queryFn: () => api.searchArtifacts(params),
+    enabled: Boolean(wsId),
+  });
+}
+
+export function artifactFoldersOptions(wsId: string) {
+  return queryOptions({
+    queryKey: artifactKeys.folders(wsId),
+    queryFn: () => api.listArtifactFolders(),
     enabled: Boolean(wsId),
   });
 }

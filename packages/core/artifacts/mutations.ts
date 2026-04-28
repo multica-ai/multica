@@ -4,9 +4,13 @@ import { useWorkspaceId } from "../hooks";
 import { artifactKeys } from "./queries";
 import type {
   Artifact,
+  ArtifactFolder,
   CreateArtifactRequest,
+  CreateArtifactFolderRequest,
   UpdateArtifactRequest,
   UpdateArtifactScopeRequest,
+  UpdateArtifactFolderRequest,
+  MoveArtifactToFolderRequest,
 } from "../types";
 
 function invalidateArtifactScopes(
@@ -68,6 +72,9 @@ export function useUpdateArtifact() {
           ...prev,
           title: data.title ?? prev.title,
           body: data.body ?? prev.body,
+          file_url: data.file_url === undefined ? prev.file_url : data.file_url,
+          file_size_bytes:
+            data.file_size_bytes === undefined ? prev.file_size_bytes : data.file_size_bytes,
           metadata: data.metadata ?? prev.metadata,
           updated_at: new Date().toISOString(),
         };
@@ -102,6 +109,101 @@ export function useMoveArtifact() {
       invalidateArtifactScopes(qc, wsId, previous);
       invalidateArtifactScopes(qc, wsId, updated);
       // Workspace search cache spans all scopes.
+      qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+    },
+  });
+}
+
+export function useMoveArtifactToFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: MoveArtifactToFolderRequest;
+    }) => api.moveArtifactToFolder(id, data),
+    onSuccess: (artifact) => {
+      qc.setQueryData(artifactKeys.detail(wsId, artifact.id), artifact);
+      // Folder lists are derived from search results; invalidate the
+      // workspace-wide search cache so the new and old folder views refetch.
+      qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+    },
+  });
+}
+
+export function useUploadArtifactFile() {
+  return useMutation({
+    mutationFn: (file: File) => api.uploadArtifactFile(file),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Folder mutations
+// ---------------------------------------------------------------------------
+
+export function useCreateArtifactFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: CreateArtifactFolderRequest) =>
+      api.createArtifactFolder(data),
+    onSuccess: (folder) => {
+      qc.setQueryData<ArtifactFolder[]>(
+        artifactKeys.folders(wsId),
+        (old) => (old ? [...old, folder] : [folder]),
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
+    },
+  });
+}
+
+export function useUpdateArtifactFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: UpdateArtifactFolderRequest;
+    }) => api.updateArtifactFolder(id, data),
+    onSuccess: (folder) => {
+      qc.setQueryData<ArtifactFolder[]>(artifactKeys.folders(wsId), (old) =>
+        old ? old.map((f) => (f.id === folder.id ? folder : f)) : old,
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
+    },
+  });
+}
+
+export function useDeleteArtifactFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (folder: Pick<ArtifactFolder, "id">) =>
+      api.deleteArtifactFolder(folder.id),
+    onMutate: async (folder) => {
+      await qc.cancelQueries({ queryKey: artifactKeys.folders(wsId) });
+      const prev = qc.getQueryData<ArtifactFolder[]>(artifactKeys.folders(wsId));
+      qc.setQueryData<ArtifactFolder[]>(artifactKeys.folders(wsId), (old) =>
+        old ? old.filter((f) => f.id !== folder.id) : old,
+      );
+      return { prev };
+    },
+    onError: (_err, _folder, ctx) => {
+      if (ctx?.prev) qc.setQueryData(artifactKeys.folders(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
+      // Artifacts inside the folder reset to root via SET NULL; refresh lists.
       qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
     },
   });

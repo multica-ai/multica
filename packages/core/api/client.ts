@@ -43,9 +43,14 @@ import type {
   TaskMessagePayload,
   Attachment,
   Artifact,
+  ArtifactFolder,
+  ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,
   UpdateArtifactScopeRequest,
+  MoveArtifactToFolderRequest,
+  CreateArtifactFolderRequest,
+  UpdateArtifactFolderRequest,
   ListArtifactsParams,
   ChatSession,
   ChatMessage,
@@ -1023,5 +1028,69 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async moveArtifactToFolder(
+    id: string,
+    data: MoveArtifactToFolderRequest,
+  ): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}/folder`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Artifact folders
+  async listArtifactFolders(): Promise<ArtifactFolder[]> {
+    return this.fetch("/api/artifact-folders");
+  }
+
+  async createArtifactFolder(
+    data: CreateArtifactFolderRequest,
+  ): Promise<ArtifactFolder> {
+    return this.fetch("/api/artifact-folders", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateArtifactFolder(
+    id: string,
+    data: UpdateArtifactFolderRequest,
+  ): Promise<ArtifactFolder> {
+    return this.fetch(`/api/artifact-folders/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteArtifactFolder(id: string): Promise<void> {
+    await this.fetch(`/api/artifact-folders/${id}`, { method: "DELETE" });
+  }
+
+  async uploadArtifactFile(file: File): Promise<ArtifactUploadResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const rid = createRequestId();
+    const start = Date.now();
+    this.logger.info("→ POST /api/artifact-uploads", { rid });
+
+    const res = await fetch(`${this.baseUrl}/api/artifact-uploads`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      this.logger.error(`← ${res.status} /api/artifact-uploads`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new ApiError(message, res.status, res.statusText);
+    }
+
+    this.logger.info(`← ${res.status} /api/artifact-uploads`, { rid, duration: `${Date.now() - start}ms` });
+    return res.json() as Promise<ArtifactUploadResponse>;
   }
 }

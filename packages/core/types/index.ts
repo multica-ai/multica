@@ -41,11 +41,17 @@ export type { Attachment } from "./attachment";
 export type {
   Artifact,
   ArtifactKind,
+  ArtifactFormat,
   ArtifactAuthorType,
   ArtifactScope,
+  ArtifactFolder,
+  ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,
   UpdateArtifactScopeRequest,
+  MoveArtifactToFolderRequest,
+  CreateArtifactFolderRequest,
+  UpdateArtifactFolderRequest,
   ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
