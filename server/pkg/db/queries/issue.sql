@@ -125,6 +125,49 @@ GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
 
+-- name: ListCrossWorkspaceIssues :many
+-- Lists issues across every workspace the caller (user_id = $1) is a member
+-- of. Membership is enforced inside the JOIN so the endpoint can sit outside
+-- the per-workspace middleware. Pagination is keyset on (created_at, id) DESC,
+-- so callers paginate via the (created_at, id) of the last seen row instead
+-- of an offset. See ADR 0001.
+--
+-- Filter semantics:
+--   $2 workspace_ids  : optional intersection with caller membership.
+--   $3 statuses       : optional set; mutually exclusive with $4.
+--   $4 open_only      : when true, drops 'done' and 'cancelled' regardless of $3.
+--   $5 priorities     : optional set.
+--   $6 assignee_ids   : optional set; covers single-assignee filter too.
+--   $7 cursor_created : opaque cursor — created_at component, NULL when first page.
+--   $8 cursor_id      : opaque cursor — id component, NULL when first page.
+--   $9 limit          : caller passes limit+1 to detect has_more.
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.due_date,
+       i.created_at, i.updated_at, i.number, i.project_id,
+       w.name           AS workspace_name,
+       w.slug           AS workspace_slug,
+       w.issue_prefix   AS workspace_issue_prefix
+FROM issue i
+JOIN workspace w ON w.id = i.workspace_id
+JOIN member    m ON m.workspace_id = i.workspace_id
+WHERE m.user_id = $1
+  AND (sqlc.narg('workspace_ids')::uuid[] IS NULL OR i.workspace_id = ANY(sqlc.narg('workspace_ids')::uuid[]))
+  AND (
+    (sqlc.narg('open_only')::bool IS TRUE
+      AND i.status NOT IN ('done', 'cancelled'))
+    OR (sqlc.narg('open_only')::bool IS NOT TRUE
+      AND (sqlc.narg('statuses')::text[] IS NULL OR i.status = ANY(sqlc.narg('statuses')::text[])))
+  )
+  AND (sqlc.narg('priorities')::text[] IS NULL OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    sqlc.narg('cursor_created')::timestamptz IS NULL
+      OR (i.created_at, i.id) < (sqlc.narg('cursor_created')::timestamptz, sqlc.narg('cursor_id')::uuid)
+  )
+ORDER BY i.created_at DESC, i.id DESC
+LIMIT $2;
+
 -- name: MarkIssueFirstExecuted :one
 -- Flips first_executed_at from NULL to now() atomically. Returns the row if
 -- this was the first time the issue was executed; no rows otherwise. The

@@ -72,6 +72,7 @@ var reservedSlugs = map[string]bool{
 	"settings":   true,
 	"workspaces": true, // global /workspaces/new workspace creation page
 	"teams":      true, // reserved for future team management routes
+	"global":     true, // /global cross-workspace meta view (ADR 0001)
 
 	// API / integration prefixes. `api` above already covers /api/*; these
 	// guard against future top-level API alias routes (e.g. /v1, /graphql)

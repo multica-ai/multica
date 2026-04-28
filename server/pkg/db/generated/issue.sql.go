@@ -452,6 +452,139 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 	return items, nil
 }
 
+const listCrossWorkspaceIssues = `-- name: ListCrossWorkspaceIssues :many
+
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.due_date,
+       i.created_at, i.updated_at, i.number, i.project_id,
+       w.name           AS workspace_name,
+       w.slug           AS workspace_slug,
+       w.issue_prefix   AS workspace_issue_prefix
+FROM issue i
+JOIN workspace w ON w.id = i.workspace_id
+JOIN member    m ON m.workspace_id = i.workspace_id
+WHERE m.user_id = $1
+  AND ($3::uuid[] IS NULL OR i.workspace_id = ANY($3::uuid[]))
+  AND (
+    ($4::bool IS TRUE
+      AND i.status NOT IN ('done', 'cancelled'))
+    OR ($4::bool IS NOT TRUE
+      AND ($5::text[] IS NULL OR i.status = ANY($5::text[])))
+  )
+  AND ($6::text[] IS NULL OR i.priority = ANY($6::text[]))
+  AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
+  AND (
+    $8::timestamptz IS NULL
+      OR (i.created_at, i.id) < ($8::timestamptz, $9::uuid)
+  )
+ORDER BY i.created_at DESC, i.id DESC
+LIMIT $2
+`
+
+type ListCrossWorkspaceIssuesParams struct {
+	UserID        pgtype.UUID        `json:"user_id"`
+	Limit         int32              `json:"limit"`
+	WorkspaceIds  []pgtype.UUID      `json:"workspace_ids"`
+	OpenOnly      pgtype.Bool        `json:"open_only"`
+	Statuses      []string           `json:"statuses"`
+	Priorities    []string           `json:"priorities"`
+	AssigneeIds   []pgtype.UUID      `json:"assignee_ids"`
+	CursorCreated pgtype.Timestamptz `json:"cursor_created"`
+	CursorID      pgtype.UUID        `json:"cursor_id"`
+}
+
+type ListCrossWorkspaceIssuesRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Title                string             `json:"title"`
+	Description          pgtype.Text        `json:"description"`
+	Status               string             `json:"status"`
+	Priority             string             `json:"priority"`
+	AssigneeType         pgtype.Text        `json:"assignee_type"`
+	AssigneeID           pgtype.UUID        `json:"assignee_id"`
+	CreatorType          string             `json:"creator_type"`
+	CreatorID            pgtype.UUID        `json:"creator_id"`
+	ParentIssueID        pgtype.UUID        `json:"parent_issue_id"`
+	Position             float64            `json:"position"`
+	DueDate              pgtype.Timestamptz `json:"due_date"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Number               int32              `json:"number"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	WorkspaceName        string             `json:"workspace_name"`
+	WorkspaceSlug        string             `json:"workspace_slug"`
+	WorkspaceIssuePrefix string             `json:"workspace_issue_prefix"`
+}
+
+// SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+// Lists issues across every workspace the caller (user_id = $1) is a member
+// of. Membership is enforced inside the JOIN so the endpoint can sit outside
+// the per-workspace middleware. Pagination is keyset on (created_at, id) DESC,
+// so callers paginate via the (created_at, id) of the last seen row instead
+// of an offset. See ADR 0001.
+//
+// Filter semantics:
+//
+//	$2 workspace_ids  : optional intersection with caller membership.
+//	$3 statuses       : optional set; mutually exclusive with $4.
+//	$4 open_only      : when true, drops 'done' and 'cancelled' regardless of $3.
+//	$5 priorities     : optional set.
+//	$6 assignee_ids   : optional set; covers single-assignee filter too.
+//	$7 cursor_created : opaque cursor — created_at component, NULL when first page.
+//	$8 cursor_id      : opaque cursor — id component, NULL when first page.
+//	$9 limit          : caller passes limit+1 to detect has_more.
+func (q *Queries) ListCrossWorkspaceIssues(ctx context.Context, arg ListCrossWorkspaceIssuesParams) ([]ListCrossWorkspaceIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listCrossWorkspaceIssues,
+		arg.UserID,
+		arg.Limit,
+		arg.WorkspaceIds,
+		arg.OpenOnly,
+		arg.Statuses,
+		arg.Priorities,
+		arg.AssigneeIds,
+		arg.CursorCreated,
+		arg.CursorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCrossWorkspaceIssuesRow{}
+	for rows.Next() {
+		var i ListCrossWorkspaceIssuesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.WorkspaceName,
+			&i.WorkspaceSlug,
+			&i.WorkspaceIssuePrefix,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssues = `-- name: ListIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
@@ -638,7 +771,6 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 }
 
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
-
 UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
@@ -653,7 +785,6 @@ type MarkIssueFirstExecutedRow struct {
 	FirstExecutedAt pgtype.Timestamptz `json:"first_executed_at"`
 }
 
-// SearchIssues: moved to handler (dynamic SQL for multi-word search support).
 // Flips first_executed_at from NULL to now() atomically. Returns the row if
 // this was the first time the issue was executed; no rows otherwise. The
 // analytics issue_executed event fires exactly when this returns a row —
