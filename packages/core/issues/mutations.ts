@@ -10,8 +10,13 @@ import {
   addIssueToBuckets,
   findIssueLocation,
   getBucket,
+  getIssueDetailCacheSnapshot,
+  getIssueFromDetailCache,
+  invalidateIssueDetailQueries,
+  patchIssueDetailQueries,
   patchIssueInBuckets,
   removeIssueFromBuckets,
+  restoreIssueDetailCacheSnapshot,
   setBucket,
 } from "./cache-helpers";
 import { useWorkspaceId } from "../hooks";
@@ -135,7 +140,8 @@ export function useUpdateIssue() {
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      const prevDetails = getIssueDetailCacheSnapshot(qc, wsId, id);
+      const prevDetail = getIssueFromDetailCache(qc, wsId, id);
 
       // Resolve parent_issue_id from the freshest source so we can keep the
       // parent's children cache in sync (used by the parent issue's
@@ -151,9 +157,7 @@ export function useUpdateIssue() {
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
         old ? patchIssueInBuckets(old, id, data) : old,
       );
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, ...data } : old,
-      );
+      patchIssueDetailQueries(qc, wsId, id, data);
       if (parentId) {
         qc.setQueryData<Issue[]>(
           issueKeys.children(wsId, parentId),
@@ -161,12 +165,12 @@ export function useUpdateIssue() {
             old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
         );
       }
-      return { prevList, prevDetail, prevChildren, parentId, id };
+      return { prevList, prevDetails, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
-      if (ctx?.prevDetail)
-        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      if (ctx?.prevDetails)
+        restoreIssueDetailCacheSnapshot(qc, ctx.prevDetails);
       if (ctx?.parentId && ctx.prevChildren !== undefined) {
         qc.setQueryData(
           issueKeys.children(wsId, ctx.parentId),
@@ -174,9 +178,16 @@ export function useUpdateIssue() {
         );
       }
     },
-    onSettled: (_data, _err, vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
+    onSuccess: (updatedIssue) => {
+      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
+        old ? patchIssueInBuckets(old, updatedIssue.id, updatedIssue) : old,
+      );
+      patchIssueDetailQueries(qc, wsId, updatedIssue.id, updatedIssue);
+    },
+    onSettled: (data, _err, vars, ctx) => {
+      invalidateIssueDetailQueries(qc, wsId, data?.id ?? vars.id);
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
         qc.invalidateQueries({

@@ -1,10 +1,11 @@
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type {
   Issue,
   IssueStatus,
   IssueStatusBucket,
   ListIssuesCache,
 } from "../types";
-import { PAGINATED_STATUSES } from "./queries";
+import { issueKeys, PAGINATED_STATUSES } from "./queries";
 
 const EMPTY_BUCKET: IssueStatusBucket = { issues: [], total: 0 };
 
@@ -97,4 +98,113 @@ export function patchIssueInBuckets(
     total: toBucket.total + 1,
   });
   return next;
+}
+
+export type IssueDetailCacheSnapshot = Array<{
+  queryKey: QueryKey;
+  data: Issue;
+}>;
+
+function isIssueDetailQueryKey(wsId: string, queryKey: QueryKey): boolean {
+  return (
+    queryKey.length === 4 &&
+    queryKey[0] === "issues" &&
+    queryKey[1] === wsId &&
+    queryKey[2] === "detail" &&
+    typeof queryKey[3] === "string"
+  );
+}
+
+function matchesIssueIdentity(
+  issue: Issue | undefined,
+  id: string,
+  identifier?: string,
+): issue is Issue {
+  if (!issue) return false;
+  return issue.id === id || issue.identifier === id || issue.identifier === identifier;
+}
+
+export function getIssueFromDetailCache(
+  qc: QueryClient,
+  wsId: string,
+  id: string,
+): Issue | undefined {
+  const direct = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+  if (direct) return direct;
+
+  for (const [queryKey, data] of qc.getQueriesData<Issue>({
+    queryKey: issueKeys.all(wsId),
+  })) {
+    if (isIssueDetailQueryKey(wsId, queryKey) && matchesIssueIdentity(data, id)) {
+      return data;
+    }
+  }
+  return undefined;
+}
+
+export function getIssueDetailCacheSnapshot(
+  qc: QueryClient,
+  wsId: string,
+  id: string,
+): IssueDetailCacheSnapshot {
+  const snapshot: IssueDetailCacheSnapshot = [];
+  for (const [queryKey, data] of qc.getQueriesData<Issue>({
+    queryKey: issueKeys.all(wsId),
+  })) {
+    if (isIssueDetailQueryKey(wsId, queryKey) && matchesIssueIdentity(data, id)) {
+      snapshot.push({ queryKey, data });
+    }
+  }
+  return snapshot;
+}
+
+export function restoreIssueDetailCacheSnapshot(
+  qc: QueryClient,
+  snapshot: IssueDetailCacheSnapshot,
+) {
+  for (const entry of snapshot) {
+    qc.setQueryData(entry.queryKey, entry.data);
+  }
+}
+
+export function patchIssueDetailQueries(
+  qc: QueryClient,
+  wsId: string,
+  id: string,
+  patch: Partial<Issue>,
+) {
+  qc.setQueriesData<Issue>(
+    {
+      predicate: (query) =>
+        isIssueDetailQueryKey(wsId, query.queryKey) &&
+        matchesIssueIdentity(query.state.data as Issue | undefined, id, patch.identifier),
+    },
+    (old) => (old ? { ...old, ...patch } : old),
+  );
+}
+
+export function invalidateIssueDetailQueries(
+  qc: QueryClient,
+  wsId: string,
+  id: string,
+) {
+  qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
+  qc.invalidateQueries({
+    predicate: (query) =>
+      isIssueDetailQueryKey(wsId, query.queryKey) &&
+      matchesIssueIdentity(query.state.data as Issue | undefined, id),
+  });
+}
+
+export function removeIssueDetailQueries(
+  qc: QueryClient,
+  wsId: string,
+  id: string,
+) {
+  qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
+  qc.removeQueries({
+    predicate: (query) =>
+      isIssueDetailQueryKey(wsId, query.queryKey) &&
+      matchesIssueIdentity(query.state.data as Issue | undefined, id),
+  });
 }
