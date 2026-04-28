@@ -23,6 +23,12 @@ function workspaceScoped(slug: string) {
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     documents: () => `${ws}/documents`,
+    documentsFolder: (folderId: string) =>
+      `${ws}/documents?folder=${encode(folderId)}`,
+    documentNew: (folderId: string | null) =>
+      folderId ? `${ws}/documents/new?folder=${encode(folderId)}` : `${ws}/documents/new`,
+    documentDetail: (id: string) => `${ws}/documents/${encode(id)}`,
+    documentEdit: (id: string) => `${ws}/documents/${encode(id)}/edit`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,

@@ -4,6 +4,8 @@ import {
   Navigate,
   Outlet,
   useMatches,
+  useParams,
+  useSearchParams,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
@@ -12,6 +14,11 @@ import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { WorkspaceDocuments } from "@multica/views/artifacts/components";
+import {
+  DocumentNewPage,
+  DocumentViewPage,
+  DocumentEditPage,
+} from "@multica/views/artifacts/pages";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { RuntimesPage } from "@multica/views/runtimes";
@@ -98,6 +105,21 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Documents" },
           },
           {
+            path: "documents/new",
+            element: <DocumentNewRoute />,
+            handle: { title: "New document" },
+          },
+          {
+            path: "documents/:id",
+            element: <DocumentViewRoute />,
+            handle: { title: "Document" },
+          },
+          {
+            path: "documents/:id/edit",
+            element: <DocumentEditRoute />,
+            handle: { title: "Edit document" },
+          },
+          {
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
@@ -152,4 +174,21 @@ export function createTabRouter(initialPath: string) {
   return createMemoryRouter(appRoutes, {
     initialEntries: [initialPath],
   });
+}
+
+// Tiny route wrappers — react-router-dom hooks aren't available inside
+// shared @multica/views, so the page components accept ids as props.
+function DocumentNewRoute() {
+  const [search] = useSearchParams();
+  return <DocumentNewPage folderId={search.get("folder")} />;
+}
+
+function DocumentViewRoute() {
+  const params = useParams<{ id: string }>();
+  return <DocumentViewPage artifactId={params.id ?? ""} />;
+}
+
+function DocumentEditRoute() {
+  const params = useParams<{ id: string }>();
+  return <DocumentEditPage artifactId={params.id ?? ""} />;
 }

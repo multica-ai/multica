@@ -20,6 +20,7 @@
     "./issues/utils/redact": "./issues/utils/redact.ts",
     "./projects/components": "./projects/components/index.ts",
     "./artifacts/components": "./artifacts/components/index.ts",
+    "./artifacts/pages": "./artifacts/pages/index.ts",
     "./autopilots/components": "./autopilots/components/index.ts",
     "./modals/registry": "./modals/registry.tsx",
     "./modals/create-issue": "./modals/create-issue.tsx",
