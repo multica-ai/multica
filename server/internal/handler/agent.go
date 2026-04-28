@@ -745,6 +745,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	if req.RuntimeID != nil {
+		// Only the agent owner may change its runtime binding.
+		// Workspace admins can manage other agent fields but not rebind the runtime.
+		userID := requestUserID(r)
+		agentOwner := uuidToString(agent.OwnerID)
+		if agentOwner != "" && agentOwner != userID {
+			writeError(w, http.StatusForbidden, "only the agent owner can change the runtime")
+			return
+		}
+
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          parseUUID(*req.RuntimeID),
 			WorkspaceID: agent.WorkspaceID,
@@ -755,7 +764,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		// Only the runtime owner may bind this runtime to an agent.
 		// Runtimes without an owner_id (legacy) are usable by anyone.
-		userID := requestUserID(r)
 		runtimeOwner := uuidToString(runtime.OwnerID)
 		if runtimeOwner != "" && runtimeOwner != userID {
 			writeError(w, http.StatusForbidden, "you can only use your own runtime")
