@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -53,6 +54,7 @@ type Handler struct {
 	DB                    dbExecutor
 	TxStarter             txStarter
 	Hub                   *realtime.Hub
+	DaemonHub             *daemonws.Hub
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
@@ -67,7 +69,7 @@ type Handler struct {
 	cfg                   Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
@@ -77,12 +79,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		analyticsClient = analytics.NoopClient{}
 	}
 
-	taskSvc := service.NewTaskService(queries, txStarter, hub, bus)
+	var daemonHub *daemonws.Hub
+	if len(daemonHubs) > 0 {
+		daemonHub = daemonHubs[0]
+	}
+
+	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
 		TxStarter:             txStarter,
 		Hub:                   hub,
+		DaemonHub:             daemonHub,
 		Bus:                   bus,
 		TaskService:           taskSvc,
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -259,8 +260,10 @@ func main() {
 		}
 	}
 
+	daemonHub := daemonws.NewHub()
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics: httpMetrics,
+		DaemonHub:   daemonHub,
 	})
 
 	srv := &http.Server{
@@ -271,7 +274,7 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, pool, hub, bus)
+	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonHub)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
