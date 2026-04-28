@@ -1,57 +1,52 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import { useMemo } from "react";
+import {
+  type Locale,
+  LocaleProvider as CoreLocaleProvider,
+  useLocale as useCoreLocale,
+} from "@multica/core/i18n";
 import { useConfigStore } from "@multica/core/config";
 import { createEnDict } from "./en";
-import { createZhDict } from "./zh";
-import type { LandingDict, Locale } from "./types";
+import { createZhTwDict } from "./zh-TW";
+import type { LandingDict } from "./types";
 
-const dictionaryFactories: Record<Locale, (allowSignup: boolean) => LandingDict> = {
+const dictionaryFactories: Record<
+  Locale,
+  (allowSignup: boolean) => LandingDict
+> = {
   en: createEnDict,
-  zh: createZhDict,
+  "zh-TW": createZhTwDict,
 };
 
-const COOKIE_NAME = "multica-locale";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
-
-type LocaleContextValue = {
-  locale: Locale;
-  t: LandingDict;
-  setLocale: (locale: Locale) => void;
-};
-
-const LocaleContext = createContext<LocaleContextValue | null>(null);
-
+// LocaleProvider re-export: landing pages can mount this provider; under the
+// hood it is the global core provider so locale state is shared with the
+// dashboard. Kept as a named export for backwards compatibility with existing
+// landing-tree imports.
 export function LocaleProvider({
   children,
-  initialLocale = "en",
+  initialLocale,
 }: {
   children: React.ReactNode;
   initialLocale?: Locale;
 }) {
-  const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  return (
+    <CoreLocaleProvider initialLocale={initialLocale}>
+      {children}
+    </CoreLocaleProvider>
+  );
+}
+
+export function useLocale(): {
+  locale: Locale;
+  t: LandingDict;
+  setLocale: (locale: Locale) => void;
+} {
+  const { locale, setLocale } = useCoreLocale();
   const allowSignup = useConfigStore((state) => state.allowSignup);
   const t = useMemo(
     () => dictionaryFactories[locale](allowSignup),
     [allowSignup, locale],
   );
-
-  const setLocale = useCallback((l: Locale) => {
-    setLocaleState(l);
-    document.cookie = `${COOKIE_NAME}=${l}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
-  }, []);
-
-  return (
-    <LocaleContext.Provider
-      value={{ locale, t, setLocale }}
-    >
-      {children}
-    </LocaleContext.Provider>
-  );
-}
-
-export function useLocale() {
-  const ctx = useContext(LocaleContext);
-  if (!ctx) throw new Error("useLocale must be used within LocaleProvider");
-  return ctx;
+  return { locale, t, setLocale };
 }

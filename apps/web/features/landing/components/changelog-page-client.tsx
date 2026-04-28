@@ -40,14 +40,14 @@ function parseDate(dateStr: string): ParsedDate {
 
 function monthYearLabel(year: number, month: number, locale: Locale) {
   if (!year || !month) return "";
-  if (locale === "zh") return `${year}\u5e74${month}\u6708`;
+  if (locale === "zh-TW") return `${year}\u5e74${month}\u6708`;
   return `${MONTHS_EN[month - 1]} ${year}`;
 }
 
 function fullDateLabel(dateStr: string, locale: Locale) {
   const { year, month, day } = parseDate(dateStr);
   if (!year || !month || !day) return dateStr;
-  if (locale === "zh") return `${year}\u5e74${month}\u6708${day}\u65e5`;
+  if (locale === "zh-TW") return `${year}\u5e74${month}\u6708${day}\u65e5`;
   return `${MONTHS_EN[month - 1]} ${day}, ${year}`;
 }
 

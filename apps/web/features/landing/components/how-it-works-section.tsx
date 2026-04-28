@@ -45,7 +45,7 @@ export function HowItWorksSection() {
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
           <Link
-            href={locale === "zh" ? "/docs/zh" : "/docs"}
+            href={locale === "zh-TW" ? "/docs/zh" : "/docs"}
             className={heroButtonClassName("ghost")}
           >
             {t.howItWorks.ctaDocs}
