@@ -64,3 +64,16 @@ export interface VerifyEmailBindingRequest {
 export interface VerifyEmailBindingResponse {
   binding: ExternalAccountBinding;
 }
+
+export interface StartGoogleBindingRequest {
+  next_path?: string;
+}
+
+export interface StartGoogleBindingResponse {
+  auth_url: string;
+}
+
+export interface CompleteGoogleBindingResponse {
+  binding: ExternalAccountBinding;
+  next_path: string | null;
+}

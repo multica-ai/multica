@@ -54,6 +54,20 @@ function CallbackContent() {
       return;
     }
 
+    if (state.startsWith("google.")) {
+      api
+        .completeGoogleBinding(code, state)
+        .then(({ next_path }) => {
+          router.push(next_path || paths.root());
+        })
+        .catch((err) => {
+          setError(
+            err instanceof Error ? err.message : "Google connection failed",
+          );
+        });
+      return;
+    }
+
     const stateParts = state.split(",");
 
     // DingTalk login flow

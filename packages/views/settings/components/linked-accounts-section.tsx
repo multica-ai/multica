@@ -87,6 +87,19 @@ export function LinkedAccountsSection() {
     }
   };
 
+  const handleGoogleConnect = async () => {
+    setStartingBinding(true);
+    try {
+      const { auth_url } = await api.startGoogleBinding({
+        next_path: window.location.pathname,
+      });
+      window.location.assign(auth_url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start Google binding");
+      setStartingBinding(false);
+    }
+  };
+
   const handleSendEmailCode = async () => {
     const email = emailInput.trim();
     if (!email) return;
@@ -310,14 +323,14 @@ export function LinkedAccountsSection() {
             </CardContent>
           </Card>
 
-          {/* Google Card — binding is created automatically at login */}
+          {/* Google Card */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Google</CardTitle>
               <CardDescription>
                 {googleBinding
-                  ? "Your Google account is linked. It was connected when you signed in with Google."
-                  : "Sign in with Google to link your account automatically."}
+                  ? "Your Google account is linked."
+                  : "Link your Google account to enable account association."}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-between gap-4">
@@ -353,7 +366,23 @@ export function LinkedAccountsSection() {
                   )}
                   Disconnect
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void handleGoogleConnect();
+                  }}
+                  disabled={removingBindingId !== null || startingBinding}
+                >
+                  {startingBinding ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Link2 className="h-4 w-4" />
+                  )}
+                  Connect
+                </Button>
+              )}
             </CardContent>
           </Card>
         </>

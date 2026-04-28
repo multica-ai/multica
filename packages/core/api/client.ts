@@ -66,6 +66,9 @@ import type {
   StartEmailBindingResponse,
   VerifyEmailBindingRequest,
   VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -384,6 +387,25 @@ export class ApiClient {
     return this.fetch("/api/me/notification-bindings/email/verify", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  }
+
+  async startGoogleBinding(
+    payload: StartGoogleBindingRequest,
+  ): Promise<StartGoogleBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/google/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeGoogleBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteGoogleBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/google/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
     });
   }
 
@@ -735,6 +757,7 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    google_client_id?: string;
     dingtalk_client_id?: string;
     dingtalk_oauth_scope?: string;
     hide_email_login?: boolean;
