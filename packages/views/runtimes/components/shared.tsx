@@ -1,4 +1,4 @@
-import { Monitor, Cloud } from "lucide-react";
+import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { RuntimeHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
@@ -71,6 +71,39 @@ export function HealthDot({
       className={`inline-block h-2 w-2 rounded-full ${HEALTH_VISUAL[health].dot} ${className}`}
     />
   );
+}
+
+// Wifi-style runtime health indicator. The icon shape carries the rough
+// state ("can it talk to us?") and the colour carries severity. Used
+// wherever a richer signal than the bare dot is appropriate (agent
+// hover-card runtime row, runtime list health column).
+//
+//   online        → Wifi (full bars, success)
+//   recently_lost → WifiHigh (fewer bars, warning) — transient hiccup
+//   offline       → WifiOff (slashed, muted) — long unreachable
+//   about_to_gc   → WifiOff (slashed, destructive) — sweeper coming
+const HEALTH_ICON: Record<
+  RuntimeHealth,
+  { Icon: typeof Wifi; tone: string }
+> = {
+  online: { Icon: Wifi, tone: "text-success" },
+  recently_lost: { Icon: WifiHigh, tone: "text-warning" },
+  offline: { Icon: WifiOff, tone: "text-muted-foreground" },
+  about_to_gc: { Icon: WifiOff, tone: "text-destructive" },
+};
+
+export function HealthIcon({
+  health,
+  className = "h-3 w-3",
+}: {
+  health: RuntimeHealth | "loading";
+  className?: string;
+}) {
+  if (health === "loading") {
+    return <Wifi className={`${className} text-muted-foreground/40`} />;
+  }
+  const { Icon, tone } = HEALTH_ICON[health];
+  return <Icon className={`${className} ${tone}`} />;
 }
 
 export function healthLabel(health: RuntimeHealth | "loading"): string {

@@ -1,16 +1,20 @@
 "use client";
 
-import { Cloud, Monitor } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  deriveRuntimeHealth,
+  type RuntimeHealth,
+} from "@multica/core/runtimes";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
+import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 
 interface AgentProfileCardProps {
@@ -142,10 +146,13 @@ function AgentAvailabilityLine({
   );
 }
 
-// Compact runtime row — cloud/local icon + runtime name. We deliberately
-// do NOT repeat online/offline here because the availability dot in the
-// header already covers reachability; another wifi icon next to the
-// runtime name would be three indicators saying the same thing.
+// Compact runtime row — wifi-style health icon + runtime name. The icon
+// shape (Wifi / WifiOff) plus colour reflects the live runtime health
+// derived from runtime + clock; cloud runtimes always read as online.
+// This is duplicate signal with the availability dot above by design —
+// the dot is the agent's effective availability (which mostly tracks
+// runtime health), and seeing the same wifi icon next to the runtime
+// name confirms WHICH runtime is the one currently in the dot's state.
 function RuntimeRow({
   agent,
   runtime,
@@ -154,12 +161,16 @@ function RuntimeRow({
   runtime: AgentRuntime | null;
 }) {
   const isCloud = agent.runtime_mode === "cloud";
-  const Icon = isCloud ? Cloud : Monitor;
+  const health: RuntimeHealth = isCloud
+    ? "online"
+    : runtime
+      ? deriveRuntimeHealth(runtime, Date.now())
+      : "offline";
   const label = runtime?.name ?? (isCloud ? "Cloud" : "Unknown runtime");
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">Runtime</span>
-      <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <HealthIcon health={health} className="h-3 w-3 shrink-0" />
       <span className="min-w-0 truncate" title={label}>
         {label}
       </span>

@@ -47,7 +47,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { HealthDot, healthLabel } from "./shared";
+import { HealthIcon, healthLabel } from "./shared";
 import {
   formatLastSeen,
   computeCostInWindow,
@@ -119,7 +119,7 @@ function buildWorkloadIndex(
 // Width choices (left → right):
 //   IconBox:    2rem            — 32px Cloud / Monitor mode badge
 //   Runtime:    minmax(0,1fr)   — primary, fills remainder, truncates first
-//   HealthDot:  0.5rem          — 6px status dot
+//   HealthIcon: 0.875rem        — 12px wifi-style icon
 //   Health:     minmax(0,1fr)   — text label, can shrink + truncate at
 //                                 narrow widths so it never overlaps the
 //                                 Runtime column. ("Recently lost · 2m
@@ -141,15 +141,15 @@ function buildWorkloadIndex(
 
 const GRID_WITH_OWNER =
   "grid items-center gap-4 " +
-  "grid-cols-[2rem_minmax(0,1fr)_0.5rem_minmax(0,1fr)_2rem_2.5rem] " +
-  "md:grid-cols-[2rem_minmax(0,1fr)_0.5rem_minmax(0,1fr)_2rem_6rem_5rem_7rem_2.5rem] " +
-  "lg:grid-cols-[2rem_minmax(0,1.2fr)_0.5rem_minmax(0,1fr)_2rem_6rem_5rem_7rem_8rem_2.5rem]";
+  "grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_2rem_2.5rem] " +
+  "md:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_2rem_6rem_5rem_7rem_2.5rem] " +
+  "lg:grid-cols-[2rem_minmax(0,1.2fr)_0.875rem_minmax(0,1fr)_2rem_6rem_5rem_7rem_8rem_2.5rem]";
 
 const GRID_NO_OWNER =
   "grid items-center gap-4 " +
-  "grid-cols-[2rem_minmax(0,1fr)_0.5rem_minmax(0,1fr)_2.5rem] " +
-  "md:grid-cols-[2rem_minmax(0,1fr)_0.5rem_minmax(0,1fr)_6rem_5rem_7rem_2.5rem] " +
-  "lg:grid-cols-[2rem_minmax(0,1.2fr)_0.5rem_minmax(0,1fr)_6rem_5rem_7rem_8rem_2.5rem]";
+  "grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_2.5rem] " +
+  "md:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_6rem_5rem_7rem_2.5rem] " +
+  "lg:grid-cols-[2rem_minmax(0,1.2fr)_0.875rem_minmax(0,1fr)_6rem_5rem_7rem_8rem_2.5rem]";
 
 export function RuntimeList({
   runtimes,
@@ -343,8 +343,11 @@ function RuntimeRow({
         )}
       </div>
 
-      {/* HEALTH dot — leading column for the same alignment reason. */}
-      <HealthDot health={health} />
+      {/* HEALTH icon — wifi-style indicator carries both shape (Wifi / WifiOff)
+          and colour (success / warning / muted / destructive) for the four
+          health buckets. Leading column for the same alignment reason as
+          the icon-box on the left. */}
+      <HealthIcon health={health} />
 
       {/* HEALTH label — last_seen folded in only when it carries information
           (everything except the always-"Just now" online case). */}
