@@ -216,7 +216,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			OwnerID:     parseUUID(userID),
 		}
 		if includeArchived {
-			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), byOwner)
+			agents, err = h.Queries.ListAllAgentsByOwner(r.Context(), db.ListAllAgentsByOwnerParams{
+				WorkspaceID: byOwner.WorkspaceID,
+				OwnerID:     byOwner.OwnerID,
+			})
 		} else {
 			agents, err = h.Queries.ListAgentsByOwner(r.Context(), byOwner)
 		}
@@ -370,11 +373,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+	// Only the runtime owner may bind this runtime to an agent.
 	// Runtimes without an owner_id (legacy) are usable by anyone.
-	if member, ok := ctxMember(r.Context()); ok {
+	{
 		runtimeOwner := uuidToString(runtime.OwnerID)
-		if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != ownerID {
+		if runtimeOwner != "" && runtimeOwner != ownerID {
 			writeError(w, http.StatusForbidden, "you can only use your own runtime to create an agent")
 			return
 		}
@@ -742,6 +745,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	if req.RuntimeID != nil {
+		// Only the agent owner may change its runtime binding.
+		// Workspace admins can manage other agent fields but not rebind the runtime.
+		userID := requestUserID(r)
+		agentOwner := uuidToString(agent.OwnerID)
+		if agentOwner != "" && agentOwner != userID {
+			writeError(w, http.StatusForbidden, "only the agent owner can change the runtime")
+			return
+		}
+
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          parseUUID(*req.RuntimeID),
 			WorkspaceID: agent.WorkspaceID,
@@ -750,15 +762,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		// Only the runtime owner or workspace owner/admin may bind this runtime to an agent.
+		// Only the runtime owner may bind this runtime to an agent.
 		// Runtimes without an owner_id (legacy) are usable by anyone.
-		userID := requestUserID(r)
-		if member, ok := ctxMember(r.Context()); ok {
-			runtimeOwner := uuidToString(runtime.OwnerID)
-			if runtimeOwner != "" && !roleAllowed(member.Role, "owner", "admin") && runtimeOwner != userID {
-				writeError(w, http.StatusForbidden, "you can only use your own runtime")
-				return
-			}
+		runtimeOwner := uuidToString(runtime.OwnerID)
+		if runtimeOwner != "" && runtimeOwner != userID {
+			writeError(w, http.StatusForbidden, "you can only use your own runtime")
+			return
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}

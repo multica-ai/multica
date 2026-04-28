@@ -64,8 +64,8 @@ func init() {
 }
 
 // printConfigLocation prints the config file path and profile name.
-func printConfigLocation(profile string) {
-	path, err := cli.CLIConfigPathForProfile(profile)
+func printConfigLocation(profile, configPath string) {
+	path, err := cli.CLIConfigPathForInstance(profile, configPath)
 	if err != nil {
 		return
 	}
@@ -77,8 +77,8 @@ func printConfigLocation(profile string) {
 
 // confirmOverwrite checks for an existing config and prompts the user.
 // Returns true if we should proceed, false if the user declined.
-func confirmOverwrite(profile string) (bool, error) {
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+func confirmOverwrite(profile, configPath string) (bool, error) {
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err != nil {
 		return true, nil // can't load → treat as no config
 	}
@@ -107,8 +107,9 @@ func confirmOverwrite(profile string) (bool, error) {
 
 func runSetupCloud(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
+	configPath := resolveConfigPath(cmd)
 
-	ok, err := confirmOverwrite(profile)
+	ok, err := confirmOverwrite(profile, configPath)
 	if err != nil {
 		return err
 	}
@@ -120,14 +121,14 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		ServerURL: "https://api.multica.ai",
 		AppURL:    "https://multica.ai",
 	}
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "Configured for Multica Cloud (https://multica.ai).")
 	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
 	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
-	printConfigLocation(profile)
+	printConfigLocation(profile, configPath)
 
 	// Authenticate.
 	fmt.Fprintln(os.Stderr, "")
@@ -146,8 +147,9 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 
 func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
+	configPath := resolveConfigPath(cmd)
 
-	ok, err := confirmOverwrite(profile)
+	ok, err := confirmOverwrite(profile, configPath)
 	if err != nil {
 		return err
 	}
@@ -172,14 +174,14 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		ServerURL: serverURL,
 		AppURL:    appURL,
 	}
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "Configured for self-hosted server.")
 	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
 	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
-	printConfigLocation(profile)
+	printConfigLocation(profile, configPath)
 
 	// Check if the server is reachable.
 	if !probeServer(serverURL) {

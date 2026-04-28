@@ -15,12 +15,16 @@ const {
   mockSendCode,
   mockVerifyCode,
   mockIssueCliToken,
+  mockGetConfig,
+  mockApiGetMe,
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
   mockSendCode: vi.fn(),
   mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
+  mockGetConfig: vi.fn(),
+  mockApiGetMe: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
   authStateRef: {
     state: {
@@ -69,7 +73,8 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaces: vi.fn().mockResolvedValue([]),
     verifyCode: vi.fn(),
     setToken: vi.fn(),
-    getMe: vi.fn(),
+    getMe: mockApiGetMe,
+    getConfig: mockGetConfig,
     issueCliToken: mockIssueCliToken,
   },
 }));
@@ -82,6 +87,10 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    mockGetConfig.mockResolvedValue({
+      cdn_domain: "",
+    });
+    mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
   });
 
   it("renders login form with email input and continue button", () => {
@@ -140,6 +149,75 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Check your email")).toBeInTheDocument();
     });
+  });
+
+  it("renders DingTalk login from runtime config while keeping email login", async () => {
+    mockGetConfig.mockResolvedValueOnce({
+      cdn_domain: "",
+      dingtalk_client_id: "ding-client-id",
+    });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /continue with dingtalk/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("preserves CLI callback details in DingTalk OAuth state", async () => {
+    mockGetConfig.mockResolvedValueOnce({
+      cdn_domain: "",
+      dingtalk_client_id: "ding-client-id",
+    });
+    searchParamsState.params = new URLSearchParams({
+      cli_callback: "http://localhost:65202/callback",
+      cli_state: "state-123",
+    });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: "http://localhost:3000",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("button", { name: /continue with dingtalk/i }),
+      );
+
+      expect(hrefSetter).toHaveBeenCalledWith(
+        expect.stringContaining("https://login.dingtalk.com/oauth2/auth"),
+      );
+      const redirectHref = hrefSetter.mock.calls[0]?.[0];
+      expect(redirectHref).toEqual(expect.any(String));
+      const target = new URL(redirectHref as string);
+      const state = target.searchParams.get("state") ?? "";
+      expect(state).toContain("provider:dingtalk");
+
+      const cliPart = state.split(",").find((part) => part.startsWith("cli:"));
+      expect(cliPart).toBeTruthy();
+      const cliParams = new URLSearchParams(
+        decodeURIComponent(cliPart!.slice(4)),
+      );
+      expect(cliParams.get("callback")).toBe("http://localhost:65202/callback");
+      expect(cliParams.get("state")).toBe("state-123");
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("shows error when sendCode fails", async () => {

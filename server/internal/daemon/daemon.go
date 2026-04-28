@@ -161,7 +161,7 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
-	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	cfg, err := cli.LoadCLIConfigForInstance(d.cfg.Profile, d.cfg.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}

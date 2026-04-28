@@ -71,7 +71,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	
+
 	signupConfig := handler.Config{
 		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
@@ -128,9 +128,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	// Auth (public)
+	r.Get("/api/config", h.GetConfig)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/dingtalk", h.DingTalkLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Daemon API routes (require daemon token or valid user token)
@@ -169,9 +171,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
-		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Post("/api/me/notification-bindings/dingtalk/start", h.StartMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/dingtalk/callback", h.CompleteMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/email/start", h.StartMyEmailBinding)
+		r.Post("/api/me/notification-bindings/email/verify", h.VerifyMyEmailBinding)
+		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)
+		r.Delete("/api/me/notification-bindings/{bindingId}", h.DeleteMyNotificationBinding)
+		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)
+		r.Patch("/api/me/notification-preferences", h.UpdateMyNotificationPreference)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)

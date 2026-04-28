@@ -2,13 +2,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { paths } from "@multica/core/paths";
 
-const { mockPush, mockSearchParams, mockLoginWithGoogle, mockListWorkspaces } =
-  vi.hoisted(() => ({
-    mockPush: vi.fn(),
-    mockSearchParams: new URLSearchParams(),
-    mockLoginWithGoogle: vi.fn(),
-    mockListWorkspaces: vi.fn(),
-  }));
+const {
+  mockPush,
+  mockSearchParams,
+  mockLoginWithGoogle,
+  mockLoginWithDingTalk,
+  mockListWorkspaces,
+  mockGoogleLogin,
+  mockDingtalkLogin,
+  mockCompleteDingTalkBinding,
+} = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockSearchParams: new URLSearchParams(),
+  mockLoginWithGoogle: vi.fn(),
+  mockLoginWithDingTalk: vi.fn(),
+  mockListWorkspaces: vi.fn(),
+  mockGoogleLogin: vi.fn(),
+  mockDingtalkLogin: vi.fn(),
+  mockCompleteDingTalkBinding: vi.fn(),
+}));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
   id: "user-1",
@@ -41,7 +53,7 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({ loginWithGoogle: mockLoginWithGoogle, loginWithDingTalk: mockLoginWithDingTalk }),
   };
 });
 
@@ -52,7 +64,9 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
-    googleLogin: vi.fn(),
+    googleLogin: mockGoogleLogin,
+    dingtalkLogin: mockDingtalkLogin,
+    completeDingTalkBinding: mockCompleteDingTalkBinding,
   },
 }));
 
@@ -64,7 +78,21 @@ describe("CallbackPage", () => {
     mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
+    mockCompleteDingTalkBinding.mockResolvedValue({
+      binding: {
+        id: "binding-1",
+        provider: "dingtalk",
+        external_user_id: "ding-open-id",
+        display_name: "Ding User",
+        status: "active",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      next_path: "/acme/settings",
+    });
   });
 
   it("unonboarded user lands on /onboarding regardless of next=", async () => {
@@ -107,6 +135,181 @@ describe("CallbackPage", () => {
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
+    });
+  });
+
+  // DingTalk login tests (provider:dingtalk in state)
+  it("routes to loginWithDingTalk when state contains provider:dingtalk", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithDingTalk).toHaveBeenCalledWith(
+        "test-code",
+        expect.stringContaining("/auth/callback"),
+      );
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("redirects DingTalk CLI OAuth callbacks to the local CLI callback", async () => {
+    const cliPart = `cli:${encodeURIComponent(
+      new URLSearchParams({
+        callback: "http://localhost:65202/callback",
+        state: "state-123",
+      }).toString(),
+    )}`;
+    mockSearchParams.set("state", `provider:dingtalk,${cliPart}`);
+    mockDingtalkLogin.mockResolvedValue({
+      token: "cli-jwt",
+      user: makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: "http://localhost:3000",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    try {
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(mockDingtalkLogin).toHaveBeenCalledWith(
+          "test-code",
+          "http://localhost:3000/auth/callback",
+        );
+      });
+      expect(hrefSetter).toHaveBeenCalledWith(
+        "http://localhost:65202/callback?token=cli-jwt&state=state-123",
+      );
+      expect(mockLoginWithDingTalk).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("redirects Google CLI OAuth callbacks to the local CLI callback", async () => {
+    const cliPart = `cli:${encodeURIComponent(
+      new URLSearchParams({
+        callback: "http://127.0.0.1:65202/callback",
+        state: "google-state",
+      }).toString(),
+    )}`;
+    mockSearchParams.set("state", cliPart);
+    mockGoogleLogin.mockResolvedValue({
+      token: "google-cli-jwt",
+      user: makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: "http://localhost:3000",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    try {
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(mockGoogleLogin).toHaveBeenCalledWith(
+          "test-code",
+          "http://localhost:3000/auth/callback",
+        );
+      });
+      expect(hrefSetter).toHaveBeenCalledWith(
+        "http://127.0.0.1:65202/callback?token=google-cli-jwt&state=google-state",
+      );
+      expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("unonboarded DingTalk user lands on /onboarding", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(makeUser());
+    mockSearchParams.set("state", "provider:dingtalk");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("onboarded DingTalk user honors safe next= from state", async () => {
+    mockLoginWithDingTalk.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockSearchParams.set("state", "provider:dingtalk,next:/invite/xyz");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/invite/xyz");
+    });
+  });
+
+  // DingTalk binding tests (dingtalk. prefix in state — from OPE-20 notification flow)
+  it("routes dingtalk callback through the binding completion API", async () => {
+    mockSearchParams.set("state", "dingtalk.signed-state");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockCompleteDingTalkBinding).toHaveBeenCalledWith(
+        "test-code",
+        "dingtalk.signed-state",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/acme/settings");
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("falls back to / when dingtalk callback has no next_path", async () => {
+    mockSearchParams.set("state", "dingtalk.signed-state");
+    mockCompleteDingTalkBinding.mockResolvedValue({
+      binding: {
+        id: "binding-1",
+        provider: "dingtalk",
+        external_user_id: "ding-open-id",
+        display_name: "Ding User",
+        status: "active",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      next_path: null,
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.root());
     });
   });
 });
