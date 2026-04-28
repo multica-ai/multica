@@ -551,6 +551,10 @@ export class ApiClient {
     });
   }
 
+  async duplicateAgent(id: string): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/duplicate`, { method: "POST" });
+  }
+
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",

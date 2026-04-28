@@ -445,6 +445,138 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+func (h *Handler) DuplicateAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	source, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, source) {
+		return
+	}
+
+	ownerID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	workspaceID := uuidToString(source.WorkspaceID)
+	runtime, err := qtx.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          source.RuntimeID,
+		WorkspaceID: source.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+
+	agents, err := qtx.ListAllAgents(r.Context(), source.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	sourceSkills, err := qtx.ListAgentSkills(r.Context(), source.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+
+	duplicate, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
+		WorkspaceID:        source.WorkspaceID,
+		Name:               duplicateAgentName(source.Name, agents),
+		Description:        source.Description,
+		Instructions:       source.Instructions,
+		AvatarUrl:          source.AvatarUrl,
+		RuntimeMode:        source.RuntimeMode,
+		RuntimeConfig:      append([]byte(nil), source.RuntimeConfig...),
+		RuntimeID:          source.RuntimeID,
+		Visibility:         source.Visibility,
+		MaxConcurrentTasks: source.MaxConcurrentTasks,
+		OwnerID:            parseUUID(ownerID),
+		CustomEnv:          append([]byte(nil), source.CustomEnv...),
+		CustomArgs:         append([]byte(nil), source.CustomArgs...),
+		McpConfig:          append([]byte(nil), source.McpConfig...),
+		Model:              source.Model,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "agent_workspace_name_unique" {
+			writeError(w, http.StatusConflict, "could not generate a unique duplicate agent name")
+			return
+		}
+		slog.Warn("duplicate agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to duplicate agent: "+err.Error())
+		return
+	}
+
+	for _, skill := range sourceSkills {
+		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
+			AgentID: duplicate.ID,
+			SkillID: skill.ID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to copy agent skill: "+err.Error())
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	if runtime.Status == "online" {
+		h.TaskService.ReconcileAgentStatus(r.Context(), duplicate.ID)
+		duplicate, _ = h.Queries.GetAgent(r.Context(), duplicate.ID)
+	}
+
+	resp := agentToResponse(duplicate)
+	if len(sourceSkills) > 0 {
+		resp.Skills = make([]SkillResponse, len(sourceSkills))
+		for i, skill := range sourceSkills {
+			resp.Skills[i] = skillToResponse(skill)
+		}
+	}
+
+	slog.Info("agent duplicated", append(logger.RequestAttrs(r), "source_agent_id", id, "agent_id", uuidToString(duplicate.ID), "workspace_id", workspaceID)...)
+	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
+	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+	h.Analytics.Capture(analytics.AgentCreated(
+		ownerID,
+		workspaceID,
+		uuidToString(duplicate.ID),
+		runtime.Provider,
+		"duplicate",
+		false,
+	))
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func duplicateAgentName(sourceName string, agents []db.Agent) string {
+	base := sourceName + " Copy"
+	existing := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		existing[agent.Name] = struct{}{}
+	}
+	if _, ok := existing[base]; !ok {
+		return base
+	}
+	for i := 2; ; i++ {
+		name := fmt.Sprintf("%s %d", base, i)
+		if _, ok := existing[name]; !ok {
+			return name
+		}
+	}
+}
+
 type UpdateAgentRequest struct {
 	Name               *string            `json:"name"`
 	Description        *string            `json:"description"`
