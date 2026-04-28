@@ -145,9 +145,18 @@ func (c DingTalkConfig) RedirectURL() string {
 }
 
 func (c DingTalkConfig) AuthorizationURL(state string) string {
+	return c.AuthorizationURLWithRedirectURI(state, c.RedirectURL())
+}
+
+func (c DingTalkConfig) AuthorizationURLWithRedirectURI(state, redirectURI string) string {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		redirectURI = c.RedirectURL()
+	}
+
 	values := url.Values{}
 	values.Set("client_id", c.ClientID)
-	values.Set("redirect_uri", c.RedirectURL())
+	values.Set("redirect_uri", redirectURI)
 	values.Set("state", state)
 	values.Set("response_type", "code")
 	values.Set("prompt", "consent")

@@ -20,9 +20,10 @@ const googleStatePrefix = "google"
 var ErrGoogleNotConfigured = errors.New("Google OAuth is not configured")
 
 type GoogleBindingState struct {
-	UserID   string `json:"user_id"`
-	NextPath string `json:"next_path,omitempty"`
-	IssuedAt int64  `json:"issued_at"`
+	UserID      string `json:"user_id"`
+	NextPath    string `json:"next_path,omitempty"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
+	IssuedAt    int64  `json:"issued_at"`
 }
 
 type GoogleConfig struct {
@@ -46,9 +47,18 @@ func (c GoogleConfig) RedirectURL() string {
 }
 
 func (c GoogleConfig) AuthorizationURL(state string) string {
+	return c.AuthorizationURLWithRedirectURI(state, c.RedirectURL())
+}
+
+func (c GoogleConfig) AuthorizationURLWithRedirectURI(state, redirectURI string) string {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		redirectURI = c.RedirectURL()
+	}
+
 	values := url.Values{}
 	values.Set("client_id", c.ClientID)
-	values.Set("redirect_uri", c.RedirectURL())
+	values.Set("redirect_uri", redirectURI)
 	values.Set("state", state)
 	values.Set("response_type", "code")
 	values.Set("scope", "openid email profile")

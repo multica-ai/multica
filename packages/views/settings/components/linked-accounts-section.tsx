@@ -79,6 +79,7 @@ export function LinkedAccountsSection() {
     try {
       const { auth_url } = await api.startDingTalkBinding({
         next_path: window.location.pathname,
+        redirect_uri: `${window.location.origin}/auth/callback`,
       });
       window.location.assign(auth_url);
     } catch (err) {
@@ -92,6 +93,7 @@ export function LinkedAccountsSection() {
     try {
       const { auth_url } = await api.startGoogleBinding({
         next_path: window.location.pathname,
+        redirect_uri: `${window.location.origin}/auth/callback`,
       });
       window.location.assign(auth_url);
     } catch (err) {

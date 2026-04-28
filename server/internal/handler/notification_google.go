@@ -16,7 +16,8 @@ import (
 const googleStateTTL = 15 * time.Minute
 
 type StartGoogleBindingRequest struct {
-	NextPath string `json:"next_path"`
+	NextPath    string `json:"next_path"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 type StartGoogleBindingResponse struct {
@@ -55,10 +56,16 @@ func (h *Handler) StartMyGoogleBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	redirectURI := sanitizeOAuthCallbackRedirectURI(req.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = cfg.RedirectURL()
+	}
+
 	state, err := notifyutil.BuildGoogleBindingState(notifyutil.GoogleBindingState{
-		UserID:   userID,
-		NextPath: sanitizeRelativePath(req.NextPath),
-		IssuedAt: time.Now().UTC().Unix(),
+		UserID:      userID,
+		NextPath:    sanitizeRelativePath(req.NextPath),
+		RedirectURI: redirectURI,
+		IssuedAt:    time.Now().UTC().Unix(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start Google binding")
@@ -66,7 +73,7 @@ func (h *Handler) StartMyGoogleBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, StartGoogleBindingResponse{
-		AuthURL: cfg.AuthorizationURL(state),
+		AuthURL: cfg.AuthorizationURLWithRedirectURI(state, redirectURI),
 	})
 }
 
@@ -105,13 +112,17 @@ func (h *Handler) CompleteMyGoogleBinding(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to load Google configuration")
 		return
 	}
+	redirectURI := sanitizeOAuthCallbackRedirectURI(state.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = cfg.RedirectURL()
+	}
 
 	// Exchange the authorization code for tokens using Google's token endpoint.
 	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
 		"code":          {strings.TrimSpace(req.Code)},
 		"client_id":     {cfg.ClientID},
 		"client_secret": {cfg.ClientSecret},
-		"redirect_uri":  {cfg.RedirectURL()},
+		"redirect_uri":  {redirectURI},
 		"grant_type":    {"authorization_code"},
 	})
 	if err != nil {
