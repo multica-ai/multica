@@ -79,6 +79,7 @@ make selfhost
 
 - 输入你的邮箱
 - 从 Resend 邮件里拿验证码（或者前面没配 Resend 的话从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行）
+- 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `MULTICA_DEV_VERIFICATION_CODE=888888` 后它才会生效
 - 登录后创建第一个工作区
 
 ## 5. 连接命令行工具到你自己的 server

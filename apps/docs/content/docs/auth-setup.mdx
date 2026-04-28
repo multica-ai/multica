@@ -32,9 +32,16 @@ The user enters an email on the sign-in page → the server sends a 6-digit code
 <Callout type="warning">
 **Do not enable a fixed verification code on a publicly reachable instance.**
 
-By default, Multica does not accept a universal code like `888888`. Local development without Resend should use the generated code printed in server logs.
+The old behavior where non-production instances accepted `888888` by default has been removed. Unless you explicitly configure it, typing `888888` is treated like any other wrong code.
 
-If you need deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production. This shortcut is ignored when `APP_ENV=production`.
+Local development without Resend should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+This shortcut is ignored when `APP_ENV=production`.
 </Callout>
 
 Production deployments should leave `MULTICA_DEV_VERIFICATION_CODE` empty and set `APP_ENV=production`. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, `APP_ENV` defaults to `production`.

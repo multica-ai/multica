@@ -32,9 +32,16 @@ Multica 支持两种登录方式：**Email + 验证码**（默认）和 **Google
 <Callout type="warning">
 **不要在公网可访问实例上启用固定验证码。**
 
-默认情况下，Multica 不接受 `888888` 这类万能验证码。不配 Resend 的本地开发，应使用 server 日志里打印的随机验证码。
+旧版「非 production 默认接受 `888888`」的行为已经移除。除非你显式配置，否则输入 `888888` 会和普通错误验证码一样被拒绝。
 
-如果你需要确定性的本地自动化测试，可以把 `MULTICA_DEV_VERIFICATION_CODE` 设成一个 6 位数字，比如 `888888`，并保持 `APP_ENV` 为非 production。`APP_ENV=production` 时这个快捷码会被忽略。
+不配 Resend 的本地开发，应使用 server 日志里打印的随机验证码。如果你需要确定性的本地/私有自动化测试，可以把 `MULTICA_DEV_VERIFICATION_CODE` 设成一个 6 位数字，比如 `888888`，并保持 `APP_ENV` 为非 production：
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+`APP_ENV=production` 时这个快捷码会被忽略。
 </Callout>
 
 生产部署应保持 `MULTICA_DEV_VERIFICATION_CODE` 为空，并设置 `APP_ENV=production`。如果你用 `make selfhost` / `docker-compose.selfhost.yml` 自部署，`APP_ENV` 默认就是 `production`。
