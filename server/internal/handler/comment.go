@@ -411,7 +411,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	// but only when the reply contains no mentions at all (a plain follow-up).
 	// If the reply explicitly @mentions anyone (agents or members), the user
 	// is making a deliberate choice about who to involve; don't auto-inherit.
-	if parentComment != nil && len(mentions) == 0 {
+	//
+	// CRITICAL: agent-authored replies must NOT inherit parent mentions.
+	// Otherwise an agent posting "No reply needed" in a thread whose root
+	// mentioned another agent would re-trigger that agent, creating a loop.
+	// Explicit @mentions in the agent's own comment still work for delegation.
+	if parentComment != nil && len(mentions) == 0 && authorType != "agent" {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {

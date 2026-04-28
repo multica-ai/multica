@@ -1519,3 +1519,120 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
 	}
 }
+
+// TestAgentReplyDoesNotInheritParentMentions verifies that agent-authored
+// replies do NOT inherit parent-comment mentions, preventing agent-to-agent
+// re-trigger loops (e.g. "No reply needed" chains). Member-authored replies
+// still inherit parent mentions as expected.
+func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Create two agents.
+	agentA := createHandlerTestAgent(t, "Loop Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Loop Agent B", nil)
+
+	// Create an unassigned issue so on_comment doesn't fire.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Agent mention inheritance test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Helper: count queued tasks for a given agent on this issue.
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// Helper: cancel all tasks for an agent on this issue.
+	cancelTasks := func(agentID string) {
+		_, err := testPool.Exec(ctx,
+			`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+			issueID, agentID,
+		)
+		if err != nil {
+			t.Fatalf("failed to cancel tasks: %v", err)
+		}
+	}
+
+	postComment := func(issueID string, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		testHandler.CreateComment(w, r)
+		return w
+	}
+
+	// 1. Member posts top-level comment mentioning Agent B.
+	mentionB := fmt.Sprintf("[@Agent B](mention://agent/%s) please review", agentB)
+	w = postComment(issueID, map[string]any{"content": mentionB}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member mention comment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var parentComment CommentResponse
+	json.NewDecoder(w.Body).Decode(&parentComment)
+	if countTasks(agentB) != 1 {
+		t.Fatalf("expected 1 task for Agent B after member mention, got %d", countTasks(agentB))
+	}
+
+	// 2. Cancel Agent B's task so it's free to be re-triggered.
+	cancelTasks(agentB)
+	if countTasks(agentB) != 0 {
+		t.Fatalf("expected 0 tasks for Agent B after cancel, got %d", countTasks(agentB))
+	}
+
+	// 3. Agent A posts a reply in the same thread with NO mentions.
+	// With the fix, this must NOT inherit the parent mention of Agent B.
+	w = postComment(issueID, map[string]any{
+		"content":   "No reply needed — just an acknowledgment.",
+		"parent_id": parentComment.ID,
+	}, map[string]string{"X-Agent-ID": agentA})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A reply: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if countTasks(agentB) != 0 {
+		t.Fatalf("expected 0 tasks for Agent B after agent reply (no parent inheritance), got %d", countTasks(agentB))
+	}
+
+	// 4. Cancel any stray tasks.
+	cancelTasks(agentB)
+
+	// 5. Member posts a reply in the same thread with NO mentions.
+	// This SHOULD inherit the parent mention and re-trigger Agent B.
+	w = postComment(issueID, map[string]any{
+		"content":   "Thanks for the review.",
+		"parent_id": parentComment.ID,
+	}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member reply: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if countTasks(agentB) != 1 {
+		t.Fatalf("expected 1 task for Agent B after member reply (parent inheritance allowed), got %d", countTasks(agentB))
+	}
+}
