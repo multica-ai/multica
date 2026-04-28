@@ -9,10 +9,10 @@ import { useEffect } from "react";
  */
 export function LocaleSync() {
   useEffect(() => {
-    const match = document.cookie.match(/(?:^|;\s*)multica-locale=(\w+)/);
+    const match = document.cookie.match(/(?:^|;\s*)multica-locale=([^;]+)/);
     const locale = match?.[1];
-    if (locale === "zh") {
-      document.documentElement.lang = "zh";
+    if (locale === "zh-TW") {
+      document.documentElement.lang = "zh-TW";
     }
   }, []);
 

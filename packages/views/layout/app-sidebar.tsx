@@ -33,7 +33,9 @@ import {
   Loader2,
   X,
   Zap,
+  Languages,
 } from "lucide-react";
+import { useLocale, locales, localeLabels, type Locale } from "@multica/core/i18n";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -555,6 +557,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
+                    <LocaleSwitcherItems />
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
                       Log out
@@ -716,5 +722,27 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
+  );
+}
+
+function LocaleSwitcherItems() {
+  const { locale, setLocale } = useLocale();
+  return (
+    <>
+      <DropdownMenuLabel className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Languages className="h-3.5 w-3.5" />
+        Language
+      </DropdownMenuLabel>
+      {locales.map((option: Locale) => (
+        <DropdownMenuItem
+          key={option}
+          onClick={() => setLocale(option)}
+          className="flex items-center justify-between"
+        >
+          <span>{localeLabels[option]}</span>
+          {option === locale && <Check className="h-3.5 w-3.5" />}
+        </DropdownMenuItem>
+      ))}
+    </>
   );
 }

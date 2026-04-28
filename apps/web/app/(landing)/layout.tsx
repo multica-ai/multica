@@ -44,12 +44,14 @@ async function getInitialLocale(): Promise<Locale> {
   // 1. User's explicit preference (cookie set when they switch language)
   const cookieStore = await cookies();
   const stored = cookieStore.get("multica-locale")?.value;
-  if (stored === "en" || stored === "zh") return stored;
+  if (stored === "en" || stored === "zh-TW") return stored;
 
-  // 2. Detect from Accept-Language header
+  // 2. Detect from Accept-Language header. Any zh-* variant maps to zh-TW
+  // for now since that is the only Chinese locale shipped; adjust when
+  // additional Chinese locales are added.
   const headersList = await headers();
   const acceptLang = headersList.get("accept-language") ?? "";
-  if (acceptLang.includes("zh")) return "zh";
+  if (acceptLang.includes("zh")) return "zh-TW";
 
   return "en";
 }

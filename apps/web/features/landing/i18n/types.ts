@@ -1,11 +1,7 @@
-export type Locale = "en" | "zh";
-
-export const locales: Locale[] = ["en", "zh"];
-
-export const localeLabels: Record<Locale, string> = {
-  en: "EN",
-  zh: "\u4e2d\u6587",
-};
+// Landing-specific translation dictionary types. Locale identifiers and the
+// global label map live in @multica/core/i18n so the entire app shares one
+// switcher and one cookie.
+export { type Locale, locales, localeLabels } from "@multica/core/i18n";
 
 type FeatureSection = {
   label: string;

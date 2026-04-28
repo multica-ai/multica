@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
+import { LocaleProvider } from "@multica/core/i18n";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
 import {
@@ -58,12 +59,14 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
       onLogout={clearLoggedInCookie}
       identity={identity}
     >
-      {/* Suspense boundary is required by Next.js for useSearchParams in
-          a client component mounted this high in the tree. */}
-      <Suspense fallback={null}>
-        <PageviewTracker />
-      </Suspense>
-      <WebNavigationProvider>{children}</WebNavigationProvider>
+      <LocaleProvider>
+        {/* Suspense boundary is required by Next.js for useSearchParams in
+            a client component mounted this high in the tree. */}
+        <Suspense fallback={null}>
+          <PageviewTracker />
+        </Suspense>
+        <WebNavigationProvider>{children}</WebNavigationProvider>
+      </LocaleProvider>
     </CoreProvider>
   );
 }
