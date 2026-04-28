@@ -1,0 +1,741 @@
+"use client";
+
+import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ChevronRight,
+  ChevronDown,
+  Folder as FolderIcon,
+  FolderPlus,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ArrowLeftRight,
+} from "lucide-react";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Badge } from "@multica/ui/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@multica/ui/components/ui/breadcrumb";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@multica/ui/components/ui/context-menu";
+import { cn } from "@multica/ui/lib/utils";
+import {
+  artifactFoldersOptions,
+  artifactSearchOptions,
+} from "@multica/core/artifacts/queries";
+import {
+  useCreateArtifactFolder,
+  useUpdateArtifactFolder,
+  useDeleteArtifactFolder,
+  useMoveArtifactToFolder,
+} from "@multica/core/artifacts/mutations";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import type { Artifact, ArtifactFolder } from "@multica/core/types";
+import { useNavigation } from "../../navigation";
+import { KindIcon, KIND_LABELS } from "./kind-icon";
+
+// ---------------------------------------------------------------------------
+// Tree helpers
+// ---------------------------------------------------------------------------
+
+interface FolderNode extends ArtifactFolder {
+  children: FolderNode[];
+}
+
+function buildFolderTree(folders: ArtifactFolder[]): FolderNode[] {
+  const byId = new Map<string, FolderNode>();
+  folders.forEach((f) => byId.set(f.id, { ...f, children: [] }));
+  const roots: FolderNode[] = [];
+  byId.forEach((node) => {
+    if (node.parent_id && byId.has(node.parent_id)) {
+      byId.get(node.parent_id)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  });
+  const sortRecursive = (list: FolderNode[]) => {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    list.forEach((n) => sortRecursive(n.children));
+  };
+  sortRecursive(roots);
+  return roots;
+}
+
+function pathTo(
+  folders: ArtifactFolder[],
+  folderId: string | null,
+): ArtifactFolder[] {
+  if (!folderId) return [];
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const out: ArtifactFolder[] = [];
+  let cur: ArtifactFolder | undefined = byId.get(folderId);
+  while (cur) {
+    out.unshift(cur);
+    cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+  }
+  return out;
+}
+
+function formatBytes(n: number | null | undefined): string {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function ScopeBadge({ artifact }: { artifact: Artifact }) {
+  const wsPaths = useWorkspacePaths();
+  if (artifact.issue_id) {
+    return (
+      <Badge variant="outline" className="text-[10px]">
+        <a
+          href={wsPaths.issueDetail(artifact.issue_id)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Issue
+        </a>
+      </Badge>
+    );
+  }
+  if (artifact.project_id) {
+    return (
+      <Badge variant="outline" className="text-[10px]">
+        <a
+          href={wsPaths.projectDetail(artifact.project_id)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Project
+        </a>
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+      Workspace
+    </Badge>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FolderTree
+// ---------------------------------------------------------------------------
+
+function FolderTreeItem({
+  node,
+  depth,
+  currentId,
+  expanded,
+  onToggle,
+  onSelect,
+  onMoveArtifact,
+}: {
+  node: FolderNode;
+  depth: number;
+  currentId: string | null;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  onSelect: (id: string | null) => void;
+  onMoveArtifact: (artifactId: string, folderId: string | null) => void;
+}) {
+  const isOpen = expanded.has(node.id);
+  const isActive = currentId === node.id;
+  const [dragOver, setDragOver] = React.useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onSelect(node.id)}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const id = e.dataTransfer.getData("text/multica-artifact");
+          if (id) onMoveArtifact(id, node.id);
+        }}
+        className={cn(
+          "group flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
+          isActive && "bg-accent font-medium",
+          dragOver && "bg-accent/70 ring-1 ring-primary/50",
+        )}
+        style={{ paddingLeft: 8 + depth * 12 }}
+      >
+        {node.children.length > 0 ? (
+          <span
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle(node.id);
+            }}
+            className="flex size-4 items-center justify-center text-muted-foreground"
+          >
+            {isOpen ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+          </span>
+        ) : (
+          <span className="size-4" />
+        )}
+        <FolderIcon className="size-4 text-muted-foreground" />
+        <span className="truncate">{node.name}</span>
+      </button>
+      {isOpen && node.children.length > 0 && (
+        <div>
+          {node.children.map((c) => (
+            <FolderTreeItem
+              key={c.id}
+              node={c}
+              depth={depth + 1}
+              currentId={currentId}
+              expanded={expanded}
+              onToggle={onToggle}
+              onSelect={onSelect}
+              onMoveArtifact={onMoveArtifact}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// New folder dialog
+// ---------------------------------------------------------------------------
+
+function NewFolderDialog({
+  open,
+  onOpenChange,
+  parentId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  parentId: string | null;
+}) {
+  const [name, setName] = React.useState("");
+  const create = useCreateArtifactFolder();
+
+  React.useEffect(() => {
+    if (!open) setName("");
+  }, [open]);
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    await create.mutateAsync({ name: name.trim(), parent_id: parentId });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New folder</DialogTitle>
+          <DialogDescription>
+            Folders group documents — they're independent of project/issue scope.
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Folder name"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleCreate();
+            }
+          }}
+        />
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={create.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCreate}
+            disabled={!name.trim() || create.isPending}
+          >
+            {create.isPending ? "Creating…" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// File manager page
+// ---------------------------------------------------------------------------
+
+export interface FileManagerPageProps {
+  /** Selected folder from query string (`?folder=<id>`). */
+  initialFolderId?: string | null;
+}
+
+export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) {
+  const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const router = useNavigation();
+
+  const [folderId, setFolderId] = React.useState<string | null>(
+    initialFolderId ?? null,
+  );
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const [query, setQuery] = React.useState("");
+  const [newFolderOpen, setNewFolderOpen] = React.useState(false);
+  const [renameTarget, setRenameTarget] = React.useState<ArtifactFolder | null>(
+    null,
+  );
+  const [renameDraft, setRenameDraft] = React.useState("");
+  const [deleteFolderTarget, setDeleteFolderTarget] =
+    React.useState<ArtifactFolder | null>(null);
+
+  React.useEffect(() => {
+    setFolderId(initialFolderId ?? null);
+  }, [initialFolderId]);
+
+  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  const { data: allArtifacts = [], isLoading } = useQuery(
+    artifactSearchOptions(wsId, { q: query.trim() || undefined, limit: 200 }),
+  );
+
+  const updateFolder = useUpdateArtifactFolder();
+  const deleteFolder = useDeleteArtifactFolder();
+  const moveArtifact = useMoveArtifactToFolder();
+
+  const tree = React.useMemo(() => buildFolderTree(folders), [folders]);
+  const breadcrumbs = React.useMemo(
+    () => pathTo(folders, folderId),
+    [folders, folderId],
+  );
+
+  // Subfolders inside the current folder.
+  const childFolders = React.useMemo(() => {
+    if (folderId === null) return tree;
+    const find = (nodes: FolderNode[]): FolderNode | undefined => {
+      for (const n of nodes) {
+        if (n.id === folderId) return n;
+        const sub = find(n.children);
+        if (sub) return sub;
+      }
+      return undefined;
+    };
+    return find(tree)?.children ?? [];
+  }, [tree, folderId]);
+
+  // Artifacts in the current folder. Server returns all artifacts (no folder
+  // filter on the search endpoint), so filter client-side. The cap of 200
+  // is generous for early use; we'll add a server filter if needed.
+  const artifacts = React.useMemo(() => {
+    return allArtifacts.filter((a) => (a.folder_id ?? null) === folderId);
+  }, [allArtifacts, folderId]);
+
+  const toggleFolder = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleMoveArtifact = (artifactId: string, target: string | null) => {
+    if (artifactId) {
+      moveArtifact.mutate({ id: artifactId, data: { folder_id: target } });
+    }
+  };
+
+  const handleRename = async () => {
+    if (!renameTarget || !renameDraft.trim()) return;
+    await updateFolder.mutateAsync({
+      id: renameTarget.id,
+      data: { name: renameDraft.trim() },
+    });
+    setRenameTarget(null);
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!deleteFolderTarget) return;
+    await deleteFolder.mutateAsync({ id: deleteFolderTarget.id });
+    if (folderId === deleteFolderTarget.id) setFolderId(null);
+    setDeleteFolderTarget(null);
+  };
+
+  return (
+    <div className="flex h-full w-full">
+      {/* Sidebar: folder tree */}
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/30">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <span className="text-xs font-medium uppercase text-muted-foreground">
+            Folders
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            onClick={() => setNewFolderOpen(true)}
+            title="New folder"
+          >
+            <FolderPlus className="size-3.5" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-1">
+          <button
+            type="button"
+            onClick={() => setFolderId(null)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const id = e.dataTransfer.getData("text/multica-artifact");
+              if (id) handleMoveArtifact(id, null);
+            }}
+            className={cn(
+              "flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
+              folderId === null && "bg-accent font-medium",
+            )}
+          >
+            <span className="size-4" />
+            <FolderIcon className="size-4 text-muted-foreground" />
+            <span>All documents</span>
+          </button>
+          {tree.map((n) => (
+            <FolderTreeItem
+              key={n.id}
+              node={n}
+              depth={0}
+              currentId={folderId}
+              expanded={expanded}
+              onToggle={toggleFolder}
+              onSelect={setFolderId}
+              onMoveArtifact={handleMoveArtifact}
+            />
+          ))}
+        </div>
+      </aside>
+
+      {/* Main: breadcrumbs, toolbar, list */}
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-2">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                {folderId === null ? (
+                  <BreadcrumbPage>All documents</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setFolderId(null);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    All documents
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
+              {breadcrumbs.map((f, i) => (
+                <React.Fragment key={f.id}>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    {i === breadcrumbs.length - 1 ? (
+                      <BreadcrumbPage>{f.name}</BreadcrumbPage>
+                    ) : (
+                      <BreadcrumbLink
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setFolderId(f.id);
+                        }}
+                        className="cursor-pointer"
+                      >
+                        {f.name}
+                      </BreadcrumbLink>
+                    )}
+                  </BreadcrumbItem>
+                </React.Fragment>
+              ))}
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search documents…"
+                className="h-8 pl-7 w-56"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setNewFolderOpen(true)}
+            >
+              <FolderPlus className="mr-1 size-4" /> New folder
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => router.push(wsPaths.documentNew(folderId))}
+            >
+              <Plus className="mr-1 size-4" /> New document
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          {isLoading ? (
+            <div className="px-6 py-6 text-sm text-muted-foreground">Loading…</div>
+          ) : childFolders.length === 0 && artifacts.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
+              <FolderIcon className="size-8 opacity-40" />
+              <span>This folder is empty.</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => router.push(wsPaths.documentNew(folderId))}
+              >
+                <Plus className="mr-1 size-4" /> New document
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-[minmax(0,1fr)_120px_120px_140px_120px] text-sm">
+              <div className="col-span-5 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+                <div>Name</div>
+                <div>Kind</div>
+                <div>Format</div>
+                <div>Scope</div>
+                <div>Modified</div>
+              </div>
+              {childFolders.map((f) => (
+                <ContextMenu key={f.id}>
+                  <ContextMenuTrigger
+                    onClick={() => setFolderId(f.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const id = e.dataTransfer.getData("text/multica-artifact");
+                      if (id) handleMoveArtifact(id, f.id);
+                    }}
+                    className="col-span-5 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <FolderIcon className="size-4 text-muted-foreground" />
+                      <span className="truncate font-medium">{f.name}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">Folder</div>
+                    <div />
+                    <div />
+                    <div className="text-xs text-muted-foreground">
+                      {formatDate(f.updated_at)}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      onSelect={() => {
+                        setRenameTarget(f);
+                        setRenameDraft(f.name);
+                      }}
+                    >
+                      <Pencil className="mr-2 size-3.5" /> Rename
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      className="text-destructive"
+                      onSelect={() => setDeleteFolderTarget(f)}
+                    >
+                      <Trash2 className="mr-2 size-3.5" /> Delete folder
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              ))}
+              {artifacts.map((a) => (
+                <ContextMenu key={a.id}>
+                  <ContextMenuTrigger
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/multica-artifact", a.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onClick={() => router.push(wsPaths.documentDetail(a.id))}
+                    className="col-span-5 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <KindIcon
+                        kind={a.kind}
+                        className="size-4 text-muted-foreground"
+                      />
+                      <span className="truncate font-medium">{a.title}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {KIND_LABELS[a.kind]}
+                    </div>
+                    <div className="text-xs uppercase text-muted-foreground">
+                      {a.format}
+                      {a.format === "pdf" && a.file_size_bytes
+                        ? ` · ${formatBytes(a.file_size_bytes)}`
+                        : ""}
+                    </div>
+                    <div>
+                      <ScopeBadge artifact={a} />
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatDate(a.updated_at)}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      onSelect={() =>
+                        router.push(wsPaths.documentEdit(a.id))
+                      }
+                    >
+                      <Pencil className="mr-2 size-3.5" /> Edit
+                    </ContextMenuItem>
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger>
+                        <ArrowLeftRight className="mr-2 size-3.5" /> Move to
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent>
+                        <ContextMenuItem
+                          onSelect={() => handleMoveArtifact(a.id, null)}
+                        >
+                          All documents (root)
+                        </ContextMenuItem>
+                        {folders.length > 0 && <ContextMenuSeparator />}
+                        {folders.map((f) => (
+                          <ContextMenuItem
+                            key={f.id}
+                            onSelect={() => handleMoveArtifact(a.id, f.id)}
+                          >
+                            <FolderIcon className="mr-2 size-3.5" />
+                            {f.name}
+                          </ContextMenuItem>
+                        ))}
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                  </ContextMenuContent>
+                </ContextMenu>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        parentId={folderId}
+      />
+
+      <Dialog
+        open={Boolean(renameTarget)}
+        onOpenChange={(open) => !open && setRenameTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename folder</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleRename();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRenameTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRename}
+              disabled={!renameDraft.trim() || updateFolder.isPending}
+            >
+              {updateFolder.isPending ? "Saving…" : "Rename"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={Boolean(deleteFolderTarget)}
+        onOpenChange={(open) => !open && setDeleteFolderTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deleting &ldquo;{deleteFolderTarget?.name}&rdquo; also deletes any
+              subfolders. Documents inside move back to the root.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteFolder}
+              disabled={deleteFolder.isPending}
+            >
+              {deleteFolder.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+

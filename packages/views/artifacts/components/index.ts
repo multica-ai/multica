@@ -14,3 +14,7 @@ export { MermaidDiagram } from "./mermaid-diagram";
 export { MoveScopeMenu } from "./move-scope-menu";
 export { ProjectDocuments } from "./project-documents";
 export { WorkspaceDocuments } from "./workspace-documents";
+export {
+  FileManagerPage,
+  type FileManagerPageProps,
+} from "./file-manager-page";

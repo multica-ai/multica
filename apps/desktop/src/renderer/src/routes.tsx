@@ -13,7 +13,7 @@ import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
-import { WorkspaceDocuments } from "@multica/views/artifacts/components";
+import { FileManagerPage } from "@multica/views/artifacts/components";
 import {
   DocumentNewPage,
   DocumentViewPage,
@@ -101,7 +101,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "documents",
-            element: <WorkspaceDocuments />,
+            element: <DocumentsRoute />,
             handle: { title: "Documents" },
           },
           {
@@ -178,6 +178,11 @@ export function createTabRouter(initialPath: string) {
 
 // Tiny route wrappers — react-router-dom hooks aren't available inside
 // shared @multica/views, so the page components accept ids as props.
+function DocumentsRoute() {
+  const [search] = useSearchParams();
+  return <FileManagerPage initialFolderId={search.get("folder")} />;
+}
+
 function DocumentNewRoute() {
   const [search] = useSearchParams();
   return <DocumentNewPage folderId={search.get("folder")} />;

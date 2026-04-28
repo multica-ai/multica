@@ -1,7 +1,9 @@
 "use client";
 
-import { WorkspaceDocuments } from "@multica/views/artifacts/components";
+import { useSearchParams } from "next/navigation";
+import { FileManagerPage } from "@multica/views/artifacts/components";
 
 export default function Page() {
-  return <WorkspaceDocuments />;
+  const params = useSearchParams();
+  return <FileManagerPage initialFolderId={params.get("folder")} />;
 }
