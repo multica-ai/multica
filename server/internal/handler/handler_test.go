@@ -2115,3 +2115,70 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 		t.Fatalf("expected 1 task for Agent B after member reply (parent inheritance allowed), got %d", countTasks(agentB))
 	}
 }
+
+// TestAgentExplicitMentionStillTriggers documents the boundary the structural
+// fix preserves: suppressing implicit parent-mention inheritance for agent
+// authors does NOT block deliberate handoffs. An agent that explicitly
+// @mentions another agent in its own comment content still enqueues a task
+// for that mentioned agent.
+func TestAgentExplicitMentionStillTriggers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Handoff Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Handoff Agent B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Agent explicit handoff test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// Agent A posts a top-level comment that explicitly @mentions Agent B —
+	// a deliberate handoff. This must enqueue a task for Agent B, and must
+	// not enqueue a self-trigger for Agent A.
+	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": explicitMention,
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", agentA)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTasks(agentB); got != 1 {
+		t.Fatalf("expected 1 task for Agent B after explicit mention by Agent A, got %d", got)
+	}
+	if got := countTasks(agentA); got != 0 {
+		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
+	}
+}
