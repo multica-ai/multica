@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/pkmpath"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -43,6 +46,33 @@ type WorkspaceResponse struct {
 	IssuePrefix string  `json:"issue_prefix"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+}
+
+// validateSettingsPKMPath enforces the rules in pkmpath.Normalize on any
+// pkm_path value embedded in a settings PUT, and rewrites the field in
+// place with the cleaned form so the stored JSON matches what the
+// validator approved. Settings shapes other than a JSON object are
+// passed through untouched (this endpoint accepts arbitrary JSON; only
+// pkm_path is the backend's concern).
+func validateSettingsPKMPath(settings any) error {
+	obj, ok := settings.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, present := obj["pkm_path"]
+	if !present || raw == nil {
+		return nil
+	}
+	pkmPath, ok := raw.(string)
+	if !ok {
+		return errors.New("pkm_path must be a string")
+	}
+	cleaned, err := pkmpath.Normalize(pkmPath, pkmpath.AllowlistRoot())
+	if err != nil {
+		return fmt.Errorf("invalid pkm_path: %w", err)
+	}
+	obj["pkm_path"] = cleaned
+	return nil
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -248,6 +278,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
+		if err := validateSettingsPKMPath(req.Settings); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
