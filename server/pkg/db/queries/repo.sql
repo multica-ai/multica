@@ -5,15 +5,20 @@ SELECT * FROM repo WHERE id = $1;
 SELECT * FROM repo WHERE url = $1;
 
 -- name: UpsertRepoByURL :one
-INSERT INTO repo (url, description)
-VALUES ($1, $2)
+-- Description lives on `repo_binding`, not on the repo catalog row, so the
+-- upsert here is keyed only on URL. The trivial DO UPDATE bumps updated_at
+-- and forces RETURNING to fire on the conflict path.
+INSERT INTO repo (url)
+VALUES ($1)
 ON CONFLICT (url) DO UPDATE
-    SET description = EXCLUDED.description,
-        updated_at  = now()
+    SET updated_at = now()
 RETURNING *;
 
 -- name: ListReposByScope :many
-SELECT r.*
+-- description comes from the binding, not the repo, so two scopes that share
+-- the same git URL can carry different descriptions without one overwriting
+-- the other.
+SELECT r.id, r.url, rb.description, r.created_at, r.updated_at
 FROM repo r
 JOIN repo_binding rb ON rb.repo_id = r.id
 WHERE rb.scope_type = $1
@@ -21,13 +26,14 @@ WHERE rb.scope_type = $1
 ORDER BY r.url ASC;
 
 -- name: CreateRepoBinding :one
--- ON CONFLICT updates a no-op column so the existing row is returned, which
--- makes the call idempotent and gives the caller a stable RepoBinding back
--- whether or not the binding existed before.
-INSERT INTO repo_binding (repo_id, scope_type, scope_id)
-VALUES ($1, $2, $3)
+-- ON CONFLICT updates description (and bumps no other column) so calling this
+-- twice with different descriptions is the way a caller mutates an existing
+-- binding's description in place — including the no-change case where the
+-- existing row is returned verbatim. Idempotent.
+INSERT INTO repo_binding (repo_id, scope_type, scope_id, description)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (repo_id, scope_type, scope_id) DO UPDATE
-    SET repo_id = EXCLUDED.repo_id
+    SET description = EXCLUDED.description
 RETURNING *;
 
 -- name: DeleteRepoBinding :exec

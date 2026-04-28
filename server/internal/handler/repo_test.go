@@ -142,6 +142,71 @@ func TestSetRepoBindingsForScope_OrphanGC(t *testing.T) {
 	}
 }
 
+// TestRepoBinding_DescriptionIsPerScope asserts that two scopes binding the
+// same git URL each keep their own description. The legacy JSONB column
+// stored description per-workspace; if description had stayed on the `repo`
+// catalog row instead of moving to `repo_binding`, workspace B writing the
+// same URL would silently overwrite workspace A's description on the next
+// read. This test pins the contract.
+func TestRepoBinding_DescriptionIsPerScope(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	wsUUID := parseUUID(testWorkspaceID)
+	pretendScope := parseUUID("22222222-2222-4222-8222-222222222222")
+	const sharedURL = "git@example.com:team/per-scope-desc.git"
+
+	t.Cleanup(func() {
+		testHandler.Queries.DeleteRepoBindingsForScope(ctx, db.DeleteRepoBindingsForScopeParams{
+			ScopeType: repoScopeWorkspace,
+			ScopeID:   wsUUID,
+		})
+		testHandler.Queries.DeleteRepoBindingsForScope(ctx, db.DeleteRepoBindingsForScopeParams{
+			ScopeType: "project",
+			ScopeID:   pretendScope,
+		})
+		testHandler.Queries.DeleteOrphanRepos(ctx)
+	})
+
+	repo, err := testHandler.Queries.UpsertRepoByURL(ctx, sharedURL)
+	if err != nil {
+		t.Fatalf("upsert repo: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateRepoBinding(ctx, db.CreateRepoBindingParams{
+		RepoID:      repo.ID,
+		ScopeType:   repoScopeWorkspace,
+		ScopeID:     wsUUID,
+		Description: "workspace's view",
+	}); err != nil {
+		t.Fatalf("workspace binding: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateRepoBinding(ctx, db.CreateRepoBindingParams{
+		RepoID:      repo.ID,
+		ScopeType:   "project",
+		ScopeID:     pretendScope,
+		Description: "project's view",
+	}); err != nil {
+		t.Fatalf("project binding: %v", err)
+	}
+
+	wsRepos, err := testHandler.loadWorkspaceRepoData(ctx, wsUUID)
+	if err != nil {
+		t.Fatalf("load workspace repos: %v", err)
+	}
+	if len(wsRepos) != 1 || wsRepos[0].Description != "workspace's view" {
+		t.Fatalf("workspace description leaked from project: %+v", wsRepos)
+	}
+
+	projRepos, err := testHandler.loadRepoDataByScope(ctx, "project", pretendScope)
+	if err != nil {
+		t.Fatalf("load project repos: %v", err)
+	}
+	if len(projRepos) != 1 || projRepos[0].Description != "project's view" {
+		t.Fatalf("project description leaked from workspace: %+v", projRepos)
+	}
+}
+
 // TestRepoBinding_SharedAcrossScopes asserts that a repo bound to multiple
 // scopes survives when one scope releases it. This is the contract Step 2 / 3
 // will rely on once project- and issue-scoped bindings exist; the same repo
@@ -171,16 +236,13 @@ func TestRepoBinding_SharedAcrossScopes(t *testing.T) {
 		testHandler.Queries.DeleteOrphanRepos(ctx)
 	})
 
-	repo, err := testHandler.Queries.UpsertRepoByURL(ctx, db.UpsertRepoByURLParams{
-		Url:         sharedURL,
-		Description: "shared",
-	})
+	repo, err := testHandler.Queries.UpsertRepoByURL(ctx, sharedURL)
 	if err != nil {
 		t.Fatalf("upsert repo: %v", err)
 	}
 	for _, params := range []db.CreateRepoBindingParams{
-		{RepoID: repo.ID, ScopeType: repoScopeWorkspace, ScopeID: wsUUID},
-		{RepoID: repo.ID, ScopeType: "project", ScopeID: pretendScope},
+		{RepoID: repo.ID, ScopeType: repoScopeWorkspace, ScopeID: wsUUID, Description: "workspace's view"},
+		{RepoID: repo.ID, ScopeType: "project", ScopeID: pretendScope, Description: "project's view"},
 	} {
 		if _, err := testHandler.Queries.CreateRepoBinding(ctx, params); err != nil {
 			t.Fatalf("create binding %+v: %v", params, err)

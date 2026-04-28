@@ -12,30 +12,38 @@ import (
 )
 
 const createRepoBinding = `-- name: CreateRepoBinding :one
-INSERT INTO repo_binding (repo_id, scope_type, scope_id)
-VALUES ($1, $2, $3)
+INSERT INTO repo_binding (repo_id, scope_type, scope_id, description)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (repo_id, scope_type, scope_id) DO UPDATE
-    SET repo_id = EXCLUDED.repo_id
-RETURNING id, repo_id, scope_type, scope_id, created_at
+    SET description = EXCLUDED.description
+RETURNING id, repo_id, scope_type, scope_id, description, created_at
 `
 
 type CreateRepoBindingParams struct {
-	RepoID    pgtype.UUID `json:"repo_id"`
-	ScopeType string      `json:"scope_type"`
-	ScopeID   pgtype.UUID `json:"scope_id"`
+	RepoID      pgtype.UUID `json:"repo_id"`
+	ScopeType   string      `json:"scope_type"`
+	ScopeID     pgtype.UUID `json:"scope_id"`
+	Description string      `json:"description"`
 }
 
-// ON CONFLICT updates a no-op column so the existing row is returned, which
-// makes the call idempotent and gives the caller a stable RepoBinding back
-// whether or not the binding existed before.
+// ON CONFLICT updates description (and bumps no other column) so calling this
+// twice with different descriptions is the way a caller mutates an existing
+// binding's description in place — including the no-change case where the
+// existing row is returned verbatim. Idempotent.
 func (q *Queries) CreateRepoBinding(ctx context.Context, arg CreateRepoBindingParams) (RepoBinding, error) {
-	row := q.db.QueryRow(ctx, createRepoBinding, arg.RepoID, arg.ScopeType, arg.ScopeID)
+	row := q.db.QueryRow(ctx, createRepoBinding,
+		arg.RepoID,
+		arg.ScopeType,
+		arg.ScopeID,
+		arg.Description,
+	)
 	var i RepoBinding
 	err := row.Scan(
 		&i.ID,
 		&i.RepoID,
 		&i.ScopeType,
 		&i.ScopeID,
+		&i.Description,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -94,7 +102,7 @@ func (q *Queries) DeleteRepoBindingsForScope(ctx context.Context, arg DeleteRepo
 }
 
 const getRepo = `-- name: GetRepo :one
-SELECT id, url, description, created_at, updated_at FROM repo WHERE id = $1
+SELECT id, url, created_at, updated_at FROM repo WHERE id = $1
 `
 
 func (q *Queries) GetRepo(ctx context.Context, id pgtype.UUID) (Repo, error) {
@@ -103,7 +111,6 @@ func (q *Queries) GetRepo(ctx context.Context, id pgtype.UUID) (Repo, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Url,
-		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -111,7 +118,7 @@ func (q *Queries) GetRepo(ctx context.Context, id pgtype.UUID) (Repo, error) {
 }
 
 const getRepoByURL = `-- name: GetRepoByURL :one
-SELECT id, url, description, created_at, updated_at FROM repo WHERE url = $1
+SELECT id, url, created_at, updated_at FROM repo WHERE url = $1
 `
 
 func (q *Queries) GetRepoByURL(ctx context.Context, url string) (Repo, error) {
@@ -120,7 +127,6 @@ func (q *Queries) GetRepoByURL(ctx context.Context, url string) (Repo, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Url,
-		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -128,7 +134,7 @@ func (q *Queries) GetRepoByURL(ctx context.Context, url string) (Repo, error) {
 }
 
 const listReposByScope = `-- name: ListReposByScope :many
-SELECT r.id, r.url, r.description, r.created_at, r.updated_at
+SELECT r.id, r.url, rb.description, r.created_at, r.updated_at
 FROM repo r
 JOIN repo_binding rb ON rb.repo_id = r.id
 WHERE rb.scope_type = $1
@@ -141,15 +147,26 @@ type ListReposByScopeParams struct {
 	ScopeID   pgtype.UUID `json:"scope_id"`
 }
 
-func (q *Queries) ListReposByScope(ctx context.Context, arg ListReposByScopeParams) ([]Repo, error) {
+type ListReposByScopeRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Url         string             `json:"url"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// description comes from the binding, not the repo, so two scopes that share
+// the same git URL can carry different descriptions without one overwriting
+// the other.
+func (q *Queries) ListReposByScope(ctx context.Context, arg ListReposByScopeParams) ([]ListReposByScopeRow, error) {
 	rows, err := q.db.Query(ctx, listReposByScope, arg.ScopeType, arg.ScopeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Repo{}
+	items := []ListReposByScopeRow{}
 	for rows.Next() {
-		var i Repo
+		var i ListReposByScopeRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Url,
@@ -168,26 +185,22 @@ func (q *Queries) ListReposByScope(ctx context.Context, arg ListReposByScopePara
 }
 
 const upsertRepoByURL = `-- name: UpsertRepoByURL :one
-INSERT INTO repo (url, description)
-VALUES ($1, $2)
+INSERT INTO repo (url)
+VALUES ($1)
 ON CONFLICT (url) DO UPDATE
-    SET description = EXCLUDED.description,
-        updated_at  = now()
-RETURNING id, url, description, created_at, updated_at
+    SET updated_at = now()
+RETURNING id, url, created_at, updated_at
 `
 
-type UpsertRepoByURLParams struct {
-	Url         string `json:"url"`
-	Description string `json:"description"`
-}
-
-func (q *Queries) UpsertRepoByURL(ctx context.Context, arg UpsertRepoByURLParams) (Repo, error) {
-	row := q.db.QueryRow(ctx, upsertRepoByURL, arg.Url, arg.Description)
+// Description lives on `repo_binding`, not on the repo catalog row, so the
+// upsert here is keyed only on URL. The trivial DO UPDATE bumps updated_at
+// and forces RETURNING to fire on the conflict path.
+func (q *Queries) UpsertRepoByURL(ctx context.Context, url string) (Repo, error) {
+	row := q.db.QueryRow(ctx, upsertRepoByURL, url)
 	var i Repo
 	err := row.Scan(
 		&i.ID,
 		&i.Url,
-		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

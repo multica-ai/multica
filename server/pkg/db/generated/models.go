@@ -355,19 +355,19 @@ type Project struct {
 }
 
 type Repo struct {
-	ID          pgtype.UUID        `json:"id"`
-	Url         string             `json:"url"`
-	Description string             `json:"description"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID        pgtype.UUID        `json:"id"`
+	Url       string             `json:"url"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RepoBinding struct {
-	ID        pgtype.UUID        `json:"id"`
-	RepoID    pgtype.UUID        `json:"repo_id"`
-	ScopeType string             `json:"scope_type"`
-	ScopeID   pgtype.UUID        `json:"scope_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID          pgtype.UUID        `json:"id"`
+	RepoID      pgtype.UUID        `json:"repo_id"`
+	ScopeType   string             `json:"scope_type"`
+	ScopeID     pgtype.UUID        `json:"scope_id"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type Skill struct {

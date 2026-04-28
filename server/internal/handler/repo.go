@@ -16,8 +16,10 @@ const (
 
 // loadRepoDataByScope returns the repos bound to (scope_type, scope_id), in
 // the normalized shape that the daemon/agent code expects (URL-trimmed,
-// deduped, empty URLs dropped). Returns an empty slice — never nil — when no
-// bindings exist.
+// deduped, empty URLs dropped). Description comes from the binding row, so
+// two scopes that share the same git URL can each carry their own
+// description without one overwriting the other.
+// Returns an empty slice — never nil — when no bindings exist.
 func (h *Handler) loadRepoDataByScope(ctx context.Context, scopeType string, scopeID pgtype.UUID) ([]RepoData, error) {
 	rows, err := h.Queries.ListReposByScope(ctx, db.ListReposByScopeParams{
 		ScopeType: scopeType,
@@ -42,8 +44,10 @@ func (h *Handler) loadWorkspaceRepoData(ctx context.Context, workspaceID pgtype.
 
 // setRepoBindingsForScope replaces the entire set of bindings attached to
 // (scope_type, scope_id) with `repos`. The repo catalog itself is upsert-by-URL
-// so two scopes sharing the same git URL share a single repo row; orphan rows
-// that no scope references anymore are pruned at the end of the transaction.
+// so two scopes sharing the same git URL share a single repo row, but the
+// description is stored per-binding so workspace A's "Backend API" doesn't
+// clobber workspace B's "Shared SDK" for the same URL. Orphan repo rows that
+// no scope references anymore are pruned at the end of the transaction.
 func (h *Handler) setRepoBindingsForScope(ctx context.Context, scopeType string, scopeID pgtype.UUID, repos []RepoData) error {
 	repos = normalizeWorkspaceRepos(repos)
 
@@ -61,17 +65,15 @@ func (h *Handler) setRepoBindingsForScope(ctx context.Context, scopeType string,
 		return err
 	}
 	for _, r := range repos {
-		repo, err := qtx.UpsertRepoByURL(ctx, db.UpsertRepoByURLParams{
-			Url:         r.URL,
-			Description: r.Description,
-		})
+		repo, err := qtx.UpsertRepoByURL(ctx, r.URL)
 		if err != nil {
 			return err
 		}
 		if _, err := qtx.CreateRepoBinding(ctx, db.CreateRepoBindingParams{
-			RepoID:    repo.ID,
-			ScopeType: scopeType,
-			ScopeID:   scopeID,
+			RepoID:      repo.ID,
+			ScopeType:   scopeType,
+			ScopeID:     scopeID,
+			Description: r.Description,
 		}); err != nil {
 			return err
 		}

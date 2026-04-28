@@ -8,7 +8,7 @@ ALTER TABLE workspace ADD COLUMN repos JSONB NOT NULL DEFAULT '[]';
 UPDATE workspace w
 SET repos = COALESCE((
     SELECT jsonb_agg(
-               jsonb_build_object('url', r.url, 'description', r.description)
+               jsonb_build_object('url', r.url, 'description', rb.description)
                ORDER BY r.url
            )
     FROM repo_binding rb
