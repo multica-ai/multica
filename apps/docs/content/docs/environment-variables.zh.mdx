@@ -16,12 +16,16 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 | `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |
 | `PORT` | `8080` | 否（除非换端口）|
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
-| `APP_ENV` | 空 | **是**（必须 `production`——见下一节陷阱）|
+| `APP_ENV` | 空 | **是**（必须 `production`）|
 | `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
 
 <Callout type="warning">
-**`APP_ENV` 不设为 `production`，任何人都能用 `888888` 登录任何账号。** Multica 有一个开发用的主验证码（master code）`888888`——`APP_ENV != "production"` 时**任何邮箱**输 `888888` 都能通过。本地开发时故意留空方便调试；**生产环境一旦不设 `production`，等于 auth 完全失效**。详见 [登录与注册配置 → 888888 陷阱](/auth-setup#888888-陷阱)。
+**生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。
 </Callout>
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 可选的 6 位固定验证码，仅用于本地或私有测试自动化 |
 
 ### 数据库连接池
 

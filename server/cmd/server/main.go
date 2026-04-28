@@ -124,6 +124,13 @@ func main() {
 	if os.Getenv("RESEND_API_KEY") == "" {
 		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
 	}
+	if os.Getenv("MULTICA_DEV_VERIFICATION_CODE") != "" {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is set but ignored because APP_ENV=production.")
+		} else {
+			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
+		}
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

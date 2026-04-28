@@ -45,19 +45,19 @@ Once it's up:
 - **Frontend**: [http://localhost:3000](http://localhost:3000)
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
-## 2. Important: set `APP_ENV` to `production`
+## 2. Important: keep production safety on
 
 <Callout type="warning">
-**`docker-compose.selfhost.yml` sets `APP_ENV` to `production` by default** — this prevents the development "master code `888888`" from being enabled on an instance you've exposed to the public internet.
+**`docker-compose.selfhost.yml` sets `APP_ENV` to `production` by default** and leaves `MULTICA_DEV_VERIFICATION_CODE` empty, so there is no fixed code on public instances.
 
-**But if your `.env` leaves `APP_ENV` empty or sets it to another value**, `888888` is enabled — **anyone can log in as any email by typing `888888` as the verification code**. See [Auth setup → The 888888 trap](/auth-setup#the-888888-trap).
+Only set `MULTICA_DEV_VERIFICATION_CODE` for local or private test automation. If a fixed code is enabled while `APP_ENV` is non-production, anyone who can request a code can sign in with that fixed value. See [Auth setup → Fixed local testing codes](/auth-setup#fixed-local-testing-codes).
 
-Before any public deployment, make sure `.env` has `APP_ENV=production`.
+Before any public deployment, make sure `.env` has `APP_ENV=production` and `MULTICA_DEV_VERIFICATION_CODE` is empty.
 </Callout>
 
 ## 3. Configure the email service (optional but recommended)
 
-Without email configured, your users can't receive verification codes — **unless `APP_ENV != production`, in which case `888888` works** (see the warning above).
+Without email configured, your users can't receive verification codes by email; the server prints generated codes to stdout instead.
 
 To actually send verification emails:
 
