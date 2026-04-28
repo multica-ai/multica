@@ -130,16 +130,14 @@ func (s *smtpSender) sendStartTLS(addr, from string, to []string, msg string) er
 }
 
 func NewEmailService() *EmailService {
-	from := os.Getenv("RESEND_FROM_EMAIL")
-	if from == "" {
-		from = "noreply@multica.ai"
-	}
 	fromName := os.Getenv("SMTP_FROM_NAME")
 
 	var sender emailSender
+	var from string
 
 	// Priority: SMTP > Resend API > dev console (nil sender)
 	smtpHost := os.Getenv("SMTP_HOST")
+	smtpUsername := os.Getenv("SMTP_USERNAME")
 	if smtpHost != "" {
 		port := 465
 		if p := os.Getenv("SMTP_PORT"); p != "" {
@@ -154,12 +152,23 @@ func NewEmailService() *EmailService {
 		sender = &smtpSender{
 			host:     smtpHost,
 			port:     port,
-			username: os.Getenv("SMTP_USERNAME"),
+			username: smtpUsername,
 			password: os.Getenv("SMTP_PASSWORD"),
 			useSSL:   useSSL,
 		}
+		// When SMTP is used, the envelope sender MUST match the auth user
+		// for most providers (QQ Exmail, Office365, etc.).
+		from = smtpUsername
 	} else if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
 		sender = &resendSender{client: resend.NewClient(apiKey)}
+	}
+
+	// Allow explicit override via RESEND_FROM_EMAIL (works for both backends).
+	if override := os.Getenv("RESEND_FROM_EMAIL"); override != "" {
+		from = override
+	}
+	if from == "" {
+		from = "noreply@multica.ai"
 	}
 
 	return &EmailService{
