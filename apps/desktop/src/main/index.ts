@@ -7,6 +7,7 @@ import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { setupQuickAdd, cleanupQuickAdd } from "./quick-add-window";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -216,6 +217,8 @@ if (!gotTheLock) {
 
     createWindow();
 
+    setupQuickAdd(() => mainWindow);
+
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
 
@@ -244,4 +247,8 @@ if (!gotTheLock) {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("will-quit", () => {
+  cleanupQuickAdd();
 });

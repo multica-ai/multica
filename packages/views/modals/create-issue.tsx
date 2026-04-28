@@ -30,12 +30,15 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
+import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useMountEffect } from "@multica/core/hooks/use-mount-effect";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
@@ -45,11 +48,49 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 
-// ---------------------------------------------------------------------------
-// CreateIssueModal
-// ---------------------------------------------------------------------------
+function dialogContentClassName(
+  backlogHint: boolean,
+  quickAdd: boolean,
+  expanded: boolean,
+): string {
+  const base = "p-0 gap-0 flex flex-col overflow-hidden";
 
-export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?: Record<string, unknown> | null }) {
+  if (backlogHint) {
+    return cn(
+      base,
+      "!top-1/2 !left-1/2",
+      "!-translate-x-1/2 !-translate-y-1/2",
+      "!max-w-[480px] !w-[calc(100vw-2rem)]",
+      "!h-auto !transition-none !duration-0",
+    );
+  }
+
+  if (quickAdd) {
+    return cn(
+      base,
+      "!top-0 !left-0 !translate-x-0 !translate-y-0",
+      "!w-full !h-full !max-w-none",
+      "!transition-none !duration-0",
+    );
+  }
+
+  return cn(
+    base,
+    "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
+    "!transition-all !duration-300 !ease-out",
+    expanded ? "!max-w-4xl !w-full !h-5/6" : "!max-w-2xl !w-full !h-96",
+  );
+}
+
+export function CreateIssueModal({
+  onClose,
+  data,
+  onExpandChange,
+}: {
+  onClose: () => void;
+  data?: Record<string, unknown> | null;
+  onExpandChange?: (expanded: boolean) => void;
+}) {
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -66,6 +107,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
@@ -76,12 +118,18 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     (data?.parent_issue_id as string) || undefined,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  // Children live as full Issue objects — the picker always returns the whole
-  // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const toggleExpanded = () => {
+    setIsExpanded((prev) => {
+      const next = !prev;
+      onExpandChange?.(next);
+      return next;
+    });
+  };
   const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
+  const isQuickAdd = typeof window !== "undefined" && document.documentElement.hasAttribute("data-quick-add");
 
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
@@ -103,14 +151,15 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   };
 
   // Sync field changes to draft store
-  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
-  const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); };
-  const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); };
+  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); setSubmitError(null); };
+  const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); setSubmitError(null); };
+  const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); setSubmitError(null); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
+    setSubmitError(null);
   };
-  const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); setSubmitError(null); };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
@@ -190,12 +239,27 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           </div>
         ), { duration: 5000 });
       }
-    } catch {
-      toast.error("Failed to create issue");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create issue";
+      setSubmitError(message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  // Keyboard shortcut — Cmd/Ctrl + Enter submits the form
+  const handleSubmitRef = useRef(handleSubmit);
+  handleSubmitRef.current = handleSubmit;
+  useMountEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        void handleSubmitRef.current();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  });
 
   return (
     <Dialog
@@ -210,17 +274,10 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
-        className={cn(
-          "p-0 gap-0 flex flex-col overflow-hidden",
-          "!top-1/2 !left-1/2 !-translate-x-1/2",
-          backlogHintIssueId
-            ? "!max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !-translate-y-1/2 !transition-none !duration-0"
-            : "!transition-all !duration-300 !ease-out",
-          !backlogHintIssueId && isExpanded
-            ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-            : !backlogHintIssueId
-              ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
-              : "",
+        className={dialogContentClassName(
+          !!backlogHintIssueId,
+          isQuickAdd,
+          isExpanded,
         )}
       >
         {backlogHintIssueId ? (
@@ -257,7 +314,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
                   <TooltipTrigger
                     render={
                       <button
-                        onClick={() => setIsExpanded(!isExpanded)}
+                        onClick={toggleExpanded}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -474,13 +531,27 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               }}
             />
 
+            {/* Inline error */}
+            {submitError && (
+              <Alert variant="destructive" className="mx-4 mt-2 mb-0 shrink-0">
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
+            )}
+
             {/* Footer */}
             <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
               <FileUploadButton
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
               />
               <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                {submitting ? "Creating..." : "Create Issue"}
+                {submitting ? (
+                  <>
+                    <Spinner className="size-3.5" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Issue"
+                )}
               </Button>
             </div>
           </>

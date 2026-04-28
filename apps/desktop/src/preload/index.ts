@@ -127,11 +127,30 @@ const updaterAPI = {
   > => ipcRenderer.invoke("updater:check"),
 };
 
+const quickAddAPI = {
+  close: () => ipcRenderer.send("quick-add:close"),
+  setSize: (width: number, height: number) =>
+    ipcRenderer.send("quick-add:set-size", width, height),
+};
+
+const workspaceAPI = {
+  onSendCurrentSlug: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("workspace:sendCurrentSlug", handler);
+    return () => ipcRenderer.removeListener("workspace:sendCurrentSlug", handler);
+  },
+  receiveCurrentSlug: (slug: string | null) => {
+    ipcRenderer.send("workspace:receiveCurrentSlug", slug);
+  },
+};
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
+  contextBridge.exposeInMainWorld("quickAddAPI", quickAddAPI);
+  contextBridge.exposeInMainWorld("workspaceAPI", workspaceAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
@@ -141,4 +160,8 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.quickAddAPI = quickAddAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.workspaceAPI = workspaceAPI;
 }
