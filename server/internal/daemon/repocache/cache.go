@@ -327,11 +327,13 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
-	WorkDir     string // parent directory for the worktree (e.g. task workdir)
-	AgentName   string // for branch naming
-	TaskID      string // for branch naming uniqueness
+	WorkspaceID     string // workspace that owns the repo
+	RepoURL         string // remote URL to look up in the cache
+	WorkDir         string // parent directory for the worktree (e.g. task workdir)
+	AgentName       string // for branch naming
+	TaskID          string // for branch naming uniqueness
+	IssueIdentifier string // workspace issue prefix + number (e.g. "TIM-42"); only used when Sharing == "issue"
+	Sharing         string // "task" (default) or "issue" — see daemon.WorkdirSharing*
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -382,8 +384,21 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
 
-	// Build branch name: agent/{sanitized-name}/{short-task-id}
-	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	// Branch name + worktree shape depend on the sharing mode:
+	//   - task (default): branch agent/{name}/{shortTaskID} — unique per
+	//     task. Reuse on the same path resets/cleans before creating a fresh
+	//     branch from the default ref (legacy behavior).
+	//   - issue: branch multica/{issueIdentifier} — shared across tasks/agents
+	//     on the same issue. Reuse keeps any local commits from prior tasks
+	//     and never resets/cleans, so a sibling agent's in-progress work is
+	//     not clobbered when the next task hands off the workdir.
+	issueMode := params.Sharing == "issue" && params.IssueIdentifier != ""
+	var branchName string
+	if issueMode {
+		branchName = "multica/" + sanitizeName(params.IssueIdentifier)
+	} else {
+		branchName = fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	}
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
@@ -392,7 +407,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef)
+		var actualBranch string
+		var err error
+		if issueMode {
+			actualBranch, err = reuseIssueWorktree(worktreePath, branchName, baseRef)
+		} else {
+			actualBranch, err = updateExistingWorktree(worktreePath, branchName, baseRef)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
@@ -406,6 +427,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			"path", worktreePath,
 			"branch", actualBranch,
 			"base", baseRef,
+			"issue_mode", issueMode,
 		)
 
 		return &WorktreeResult{
@@ -414,9 +436,19 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		}, nil
 	}
 
-	// Create a new worktree. createWorktree may rename the branch to avoid
-	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := createWorktree(barePath, worktreePath, branchName, baseRef)
+	// Create a new worktree.
+	//   - issue mode: reuse refs/heads/<issue-branch> if present (left over
+	//     from a previous task on this issue) or origin/<issue-branch>
+	//     (created by another machine). Otherwise base on the remote default
+	//     branch. The result is idempotent across daemon restarts.
+	//   - task mode: legacy unique-per-task branch (renamed on collision).
+	var actualBranch string
+	var err error
+	if issueMode {
+		actualBranch, err = createIssueWorktree(barePath, worktreePath, branchName, baseRef)
+	} else {
+		actualBranch, err = createWorktree(barePath, worktreePath, branchName, baseRef)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
@@ -431,6 +463,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		"path", worktreePath,
 		"branch", actualBranch,
 		"base", baseRef,
+		"issue_mode", issueMode,
 	)
 
 	return &WorktreeResult{
@@ -470,6 +503,99 @@ func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// createIssueWorktree creates (or reuses) a worktree on the issue-shared
+// branch. Resolution order, all idempotent:
+//  1. Reuse refs/heads/<branchName> if it already exists in the bare repo
+//     (left over from a prior task on this issue on this daemon).
+//  2. Reuse refs/remotes/origin/<branchName> if a sibling daemon pushed work
+//     for this issue.
+//  3. Otherwise create the branch from baseRef (the remote default branch).
+//
+// Never appends a timestamp suffix on collision — the whole point of the
+// issue-shared branch is for tasks/agents to land on the same ref.
+func createIssueWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, error) {
+	if _, err := os.Stat(worktreePath); err == nil {
+		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
+	}
+
+	localRef := "refs/heads/" + branchName
+	originRef := "refs/remotes/origin/" + branchName
+
+	// Case 1: branch already exists locally — `git worktree add <path> <branch>`
+	// (without -b) checks it out into the new worktree.
+	if err := exec.Command("git", "-C", gitRoot, "rev-parse", "--verify", localRef).Run(); err == nil {
+		cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", worktreePath, branchName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git worktree add (reuse local): %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return branchName, nil
+	}
+
+	// Case 2: branch exists on origin — create a new local tracking branch.
+	if err := exec.Command("git", "-C", gitRoot, "rev-parse", "--verify", originRef).Run(); err == nil {
+		cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, originRef)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git worktree add (track origin): %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return branchName, nil
+	}
+
+	// Case 3: brand new — base on the resolved remote default branch.
+	if err := runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef); err != nil {
+		return "", err
+	}
+	return branchName, nil
+}
+
+// reuseIssueWorktree updates an existing issue-shared worktree without
+// resetting / cleaning. Concretely:
+//   - If the worktree is already on branchName, leave it alone (just stay on
+//     the in-progress branch — uncommitted changes from a sibling agent
+//     still on the worktree must not be lost).
+//   - Otherwise switch to branchName, creating it from origin/<branchName>
+//     if available or from baseRef as a last resort.
+//
+// Never runs `git reset --hard` or `git clean -fd` here — those are the
+// legacy task-mode behaviors that explicitly clobber sibling work.
+func reuseIssueWorktree(worktreePath, branchName, baseRef string) (string, error) {
+	currentBranch := strings.TrimSpace(runGitOut(worktreePath, "rev-parse", "--abbrev-ref", "HEAD"))
+	if currentBranch == branchName {
+		return branchName, nil
+	}
+
+	// Branch already checked out elsewhere or detached HEAD — try a plain
+	// switch first (succeeds when the local branch already exists and is not
+	// checked out in another worktree of the same bare repo).
+	if out, err := exec.Command("git", "-C", worktreePath, "checkout", branchName).CombinedOutput(); err == nil {
+		_ = out
+		return branchName, nil
+	}
+
+	// Branch doesn't exist locally — create it tracking origin/<branchName>
+	// or fall back to baseRef. Mirrors the resolution order in
+	// createIssueWorktree but operates inside an existing worktree.
+	originRef := "refs/remotes/origin/" + branchName
+	startPoint := baseRef
+	if err := exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", originRef).Run(); err == nil {
+		startPoint = originRef
+	}
+	if out, err := exec.Command("git", "-C", worktreePath, "checkout", "-b", branchName, startPoint).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git checkout -b (issue mode): %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return branchName, nil
+}
+
+// runGitOut runs `git -C <dir> <args...>` and returns stdout, swallowing
+// errors so callers can treat empty output as "unknown".
+func runGitOut(dir string, args ...string) string {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 // isBranchCollisionError returns true if err is specifically about a branch

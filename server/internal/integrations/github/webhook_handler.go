@@ -37,6 +37,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -102,8 +103,14 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We only care about three event types. Everything else is a fast 200.
-	relevant := eventType == "pull_request" || eventType == "pull_request_review" || eventType == "pull_request_review_thread"
+	// We only care about four event types. Everything else is a fast 200.
+	// pull_request_review_comment fires for each inline comment CR (or any
+	// reviewer) leaves on a specific file/line; we mirror those rows into
+	// issue_review_thread so the dev agent can walk them.
+	relevant := eventType == "pull_request" ||
+		eventType == "pull_request_review" ||
+		eventType == "pull_request_review_thread" ||
+		eventType == "pull_request_review_comment"
 	if !relevant {
 		writeOK(w, "ignored", map[string]any{"event": eventType})
 		return
@@ -180,6 +187,8 @@ func (h *WebhookHandler) dispatch(ctx context.Context, eventType string, payload
 		return h.handleReview(ctx, payload, binding)
 	case "pull_request_review_thread":
 		return h.handleReviewThread(ctx, payload, binding)
+	case "pull_request_review_comment":
+		return h.handleReviewComment(ctx, payload, binding)
 	}
 	return &dispatchResult{label: "ignored"}, nil
 }
@@ -192,6 +201,8 @@ func (h *WebhookHandler) handlePR(ctx context.Context, payload map[string]json.R
 	if err := decode(payload, "pull_request", &p.PR); err != nil {
 		return nil, err
 	}
+	// sender is best-effort: missing on some synthetic payloads.
+	_ = decode(payload, "sender", &p.Sender)
 
 	// Resolve issue: prefer existing PR linkage, else extract identifier
 	// from headRef/title/body and look up.
@@ -206,16 +217,48 @@ func (h *WebhookHandler) handlePR(ctx context.Context, payload map[string]json.R
 	}
 
 	in := Input{
-		Kind:        EventKindPR,
-		IssueStatus: issue.Status,
-		PRAction:    PRAction(p.Action),
-		Merged:      p.PR.Merged,
+		Kind:               EventKindPR,
+		IssueStatus:        issue.Status,
+		PRAction:           PRAction(p.Action),
+		Merged:             p.PR.Merged,
+		SenderLogin:        p.Sender.Login,
+		SecondsSinceOpened: secondsSincePROpened(p.PR.CreatedAt),
 	}
 	dec := Decide(in)
 	if dec.Action == ActionNoop {
 		return &dispatchResult{label: "noop", fields: map[string]any{"issue": issue.ID.String(), "current": issue.Status}}, nil
 	}
-	return h.applyDecision(ctx, issue, dec, p.PR, binding, "pull_request")
+
+	res, err := h.applyDecision(ctx, issue, dec, p.PR, binding, "pull_request")
+	if err != nil || res == nil {
+		return res, err
+	}
+
+	// Bug D fix (2026-04-28): if the merge transitioned in_review → staged
+	// (because CodeRabbit isn't installed on the repo, or the merge happened
+	// before the CR predicate fired), chain a follow-up staged → done so the
+	// final card state matches reality. This mirrors the user-expected
+	// flow: CR signals "ready to merge" → staged → human merges → done. We
+	// run this only when the just-applied decision is the
+	// `pr_merged_from_in_review` activity kind, so the handler stays
+	// idempotent for normal merges (where the issue was already at staged).
+	if dec.NewStatus == StatusStaged && dec.ActivityKind == "pr_merged_from_in_review" {
+		refetched, ferr := h.Queries.GetIssue(ctx, issue.ID)
+		if ferr == nil && refetched.Status == StatusStaged {
+			followupIn := Input{
+				Kind:        EventKindPR,
+				IssueStatus: refetched.Status,
+				PRAction:    PRAction(p.Action),
+				Merged:      p.PR.Merged,
+				SenderLogin: p.Sender.Login,
+			}
+			followupDec := Decide(followupIn)
+			if followupDec.Action != ActionNoop && followupDec.NewStatus == StatusDone {
+				_, _ = h.applyDecision(ctx, refetched, followupDec, p.PR, binding, "pull_request_chained")
+			}
+		}
+	}
+	return res, nil
 }
 
 func (h *WebhookHandler) handleReview(ctx context.Context, payload map[string]json.RawMessage, binding db.WorkspaceRepoBinding) (*dispatchResult, error) {
@@ -241,18 +284,19 @@ func (h *WebhookHandler) handleReview(ctx context.Context, payload map[string]js
 		return &dispatchResult{label: "issue_not_found", fields: map[string]any{"pr_number": p.PR.Number}}, nil
 	}
 
-	noOpenChanges, noUnresolved, err := h.predicate(ctx, binding, p.PR.Number)
+	noOpenChanges, noUnresolved, unresolvedCount, err := h.predicate(ctx, binding, p.PR.Number, issue.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	in := Input{
-		Kind:                   EventKindReview,
-		IssueStatus:            issue.Status,
-		ReviewState:            ReviewState(strings.ToLower(p.Review.State)),
-		ReviewByCR:             strings.EqualFold(p.Review.User.Login, binding.CrBotUsername),
-		NoOpenCRChangesRequest: noOpenChanges,
-		NoUnresolvedCRThreads:  noUnresolved,
+		Kind:                       EventKindReview,
+		IssueStatus:                issue.Status,
+		ReviewState:                ReviewState(strings.ToLower(p.Review.State)),
+		ReviewByCR:                 strings.EqualFold(p.Review.User.Login, binding.CrBotUsername),
+		NoOpenCRChangesRequest:     noOpenChanges,
+		NoUnresolvedCRThreads:      noUnresolved,
+		LocalUnresolvedThreadCount: unresolvedCount,
 	}
 	dec := Decide(in)
 	if dec.Action == ActionNoop {
@@ -269,6 +313,9 @@ func (h *WebhookHandler) handleReviewThread(ctx context.Context, payload map[str
 	if err := decode(payload, "pull_request", &p.PR); err != nil {
 		return nil, err
 	}
+	// `thread` is best-effort — older payloads may omit it. We use it to mirror
+	// resolved/unresolved state into issue_review_thread keyed on the node_id.
+	_ = decode(payload, "thread", &p.Thread)
 
 	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, p.PR.Number)
 	if err != nil {
@@ -278,21 +325,183 @@ func (h *WebhookHandler) handleReviewThread(ctx context.Context, payload map[str
 		return &dispatchResult{label: "issue_not_found"}, nil
 	}
 
-	noOpenChanges, noUnresolved, err := h.predicate(ctx, binding, p.PR.Number)
+	// Mirror resolved/unresolved state to our local issue_review_thread rows.
+	// GitHub's pull_request_review_thread payload carries the GraphQL node_id
+	// for the thread *and* the numeric ids of every comment in the thread, so
+	// we have two ways to find our rows. We use the comment ids as the primary
+	// key (they're the natural unique key in our table) and stamp node_id onto
+	// the row at the same time so future deliveries can use either.
+	switch p.Action {
+	case "resolved", "unresolved":
+		newState := p.Action // both "resolved" and "unresolved" are valid state values
+		nodeIDArg := pgtype.Text{Valid: false}
+		if p.Thread.NodeID != "" {
+			nodeIDArg = pgtypeText(p.Thread.NodeID)
+			// Best-effort update by node_id first, in case rows were created by
+			// a previous resolved/unresolved delivery that stamped node_id.
+			_, _ = h.Queries.SetReviewThreadStateByThreadNodeID(ctx, db.SetReviewThreadStateByThreadNodeIDParams{
+				GhThreadNodeID: pgtypeText(p.Thread.NodeID),
+				State:          newState,
+				AgentID:        pgtype.UUID{Valid: false},
+			})
+		}
+		for _, c := range p.Thread.Comments {
+			if c.ID == 0 {
+				continue
+			}
+			_, _ = h.Queries.SetReviewThreadStateByCommentID(ctx, db.SetReviewThreadStateByCommentIDParams{
+				GhCommentID:    c.ID,
+				State:          newState,
+				GhThreadNodeID: nodeIDArg,
+				AgentID:        pgtype.UUID{Valid: false},
+			})
+		}
+	}
+
+	noOpenChanges, noUnresolved, unresolvedCount, err := h.predicate(ctx, binding, p.PR.Number, issue.ID)
 	if err != nil {
 		return nil, err
 	}
 	in := Input{
-		Kind:                   EventKindReviewThread,
-		IssueStatus:            issue.Status,
-		NoOpenCRChangesRequest: noOpenChanges,
-		NoUnresolvedCRThreads:  noUnresolved,
+		Kind:                       EventKindReviewThread,
+		IssueStatus:                issue.Status,
+		NoOpenCRChangesRequest:     noOpenChanges,
+		NoUnresolvedCRThreads:      noUnresolved,
+		LocalUnresolvedThreadCount: unresolvedCount,
 	}
 	dec := Decide(in)
 	if dec.Action == ActionNoop {
 		return &dispatchResult{label: "noop"}, nil
 	}
 	return h.applyDecision(ctx, issue, dec, p.PR, binding, "pull_request_review_thread")
+}
+
+// handleReviewComment mirrors a single CR review comment (a per-line PR
+// comment) into issue_review_thread. We only insert rows authored by the
+// configured CR bot — human inline comments are tracked differently.
+//
+// Action `created` and `edited` upsert; `deleted` is currently best-effort
+// ignored (we leave the row in place; the dev agent can resolve via thread
+// resolution anyway).
+func (h *WebhookHandler) handleReviewComment(ctx context.Context, payload map[string]json.RawMessage, binding db.WorkspaceRepoBinding) (*dispatchResult, error) {
+	var p reviewCommentPayload
+	if err := decode(payload, "action", &p.Action); err != nil {
+		return nil, err
+	}
+	if err := decode(payload, "comment", &p.Comment); err != nil {
+		return nil, err
+	}
+	if err := decode(payload, "pull_request", &p.PR); err != nil {
+		return nil, err
+	}
+
+	// Only act on creation/edits. Deletion is rare from CR and we keep the
+	// row so the audit trail is preserved.
+	if p.Action != "created" && p.Action != "edited" {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-created/edited comment"}}, nil
+	}
+
+	// Only mirror comments authored by the configured CR bot. Human PR
+	// comments aren't part of the dev-agent fixing loop today.
+	if !strings.EqualFold(p.Comment.User.Login, binding.CrBotUsername) {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-CR author", "author": p.Comment.User.Login}}, nil
+	}
+
+	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, p.PR.Number)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &dispatchResult{label: "issue_not_found", fields: map[string]any{"pr_number": p.PR.Number}}, nil
+	}
+
+	severity, title := parseCRBody(p.Comment.Body)
+
+	var linePG pgtype.Int4
+	if p.Comment.Line > 0 {
+		linePG = pgtypeInt4(int32(p.Comment.Line))
+	}
+	var sidePG pgtype.Text
+	if p.Comment.Side != "" {
+		sidePG = pgtypeText(p.Comment.Side)
+	}
+
+	params := db.UpsertReviewThreadParams{
+		WorkspaceID:    pgtype.UUID{Bytes: issue.WorkspaceID.Bytes, Valid: true},
+		IssueID:        pgtype.UUID{Bytes: issue.ID.Bytes, Valid: true},
+		PrRepo:         binding.RepoFullName,
+		PrNumber:       p.PR.Number,
+		GhCommentID:    p.Comment.ID,
+		GhThreadNodeID: pgtype.Text{Valid: false}, // populated later from review_thread payloads
+		FilePath:       p.Comment.Path,
+		Line:           linePG,
+		Side:           sidePG,
+		Severity:       severity,
+		Title:          title,
+		Body:           p.Comment.Body,
+		Url:            p.Comment.HTMLURL,
+		AuthorLogin:    p.Comment.User.Login,
+	}
+	row, err := h.Queries.UpsertReviewThread(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("upsert review thread: %w", err)
+	}
+
+	return &dispatchResult{
+		label: "review_comment_recorded",
+		fields: map[string]any{
+			"issue":         uuidStr(issue.ID),
+			"gh_comment_id": p.Comment.ID,
+			"severity":      row.Severity,
+			"state":         row.State,
+		},
+	}, nil
+}
+
+// parseCRBody extracts a severity tag and a one-line title from a CodeRabbit
+// review-comment body. CR prefixes its comments with markers like:
+//   _⚠️ Potential issue_
+//   _🛠️ Refactor suggestion_
+//   _🧹 Nitpick_
+//   _💡 Verification agent_
+// We map the first matching marker to a normalized severity. The title is
+// the first non-empty, non-marker line, trimmed to ~140 chars.
+func parseCRBody(body string) (severity, title string) {
+	lower := strings.ToLower(body)
+	switch {
+	case strings.Contains(lower, "potential issue"):
+		severity = "issue"
+	case strings.Contains(lower, "refactor suggestion"), strings.Contains(lower, "refactor:"):
+		severity = "refactor"
+	case strings.Contains(lower, "nitpick"), strings.Contains(lower, "nit:"):
+		severity = "nitpick"
+	case strings.Contains(lower, "suggestion"):
+		severity = "suggestion"
+	default:
+		severity = "unknown"
+	}
+
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		// Skip CR's italic-marker line (starts and ends with underscore).
+		if strings.HasPrefix(line, "_") && strings.HasSuffix(line, "_") {
+			continue
+		}
+		// Strip leading markdown header / list markers for cleaner titles.
+		line = strings.TrimLeft(line, "#*-> \t")
+		if line == "" {
+			continue
+		}
+		title = line
+		break
+	}
+	if len(title) > 140 {
+		title = title[:140]
+	}
+	return severity, title
 }
 
 // ---------------------------------------------------------------------------
@@ -440,10 +649,24 @@ func (h *WebhookHandler) applyDecision(ctx context.Context, issue db.Issue, dec 
 // CR predicate
 // ---------------------------------------------------------------------------
 
-func (h *WebhookHandler) predicate(ctx context.Context, binding db.WorkspaceRepoBinding, prNumber int32) (bool, bool, error) {
+// predicate computes the two CR-thread booleans + the local unresolved count
+// for a given issue's PR.
+//
+// noOpenChanges (no open CHANGES_REQUESTED review) is computed from GitHub's
+// REST reviews API — that's the only place the latest review state lives.
+//
+// noUnresolved + unresolvedCount come from our local issue_review_thread
+// table, which is the source of truth for thread state inside Multica. The
+// table is kept in sync with GitHub via the pull_request_review_thread
+// resolved/unresolved webhook deliveries (see handleReviewThread). Reading
+// locally lets us reflect resolutions made by the dev agent in the fixing
+// loop the moment they're written, without a GraphQL round-trip, and lets
+// the state machine drive in_review → fixing on stale unresolved counts even
+// when CR's review state is COMMENTED rather than CHANGES_REQUESTED.
+func (h *WebhookHandler) predicate(ctx context.Context, binding db.WorkspaceRepoBinding, prNumber int32, issueID pgtype.UUID) (noOpenChanges, noUnresolved bool, unresolvedCount int, err error) {
 	owner, repo, ok := splitRepo(binding.RepoFullName)
 	if !ok {
-		return false, false, fmt.Errorf("invalid repo: %s", binding.RepoFullName)
+		return false, false, 0, fmt.Errorf("invalid repo: %s", binding.RepoFullName)
 	}
 	var c PRReviewClient
 	if h.NewClient != nil {
@@ -451,7 +674,35 @@ func (h *WebhookHandler) predicate(ctx context.Context, binding db.WorkspaceRepo
 	} else {
 		c = NewGitHubAPIClient(h.Auth, binding.InstallationID)
 	}
-	return EvaluatePredicate(ctx, c, owner, repo, int(prNumber), binding.CrBotUsername)
+
+	// noOpenChanges: walk reviews from GitHub.
+	reviews, rerr := c.ListReviews(ctx, owner, repo, int(prNumber))
+	if rerr != nil {
+		return false, false, 0, fmt.Errorf("list reviews: %w", rerr)
+	}
+	noOpenChanges = true
+	var latestCRState string
+	for _, r := range reviews {
+		if !equalLogin(r.User.Login, binding.CrBotUsername) {
+			continue
+		}
+		switch r.State {
+		case "APPROVED", "CHANGES_REQUESTED", "DISMISSED":
+			latestCRState = r.State
+		}
+	}
+	if latestCRState == "CHANGES_REQUESTED" {
+		noOpenChanges = false
+	}
+
+	// noUnresolved + count: read from our local mirror.
+	count, cerr := h.Queries.CountUnresolvedReviewThreadsByIssue(ctx, issueID)
+	if cerr != nil {
+		return false, false, 0, fmt.Errorf("count unresolved review threads: %w", cerr)
+	}
+	unresolvedCount = int(count)
+	noUnresolved = unresolvedCount == 0
+	return noOpenChanges, noUnresolved, unresolvedCount, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -459,21 +710,27 @@ func (h *WebhookHandler) predicate(ctx context.Context, binding db.WorkspaceRepo
 // ---------------------------------------------------------------------------
 
 type prInfo struct {
-	Number  int32  `json:"number"`
-	HTMLURL string `json:"html_url"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	Merged  bool   `json:"merged"`
-	State   string `json:"state"`
-	Head    struct {
+	Number    int32  `json:"number"`
+	HTMLURL   string `json:"html_url"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Merged    bool   `json:"merged"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
+	Head      struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	HeadRef string `json:"-"`
 }
 
+type senderInfo struct {
+	Login string `json:"login"`
+}
+
 type prPayload struct {
-	Action string `json:"action"`
-	PR     prInfo `json:"pull_request"`
+	Action string     `json:"action"`
+	PR     prInfo     `json:"pull_request"`
+	Sender senderInfo `json:"sender"`
 }
 
 type reviewPayload struct {
@@ -485,12 +742,64 @@ type reviewPayload struct {
 			Login string `json:"login"`
 		} `json:"user"`
 	} `json:"review"`
-	PR prInfo `json:"pull_request"`
+	PR     prInfo     `json:"pull_request"`
+	Sender senderInfo `json:"sender"`
 }
 
 type reviewThreadPayload struct {
-	Action string `json:"action"`
-	PR     prInfo `json:"pull_request"`
+	Action string     `json:"action"`
+	PR     prInfo     `json:"pull_request"`
+	Sender senderInfo `json:"sender"`
+	Thread reviewThreadInfo `json:"thread"`
+}
+
+// reviewThreadInfo carries the GraphQL node_id and per-comment numeric ids
+// that GitHub includes on pull_request_review_thread payloads. Both keys
+// help us locate the matching issue_review_thread row(s).
+type reviewThreadInfo struct {
+	NodeID   string `json:"node_id"`
+	Comments []struct {
+		ID int64 `json:"id"`
+	} `json:"comments"`
+}
+
+// reviewCommentPayload mirrors the pull_request_review_comment event. We
+// only use the fields needed to upsert one issue_review_thread row.
+type reviewCommentPayload struct {
+	Action  string `json:"action"`
+	Comment struct {
+		ID      int64  `json:"id"`
+		Body    string `json:"body"`
+		Path    string `json:"path"`
+		Line    int    `json:"line"`
+		Side    string `json:"side"`
+		HTMLURL string `json:"html_url"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		PullRequestReviewID int64 `json:"pull_request_review_id"`
+	} `json:"comment"`
+	PR     prInfo     `json:"pull_request"`
+	Sender senderInfo `json:"sender"`
+}
+
+// secondsSincePROpened returns the number of seconds between createdAt
+// (the PR's created_at timestamp from GitHub) and now. Returns 0 when the
+// timestamp is missing or unparseable, which disables the cooldown check
+// in the state machine.
+func secondsSincePROpened(createdAt string) int64 {
+	if createdAt == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return 0
+	}
+	delta := time.Since(t).Seconds()
+	if delta < 0 {
+		return 0
+	}
+	return int64(delta)
 }
 
 // decode unmarshals payload[key] into out. We use a custom Unmarshaler shim

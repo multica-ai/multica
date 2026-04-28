@@ -172,6 +172,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		} else {
 			r.Post("/api/webhooks/github", gh.ServeHTTP)
 		}
+
+		// Review-thread mutation actions reuse the same GitHub App auth as the
+		// webhook handler. We need only GITHUB_APP_ID + private key here
+		// (no webhook secret) but we already required the secret to gate the
+		// webhook above, so reusing this guard is fine.
+		if ra, err := ghintegration.NewReviewActionsFromEnv(queries); err != nil {
+			slog.Warn("github review-actions init failed", "error", err)
+		} else {
+			h.ReviewActions = ra
+		}
 	}
 
 	// Daemon API routes (require daemon token or valid user token)
@@ -312,6 +322,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Delete("/links/{linkId}", h.DeleteIssueLink)
 					r.Get("/links", h.ListIssueLinks)
 					r.Get("/blockers", h.ListIssueBlockers)
+
+					// CR review threads (mutation routes mounted only when GitHub
+					// App auth is configured — see h.ReviewActions init above).
+					r.Get("/review-threads", h.ListReviewThreads)
+					if h.ReviewActions != nil {
+						r.Post("/review-threads/{threadID}/reply", h.ReplyToReviewThread)
+						r.Post("/review-threads/{threadID}/resolve", h.ResolveReviewThread)
+					}
 				})
 			})
 

@@ -146,6 +146,37 @@ var issueSearchCmd = &cobra.Command{
 	RunE:  runIssueSearch,
 }
 
+// CR review-thread subcommands. The dev agent uses these in the BMAD fixing
+// loop to walk and resolve CodeRabbit review threads tracked locally in
+// issue_review_thread.
+
+var issueReviewThreadsCmd = &cobra.Command{
+	Use:     "review-threads",
+	Short:   "Walk and resolve CR review threads on an issue's PR",
+	Aliases: []string{"rt", "review-thread"},
+}
+
+var issueReviewThreadsListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List review threads on an issue (defaults to unresolved only)",
+	Args:  exactArgs(1),
+	RunE:  runIssueReviewThreadsList,
+}
+
+var issueReviewThreadsReplyCmd = &cobra.Command{
+	Use:   "reply <issue-id> <thread-id>",
+	Short: "Post a reply on a review thread without resolving it",
+	Args:  exactArgs(2),
+	RunE:  runIssueReviewThreadsReply,
+}
+
+var issueReviewThreadsResolveCmd = &cobra.Command{
+	Use:   "resolve <issue-id> <thread-id>",
+	Short: "Resolve a review thread (optionally with an inline reply)",
+	Args:  exactArgs(2),
+	RunE:  runIssueReviewThreadsResolve,
+}
+
 var validIssueStatuses = []string{
 	"backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "staged", "done", "blocked", "cancelled",
 }
@@ -163,6 +194,11 @@ func init() {
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueSearchCmd)
+	issueCmd.AddCommand(issueReviewThreadsCmd)
+
+	issueReviewThreadsCmd.AddCommand(issueReviewThreadsListCmd)
+	issueReviewThreadsCmd.AddCommand(issueReviewThreadsReplyCmd)
+	issueReviewThreadsCmd.AddCommand(issueReviewThreadsResolveCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
@@ -253,6 +289,20 @@ func init() {
 	// issue subscriber remove
 	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (defaults to the caller)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue review-threads list
+	issueReviewThreadsListCmd.Flags().String("output", "table", "Output format: table or json")
+	issueReviewThreadsListCmd.Flags().String("state", "unresolved", "State filter: unresolved (default) or all")
+
+	// issue review-threads reply
+	issueReviewThreadsReplyCmd.Flags().String("content", "", "Reply content (required unless --content-stdin)")
+	issueReviewThreadsReplyCmd.Flags().Bool("content-stdin", false, "Read reply content from stdin (avoids shell escaping issues)")
+	issueReviewThreadsReplyCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue review-threads resolve
+	issueReviewThreadsResolveCmd.Flags().String("reply", "", "Optional reply text posted before the resolve")
+	issueReviewThreadsResolveCmd.Flags().Bool("reply-stdin", false, "Read reply text from stdin")
+	issueReviewThreadsResolveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,4 +1246,159 @@ func truncateID(id string) string {
 		return string(runes[:8])
 	}
 	return id
+}
+
+// ---------------------------------------------------------------------------
+// CR review-thread commands
+// ---------------------------------------------------------------------------
+
+func runIssueReviewThreadsList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	state, _ := cmd.Flags().GetString("state")
+	state = strings.ToLower(strings.TrimSpace(state))
+	path := "/api/issues/" + args[0] + "/review-threads"
+	if state == "unresolved" || state == "" {
+		path += "?state=unresolved"
+	} else if state != "all" {
+		return fmt.Errorf("--state must be 'unresolved' or 'all'")
+	}
+
+	var resp struct {
+		IssueID     string           `json:"issue_id"`
+		StateFilter string           `json:"state_filter"`
+		Threads     []map[string]any `json:"threads"`
+		Total       int              `json:"total"`
+	}
+	if err := client.GetJSON(ctx, path, &resp); err != nil {
+		return fmt.Errorf("list review threads: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+
+	headers := []string{"THREAD-ID", "STATE", "SEVERITY", "FILE:LINE", "AUTHOR", "TITLE"}
+	rows := make([][]string, 0, len(resp.Threads))
+	for _, t := range resp.Threads {
+		fileLine := strVal(t, "file_path")
+		if l, ok := t["line"]; ok && l != nil {
+			fileLine = fmt.Sprintf("%s:%v", fileLine, l)
+		}
+		title := strVal(t, "title")
+		if utf8.RuneCountInString(title) > 64 {
+			runes := []rune(title)
+			title = string(runes[:61]) + "..."
+		}
+		rows = append(rows, []string{
+			truncateID(strVal(t, "id")),
+			strVal(t, "state"),
+			strVal(t, "severity"),
+			fileLine,
+			strVal(t, "author_login"),
+			title,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	fmt.Fprintf(os.Stderr, "\n%d thread(s) — issue %s, filter=%q\n", resp.Total, truncateID(resp.IssueID), resp.StateFilter)
+	return nil
+}
+
+// runIssueReviewThreadsReply posts a reply on the given thread without
+// resolving it. Useful when the dev agent wants to ask CR a clarifying
+// question or push back before resolving.
+func runIssueReviewThreadsReply(cmd *cobra.Command, args []string) error {
+	content, _ := cmd.Flags().GetString("content")
+	useStdin, _ := cmd.Flags().GetBool("content-stdin")
+
+	if content != "" && useStdin {
+		return fmt.Errorf("--content and --content-stdin are mutually exclusive")
+	}
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		content = strings.TrimSuffix(string(data), "\n")
+	}
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("--content or --content-stdin is required and must be non-empty")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	issueID, threadID := args[0], args[1]
+	body := map[string]any{"content": content}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/review-threads/"+threadID+"/reply", body, &result); err != nil {
+		return fmt.Errorf("reply to review thread: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Reply posted on thread %s of issue %s.\n", truncateID(threadID), truncateID(issueID))
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+// runIssueReviewThreadsResolve marks the thread resolved on GitHub. Optionally
+// posts a reply first when --reply / --reply-stdin is provided. The local
+// issue_review_thread row is mirrored to state='resolved' immediately so the
+// state machine sees the count drop without waiting for the inbound webhook.
+func runIssueReviewThreadsResolve(cmd *cobra.Command, args []string) error {
+	reply, _ := cmd.Flags().GetString("reply")
+	useStdin, _ := cmd.Flags().GetBool("reply-stdin")
+	if reply != "" && useStdin {
+		return fmt.Errorf("--reply and --reply-stdin are mutually exclusive")
+	}
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		reply = strings.TrimSuffix(string(data), "\n")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	issueID, threadID := args[0], args[1]
+	body := map[string]any{}
+	if strings.TrimSpace(reply) != "" {
+		body["reply"] = reply
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/review-threads/"+threadID+"/resolve", body, &result); err != nil {
+		return fmt.Errorf("resolve review thread: %w", err)
+	}
+
+	if w, ok := result["warning"].(string); ok && w != "" {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+	}
+	fmt.Fprintf(os.Stderr, "Thread %s on issue %s resolved.\n", truncateID(threadID), truncateID(issueID))
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }

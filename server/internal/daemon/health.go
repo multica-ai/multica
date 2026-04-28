@@ -45,11 +45,13 @@ func (d *Daemon) listenHealth() (net.Listener, error) {
 
 // repoCheckoutRequest is the body of a POST /repo/checkout request.
 type repoCheckoutRequest struct {
-	URL         string `json:"url"`
-	WorkspaceID string `json:"workspace_id"`
-	WorkDir     string `json:"workdir"`
-	AgentName   string `json:"agent_name"`
-	TaskID      string `json:"task_id"`
+	URL             string `json:"url"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkDir         string `json:"workdir"`
+	AgentName       string `json:"agent_name"`
+	TaskID          string `json:"task_id"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
+	Sharing         string `json:"sharing,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -158,11 +160,13 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		}
 
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
-			WorkDir:     req.WorkDir,
-			AgentName:   req.AgentName,
-			TaskID:      req.TaskID,
+			WorkspaceID:     req.WorkspaceID,
+			RepoURL:         req.URL,
+			WorkDir:         req.WorkDir,
+			AgentName:       req.AgentName,
+			TaskID:          req.TaskID,
+			IssueIdentifier: req.IssueIdentifier,
+			Sharing:         req.Sharing,
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)

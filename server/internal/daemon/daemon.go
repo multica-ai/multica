@@ -49,10 +49,32 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// issueLocks serializes issue-mode tasks that share a workdir and branch.
+	// Keyed by "<workspaceID>/<issueIdentifier>". Created lazily; entries are
+	// never removed (cardinality is bounded by the number of distinct issues
+	// this daemon has touched in its lifetime — small in practice).
+	issueLocks sync.Map
+
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+}
+
+// lockForIssue returns the mutex dedicated to a (workspace, issue) pair, or
+// nil when issue-mode locking does not apply (chat/autopilot task, legacy
+// server, or task-mode sharing).
+func (d *Daemon) lockForIssue(workspaceID, issueIdentifier string) *sync.Mutex {
+	if d.cfg.WorkdirSharing != WorkdirSharingIssue || workspaceID == "" || issueIdentifier == "" {
+		return nil
+	}
+	key := workspaceID + "/" + issueIdentifier
+	if l, ok := d.issueLocks.Load(key); ok {
+		return l.(*sync.Mutex)
+	}
+	newLock := &sync.Mutex{}
+	actual, _ := d.issueLocks.LoadOrStore(key, newLock)
+	return actual.(*sync.Mutex)
 }
 
 // New creates a new Daemon instance.
@@ -894,6 +916,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	d.mu.Unlock()
 	provider := rt.Provider
 
+	// In issue mode, serialize tasks that target the same issue. Two
+	// concurrent agents on one issue would otherwise race on the shared
+	// workdir and the multica/<issue> branch — git lockfiles tolerate it
+	// far less gracefully than the daemon's own activeTasks pool. The lock
+	// is held across the entire task lifetime; concurrency across different
+	// issues is unaffected.
+	if lock := d.lockForIssue(task.WorkspaceID, task.IssueIdentifier); lock != nil {
+		lock.Lock()
+		defer lock.Unlock()
+	}
+
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
 	agentName := "agent"
@@ -1053,22 +1086,40 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 	}
 
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+	// In issue mode, all tasks on the same issue share a workdir even when
+	// dispatch did not supply PriorWorkDir (e.g. the very first task for a
+	// different agent on this issue). Synthesize the issue-shared path so
+	// reuse picks up across agents. Falls back to nothing when the server
+	// did not provide an issue identifier (legacy server, chat task,
+	// autopilot task), keeping the historical task-scoped behavior.
+	priorWorkDir := task.PriorWorkDir
+	useIssueLayout := d.cfg.WorkdirSharing == WorkdirSharingIssue && task.IssueIdentifier != ""
+	if useIssueLayout && priorWorkDir == "" {
+		priorWorkDir = execenv.IssueWorkDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.IssueIdentifier)
+	}
+
+	// Try to reuse the workdir from a previous task on the same issue.
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
-	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)
+	if priorWorkDir != "" {
+		env = execenv.Reuse(priorWorkDir, provider, codexVersion, taskCtx, d.logger)
 	}
 	if env == nil {
+		sharing := d.cfg.WorkdirSharing
+		if sharing == "" {
+			sharing = WorkdirSharingTask
+		}
 		var err error
 		env, err = execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			Task:           taskCtx,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          task.ID,
+			IssueIdentifier: task.IssueIdentifier,
+			Sharing:         sharing,
+			AgentName:       agentName,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			Task:            taskCtx,
 		}, d.logger)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
@@ -1095,6 +1146,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+	}
+	// Surface the issue identifier and sharing mode so `multica repo checkout`
+	// can request the issue-shared branch (`multica/<identifier>`) and skip the
+	// reset/clean that would clobber a sibling agent's in-progress work.
+	if task.IssueIdentifier != "" {
+		agentEnv["MULTICA_ISSUE_IDENTIFIER"] = task.IssueIdentifier
+	}
+	if d.cfg.WorkdirSharing != "" {
+		agentEnv["MULTICA_WORKDIR_SHARING"] = d.cfg.WorkdirSharing
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -1138,7 +1198,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
+	reused := priorWorkDir != "" && env.WorkDir == priorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,

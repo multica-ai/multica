@@ -29,6 +29,7 @@ type Task struct {
 	AgentID                 string          `json:"agent_id"`
 	RuntimeID               string          `json:"runtime_id"`
 	IssueID                 string          `json:"issue_id"`
+	IssueIdentifier         string          `json:"issue_identifier,omitempty"` // workspace issue prefix + number, e.g. "TIM-42"; empty for chat/autopilot/legacy server
 	WorkspaceID             string          `json:"workspace_id"`
 	Agent                   *AgentData      `json:"agent,omitempty"`
 	Repos                   []RepoData      `json:"repos,omitempty"`

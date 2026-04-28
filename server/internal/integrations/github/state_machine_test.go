@@ -69,6 +69,72 @@ func TestDecide_PRSynchronize(t *testing.T) {
 			t.Fatalf("got %+v; want noop", got)
 		}
 	})
+	t.Run("from in_review by agent pusher is noop", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			SenderLogin: "bmad-amelia",
+		})
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop (agent pusher carve-out)", got)
+		}
+	})
+	t.Run("from in_review by agent pusher case-insensitive", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			SenderLogin: "BMAD-Amelia",
+		})
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop (case-insensitive)", got)
+		}
+	})
+	t.Run("from in_review within cooldown is noop", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			SenderLogin: "some-human", SecondsSinceOpened: 30,
+		})
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop (cooldown)", got)
+		}
+	})
+	t.Run("from in_review past cooldown by human flips to fixing", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			SenderLogin: "some-human", SecondsSinceOpened: 600,
+		})
+		want := Decision{Action: ActionSetStatus, NewStatus: StatusFixing, ActivityKind: "pr_updated"}
+		if got != want {
+			t.Fatalf("got %+v; want %+v", got, want)
+		}
+	})
+	t.Run("from in_review with no timing data + human sender flips", func(t *testing.T) {
+		got := Decide(Input{
+			Kind: EventKindPR, IssueStatus: StatusInReview, PRAction: PRActionSynchronize,
+			SenderLogin: "some-human", SecondsSinceOpened: 0,
+		})
+		if got.Action != ActionSetStatus || got.NewStatus != StatusFixing {
+			t.Fatalf("got %+v; want fixing (no cooldown data)", got)
+		}
+	})
+}
+
+func TestIsAgentPusher(t *testing.T) {
+	cases := []struct {
+		login string
+		want  bool
+	}{
+		{"bmad-amelia", true},
+		{"BMAD-Amelia", true},
+		{"BMAD-WINSTON", true},
+		{"bmad-quinn", true},
+		{"bmad-murat", true},
+		{"some-human", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := IsAgentPusher(tc.login); got != tc.want {
+			t.Errorf("IsAgentPusher(%q) = %v; want %v", tc.login, got, tc.want)
+		}
+	}
 }
 
 func TestDecide_PRClosed(t *testing.T) {

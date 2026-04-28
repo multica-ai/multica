@@ -9,8 +9,27 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
+
+// issueIdentifierUnsafe matches anything that should not appear in a directory
+// name derived from an issue identifier. Real identifiers ("TIM-42", "BMD-7")
+// are alphanumeric + dash, so this is mostly a defense against odd workspace
+// prefixes (whitespace, slashes, control chars). Empty result falls back to
+// "issue".
+var issueIdentifierUnsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+func sanitizeIssueIdentifier(s string) string {
+	s = strings.TrimSpace(s)
+	s = issueIdentifierUnsafe.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-.")
+	if s == "" {
+		return "issue"
+	}
+	return s
+}
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
@@ -20,13 +39,33 @@ type RepoContextForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string            // workspace UUID — tasks are grouped under this
-	TaskID         string            // task UUID — used for directory name
-	AgentName      string            // for git branch naming only
-	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
-	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
-	Task           TaskContextForEnv // context data for writing files
+	WorkspacesRoot  string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID     string            // workspace UUID — tasks are grouped under this
+	TaskID          string            // task UUID — used for directory name in task mode
+	IssueIdentifier string            // workspace issue prefix + number (e.g. "TIM-42"); only used when Sharing == "issue"
+	Sharing         string            // workdir sharing mode ("task" default, "issue" opt-in). Empty = task.
+	AgentName       string            // for git branch naming only
+	Provider        string            // agent provider ("claude", "codex") — determines skill injection paths
+	CodexVersion    string            // detected Codex CLI version (only used when Provider == "codex")
+	Task            TaskContextForEnv // context data for writing files
+}
+
+const (
+	sharingTask  = "task"
+	sharingIssue = "issue"
+)
+
+// IssueWorkDir returns the canonical issue-shared workdir path for a given
+// workspace + issue identifier, or "" when the inputs are insufficient (e.g.
+// chat task or autopilot task with no issue identifier).
+//
+// Exposed so the daemon can synthesize PriorWorkDir for issue-mode reuse
+// across agents without duplicating the path layout rules.
+func IssueWorkDir(workspacesRoot, workspaceID, issueIdentifier string) string {
+	if workspacesRoot == "" || workspaceID == "" || issueIdentifier == "" {
+		return ""
+	}
+	return filepath.Join(workspacesRoot, workspaceID, "issues", sanitizeIssueIdentifier(issueIdentifier), "workdir")
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -75,6 +114,14 @@ type Environment struct {
 // Prepare creates an isolated execution environment for a task.
 // The workdir starts empty (no repo checkouts). The agent checks out repos
 // on demand via `multica repo checkout <url>`.
+//
+// Sharing modes:
+//   - "task" (default): {workspacesRoot}/{workspaceID}/{shortTaskID}/workdir/.
+//     Each task gets its own root; reuse goes through PriorWorkDir.
+//   - "issue": {workspacesRoot}/{workspaceID}/issues/{issueIdentifier}/workdir/.
+//     All tasks on the same issue share the workdir. If the directory already
+//     exists, Prepare reuses it instead of removing it. Falls back to the task
+//     layout when IssueIdentifier is empty (chat / autopilot / legacy server).
 func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.WorkspacesRoot == "" {
 		return nil, fmt.Errorf("execenv: workspaces root is required")
@@ -86,12 +133,24 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
+	useIssueLayout := params.Sharing == sharingIssue && params.IssueIdentifier != ""
+	var envRoot string
+	if useIssueLayout {
+		envRoot = filepath.Join(params.WorkspacesRoot, params.WorkspaceID, "issues", sanitizeIssueIdentifier(params.IssueIdentifier))
+	} else {
+		envRoot = filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
+	}
 
-	// Remove existing env if present (defensive — task IDs are unique).
-	if _, err := os.Stat(envRoot); err == nil {
-		if err := os.RemoveAll(envRoot); err != nil {
-			return nil, fmt.Errorf("execenv: remove existing env: %w", err)
+	// In task mode, remove any existing directory (defensive — task IDs are
+	// unique so a collision means a stale leftover). In issue mode the
+	// directory is intentionally shared across tasks/agents — never delete it
+	// here. The agent session is preserved separately by the daemon via
+	// PriorSessionID, so reusing the directory does not leak session state.
+	if !useIssueLayout {
+		if _, err := os.Stat(envRoot); err == nil {
+			if err := os.RemoveAll(envRoot); err != nil {
+				return nil, fmt.Errorf("execenv: remove existing env: %w", err)
+			}
 		}
 	}
 

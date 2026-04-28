@@ -20,8 +20,19 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 24 * time.Hour     // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL           = 72 * time.Hour     // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCTTL                 = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL           = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+
+	// WorkdirSharingTask is the historical default: every task gets its own
+	// {workspacesRoot}/{workspaceID}/{shortTaskID}/workdir/, with reuse only
+	// for the same (agent, issue) pair via PriorWorkDir.
+	WorkdirSharingTask = "task"
+	// WorkdirSharingIssue opts in to one shared workdir per issue. All tasks
+	// on the same issue (regardless of agent) land in
+	// {workspacesRoot}/{workspaceID}/issues/{issueIdentifier}/workdir/. Agent
+	// session identity is preserved separately — this flag only changes the
+	// workdir layout and the repo branch reuse policy.
+	WorkdirSharingIssue = "issue"
 )
 
 // Config holds all daemon configuration.
@@ -36,6 +47,7 @@ type Config struct {
 	Profile            string                // profile name (empty = default)
 	Agents             map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
+	WorkdirSharing     string                // "task" (default) or "issue" — see WorkdirSharingTask / WorkdirSharingIssue
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
@@ -270,6 +282,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Workdir sharing mode: env > default (task). Only "task" and "issue" are
+	// recognized; any other value falls back to "task" so a typo can't silently
+	// flip live tasks into a shared layout.
+	workdirSharing := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_WORKDIR_SHARING")))
+	if workdirSharing != WorkdirSharingIssue {
+		workdirSharing = WorkdirSharingTask
+	}
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -297,6 +317,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Profile:            profile,
 		Agents:             agents,
 		WorkspacesRoot:     workspacesRoot,
+		WorkdirSharing:     workdirSharing,
 		KeepEnvAfterTask:   keepEnv,
 		GCEnabled:          gcEnabled,
 		GCInterval:         gcInterval,

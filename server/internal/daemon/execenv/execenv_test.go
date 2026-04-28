@@ -1617,6 +1617,151 @@ func TestWriteReadGCMeta(t *testing.T) {
 	}
 }
 
+func TestSanitizeIssueIdentifier(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input, want string
+	}{
+		{"TIM-42", "TIM-42"},
+		{"BMD-7", "BMD-7"},
+		{"42", "42"},
+		{" TIM-42 ", "TIM-42"},
+		{"weird/issue:42", "weird-issue-42"},
+		{"", "issue"},
+		{"---", "issue"},
+		{"path/../traversal", "path-..-traversal"},
+	}
+	for _, tt := range tests {
+		if got := sanitizeIssueIdentifier(tt.input); got != tt.want {
+			t.Errorf("sanitizeIssueIdentifier(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestIssueWorkDir(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		root, ws, ident, want string
+	}{
+		{"/root", "ws-1", "TIM-42", filepath.Join("/root", "ws-1", "issues", "TIM-42", "workdir")},
+		{"/root", "ws-1", "weird/id", filepath.Join("/root", "ws-1", "issues", "weird-id", "workdir")},
+		{"", "ws-1", "TIM-42", ""},
+		{"/root", "", "TIM-42", ""},
+		{"/root", "ws-1", "", ""},
+	}
+	for _, tt := range tests {
+		if got := IssueWorkDir(tt.root, tt.ws, tt.ident); got != tt.want {
+			t.Errorf("IssueWorkDir(%q,%q,%q) = %q, want %q", tt.root, tt.ws, tt.ident, got, tt.want)
+		}
+	}
+}
+
+func TestPrepareIssueModeUsesSharedPath(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	// First task on the issue.
+	env1, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:    "ws-issue-001",
+		TaskID:          "00000000-0000-0000-0000-000000000001",
+		IssueIdentifier: "TIM-42",
+		Sharing:         "issue",
+		AgentName:       "Agent A",
+		Provider:        "claude",
+		Task:            TaskContextForEnv{IssueID: "issue-uuid-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("first Prepare failed: %v", err)
+	}
+
+	wantRoot := filepath.Join(workspacesRoot, "ws-issue-001", "issues", "TIM-42")
+	if env1.RootDir != wantRoot {
+		t.Fatalf("env1.RootDir = %q, want %q", env1.RootDir, wantRoot)
+	}
+	if env1.WorkDir != filepath.Join(wantRoot, "workdir") {
+		t.Fatalf("env1.WorkDir = %q, want %q", env1.WorkDir, filepath.Join(wantRoot, "workdir"))
+	}
+
+	// Drop a marker file to verify the directory is reused on the next task.
+	marker := filepath.Join(env1.WorkDir, "marker.txt")
+	if err := os.WriteFile(marker, []byte("preserved"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	// Second task on the same issue (different agent and task ID) — must
+	// reuse the same root and NOT remove the marker.
+	env2, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:    "ws-issue-001",
+		TaskID:          "00000000-0000-0000-0000-000000000002",
+		IssueIdentifier: "TIM-42",
+		Sharing:         "issue",
+		AgentName:       "Agent B",
+		Provider:        "claude",
+		Task:            TaskContextForEnv{IssueID: "issue-uuid-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("second Prepare failed: %v", err)
+	}
+	if env2.RootDir != env1.RootDir {
+		t.Fatalf("issue mode: env2.RootDir = %q, want %q (shared)", env2.RootDir, env1.RootDir)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "preserved" {
+		t.Fatalf("marker should survive issue-mode reuse; err=%v data=%q", err, string(data))
+	}
+}
+
+func TestPrepareTaskModeUnchanged(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	// Empty Sharing should fall back to the legacy task layout.
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:    "ws-task-001",
+		TaskID:          "abcdef12-3456-7890-abcd-ef1234567890",
+		IssueIdentifier: "TIM-42", // ignored in task mode
+		Sharing:         "",
+		AgentName:       "Agent A",
+		Provider:        "claude",
+		Task:            TaskContextForEnv{IssueID: "issue-uuid-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	wantRoot := filepath.Join(workspacesRoot, "ws-task-001", "abcdef12")
+	if env.RootDir != wantRoot {
+		t.Errorf("task-mode RootDir = %q, want %q", env.RootDir, wantRoot)
+	}
+}
+
+func TestPrepareIssueModeFallsBackWhenIdentifierMissing(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	// Sharing=issue but no identifier (chat task, autopilot task) — must
+	// fall back to the per-task layout so chat/autopilot keep working.
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:   "ws-fallback",
+		TaskID:         "feedface-0000-0000-0000-000000000000",
+		Sharing:        "issue",
+		AgentName:      "Agent A",
+		Provider:       "claude",
+		Task:           TaskContextForEnv{ChatSessionID: "chat-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	if !strings.Contains(env.RootDir, "feedface") {
+		t.Errorf("expected fallback to task layout (short task id), got %q", env.RootDir)
+	}
+	if strings.Contains(env.RootDir, "issues") {
+		t.Errorf("expected fallback NOT to use issues/ path, got %q", env.RootDir)
+	}
+}
+
 func TestWriteGCMeta_EmptyRoot(t *testing.T) {
 	t.Parallel()
 	if err := WriteGCMeta("", "issue", "ws"); err != nil {

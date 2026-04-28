@@ -118,6 +118,7 @@ type AgentTaskResponse struct {
 	AgentID                 string          `json:"agent_id"`
 	RuntimeID               string          `json:"runtime_id"`
 	IssueID                 string          `json:"issue_id"`
+	IssueIdentifier         string          `json:"issue_identifier,omitempty"` // workspace issue prefix + number, e.g. "TIM-42"; empty for chat/autopilot tasks
 	WorkspaceID             string          `json:"workspace_id"`
 	Status                  string          `json:"status"`
 	Priority                int32           `json:"priority"`

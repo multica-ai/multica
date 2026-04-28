@@ -20,6 +20,48 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// markerOnlyBMADAgents is the set of BMAD agent names that are contractually
+// forbidden from driving issue status transitions directly. They communicate
+// state through contract-marker comments (parsed by the BMAD sidecar) which
+// then route the card on their behalf. See bmad-tea/SKILL.md,
+// bmad-agent-reviewer/SKILL.md, bmad-architect-impl-plan/SKILL.md, and
+// bmad-dev-story/SKILL.md for the exact markers each agent emits.
+//
+// Each entry maps the agent name to the set of statuses the agent is still
+// permitted to flip to (allow-list). nil / empty set means "every status flip
+// is forbidden". This is needed for `bmad-agent-dev` (Amelia), which retains
+// one documented direct flip path — the `staged` flip in `bmad-dev-story`
+// Step 1.1.0 post-merge no-op short-circuit.
+var markerOnlyBMADAgents = map[string]map[string]struct{}{
+	"bmad-tea":             nil, // Murat   — emits <!-- completion-note v1 -->
+	"bmad-agent-reviewer":  nil, // Quinn   — emits <!-- review-findings v1 -->
+	"bmad-agent-architect": nil, // Winston — emits <!-- impl-plan v1 -->
+	"bmad-agent-dev":       {"staged": {}}, // Amelia — emits <!-- claim v1 -->, <!-- completion-note v1 -->, etc.; `staged` exempt
+}
+
+// isMarkerOnlyBMADAgent reports whether an agent name belongs to the
+// marker-only deny list above. Names are matched case-insensitively after
+// trimming whitespace.
+func isMarkerOnlyBMADAgent(name string) bool {
+	_, ok := markerOnlyBMADAgents[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
+// markerOnlyAgentAllowsStatus reports whether an agent on the marker-only
+// list is nonetheless permitted to flip to the given status (the per-agent
+// allow-list of exempt statuses).
+func markerOnlyAgentAllowsStatus(name, status string) bool {
+	allow, ok := markerOnlyBMADAgents[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		return true // not on the list — unrestricted
+	}
+	if allow == nil || len(allow) == 0 {
+		return false // on the list, no exemptions — fully forbidden
+	}
+	_, exempt := allow[strings.ToLower(strings.TrimSpace(status))]
+	return exempt
+}
+
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
 	ID                 string                  `json:"id"`
@@ -1147,6 +1189,45 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
 			return
+		}
+	}
+
+	// Marker-only BMAD agent guard (Option 1, 2026-04-28).
+	// Some BMAD personas (bmad-tea / Murat, bmad-agent-reviewer / Quinn) are
+	// contractually forbidden from driving status transitions directly — the
+	// sidecar parses their <!-- completion-note v1 --> / <!-- review-findings v1 -->
+	// markers and routes the card. When the LLM ignores its persona prompt
+	// and PATCHes status anyway, it races the sidecar and corrupts column
+	// state. Reject the request at the API layer so the bad transition
+	// never reaches the activity log. The sidecar (X-Agent-ID = bmad-sidecar)
+	// and the architect (bmad-architect-impl-plan) are NOT blocked — they
+	// have legitimate flips. Member callers are also not blocked.
+	if req.Status != nil && prevIssue.Status != *req.Status {
+		actorTypePre, actorIDPre := h.resolveActor(r, userID, workspaceID)
+		if actorTypePre == "agent" {
+			actorAgent, err := h.Queries.GetAgent(r.Context(), parseUUID(actorIDPre))
+			if err == nil && isMarkerOnlyBMADAgent(actorAgent.Name) &&
+				!markerOnlyAgentAllowsStatus(actorAgent.Name, *req.Status) {
+				slog.Warn("marker-only BMAD agent blocked from direct status flip",
+					append(logger.RequestAttrs(r),
+						"agent_name", actorAgent.Name,
+						"agent_id", actorIDPre,
+						"issue_id", id,
+						"prev_status", prevIssue.Status,
+						"requested_status", *req.Status,
+					)...)
+				writeError(w, http.StatusForbidden, fmt.Sprintf(
+					"agent %q is forbidden from calling `multica issue status` directly. "+
+						"Status transitions are owned by the BMAD sidecar, which parses "+
+						"contract markers in your comments (`<!-- claim v1 -->`, "+
+						"`<!-- impl-plan v1 -->`, `<!-- completion-note v1 -->`, "+
+						"`<!-- review-findings v1 -->`, `<!-- fix-note v1 -->`, "+
+						"`<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`) and routes "+
+						"the card. Drop the `multica issue status` call and post your "+
+						"marker comment instead.",
+					actorAgent.Name))
+				return
+			}
 		}
 	}
 

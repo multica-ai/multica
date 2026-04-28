@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
+	githubintegration "github.com/multica-ai/multica/server/internal/integrations/github"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -64,6 +65,11 @@ type Handler struct {
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
+	// ReviewActions wraps GitHub GraphQL mutations the dev agent uses while
+	// walking CR review threads in the fixing loop. nil when the GITHUB_APP_*
+	// env vars are not configured — the corresponding routes are then not
+	// registered (see router.go).
+	ReviewActions *githubintegration.ReviewActions
 	cfg                   Config
 }
 

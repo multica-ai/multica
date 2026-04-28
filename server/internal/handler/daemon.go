@@ -745,10 +745,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				// Build the stable, human-readable issue identifier
+				// ("<prefix>-<number>") so the daemon can name issue-scoped
+				// workdirs and branches without an extra round-trip. Empty
+				// prefix is tolerated — issue.Number alone still uniquely
+				// identifies the issue within the workspace.
+				if issue.Number > 0 {
+					if ws.IssuePrefix != "" {
+						resp.IssueIdentifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
+					} else {
+						resp.IssueIdentifier = fmt.Sprintf("%d", issue.Number)
+					}
+				}
+				if ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
 				}
 			}
 		}

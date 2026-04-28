@@ -163,8 +163,25 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("6. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
 		b.WriteString(BuildCommentReplyInstructions(ctx.IssueID, ctx.TriggerCommentID))
 		b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+	} else if hasBMADSkill(ctx) {
+		// Assignment-triggered, BMAD agent: status transitions are owned by
+		// the sidecar via contract markers (impl-plan, completion-note,
+		// review-findings, fix-note, plan-issue). The generic "flip to
+		// in_progress / in_review" loop below would race the sidecar's
+		// marker-based router and corrupt column state, so it is omitted
+		// for BMAD agents. (See bug investigation 2026-04-28.)
+		b.WriteString("**Status transitions are owned by the BMAD sidecar, not by you.** As of the marker-only architecture (2026-04-28), the Multica BMAD sidecar reads contract markers in your comments (`<!-- claim v1 -->`, `<!-- impl-plan v1 -->`, `<!-- completion-note v1 -->`, `<!-- review-findings v1 -->`, `<!-- fix-note v1 -->`, `<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`) and routes the issue automatically. Follow the exact marker rules in your persona's SKILL.md.\n\n")
+		b.WriteString("**Hard rule:** do NOT call `multica issue status <id> ...`. The Multica backend rejects status calls from BMAD agents on the marker-only allowlist with HTTP 403. Even outside the allowlist, calling status from any moment other than what your Skill explicitly authorizes will race the sidecar, cancel your task, and reroute the issue to the wrong agent. The single documented exception is the `staged` flip in `bmad-dev-story` Step 1.1.0 (post-merge no-op short-circuit). Every other column transition is sidecar-driven from the markers above.\n")
+		b.WriteString("- `bmad-architect-impl-plan`: NEVER call status. Post `<!-- impl-plan v1 -->` and the sidecar routes to `ready_for_dev`; on failure, post a comment and exit (the sidecar/human handles `blocked`).\n")
+		b.WriteString("- `bmad-dev-story`: NEVER call status, except `staged` for the post-merge no-op short-circuit (Step 1.1.0). Post `<!-- claim v1 -->` to claim, `<!-- completion-note v1 -->` to hand off to review, `<!-- fix-note v1 -->` after a fix, `<!-- plan-issue v1 -->` to bounce to architect, `<!-- pr-opened v1 -->` after opening PRs.\n")
+		b.WriteString("- `bmad-tea`, `bmad-agent-reviewer`, `bmad-code-review`: NEVER call status. The sidecar reads your marker and routes.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		b.WriteString("2. Read comments for additional context (impl-plan, prior review-findings, completion-notes)\n")
+		b.WriteString("3. Follow your Skill and Agent Identity exactly to complete the task\n")
+		fmt.Fprintf(&b, "4. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		b.WriteString("5. Let the sidecar route the issue based on your marker. Exit when done.\n\n")
 	} else {
-		// Assignment-triggered: defer to agent Skills for workflow specifics.
+		// Assignment-triggered, non-BMAD: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
@@ -239,4 +256,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	return b.String()
+}
+
+// hasBMADSkill returns true when any of the agent's skills is part of the
+// BMAD framework (skill name prefixed with "bmad-"). BMAD personas drive
+// status transitions through contract markers parsed by the sidecar; the
+// generic "flip to in_progress" assignment workflow does not apply to them.
+func hasBMADSkill(ctx TaskContextForEnv) bool {
+	for _, s := range ctx.AgentSkills {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Name)), "bmad-") {
+			return true
+		}
+	}
+	return false
 }
