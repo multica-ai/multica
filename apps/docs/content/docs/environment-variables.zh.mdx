@@ -7,9 +7,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量读取配置——数据库、登录、邮件、存储、注册白名单都在这里配。这一页按用途分组给完整清单：每组说清楚**不设会怎样**、**生产必须设哪几个**。Auth 相关那几个怎么真正配见 [登录与注册配置](/auth-setup)。
 
-## 启动必填的五个
+## 核心 server 环境变量
 
-这五个是你部署前必须考虑的——有些有默认值能让 server 启动，但生产环境里你应该全部显式配。
+这些是你部署前必须考虑的核心变量——有些有默认值能让 server 启动，但生产环境里你应该显式配置必填项。
 
 | 环境变量 | 默认值 | 生产必须设？ |
 |---|---|---|
@@ -18,14 +18,11 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
 | `APP_ENV` | 空 | **是**（必须 `production`）|
 | `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
+| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 否（生产必须保持为空）|
 
 <Callout type="warning">
 **生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。
 </Callout>
-
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 可选的 6 位固定验证码，仅用于本地或私有测试自动化 |
 
 ### 数据库连接池
 
