@@ -57,7 +57,10 @@ export type WSEventType =
   | "invitation:created"
   | "invitation:accepted"
   | "invitation:declined"
-  | "invitation:revoked";
+  | "invitation:revoked"
+  | "artifact:created"
+  | "artifact:updated"
+  | "artifact:deleted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

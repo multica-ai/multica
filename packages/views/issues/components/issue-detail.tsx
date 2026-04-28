@@ -50,6 +50,7 @@ import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { AttachmentList } from "./attachment-list";
+import { ArtifactList } from "../../artifacts/components/artifact-list";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -1090,6 +1091,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             content={issue.description ?? ""}
             className="mt-3"
           />
+
+          <ArtifactList issueId={issue.id} className="mt-3" />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (

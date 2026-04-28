@@ -24,6 +24,8 @@ import { useModalStore } from "@multica/core/modals";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
+import { ProjectDocuments } from "../../artifacts/components/project-documents";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
@@ -235,6 +237,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [projectTab, setProjectTab] = useState<"issues" | "documents">("issues");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -641,11 +644,26 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </div>
           </PageHeader>
 
-          <ViewStoreProvider store={projectViewStore}>
-              <IssuesHeader scopedIssues={projectIssues} />
-              <ProjectIssuesContent projectIssues={projectIssues} projectId={projectId} />
-              <BatchActionToolbar />
-            </ViewStoreProvider>
+          <Tabs
+              value={projectTab}
+              onValueChange={(v) => setProjectTab(v as "issues" | "documents")}
+              className="flex flex-1 flex-col"
+            >
+              <TabsList className="mx-4 mt-2 w-fit">
+                <TabsTrigger value="issues">Issues</TabsTrigger>
+                <TabsTrigger value="documents">Documents</TabsTrigger>
+              </TabsList>
+              <TabsContent value="issues" className="flex flex-1 flex-col">
+                <ViewStoreProvider store={projectViewStore}>
+                  <IssuesHeader scopedIssues={projectIssues} />
+                  <ProjectIssuesContent projectIssues={projectIssues} projectId={projectId} />
+                  <BatchActionToolbar />
+                </ViewStoreProvider>
+              </TabsContent>
+              <TabsContent value="documents" className="flex-1 overflow-auto">
+                <ProjectDocuments projectId={projectId} />
+              </TabsContent>
+            </Tabs>
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}
