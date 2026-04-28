@@ -141,7 +141,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
 
       {/* Agent */}
       <span className="flex w-32 items-center gap-1.5 shrink-0">
-        <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard />
+        <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard showStatusDot />
         <span className="truncate text-xs text-muted-foreground">
           {getActorName("agent", autopilot.assignee_id)}
         </span>
