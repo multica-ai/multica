@@ -37,7 +37,7 @@ multica setup self-host
 
 The `multica setup self-host` command will:
 1. Configure CLI to connect to localhost:8080 / localhost:3000
-2. Open a browser for login — use verification code `888888` with any email
+2. Open a browser for login — use the emailed code, or the generated code printed in backend logs when Resend is unset
 3. Discover workspaces automatically
 4. Start the daemon in the background
 

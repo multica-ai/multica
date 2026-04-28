@@ -17,7 +17,7 @@
     "./issues/hooks": "./issues/hooks/index.ts",
     "./issues/utils/filter": "./issues/utils/filter.ts",
     "./issues/utils/sort": "./issues/utils/sort.ts",
-    "./issues/utils/redact": "./issues/utils/redact.ts",
+    "./common/task-transcript": "./common/task-transcript/index.ts",
     "./projects/components": "./projects/components/index.ts",
     "./autopilots/components": "./autopilots/components/index.ts",
     "./modals/registry": "./modals/registry.tsx",
@@ -78,6 +78,7 @@
     "recharts": "3.8.0",
     "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
     "sonner": "^2.0.7"

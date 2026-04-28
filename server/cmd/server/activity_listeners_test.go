@@ -16,7 +16,7 @@ import (
 func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
 	t.Helper()
 	activities, err := queries.ListActivities(context.Background(), db.ListActivitiesParams{
-		IssueID: util.ParseUUID(issueID),
+		IssueID: util.MustParseUUID(issueID),
 		Limit:   100,
 		Offset:  0,
 	})

@@ -6,7 +6,7 @@ import {
   patchIssueInBuckets,
   removeIssueFromBuckets,
 } from "./cache-helpers";
-import type { Issue } from "../types";
+import type { Issue, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -70,6 +70,26 @@ export function onIssueUpdated(
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
   }
+}
+
+/**
+ * Patch an issue's `labels` field in-place across the list cache, my-issues
+ * caches, and the detail cache. Triggered by the `issue_labels:changed` WS
+ * event after attach/detach so list/board chips update without a refetch.
+ */
+export function onIssueLabelsChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
+  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
+    old ? patchIssueInBuckets(old, issueId, { labels }) : old,
+  );
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, labels } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(

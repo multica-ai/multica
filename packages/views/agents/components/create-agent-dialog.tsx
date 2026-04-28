@@ -6,6 +6,7 @@ import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ModelDropdown } from "./model-dropdown";
 import type {
+  Agent,
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
@@ -36,6 +37,7 @@ export function CreateAgentDialog({
   runtimesLoading,
   members,
   currentUserId,
+  template,
   onClose,
   onCreate,
 }: {
@@ -43,13 +45,26 @@ export function CreateAgentDialog({
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
+  // When provided, the dialog opens in "Duplicate" mode: the visible
+  // fields (name / description / runtime / visibility / model) are
+  // pre-populated from this agent, and the hidden fields
+  // (instructions / custom_args / custom_env / max_concurrent_tasks)
+  // are forwarded to the create call so the new agent is a true clone.
+  // Skills are copied separately by the caller after createAgent
+  // succeeds — they're not part of CreateAgentRequest.
+  template?: Agent | null;
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<AgentVisibility>("private");
-  const [model, setModel] = useState("");
+  const isDuplicate = !!template;
+  const [name, setName] = useState(
+    template ? `${template.name} (Copy)` : "",
+  );
+  const [description, setDescription] = useState(template?.description ?? "");
+  const [visibility, setVisibility] = useState<AgentVisibility>(
+    template?.visibility ?? "private",
+  );
+  const [model, setModel] = useState(template?.model ?? "");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("mine");
@@ -72,7 +87,11 @@ export function CreateAgentDialog({
     });
   }, [runtimes, runtimeFilter, currentUserId]);
 
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState(filteredRuntimes[0]?.id ?? "");
+  // When duplicating, default to the template's runtime so the clone
+  // lands on the same machine — caller can still switch in the picker.
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(
+    template?.runtime_id ?? filteredRuntimes[0]?.id ?? "",
+  );
 
   useEffect(() => {
     if (!selectedRuntimeId && filteredRuntimes[0]) {
@@ -86,13 +105,34 @@ export function CreateAgentDialog({
     if (!name.trim() || !selectedRuntime) return;
     setCreating(true);
     try {
-      await onCreate({
+      // When duplicating, forward the hidden config fields the template
+      // carries (instructions / custom_args / custom_env / max_concurrent_tasks)
+      // so the clone is functional out of the box without the user
+      // having to walk back through every settings tab. Skills are
+      // copied by the caller in a follow-up setAgentSkills call.
+      const data: CreateAgentRequest = {
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
         model: model.trim() || undefined,
-      });
+      };
+      if (template) {
+        if (template.instructions) data.instructions = template.instructions;
+        if (template.custom_args.length) data.custom_args = template.custom_args;
+        // Skip env when the template's values are redacted from the API
+        // response — copying placeholders would create a broken clone.
+        if (
+          !template.custom_env_redacted &&
+          Object.keys(template.custom_env).length > 0
+        ) {
+          data.custom_env = template.custom_env;
+        }
+        if (template.max_concurrent_tasks) {
+          data.max_concurrent_tasks = template.max_concurrent_tasks;
+        }
+      }
+      await onCreate(data);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create agent");
@@ -104,9 +144,13 @@ export function CreateAgentDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Agent</DialogTitle>
+          <DialogTitle>
+            {isDuplicate ? "Duplicate Agent" : "Create Agent"}
+          </DialogTitle>
           <DialogDescription>
-            Create a new AI agent for your workspace.
+            {isDuplicate
+              ? `Create a new agent based on "${template!.name}". Instructions, env, and skills are copied for you.`
+              : "Create a new AI agent for your workspace."}
           </DialogDescription>
         </DialogHeader>
 

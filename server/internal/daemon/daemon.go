@@ -45,6 +45,7 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSetCh chan struct{}      // notifies the WS wakeup loop to reconnect with a new runtime set
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -69,6 +70,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
 		runtimeIndex:  make(map[string]Runtime),
+		runtimeSetCh:  make(chan struct{}, 1),
 		agentVersions: make(map[string]string),
 	}
 }
@@ -87,6 +89,23 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+func (d *Daemon) notifyRuntimeSetChanged() {
+	select {
+	case d.runtimeSetCh <- struct{}{}:
+	default:
+	}
+}
+
+func (d *Daemon) drainRuntimeSetChanged() {
+	for {
+		select {
+		case <-d.runtimeSetCh:
+		default:
+			return
+		}
+	}
 }
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
@@ -132,10 +151,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
 
+	taskWakeups := make(chan struct{}, 1)
+	d.drainRuntimeSetChanged()
+	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
-	return d.pollLoop(ctx)
+	return d.pollLoop(ctx, taskWakeups)
 }
 
 // RestartBinary returns the path to the new binary if the daemon needs to restart
@@ -422,6 +444,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	d.mu.Unlock()
 
 	var registered int
+	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
 			continue // important: never replace existing workspaceState; ensureRepoReady holds ws.repoRefreshMu from the original pointer
@@ -473,7 +496,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			delete(d.workspaces, id)
 			d.mu.Unlock()
 			d.logger.Info("stopped watching workspace", "workspace_id", id)
+			removed++
 		}
+	}
+	if registered > 0 || removed > 0 {
+		d.notifyRuntimeSetChanged()
 	}
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
@@ -799,7 +826,7 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
-func (d *Daemon) pollLoop(ctx context.Context) error {
+func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
 	sem := make(chan struct{}, d.cfg.MaxConcurrentTasks)
 	var wg sync.WaitGroup
 
@@ -822,7 +849,7 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
-			if err := sleepWithContext(ctx, d.cfg.PollInterval); err != nil {
+			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
 				wg.Wait()
 				return err
 			}
@@ -878,7 +905,7 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 				d.logger.Debug("poll: no tasks", "runtimes", runtimeIDs, "cycle", pollCount)
 			}
 			pollOffset = (pollOffset + 1) % n
-			if err := sleepWithContext(ctx, d.cfg.PollInterval); err != nil {
+			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
 				wg.Wait()
 				return err
 			}
@@ -984,7 +1011,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// have built a real session before getting stuck (rate-limit, tool
 		// error, etc.) and we want the next chat turn to resume there
 		// rather than start over and "forget" the conversation.
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, "agent_error"); err != nil {
+		failureReason := result.FailureReason
+		if failureReason == "" {
+			failureReason = "agent_error"
+		}
+		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
 		}
 	default:
@@ -1174,12 +1205,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		model = entry.Model
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:             env.WorkDir,
-		Model:           model,
-		Timeout:         d.cfg.AgentTimeout,
-		ResumeSessionID: task.PriorSessionID,
-		CustomArgs:      customArgs,
-		McpConfig:       mcpConfig,
+		Cwd:                       env.WorkDir,
+		Model:                     model,
+		Timeout:                   d.cfg.AgentTimeout,
+		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
+		ResumeSessionID:           task.PriorSessionID,
+		CustomArgs:                customArgs,
+		McpConfig:                 mcpConfig,
 	}
 	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
 	// workspace dir rather than the task workdir, so the AGENTS.md written by
@@ -1264,9 +1296,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		// in sync even when the agent times out after building a session.
 		// We mark as "blocked" (not a hard error return) so handleTask
 		// goes through the FailTask path that forwards session info.
+		comment := result.Error
+		if comment == "" {
+			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
+		}
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout),
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "timeout",
+			Usage:         usageEntries,
+		}, nil
+	case "cancelled":
+		// Server cancelled the task (e.g. issue reassignment, user cancel).
+		// handleTask's cancelledByPoll branch already discards this result,
+		// so this case is mainly defensive — and preserves the "cancelled"
+		// status string for the "agent finished" log line so operators can
+		// distinguish "task cancelled by server" from a real timeout.
+		return TaskResult{
+			Status:    "cancelled",
+			Comment:   "task cancelled by server",
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
@@ -1349,6 +1400,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				if err := d.client.ReportTaskMessages(sendCtx, taskID, toSend); err != nil {
 					taskLog.Debug("failed to report task messages", "error", err)
+				} else {
+					taskLog.Debug("reported task messages", "count", len(toSend), "last_seq", toSend[len(toSend)-1].Seq)
 				}
 				cancel()
 			}
@@ -1422,6 +1475,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						toolName = callIDToTool[msg.CallID]
 						mu.Unlock()
 					}
+					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:    int(s),
@@ -1467,6 +1521,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	case result := <-session.Result:
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// Distinguish external cancellation (e.g. server-initiated cancel
+		// because the issue was reassigned, or the user invoked CancelTask)
+		// from genuine drain-deadline timeouts. context.Canceled means the
+		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
+		// drain deadline expiring on its own.
+		if errors.Is(drainCtx.Err(), context.Canceled) {
+			return agent.Result{
+				Status: "cancelled",
+				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
+			}, toolCount.Load(), nil
+		}
 		return agent.Result{
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",

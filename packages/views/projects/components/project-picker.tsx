@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { ProjectIcon } from "./project-icon";
 
 export function ProjectPicker({
   projectId,
@@ -34,13 +35,17 @@ export function ProjectPicker({
         className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
         render={triggerRender}
       >
-        <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        {current ? (
+          <ProjectIcon project={current} size="sm" />
+        ) : (
+          <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
         <span className="truncate">{current ? current.title : "No project"}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((p) => (
           <DropdownMenuItem key={p.id} onClick={() => onUpdate({ project_id: p.id })}>
-            <span className="mr-1">{p.icon || "📁"}</span>
+            <ProjectIcon project={p} size="md" className="mr-1" />
             <span className="truncate">{p.title}</span>
             {p.id === projectId && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
           </DropdownMenuItem>

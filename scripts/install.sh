@@ -393,7 +393,7 @@ run_with_server() {
   printf "     ${CYAN}multica setup self-host${RESET}   # Configure + authenticate + start daemon\n"
   printf "\n"
   printf "  ${BOLD}Login:${RESET} configure ${CYAN}RESEND_API_KEY${RESET} in .env for email codes,\n"
-  printf "  or set ${CYAN}APP_ENV=development${RESET} in .env to enable the dev master code ${BOLD}888888${RESET}.\n"
+  printf "  or read the generated code from backend logs when Resend is unset.\n"
   printf "\n"
   printf "  ${BOLD}To stop all services:${RESET}\n"
   printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop\n"

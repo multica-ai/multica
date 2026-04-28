@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markd
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { FileText, Download } from 'lucide-react'
@@ -11,6 +12,7 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
+import 'katex/dist/katex.min.css'
 import './markdown.css'
 
 /**
@@ -404,7 +406,7 @@ export function Markdown({
   return (
     <div className={cn('markdown-content break-words', className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
+        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}

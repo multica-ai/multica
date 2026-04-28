@@ -14,6 +14,24 @@ interface DesktopAPI {
   openExternal: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
+  /** Show a native OS notification for a new inbox item. */
+  showNotification: (payload: {
+    slug: string;
+    itemId: string;
+    issueKey: string;
+    title: string;
+    body: string;
+  }) => void;
+  /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
+  setUnreadBadge: (count: number) => void;
+  /** Listen for "open inbox row" requests from notification clicks. Returns an unsubscribe function. */
+  onInboxOpen: (
+    callback: (payload: {
+      slug: string;
+      itemId: string;
+      issueKey: string;
+    }) => void,
+  ) => () => void;
 }
 
 interface DaemonStatus {
@@ -50,6 +68,7 @@ interface DaemonAPI {
   startLogStream: () => void;
   stopLogStream: () => void;
   onLogLine: (callback: (line: string) => void) => () => void;
+  openLogFile: () => Promise<{ success: boolean; error?: string }>;
 }
 
 interface UpdaterAPI {

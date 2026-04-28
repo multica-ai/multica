@@ -89,10 +89,16 @@ FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
 
--- name: CancelAgentTasksByIssue :exec
+-- name: CancelAgentTasksByIssue :many
+-- Cancels every active task on the issue and returns the affected rows so the
+-- caller can reconcile each agent's status and broadcast task:cancelled events
+-- (#1587). Prior :exec form silently dropped that info, so internal cancel
+-- paths (issue status flips to cancelled/done, etc.) left agents stuck at
+-- status="working" with no self-correction.
 UPDATE agent_task_queue
-SET status = 'cancelled'
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
+SET status = 'cancelled', completed_at = now()
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
 -- Cancels active tasks for a single (issue, agent) pair without touching
@@ -104,10 +110,27 @@ SET status = 'cancelled', completed_at = now()
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
--- name: CancelAgentTasksByAgent :exec
+-- name: CancelAgentTasksByAgent :many
+-- Bulk-cancel every active (queued/dispatched/running) task for an agent.
+-- Returns the affected rows so callers can broadcast task:cancelled events.
+-- Mirrors the shape of CancelAgentTasksByIssue / CancelAgentTasksByIssueAndAgent
+-- (also :many + RETURNING + completed_at) so the three sibling cancel paths
+-- behave consistently.
 UPDATE agent_task_queue
-SET status = 'cancelled'
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running');
+SET status = 'cancelled', completed_at = now()
+WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
+
+-- name: CancelAgentTasksByTriggerComment :many
+-- Cancels active tasks whose trigger is the given comment. Called when a
+-- comment is deleted so the agent does not run with the now-deleted content
+-- already embedded in its prompt. Must run BEFORE the comment row is deleted
+-- because the FK ON DELETE SET NULL would otherwise nullify trigger_comment_id
+-- and we'd lose the ability to find the affected tasks.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
 
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
@@ -260,6 +283,81 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 ORDER BY created_at DESC;
 
+-- name: GetWorkspaceAgentRunCounts :many
+-- Total task runs per agent over the trailing 30 days, used by the Agents
+-- list RUNS column. 30-day window keeps the count meaningful (a long-dormant
+-- agent shouldn't show "5,420 runs from 2 years ago") and keeps the scan
+-- bounded as the workspace ages.
+SELECT
+    atq.agent_id,
+    COUNT(*)::int AS run_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.created_at > now() - INTERVAL '30 days'
+GROUP BY atq.agent_id;
+
+-- name: GetWorkspaceAgentActivity30d :many
+-- Returns per-agent daily activity buckets for the last 30 days. Single
+-- workspace-wide read backs both surfaces:
+--   - Agents list ACTIVITY column — uses only the trailing 7 buckets
+--   - Agent detail "Last 30 days" panel — uses the full 30
+-- 30 days contains 7 days, so one fetch + a client-side .slice(-7) wins
+-- over fetching twice. Days with no completion produce no row; the
+-- front-end zero-fills.
+--
+-- Anchored on completed_at (not created_at) because the sparkline answers
+-- "what did this agent produce?" not "what was queued at it?". A task that's
+-- still in flight has no completed_at and contributes nothing here — that's
+-- correct: in-flight tasks are surfaced via the live presence indicator,
+-- not the historical trend.
+SELECT
+    atq.agent_id,
+    DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at > now() - INTERVAL '30 days'
+GROUP BY atq.agent_id, bucket
+ORDER BY atq.agent_id, bucket;
+
+-- name: ListWorkspaceAgentTaskSnapshot :many
+-- Returns the tasks needed to derive each agent's current presence:
+--   - All active tasks (queued / dispatched / running) — for working signal + counts
+--   - Each agent's most recent OUTCOME task (completed / failed) — for sticky
+--     failed signal
+-- The front-end picks "active wins, else latest outcome" — see derive-presence.ts.
+--
+-- Cancelled tasks are excluded from the outcome half on purpose: cancel is a
+-- procedural signal ("attempt aborted"), not an outcome. It tells us nothing
+-- about whether the agent works, so it must NOT be allowed to mask a prior
+-- failure. Concretely: if an agent fails and then the user cancels the queued
+-- retry (or the parent issue closes and cascades cancels), the failed signal
+-- has to stay red. Only a real success (completed) or a fresh attempt (active)
+-- clears it.
+--
+-- No UI windows in SQL: stickiness is decided by "is the latest outcome a
+-- failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
+-- no workspace_id column.
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('queued', 'dispatched', 'running')
+
+UNION ALL
+
+SELECT t.* FROM (
+  SELECT DISTINCT ON (atq.agent_id) atq.*
+  FROM agent_task_queue atq
+  JOIN agent a ON a.id = atq.agent_id
+  WHERE a.workspace_id = $1
+    AND atq.status IN ('completed', 'failed')
+  ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
+) t;
+
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
@@ -268,4 +366,14 @@ ORDER BY created_at DESC;
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: RefreshAgentStatusFromTasks :one
+UPDATE agent AS a
+SET status = CASE WHEN EXISTS (
+    SELECT 1 FROM agent_task_queue q
+    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
+) THEN 'working' ELSE 'idle' END,
+    updated_at = now()
+WHERE a.id = $1
 RETURNING *;

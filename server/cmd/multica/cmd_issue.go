@@ -15,6 +15,79 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+// resolveTextFlag picks between a `--<name>` flag value and a paired
+// `--<name>-stdin` flag, mirroring the existing `--content` / `--content-stdin`
+// pattern. It returns the resolved string and an error when both are set or
+// stdin is requested but produces no body. The resulting text is returned
+// verbatim — callers decide whether to apply unescapeFlagText to the inline
+// flag form (and never to the stdin form, which already preserves literal
+// backslashes).
+func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
+	stdinFlag := flagName + "-stdin"
+	useStdin, _ := cmd.Flags().GetBool(stdinFlag)
+	inline, _ := cmd.Flags().GetString(flagName)
+	if useStdin && inline != "" {
+		return "", false, fmt.Errorf("--%s and --%s are mutually exclusive", flagName, stdinFlag)
+	}
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", false, fmt.Errorf("read stdin for --%s: %w", stdinFlag, err)
+		}
+		body := strings.TrimSuffix(string(data), "\n")
+		if body == "" {
+			return "", false, fmt.Errorf("stdin content for --%s is empty", stdinFlag)
+		}
+		return body, true, nil
+	}
+	if inline == "" {
+		return "", false, nil
+	}
+	return unescapeFlagText(inline), true, nil
+}
+
+// unescapeFlagText decodes the common backslash escape sequences (\n, \r, \t,
+// \\) in a free-form string flag value. Shells like bash do not expand these
+// inside double quotes, so an LLM agent that emits
+// `--content "para1\n\npara2"` ends up sending the literal 4-char sequence to
+// the CLI and then to storage, where it renders as text rather than as line
+// breaks. Decoding here makes the flag behave the way callers intuit; users
+// who genuinely need a literal backslash-n can write `\\n` or pipe the body
+// via `--content-stdin` / `--description-stdin`, which bypass this path
+// entirely.
+func unescapeFlagText(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+				i++
+				continue
+			case 'r':
+				b.WriteByte('\r')
+				i++
+				continue
+			case 't':
+				b.WriteByte('\t')
+				i++
+				continue
+			case '\\':
+				b.WriteByte('\\')
+				i++
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 var issueCmd = &cobra.Command{
 	Use:   "issue",
 	Short: "Work with issues",
@@ -186,7 +259,8 @@ func init() {
 
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
-	issueCreateCmd.Flags().String("description", "", "Issue description")
+	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent)")
@@ -198,7 +272,8 @@ func init() {
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
-	issueUpdateCmd.Flags().String("description", "", "New description")
+	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent)")
@@ -232,8 +307,8 @@ func init() {
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
 
 	// issue comment add
-	issueCommentAddCmd.Flags().String("content", "", "Comment content (required unless --content-stdin)")
-	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (avoids shell escaping issues)")
+	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -411,8 +486,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
-	if v, _ := cmd.Flags().GetString("description"); v != "" {
-		body["description"] = v
+	desc, hasDesc, err := resolveTextFlag(cmd, "description")
+	if err != nil {
+		return err
+	}
+	if hasDesc {
+		body["description"] = desc
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		body["status"] = v
@@ -486,9 +565,12 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("title")
 		body["title"] = v
 	}
-	if cmd.Flags().Changed("description") {
-		v, _ := cmd.Flags().GetString("description")
-		body["description"] = v
+	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") {
+		desc, _, err := resolveTextFlag(cmd, "description")
+		if err != nil {
+			return err
+		}
+		body["description"] = desc
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
@@ -717,25 +799,11 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
-	content, _ := cmd.Flags().GetString("content")
-	useStdin, _ := cmd.Flags().GetBool("content-stdin")
-
-	if content != "" && useStdin {
-		return fmt.Errorf("--content and --content-stdin are mutually exclusive")
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
 	}
-
-	if useStdin {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		content = strings.TrimSuffix(string(data), "\n")
-		if content == "" {
-			return fmt.Errorf("stdin content is empty")
-		}
-	}
-
-	if content == "" {
+	if !hasContent {
 		return fmt.Errorf("--content or --content-stdin is required")
 	}
 
@@ -1104,9 +1172,35 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
 
-	nameLower := strings.ToLower(name)
-	var matches []assigneeMatch
+	input := strings.TrimSpace(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no member or agent found matching %q", name)
+	}
+	inputLower := strings.ToLower(input)
+
+	// Matches are collected into three priority buckets. Higher-priority buckets
+	// short-circuit lower-priority matching so that, e.g., an exact name match
+	// always wins over a substring collision with another candidate.
+	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
+	//   2. exactMatches     — case-insensitive full name equality.
+	//   3. substringMatches — preserves the existing partial-name UX.
+	var idMatches, exactMatches, substringMatches []assigneeMatch
 	var errs []error
+
+	classify := func(entityType, id, displayName string) {
+		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
+		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
+			idMatches = append(idMatches, match)
+			return
+		}
+		if strings.EqualFold(displayName, input) {
+			exactMatches = append(exactMatches, match)
+			return
+		}
+		if strings.Contains(strings.ToLower(displayName), inputLower) {
+			substringMatches = append(substringMatches, match)
+		}
+	}
 
 	// Search members.
 	var members []map[string]any
@@ -1114,14 +1208,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch members: %w", err))
 	} else {
 		for _, m := range members {
-			mName := strVal(m, "name")
-			if strings.Contains(strings.ToLower(mName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "member",
-					ID:   strVal(m, "user_id"),
-					Name: mName,
-				})
-			}
+			classify("member", strVal(m, "user_id"), strVal(m, "name"))
 		}
 	}
 
@@ -1132,14 +1219,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 	} else {
 		for _, a := range agents {
-			aName := strVal(a, "name")
-			if strings.Contains(strings.ToLower(aName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "agent",
-					ID:   strVal(a, "id"),
-					Name: aName,
-				})
-			}
+			classify("agent", strVal(a, "id"), strVal(a, "name"))
 		}
 	}
 
@@ -1148,18 +1228,25 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", errs[0], errs[1])
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("no member or agent found matching %q", name)
-	case 1:
-		return matches[0].Type, matches[0].ID, nil
-	default:
-		var parts []string
-		for _, m := range matches {
-			parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
+		switch len(bucket) {
+		case 0:
+			continue
+		case 1:
+			return bucket[0].Type, bucket[0].ID, nil
+		default:
+			return "", "", ambiguousAssigneeError(input, bucket)
 		}
-		return "", "", fmt.Errorf("ambiguous assignee %q; matches:\n%s", name, strings.Join(parts, "\n"))
 	}
+	return "", "", fmt.Errorf("no member or agent found matching %q", input)
+}
+
+func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
+	parts := make([]string, 0, len(matches))
+	for _, m := range matches {
+		parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	}
+	return fmt.Errorf("ambiguous assignee %q; matches:\n%s", input, strings.Join(parts, "\n"))
 }
 
 func formatAssignee(issue map[string]any) string {

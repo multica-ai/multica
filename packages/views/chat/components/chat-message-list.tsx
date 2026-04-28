@@ -35,26 +35,23 @@ export function ChatMessageList({
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
 
-  // While a task is in flight and its assistant message hasn't landed yet,
-  // inject a synthetic placeholder carrying the same task_id. AssistantMessage
-  // reads the live timeline from the shared taskMessagesOptions cache (fed by
-  // WS), so the synthetic bubble renders exactly what the persisted bubble
-  // will. Because MessageBubble is keyed by task_id when present, the DOM
-  // element is preserved when the real message arrives — no unmount/remount,
-  // no double scroll-to-bottom, no visible jump.
+  // Once the assistant message for this pending task has landed in the
+  // messages list, AssistantMessage owns its rendering — suppress the live
+  // timeline to avoid rendering the same content in two places during the
+  // invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
-  const displayMessages: ChatMessage[] = pendingTaskId && !pendingAlreadyPersisted
-    ? [...messages, {
-        id: `pending-${pendingTaskId}`,
-        chat_session_id: messages[messages.length - 1]?.chat_session_id ?? "",
-        role: "assistant",
-        content: "",
-        task_id: pendingTaskId,
-        created_at: new Date().toISOString(),
-      }]
-    : messages;
+
+  // Live timeline for the in-flight task. useRealtimeSync keeps this cache
+  // current via setQueryData on task:message events.
+  const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
+  const { data: liveTaskMessages } = useQuery({
+    ...taskMessagesOptions(pendingTaskId ?? ""),
+    enabled: showLiveTimeline,
+  });
+  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  const hasLive = showLiveTimeline && liveTimeline.length > 0;
 
   return (
     <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
@@ -63,14 +60,15 @@ export function ChatMessageList({
        *  views doesn't jolt the reading width. px-5 is a touch tighter
        *  than issue-detail's px-8 because the chat window can be narrow. */}
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {displayMessages.map((msg) => (
-          <MessageBubble
-            key={msg.role === "assistant" && msg.task_id ? `task-${msg.task_id}` : msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId && !pendingAlreadyPersisted}
-          />
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} />
         ))}
-        {isWaiting && !pendingTaskId && (
+        {hasLive && (
+          <div className="w-full space-y-1.5">
+            <TimelineView items={liveTimeline} />
+          </div>
+        )}
+        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         )}
       </div>
@@ -118,7 +116,7 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-function MessageBubble({ message, isPending }: { message: ChatMessage; isPending?: boolean }) {
+function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -135,15 +133,13 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     );
   }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
+  return <AssistantMessage message={message} />;
 }
 
 function AssistantMessage({
   message,
-  isPending,
 }: {
   message: ChatMessage;
-  isPending?: boolean;
 }) {
   const taskId = message.task_id;
 
@@ -161,13 +157,11 @@ function AssistantMessage({
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
-      ) : message.content ? (
+      ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown>{message.content}</Markdown>
         </div>
-      ) : isPending ? (
-        <Loader2 className="size-4 animate-spin text-muted-foreground" />
-      ) : null}
+      )}
     </div>
   );
 }

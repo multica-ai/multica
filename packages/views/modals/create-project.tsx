@@ -253,7 +253,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <PillButton>
                   {leadType && leadId ? (
                     <>
-                      <ActorAvatar actorType={leadType} actorId={leadId} size={16} />
+                      <ActorAvatar actorType={leadType} actorId={leadId} size={16} showStatusDot />
                       <span>{leadLabel}</span>
                     </>
                   ) : (
@@ -323,7 +323,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
                       >
-                        <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                        <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
                         <span>{a.name}</span>
                       </button>
                     ))}

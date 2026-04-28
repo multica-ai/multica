@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -50,7 +52,11 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
 func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.AgentRuntime, bool) {
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return db.AgentRuntime{}, false
+	}
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return db.AgentRuntime{}, false
@@ -63,7 +69,11 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
 func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, bool) {
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return db.AgentTaskQueue{}, false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return db.AgentTaskQueue{}, false
@@ -208,6 +218,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "at least one runtime is required")
 		return
 	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	req.WorkspaceID = uuidToString(wsUUID)
 
 	// Verify workspace access and resolve owner.
 	// Daemon tokens (mdt_) prove workspace access directly; OwnerID will be zero
@@ -228,7 +243,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		ownerID = member.UserID
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(req.WorkspaceID))
+	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
@@ -264,7 +279,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		})
 
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-			WorkspaceID: parseUUID(req.WorkspaceID),
+			WorkspaceID: wsUUID,
 			DaemonID:    strToText(req.DaemonID),
 			Name:        name,
 			RuntimeMode: "local",
@@ -442,13 +457,17 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "runtime_ids is required")
 		return
 	}
+	runtimeUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.RuntimeIDs, "runtime_ids")
+	if !ok {
+		return
+	}
 
 	// Track affected workspaces for WS notifications.
 	affectedWorkspaces := make(map[string]bool)
 
-	for _, rid := range req.RuntimeIDs {
+	for i, rid := range req.RuntimeIDs {
 		// Look up the runtime and verify ownership.
-		rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(rid))
+		rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUIDs[i])
 		if err != nil {
 			slog.Warn("deregister: runtime not found", "runtime_id", rid, "error", err)
 			continue
@@ -460,7 +479,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.Queries.SetAgentRuntimeOffline(r.Context(), parseUUID(rid)); err != nil {
+		if err := h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID); err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
@@ -483,25 +502,56 @@ type DaemonHeartbeatRequest struct {
 	RuntimeID string `json:"runtime_id"`
 }
 
+// heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
+// heartbeat hot path. Probes are read-only (ZCARD in Redis) so a timeout is
+// ack-safe: the worst case is "we didn't find out if anything was queued this
+// tick" and the next heartbeat (default 15s later) will try again.
+//
+// PopPending is deliberately NOT bounded this way — its Redis implementation
+// runs a Lua claim script whose ZREM + SET-running side effects cannot be
+// cleanly un-run from the client side if the context expires mid-script. We
+// therefore only invoke PopPending after HasPending confirms there is work
+// to claim, so we never start a claim we might have to abort.
+const heartbeatHasPendingTimeout = 1 * time.Second
+
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	var (
+		outcome                                                                  = "unauth"
+		runtimeID                                                                string
+		authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64
+		probeSkillsTimedOut, probeImportTimedOut                                 bool
+	)
+	defer func() {
+		logHeartbeatEndpointSlow(runtimeID, outcome, start, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs, probeSkillsTimedOut, probeImportTimedOut)
+	}()
+
 	var req DaemonHeartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		outcome = "bad_body"
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.RuntimeID == "" {
+		outcome = "missing_runtime_id"
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
 		return
 	}
+	runtimeID = req.RuntimeID
 
 	// Verify the caller owns this runtime's workspace.
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID)
+	if !ok {
 		return
 	}
+	authMs = time.Since(start).Milliseconds()
 
-	_, err := h.Queries.UpdateAgentRuntimeHeartbeat(r.Context(), parseUUID(req.RuntimeID))
+	updateStart := time.Now()
+	_, err := h.Queries.UpdateAgentRuntimeHeartbeat(r.Context(), rt.ID)
+	updateMs = time.Since(updateStart).Milliseconds()
 	if err != nil {
+		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
 	}
@@ -523,25 +573,88 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		resp["pending_model_list"] = map[string]string{"id": pending.ID}
 	}
 
-	// Check for pending local-skill list requests for this runtime.
-	if pending, err := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID); err != nil {
-		slog.Warn("local skill list PopPending failed", "error", err, "runtime_id", req.RuntimeID)
-	} else if pending != nil {
-		resp["pending_local_skills"] = map[string]string{"id": pending.ID}
-	}
-
-	// Check for pending local-skill import requests for this runtime.
-	if pending, err := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID); err != nil {
-		slog.Warn("local skill import PopPending failed", "error", err, "runtime_id", req.RuntimeID)
-	} else if pending != nil {
-		payload := map[string]string{
-			"id":        pending.ID,
-			"skill_key": pending.SkillKey,
+	// Probe then claim the local-skill list queue. The probe is bounded so a
+	// slow shared store cannot stall the heartbeat on empty-queue ticks; the
+	// claim runs unbounded (it inherits only r.Context()) because its Lua
+	// side effects cannot be safely aborted mid-script.
+	probeSkillsStart := time.Now()
+	probeSkillsCtx, cancelProbeSkills := context.WithTimeout(r.Context(), heartbeatHasPendingTimeout)
+	hasSkills, probeErr := h.LocalSkillListStore.HasPending(probeSkillsCtx, req.RuntimeID)
+	cancelProbeSkills()
+	probeSkillsMs = time.Since(probeSkillsStart).Milliseconds()
+	switch {
+	case probeErr == nil && hasSkills:
+		popStart := time.Now()
+		pendingSkills, popErr := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID)
+		popSkillsMs = time.Since(popStart).Milliseconds()
+		if popErr != nil {
+			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", req.RuntimeID)
+		} else if pendingSkills != nil {
+			resp["pending_local_skills"] = map[string]string{"id": pendingSkills.ID}
 		}
-		resp["pending_local_skill_import"] = payload
+	case probeErr != nil:
+		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
+			probeSkillsTimedOut = true
+			slog.Warn("local skill list HasPending timed out", "runtime_id", req.RuntimeID, "elapsed_ms", probeSkillsMs)
+		} else {
+			slog.Warn("local skill list HasPending failed", "error", probeErr, "runtime_id", req.RuntimeID)
+		}
 	}
 
+	// Same probe-then-claim pattern for the import queue.
+	probeImportStart := time.Now()
+	probeImportCtx, cancelProbeImport := context.WithTimeout(r.Context(), heartbeatHasPendingTimeout)
+	hasImport, probeErr := h.LocalSkillImportStore.HasPending(probeImportCtx, req.RuntimeID)
+	cancelProbeImport()
+	probeImportMs = time.Since(probeImportStart).Milliseconds()
+	switch {
+	case probeErr == nil && hasImport:
+		popStart := time.Now()
+		pendingImport, popErr := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID)
+		popImportMs = time.Since(popStart).Milliseconds()
+		if popErr != nil {
+			slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", req.RuntimeID)
+		} else if pendingImport != nil {
+			resp["pending_local_skill_import"] = map[string]string{
+				"id":        pendingImport.ID,
+				"skill_key": pendingImport.SkillKey,
+			}
+		}
+	case probeErr != nil:
+		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
+			probeImportTimedOut = true
+			slog.Warn("local skill import HasPending timed out", "runtime_id", req.RuntimeID, "elapsed_ms", probeImportMs)
+		} else {
+			slog.Warn("local skill import HasPending failed", "error", probeErr, "runtime_id", req.RuntimeID)
+		}
+	}
+
+	outcome = "ok"
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// logHeartbeatEndpointSlow emits one structured log when /api/daemon/heartbeat
+// exceeds 500ms, splitting auth / update / probe / pop phases for both queues
+// so the prod tail can be attributed without flooding logs at normal rates.
+// Mirrors logClaimEndpointSlow for consistency.
+func logHeartbeatEndpointSlow(runtimeID, outcome string, start time.Time, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64, probeSkillsTimedOut, probeImportTimedOut bool) {
+	totalMs := time.Since(start).Milliseconds()
+	if totalMs < 500 && !probeSkillsTimedOut && !probeImportTimedOut {
+		return
+	}
+	slog.Info("heartbeat_endpoint slow",
+		"runtime_id", runtimeID,
+		"outcome", outcome,
+		"total_ms", totalMs,
+		"auth_ms", authMs,
+		"update_ms", updateMs,
+		"probe_skills_ms", probeSkillsMs,
+		"pop_skills_ms", popSkillsMs,
+		"probe_import_ms", probeImportMs,
+		"pop_import_ms", popImportMs,
+		"probe_skills_timed_out", probeSkillsTimedOut,
+		"probe_import_timed_out", probeImportTimedOut,
+	)
 }
 
 // logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
@@ -1388,7 +1501,11 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 // read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "issueId")
-	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
+	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
+	if !ok {
+		return
+	}
+	issue, err := h.Queries.GetIssue(r.Context(), issueUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return

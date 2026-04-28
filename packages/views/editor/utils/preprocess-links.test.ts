@@ -77,4 +77,19 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
     const input = "见 [link](https://example.com/x。)后文";
     expect(preprocessLinks(input)).toBe(input);
   });
+
+  it("does not linkify fuzzy domains inside existing markdown link labels", () => {
+    const input =
+      "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)、[NBC Insider](https://www.nbc.com/nbc-insider/every-nba-playoff-game-this-week-on-nbc-peacock-april-25-28)";
+
+    expect(preprocessLinks(input)).toBe(input);
+  });
+
+  it("still linkifies fuzzy domains outside existing markdown links", () => {
+    const input = "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)，官网 NBA.com";
+
+    expect(preprocessLinks(input)).toBe(
+      "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)，官网 [NBA.com](http://NBA.com)",
+    );
+  });
 });

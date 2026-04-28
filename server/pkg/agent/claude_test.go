@@ -2,11 +2,15 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClaudeHandleAssistantText(t *testing.T) {
@@ -530,6 +534,63 @@ func TestResolveSessionID(t *testing.T) {
 					tc.requested, tc.emitted, tc.failed, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Fake claude binary: drains stdin so writeClaudeInput succeeds, writes a
+	// canonical V8-abort line to stderr, then exits non-zero before emitting
+	// any stream-json to stdout. This is the exact failure mode that motivated
+	// PR #1674 — without sampling stderrBuf.Tail() after cmd.Wait() returns,
+	// Result.Error would be a useless "exit status 3".
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
+		"exit 3\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain message stream so the lifecycle goroutine can progress.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "claude exited with error") {
+			t.Fatalf("expected error to mention exit, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "V8 abort: assertion failed") {
+			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "claude stderr:") {
+			t.Fatalf("expected stderr label in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
 

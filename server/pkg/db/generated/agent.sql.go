@@ -89,26 +89,116 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 	return i, err
 }
 
-const cancelAgentTasksByAgent = `-- name: CancelAgentTasksByAgent :exec
+const cancelAgentTasksByAgent = `-- name: CancelAgentTasksByAgent :many
 UPDATE agent_task_queue
-SET status = 'cancelled'
+SET status = 'cancelled', completed_at = now()
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at
 `
 
-func (q *Queries) CancelAgentTasksByAgent(ctx context.Context, agentID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, cancelAgentTasksByAgent, agentID)
-	return err
+// Bulk-cancel every active (queued/dispatched/running) task for an agent.
+// Returns the affected rows so callers can broadcast task:cancelled events.
+// Mirrors the shape of CancelAgentTasksByIssue / CancelAgentTasksByIssueAndAgent
+// (also :many + RETURNING + completed_at) so the three sibling cancel paths
+// behave consistently.
+func (q *Queries) CancelAgentTasksByAgent(ctx context.Context, agentID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelAgentTasksByAgent, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.LastHeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const cancelAgentTasksByIssue = `-- name: CancelAgentTasksByIssue :exec
+const cancelAgentTasksByIssue = `-- name: CancelAgentTasksByIssue :many
 UPDATE agent_task_queue
-SET status = 'cancelled'
+SET status = 'cancelled', completed_at = now()
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at
 `
 
-func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, cancelAgentTasksByIssue, issueID)
-	return err
+// Cancels every active task on the issue and returns the affected rows so the
+// caller can reconcile each agent's status and broadcast task:cancelled events
+// (#1587). Prior :exec form silently dropped that info, so internal cancel
+// paths (issue status flips to cancelled/done, etc.) left agents stuck at
+// status="working" with no self-correction.
+func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelAgentTasksByIssue, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.LastHeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const cancelAgentTasksByIssueAndAgent = `-- name: CancelAgentTasksByIssueAndAgent :many
@@ -129,6 +219,62 @@ type CancelAgentTasksByIssueAndAgentParams struct {
 // still-running @-mention agent on the same issue.
 func (q *Queries) CancelAgentTasksByIssueAndAgent(ctx context.Context, arg CancelAgentTasksByIssueAndAgentParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, cancelAgentTasksByIssueAndAgent, arg.IssueID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.LastHeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const cancelAgentTasksByTriggerComment = `-- name: CancelAgentTasksByTriggerComment :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at
+`
+
+// Cancels active tasks whose trigger is the given comment. Called when a
+// comment is deleted so the agent does not run with the now-deleted content
+// already embedded in its prompt. Must run BEFORE the comment row is deleted
+// because the FK ON DELETE SET NULL would otherwise nullify trigger_comment_id
+// and we'd lose the ability to find the affected tasks.
+func (q *Queries) CancelAgentTasksByTriggerComment(ctx context.Context, triggerCommentID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelAgentTasksByTriggerComment, triggerCommentID)
 	if err != nil {
 		return nil, err
 	}
@@ -771,6 +917,107 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 	return i, err
 }
 
+const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
+SELECT
+    atq.agent_id,
+    DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at > now() - INTERVAL '30 days'
+GROUP BY atq.agent_id, bucket
+ORDER BY atq.agent_id, bucket
+`
+
+type GetWorkspaceAgentActivity30dRow struct {
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Bucket      pgtype.Timestamptz `json:"bucket"`
+	TaskCount   int32              `json:"task_count"`
+	FailedCount int32              `json:"failed_count"`
+}
+
+// Returns per-agent daily activity buckets for the last 30 days. Single
+// workspace-wide read backs both surfaces:
+//   - Agents list ACTIVITY column — uses only the trailing 7 buckets
+//   - Agent detail "Last 30 days" panel — uses the full 30
+//
+// 30 days contains 7 days, so one fetch + a client-side .slice(-7) wins
+// over fetching twice. Days with no completion produce no row; the
+// front-end zero-fills.
+//
+// Anchored on completed_at (not created_at) because the sparkline answers
+// "what did this agent produce?" not "what was queued at it?". A task that's
+// still in flight has no completed_at and contributes nothing here — that's
+// correct: in-flight tasks are surfaced via the live presence indicator,
+// not the historical trend.
+func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID pgtype.UUID) ([]GetWorkspaceAgentActivity30dRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceAgentActivity30d, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetWorkspaceAgentActivity30dRow{}
+	for rows.Next() {
+		var i GetWorkspaceAgentActivity30dRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Bucket,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkspaceAgentRunCounts = `-- name: GetWorkspaceAgentRunCounts :many
+SELECT
+    atq.agent_id,
+    COUNT(*)::int AS run_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.created_at > now() - INTERVAL '30 days'
+GROUP BY atq.agent_id
+`
+
+type GetWorkspaceAgentRunCountsRow struct {
+	AgentID  pgtype.UUID `json:"agent_id"`
+	RunCount int32       `json:"run_count"`
+}
+
+// Total task runs per agent over the trailing 30 days, used by the Agents
+// list RUNS column. 30-day window keeps the count meaningful (a long-dormant
+// agent shouldn't show "5,420 runs from 2 years ago") and keeps the scan
+// bounded as the workspace ages.
+func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pgtype.UUID) ([]GetWorkspaceAgentRunCountsRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceAgentRunCounts, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetWorkspaceAgentRunCountsRow{}
+	for rows.Next() {
+		var i GetWorkspaceAgentRunCountsRow
+		if err := rows.Scan(&i.AgentID, &i.RunCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
@@ -1115,6 +1362,86 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const listWorkspaceAgentTaskSnapshot = `-- name: ListWorkspaceAgentTaskSnapshot :many
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.last_heartbeat_at FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('queued', 'dispatched', 'running')
+
+UNION ALL
+
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.last_heartbeat_at FROM (
+  SELECT DISTINCT ON (atq.agent_id) atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.last_heartbeat_at
+  FROM agent_task_queue atq
+  JOIN agent a ON a.id = atq.agent_id
+  WHERE a.workspace_id = $1
+    AND atq.status IN ('completed', 'failed')
+  ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
+) t
+`
+
+// Returns the tasks needed to derive each agent's current presence:
+//   - All active tasks (queued / dispatched / running) — for working signal + counts
+//   - Each agent's most recent OUTCOME task (completed / failed) — for sticky
+//     failed signal
+//
+// The front-end picks "active wins, else latest outcome" — see derive-presence.ts.
+//
+// Cancelled tasks are excluded from the outcome half on purpose: cancel is a
+// procedural signal ("attempt aborted"), not an outcome. It tells us nothing
+// about whether the agent works, so it must NOT be allowed to mask a prior
+// failure. Concretely: if an agent fails and then the user cancels the queued
+// retry (or the parent issue closes and cascades cancels), the failed signal
+// has to stay red. Only a real success (completed) or a fresh attempt (active)
+// clears it.
+//
+// No UI windows in SQL: stickiness is decided by "is the latest outcome a
+// failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
+// no workspace_id column.
+func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceAgentTaskSnapshot, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.LastHeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recoverOrphanedTasksForRuntime = `-- name: RecoverOrphanedTasksForRuntime :many
 UPDATE agent_task_queue
 SET status = 'failed',
@@ -1171,6 +1498,46 @@ func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const refreshAgentStatusFromTasks = `-- name: RefreshAgentStatusFromTasks :one
+UPDATE agent AS a
+SET status = CASE WHEN EXISTS (
+    SELECT 1 FROM agent_task_queue q
+    WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
+) THEN 'working' ELSE 'idle' END,
+    updated_at = now()
+WHERE a.id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model
+`
+
+func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, refreshAgentStatusFromTasks, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+	)
+	return i, err
 }
 
 const restoreAgent = `-- name: RestoreAgent :one

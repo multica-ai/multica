@@ -5,6 +5,9 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  AgentActivityBucket,
+  AgentRunCount,
+  TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
   CreateAgentRequest,
@@ -16,6 +19,8 @@ export type {
   SetAgentSkillsRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
@@ -34,6 +39,7 @@ export type {
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
+export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";

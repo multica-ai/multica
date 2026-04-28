@@ -90,6 +90,14 @@ export interface EditorExtensionsOptions {
   >;
   /** When true, bare Enter also submits (chat-style). Default false. */
   submitOnEnter?: boolean;
+  /**
+   * When true, the @mention extension is not registered at all. Use for
+   * editors where mentioning members/agents has no business meaning (e.g.
+   * agent system prompts) — typing `@` becomes inert and any pre-existing
+   * `[@user](mention://...)` markdown renders as plain text instead of being
+   * parsed into a mention node.
+   */
+  disableMentions?: boolean;
 }
 
 export function createEditorExtensions(
@@ -122,10 +130,16 @@ export function createEditorExtensions(
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
     FileCardExtension,
-    BaseMentionExtension.configure({
-      HTMLAttributes: { class: "mention" },
-      ...(editable && options.queryClient ? { suggestion: createMentionSuggestion(options.queryClient) } : {}),
-    }),
+    ...(options.disableMentions
+      ? []
+      : [
+          BaseMentionExtension.configure({
+            HTMLAttributes: { class: "mention" },
+            ...(editable && options.queryClient
+              ? { suggestion: createMentionSuggestion(options.queryClient) }
+              : {}),
+          }),
+        ]),
   ];
 
   if (editable) {

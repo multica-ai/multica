@@ -13,6 +13,8 @@ import type {
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
+  AgentActivityBucket,
+  AgentRunCount,
   AgentRuntime,
   InboxItem,
   IssueSubscriber,
@@ -33,6 +35,8 @@ import type {
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -51,6 +55,11 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  Label,
+  CreateLabelRequest,
+  UpdateLabelRequest,
+  ListLabelsResponse,
+  IssueLabelsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -561,6 +570,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  // Bulk-cancel every active task (queued/dispatched/running) for the agent.
+  // Permission: agent owner or workspace admin/owner. Server returns the
+  // count of cancelled rows; broadcasts task:cancelled for each so other
+  // surfaces can clear their live cards.
+  async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
+    return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -580,6 +597,24 @@ export class ApiClient {
 
   async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
     return this.fetch(`/api/runtimes/${runtimeId}/activity`);
+  }
+
+  async getRuntimeUsageByAgent(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByAgent[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
+  }
+
+  async getRuntimeUsageByHour(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByHour[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
   }
 
   async initiateUpdate(
@@ -644,6 +679,28 @@ export class ApiClient {
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
+  }
+
+  // Workspace-scoped agent task snapshot: every active task
+  // (queued/dispatched/running) plus each agent's most recent terminal task.
+  // Powers the front-end's "active wins, else latest terminal" presence
+  // derivation; one fetch backs every per-agent presence read in the app.
+  // Workspace is resolved server-side from the X-Workspace-Slug header.
+  async getAgentTaskSnapshot(): Promise<AgentTask[]> {
+    return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Per-agent daily activity for the last 30 days, anchored on
+  // completed_at. One workspace-wide fetch backs both the Agents-list
+  // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
+  // days" panel (uses all 30).
+  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
+    return this.fetch(`/api/agent-activity-30d`);
+  }
+
+  // Per-agent 30-day total run count for the Agents-list RUNS column.
+  async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
+    return this.fetch(`/api/agent-run-counts`);
   }
 
   async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
@@ -976,6 +1033,50 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  // Labels
+  async listLabels(): Promise<ListLabelsResponse> {
+    return this.fetch(`/api/labels`);
+  }
+
+  async getLabel(id: string): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`);
+  }
+
+  async createLabel(data: CreateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLabel(id: string, data: UpdateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabel(id: string): Promise<void> {
+    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`);
+  }
+
+  async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ label_id: labelId }),
+    });
+  }
+
+  async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+      method: "DELETE",
+    });
   }
 
   // Pins

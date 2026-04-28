@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -93,9 +94,13 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 		metaBytes = []byte("{}")
 	}
 
-	var workspaceID = parseUUID("")
+	var workspaceID pgtype.UUID
 	if req.WorkspaceID != nil && *req.WorkspaceID != "" {
-		workspaceID = parseUUID(*req.WorkspaceID)
+		ws, ok := parseUUIDOrBadRequest(w, *req.WorkspaceID, "workspace_id")
+		if !ok {
+			return
+		}
+		workspaceID = ws
 	}
 
 	fb, err := h.Queries.CreateFeedback(r.Context(), db.CreateFeedbackParams{
