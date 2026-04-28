@@ -45,12 +45,12 @@ type codexSandboxPolicy struct {
 // codexSandboxPolicyFor picks the right policy for the given platform and
 // detected Codex CLI version.
 //
-// - Non-darwin: always workspace-write with network access (Landlock is not
-//   affected by the macOS Seatbelt bug).
-// - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
-//   workspace-write with network access (upstream bug fixed).
-// - darwin otherwise (including when the version is unknown): fall back to
-//   danger-full-access so the Multica CLI can reach the API.
+//   - Non-darwin: always workspace-write with network access (Landlock is not
+//     affected by the macOS Seatbelt bug).
+//   - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
+//     workspace-write with network access (upstream bug fixed).
+//   - darwin otherwise (including when the version is unknown): fall back to
+//     danger-full-access so the Multica CLI can reach the API.
 func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
@@ -127,13 +127,16 @@ const (
 //
 // Keeping the block as pure top-level dotted-key assignments, and placing it
 // at the top of the file (see upsertMulticaManagedBlock), avoids both traps.
-func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
+func renderMulticaManagedBlock(policy codexSandboxPolicy, includeMultiAgentDottedKey bool) string {
 	var b strings.Builder
 	b.WriteString(multicaManagedBeginMarker)
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("sandbox_mode = %q\n", policy.Mode))
 	if policy.Mode == "workspace-write" {
 		b.WriteString(fmt.Sprintf("sandbox_workspace_write.network_access = %t\n", policy.NetworkAccess))
+	}
+	if includeMultiAgentDottedKey {
+		b.WriteString("features.multi_agent = false\n")
 	}
 	b.WriteString(multicaManagedEndMarker)
 	b.WriteString("\n")
@@ -142,9 +145,23 @@ func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
 
 // managedBlockRe captures the daemon-owned block (including the surrounding
 // markers) so it can be replaced idempotently.
-var managedBlockRe = regexp.MustCompile(
-	`(?ms)^` + regexp.QuoteMeta(multicaManagedBeginMarker) +
-		`.*?^` + regexp.QuoteMeta(multicaManagedEndMarker) + `\n?`)
+var (
+	managedBlockRe = regexp.MustCompile(
+		`(?ms)^` + regexp.QuoteMeta(multicaManagedBeginMarker) +
+			`.*?^` + regexp.QuoteMeta(multicaManagedEndMarker) + `\n?`)
+	topLevelCodexMultiAgentRe = regexp.MustCompile(`^features\s*\.\s*multi_agent\s*=`)
+	codexFeaturesTableRe      = regexp.MustCompile(`^\[\s*features\s*\]\s*(?:#.*)?$`)
+	codexTableHeaderRe        = regexp.MustCompile(`^\s*\[[^]]+\]`)
+	codexMultiAgentKeyRe      = regexp.MustCompile(`^multi_agent\s*=`)
+)
+
+// codexNativeMultiAgentEnabled returns true when the operator explicitly opts
+// into Codex native subagents inside a Multica-managed Codex task. The default
+// is false because Multica tracks the parent Codex thread lifecycle only.
+func codexNativeMultiAgentEnabled() bool {
+	v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_MULTI_AGENT"))
+	return v == "1" || strings.EqualFold(v, "true")
+}
 
 // upsertMulticaManagedBlock returns the config content with the multica-managed
 // block placed at the very top of the file. Any previously written managed
@@ -156,10 +173,10 @@ var managedBlockRe = regexp.MustCompile(
 // `[permissions.multica]` or `[profiles.foo]`. Combined with the dotted-key
 // form used by renderMulticaManagedBlock, this means the managed block neither
 // leaks into nor inherits from any surrounding table scope.
-func upsertMulticaManagedBlock(content string, policy codexSandboxPolicy) string {
+func upsertMulticaManagedBlock(content string, policy codexSandboxPolicy, includeMultiAgentDottedKey bool) string {
 	// Drop any previously written managed block (wherever it sits).
 	content = managedBlockRe.ReplaceAllString(content, "")
-	block := renderMulticaManagedBlock(policy)
+	block := renderMulticaManagedBlock(policy, includeMultiAgentDottedKey)
 	// Trim leading blank lines left behind by the removal so we don't grow
 	// the file on every idempotent rewrite.
 	content = strings.TrimLeft(content, "\n")
@@ -204,6 +221,61 @@ func stripLegacySandboxDirectives(content string) string {
 	return strings.Join(out, "\n")
 }
 
+// stripCodexMultiAgentDirectives removes user-copied Codex multi-agent
+// declarations that would conflict with the daemon-managed default. Other
+// user config, including unrelated [features] keys, is preserved.
+func stripCodexMultiAgentDirectives(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	inFeaturesTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if codexTableHeaderRe.MatchString(trimmed) {
+			inFeaturesTable = codexFeaturesTableRe.MatchString(trimmed)
+			out = append(out, line)
+			continue
+		}
+		if inFeaturesTable {
+			if codexMultiAgentKeyRe.MatchString(trimmed) {
+				continue
+			}
+			out = append(out, line)
+			continue
+		}
+		if topLevelCodexMultiAgentRe.MatchString(trimmed) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+func hasCodexFeaturesTable(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if codexFeaturesTableRe.MatchString(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
+// insertCodexFeaturesTableMultiAgent writes the daemon default directly into
+// an existing [features] table. This avoids producing invalid TOML by mixing a
+// top-level features.multi_agent dotted key with a later [features] header.
+func insertCodexFeaturesTableMultiAgent(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines)+1)
+	inserted := false
+	for _, line := range lines {
+		out = append(out, line)
+		if !inserted && codexFeaturesTableRe.MatchString(strings.TrimSpace(line)) {
+			out = append(out, "multi_agent = false")
+			inserted = true
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 // ensureCodexSandboxConfig writes the multica-managed sandbox block into the
 // given config.toml according to the policy. It is idempotent: running it
 // twice produces the same file contents. The file is created if it doesn't
@@ -223,8 +295,17 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 	if existing != "" && !managedBlockRe.MatchString(existing) {
 		existing = stripLegacySandboxDirectives(existing)
 	}
+	multiAgentOptOut := codexNativeMultiAgentEnabled()
+	multiAgentInFeaturesTable := false
+	if existing != "" && !multiAgentOptOut {
+		existing = stripCodexMultiAgentDirectives(existing)
+		multiAgentInFeaturesTable = hasCodexFeaturesTable(existing)
+	}
 
-	updated := upsertMulticaManagedBlock(existing, policy)
+	updated := upsertMulticaManagedBlock(existing, policy, !multiAgentOptOut && !multiAgentInFeaturesTable)
+	if multiAgentInFeaturesTable {
+		updated = insertCodexFeaturesTableMultiAgent(updated)
+	}
 	if updated == string(data) {
 		return nil
 	}

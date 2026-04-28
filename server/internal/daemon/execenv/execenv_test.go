@@ -1272,6 +1272,121 @@ approval_policy = "on-failure"
 	}
 }
 
+func TestEnsureCodexSandboxConfigDisablesNativeMultiAgentByDefault(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	t.Setenv("MULTICA_CODEX_MULTI_AGENT", "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if !strings.Contains(s, "features.multi_agent = false") {
+		t.Errorf("expected managed multi_agent disable, got:\n%s", s)
+	}
+}
+
+func TestEnsureCodexSandboxConfigStripsDottedMultiAgent(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	t.Setenv("MULTICA_CODEX_MULTI_AGENT", "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "o3"
+features.multi_agent = true
+approval_policy = "on-failure"
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if strings.Contains(s, "features.multi_agent = true") {
+		t.Errorf("expected copied dotted multi_agent=true to be stripped, got:\n%s", s)
+	}
+	if n := strings.Count(s, "features.multi_agent = false"); n != 1 {
+		t.Errorf("expected exactly one managed multi_agent=false, got %d in:\n%s", n, s)
+	}
+	if !strings.Contains(s, `model = "o3"`) || !strings.Contains(s, `approval_policy = "on-failure"`) {
+		t.Errorf("expected unrelated user config to be preserved, got:\n%s", s)
+	}
+}
+
+func TestEnsureCodexSandboxConfigStripsFeaturesTableMultiAgent(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	t.Setenv("MULTICA_CODEX_MULTI_AGENT", "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "o3"
+
+[features]
+multi_agent = true
+other_feature = true
+
+[profiles.default]
+model = "gpt-5"
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if strings.Contains(s, "multi_agent = true") {
+		t.Errorf("expected [features] multi_agent=true to be stripped, got:\n%s", s)
+	}
+	if n := strings.Count(s, "multi_agent = false"); n != 1 {
+		t.Errorf("expected exactly one managed multi_agent=false in [features], got %d in:\n%s", n, s)
+	}
+	if strings.Contains(s, "features.multi_agent = false") {
+		t.Errorf("expected multi_agent default inside existing [features] table, got dotted key:\n%s", s)
+	}
+	if !strings.Contains(s, "[features]") || !strings.Contains(s, "other_feature = true") {
+		t.Errorf("expected unrelated [features] config to be preserved, got:\n%s", s)
+	}
+	if !strings.Contains(s, "[profiles.default]") || !strings.Contains(s, `model = "gpt-5"`) {
+		t.Errorf("expected later table config to be preserved, got:\n%s", s)
+	}
+}
+
+func TestEnsureCodexSandboxConfigMultiAgentOptOut(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	t.Setenv("MULTICA_CODEX_MULTI_AGENT", "1")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "o3"
+features.multi_agent = true
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if strings.Contains(s, "features.multi_agent = false") {
+		t.Errorf("opt-out should not emit managed multi_agent=false, got:\n%s", s)
+	}
+	if !strings.Contains(s, "features.multi_agent = true") {
+		t.Errorf("opt-out should preserve copied user multi_agent=true, got:\n%s", s)
+	}
+}
+
 func TestEnsureCodexSandboxConfigStripsLegacyInlineDirectives(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
