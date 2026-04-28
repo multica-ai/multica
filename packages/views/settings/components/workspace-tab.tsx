@@ -27,7 +27,7 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
@@ -37,6 +37,14 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+
+// PKM path is stashed inside the existing `settings` JSONB column.
+// `Workspace.settings` is typed as `Record<string, unknown>`, so we narrow
+// here instead of leaking a cast into the component body.
+function readPkmPath(workspace: Workspace | null | undefined): string {
+  const value = workspace?.settings?.pkm_path;
+  return typeof value === "string" ? value : "";
+}
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
@@ -96,6 +104,8 @@ export function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  const [pkmPath, setPkmPath] = useState(readPkmPath(workspace));
+  const [pkmPathError, setPkmPathError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -121,23 +131,35 @@ export function WorkspaceTab() {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
+    setPkmPath(readPkmPath(workspace));
+    setPkmPathError(null);
   }, [workspace]);
 
   const handleSave = async () => {
     if (!workspace) return;
     setSaving(true);
+    setPkmPathError(null);
     try {
       const updated = await api.updateWorkspace(workspace.id, {
         name,
         description,
         context,
+        settings: { ...workspace.settings, pkm_path: pkmPath.trim() },
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
       toast.success("Workspace settings saved");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");
+      // Server returns 400 with `{ error: "..." }` for invalid pkm_path
+      // (outside allowlist root, contains "..", etc.). Surface those
+      // inline under the field instead of as a transient toast — the user
+      // needs to read and act on the message.
+      if (e instanceof ApiError && e.status === 400) {
+        setPkmPathError(e.message);
+      } else {
+        toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");
+      }
     } finally {
       setSaving(false);
     }
@@ -224,6 +246,46 @@ export function WorkspaceTab() {
                 className="mt-1 resize-none"
                 placeholder="Background information and context for AI agents working in this workspace"
               />
+            </div>
+            <div>
+              <Label
+                htmlFor="workspace-pkm-path"
+                className="text-xs text-muted-foreground"
+              >
+                PKM path
+              </Label>
+              <Input
+                id="workspace-pkm-path"
+                type="text"
+                value={pkmPath}
+                onChange={(e) => {
+                  setPkmPath(e.target.value);
+                  if (pkmPathError) setPkmPathError(null);
+                }}
+                disabled={!canManageWorkspace}
+                placeholder="/PKM-CUONG/GROWTH/PROJECTS"
+                aria-invalid={pkmPathError ? true : undefined}
+                aria-describedby={
+                  pkmPathError ? "workspace-pkm-path-error" : "workspace-pkm-path-help"
+                }
+                className="mt-1"
+              />
+              {pkmPathError ? (
+                <p
+                  id="workspace-pkm-path-error"
+                  className="mt-1 text-xs text-destructive"
+                  role="alert"
+                >
+                  {pkmPathError}
+                </p>
+              ) : (
+                <p
+                  id="workspace-pkm-path-help"
+                  className="mt-1 text-xs text-muted-foreground"
+                >
+                  Relative to server PKM root. Default: /PKM-CUONG/GROWTH/PROJECTS
+                </p>
+              )}
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Slug</Label>
