@@ -274,6 +274,7 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if !strings.Contains(requests, `"mcpServers":[]`) {
 		t.Fatalf("session/load must include mcpServers, got:\n%s", requests)
 	}
+	// Kiro docs use content, but Kiro CLI 2.1.1 still requires prompt.
 	if !strings.Contains(requests, `"content":[`) {
 		t.Fatalf("session/prompt must send Kiro content field, got:\n%s", requests)
 	}

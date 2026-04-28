@@ -13,8 +13,10 @@ import (
 
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol subcommand,
-// and --trust-all-tools keeps headless task execution from blocking on a local
-// prompt that no user can answer.
+// and --trust-all-tools covers Kiro's CLI-level tool gate while
+// hermesClient handles ACP session/request_permission auto-approval. In Kiro
+// CLI 2.1.1, `-a` is short for --trust-all-tools, not --agent; --agent remains
+// allowed so users can select a custom Kiro agent.
 var kiroBlockedArgs = map[string]blockedArgMode{
 	"acp":               blockedStandalone,
 	"-a":                blockedStandalone,
@@ -223,6 +225,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Kiro's published docs use `content`, while Kiro CLI 2.1.1 still
 		// requires the standard ACP `prompt` field. Send both so either wire
 		// shape can drive the turn.
+		// TODO: drop one field once Kiro lands on a single canonical payload.
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"content":   promptBlocks,
