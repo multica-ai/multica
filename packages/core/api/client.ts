@@ -735,6 +735,9 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    dingtalk_client_id?: string;
+    dingtalk_oauth_scope?: string;
+    hide_email_login?: boolean;
     posthog_key?: string;
     posthog_host?: string;
   }> {

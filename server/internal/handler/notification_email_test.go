@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,11 @@ import (
 func cleanupEmailBindingTest(t *testing.T) {
 	t.Helper()
 	cleanupNotificationSettings(t)
+	// Clear any verification codes left by previous test runs to avoid rate-limit
+	// false-positives (60s throttle on per-email codes).
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM verification_code WHERE email LIKE '%email%' OR email LIKE '%verify%' OR email LIKE '%ratelimit%'`); err != nil {
+		t.Fatalf("delete verification_code: %v", err)
+	}
 }
 
 func TestEmailBindingStart_InvalidEmail(t *testing.T) {

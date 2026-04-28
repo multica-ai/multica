@@ -71,7 +71,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	
+
 	signupConfig := handler.Config{
 		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
@@ -128,6 +128,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	// Auth (public)
+	r.Get("/api/config", h.GetConfig)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
@@ -170,7 +171,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
-		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/me/notification-bindings/dingtalk/start", h.StartMyDingTalkBinding)

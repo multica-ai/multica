@@ -28,12 +28,6 @@ const nextConfig: NextConfig = {
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),
-  env: {
-    // Expose DINGTALK_CLIENT_ID to the browser so the login page can render
-    // the DingTalk button without requiring a separate NEXT_PUBLIC_ variable.
-    NEXT_PUBLIC_DINGTALK_CLIENT_ID:
-      process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID || process.env.DINGTALK_CLIENT_ID || "",
-  },
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],

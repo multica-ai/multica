@@ -25,7 +25,14 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const dingtalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
+const buildTimeDingTalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
+const buildTimeHideEmailLogin = process.env.NEXT_PUBLIC_HIDE_EMAIL_LOGIN === "true";
+
+interface RuntimeAuthConfig {
+  dingtalkClientId?: string;
+  dingtalkOAuthScope?: string;
+  hideEmailLogin?: boolean;
+}
 
 function LoginPageContent() {
   const router = useRouter();
@@ -47,7 +54,29 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
+  const [runtimeAuthConfig, setRuntimeAuthConfig] =
+    useState<RuntimeAuthConfig>({});
   const hasOnboarded = useHasOnboarded();
+
+  useEffect(() => {
+    api
+      .getConfig()
+      .then((cfg) => {
+        setRuntimeAuthConfig({
+          dingtalkClientId: cfg.dingtalk_client_id || undefined,
+          dingtalkOAuthScope: cfg.dingtalk_oauth_scope || undefined,
+          hideEmailLogin: cfg.hide_email_login,
+        });
+      })
+      .catch(() => {
+        // Runtime config is optional; build-time env keeps existing deployments working.
+      });
+  }, []);
+
+  const dingtalkClientId =
+    runtimeAuthConfig.dingtalkClientId || buildTimeDingTalkClientId;
+  const hideEmailLogin =
+    runtimeAuthConfig.hideEmailLogin ?? buildTimeHideEmailLogin;
 
   // Already authenticated — honor ?next= or fall back to first workspace
   // (or /onboarding if the user has none). Skip this entire path when
@@ -180,10 +209,11 @@ function LoginPageContent() {
               clientId: dingtalkClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
               state: dingtalkState,
+              scope: runtimeAuthConfig.dingtalkOAuthScope,
             }
           : undefined
       }
-      hideEmailLogin={process.env.NEXT_PUBLIC_HIDE_EMAIL_LOGIN === "true"}
+      hideEmailLogin={hideEmailLogin}
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }

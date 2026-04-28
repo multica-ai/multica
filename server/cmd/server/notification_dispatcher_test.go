@@ -219,7 +219,7 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 		UserID:  "staff-success",
 	})
 
-	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool))
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil)
 
 	delivery := loadNotificationDeliveryByEvent(t, eventID)
 	if delivery.Status != "sent" {
@@ -269,7 +269,7 @@ func TestDispatchPendingDingTalkDeliveries_RequeuesThenFails(t *testing.T) {
 	})
 
 	queries := db.New(testPool)
-	dispatchPendingNotificationDeliveries(context.Background(), queries)
+	dispatchPendingNotificationDeliveries(context.Background(), queries, nil)
 	delivery := loadNotificationDeliveryByEvent(t, eventID)
 	if delivery.Status != "pending" {
 		t.Fatalf("expected first failed attempt to requeue as pending, got %q", delivery.Status)
@@ -281,8 +281,8 @@ func TestDispatchPendingDingTalkDeliveries_RequeuesThenFails(t *testing.T) {
 		t.Fatalf("expected last_error to contain send failure, got %#v", delivery.LastError)
 	}
 
-	dispatchPendingNotificationDeliveries(context.Background(), queries)
-	dispatchPendingNotificationDeliveries(context.Background(), queries)
+	dispatchPendingNotificationDeliveries(context.Background(), queries, nil)
+	dispatchPendingNotificationDeliveries(context.Background(), queries, nil)
 	delivery = loadNotificationDeliveryByEvent(t, eventID)
 	if delivery.Status != "failed" {
 		t.Fatalf("expected delivery status failed after max attempts, got %q", delivery.Status)
@@ -360,7 +360,7 @@ func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) 
 		Mobile:  "13800000000",
 	})
 
-	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool))
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil)
 
 	delivery := loadNotificationDeliveryByEvent(t, eventID)
 	if delivery.Status != "sent" {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -158,6 +159,38 @@ func (h *Handler) GetMyNotificationBindings(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load notification bindings")
 		return
+	}
+
+	// Lazy-create email binding for users who have a real email but logged in
+	// before the auto-bind code was deployed (or who registered via DingTalk
+	// and later verified their email).
+	hasEmailBinding := false
+	for _, b := range bindings {
+		if b.Provider == "email" {
+			hasEmailBinding = true
+			break
+		}
+	}
+	if !hasEmailBinding {
+		user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+		if err == nil && user.Email != "" && !strings.HasSuffix(user.Email, "@dingtalk.local") {
+			binding, err := h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
+				UserID:                parseUUID(userID),
+				Provider:              "email",
+				ExternalUserID:        user.Email,
+				DisplayName:           strToText(user.Email),
+				AccessTokenEncrypted:  pgtype.Text{},
+				RefreshTokenEncrypted: pgtype.Text{},
+				TokenExpiresAt:        pgtype.Timestamptz{},
+				Status:                "active",
+				Metadata:              []byte("{}"),
+			})
+			if err != nil {
+				slog.Warn("failed to lazy-create email binding", "user_id", userID, "error", err)
+			} else {
+				bindings = append(bindings, binding)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, ListNotificationBindingsResponse{

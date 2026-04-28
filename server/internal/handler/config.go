@@ -3,10 +3,14 @@ package handler
 import (
 	"net/http"
 	"os"
+	"strings"
 )
 
 type AppConfig struct {
-	CdnDomain string `json:"cdn_domain"`
+	CdnDomain          string `json:"cdn_domain"`
+	DingTalkClientID   string `json:"dingtalk_client_id"`
+	DingTalkOAuthScope string `json:"dingtalk_oauth_scope"`
+	HideEmailLogin     bool   `json:"hide_email_login"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -18,7 +22,11 @@ type AppConfig struct {
 }
 
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	config := AppConfig{}
+	config := AppConfig{
+		DingTalkClientID:   strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
+		DingTalkOAuthScope: strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
+		HideEmailLogin:     os.Getenv("NEXT_PUBLIC_HIDE_EMAIL_LOGIN") == "true",
+	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
