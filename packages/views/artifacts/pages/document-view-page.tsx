@@ -166,7 +166,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   }
   if (isError || !artifact) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-8 py-6">
+      <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
         <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
           <ArrowLeft className="mr-1 size-4" /> Documents
         </Button>
@@ -205,7 +205,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-8 py-6">
+    <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
           <ArrowLeft className="mr-1 size-4" /> Documents

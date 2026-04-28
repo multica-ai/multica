@@ -55,6 +55,13 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@multica/ui/components/ui/sheet";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -428,6 +435,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const [authorFilter, setAuthorFilter] = React.useState<
     "all" | ArtifactAuthorType
   >("all");
+  const [foldersSheetOpen, setFoldersSheetOpen] = React.useState(false);
 
   React.useEffect(() => {
     setFolderId(initialFolderId ?? null);
@@ -599,108 +607,143 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     setBatchDeleteOpen(false);
   };
 
+  // Folder tree shared between desktop sidebar and mobile sheet.
+  const renderFolderTree = (onPick?: () => void) => (
+    <div className="flex flex-1 flex-col">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <span className="text-xs font-medium uppercase text-muted-foreground">
+          Folders
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={() => setNewFolderOpen(true)}
+          title="New folder"
+        >
+          <FolderPlus className="size-3.5" />
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-1">
+        <button
+          type="button"
+          onClick={() => {
+            setFolderId(null);
+            onPick?.();
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/multica-artifact");
+            if (id) handleMoveArtifact(id, null);
+          }}
+          className={cn(
+            "flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
+            folderId === null && "bg-accent font-medium",
+          )}
+        >
+          <span className="size-4" />
+          <FolderIcon className="size-4 text-muted-foreground" />
+          <span>All documents</span>
+        </button>
+        {tree.map((n) => (
+          <FolderTreeItem
+            key={n.id}
+            node={n}
+            depth={0}
+            currentId={folderId}
+            expanded={expanded}
+            onToggle={toggleFolder}
+            onSelect={(id) => {
+              setFolderId(id);
+              onPick?.();
+            }}
+            onMoveArtifact={handleMoveArtifact}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-full w-full">
-      {/* Sidebar: folder tree */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/30">
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <span className="text-xs font-medium uppercase text-muted-foreground">
-            Folders
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            onClick={() => setNewFolderOpen(true)}
-            title="New folder"
-          >
-            <FolderPlus className="size-3.5" />
-          </Button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-1">
-          <button
-            type="button"
-            onClick={() => setFolderId(null)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const id = e.dataTransfer.getData("text/multica-artifact");
-              if (id) handleMoveArtifact(id, null);
-            }}
-            className={cn(
-              "flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
-              folderId === null && "bg-accent font-medium",
-            )}
-          >
-            <span className="size-4" />
-            <FolderIcon className="size-4 text-muted-foreground" />
-            <span>All documents</span>
-          </button>
-          {tree.map((n) => (
-            <FolderTreeItem
-              key={n.id}
-              node={n}
-              depth={0}
-              currentId={folderId}
-              expanded={expanded}
-              onToggle={toggleFolder}
-              onSelect={setFolderId}
-              onMoveArtifact={handleMoveArtifact}
-            />
-          ))}
-        </div>
+      {/* Desktop sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card/30 md:flex">
+        {renderFolderTree()}
       </aside>
 
       {/* Main: breadcrumbs, toolbar, list */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-2">
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                {folderId === null ? (
-                  <BreadcrumbPage>All documents</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setFolderId(null);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    All documents
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-              {breadcrumbs.map((f, i) => (
-                <React.Fragment key={f.id}>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    {i === breadcrumbs.length - 1 ? (
-                      <BreadcrumbPage>{f.name}</BreadcrumbPage>
-                    ) : (
-                      <BreadcrumbLink
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setFolderId(f.id);
-                        }}
-                        className="cursor-pointer"
-                      >
-                        {f.name}
-                      </BreadcrumbLink>
-                    )}
-                  </BreadcrumbItem>
-                </React.Fragment>
-              ))}
-            </BreadcrumbList>
-          </Breadcrumb>
-          <div className="flex items-center gap-2">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 md:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Sheet open={foldersSheetOpen} onOpenChange={setFoldersSheetOpen}>
+              <SheetTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="md:hidden"
+                    aria-label="Browse folders"
+                  />
+                }
+              >
+                <FolderIcon className="size-4" />
+              </SheetTrigger>
+              <SheetContent side="left" className="flex w-72 flex-col p-0">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Folders</SheetTitle>
+                </SheetHeader>
+                {renderFolderTree(() => setFoldersSheetOpen(false))}
+              </SheetContent>
+            </Sheet>
+            <Breadcrumb className="min-w-0 flex-1">
+              <BreadcrumbList className="flex-nowrap">
+                <BreadcrumbItem>
+                  {folderId === null ? (
+                    <BreadcrumbPage className="truncate">All documents</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setFolderId(null);
+                      }}
+                      className="cursor-pointer truncate"
+                    >
+                      All documents
+                    </BreadcrumbLink>
+                  )}
+                </BreadcrumbItem>
+                {breadcrumbs.map((f, i) => (
+                  <React.Fragment key={f.id}>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem className="min-w-0">
+                      {i === breadcrumbs.length - 1 ? (
+                        <BreadcrumbPage className="truncate">{f.name}</BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setFolderId(f.id);
+                          }}
+                          className="cursor-pointer truncate"
+                        >
+                          {f.name}
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                  </React.Fragment>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search documents…"
-                className="h-8 pl-7 w-56"
+                placeholder="Search…"
+                className="h-8 w-40 pl-7 sm:w-56"
               />
             </div>
             <DropdownMenu>
@@ -730,20 +773,24 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               size="sm"
               variant="outline"
               onClick={() => setNewFolderOpen(true)}
+              aria-label="New folder"
             >
-              <FolderPlus className="mr-1 size-4" /> New folder
+              <FolderPlus className="size-4 sm:mr-1" />
+              <span className="hidden sm:inline">New folder</span>
             </Button>
             <Button
               size="sm"
               onClick={() => router.push(wsPaths.documentNew(folderId))}
+              aria-label="New document"
             >
-              <Plus className="mr-1 size-4" /> New document
+              <Plus className="size-4 sm:mr-1" />
+              <span className="hidden sm:inline">New document</span>
             </Button>
           </div>
         </div>
 
         {totalSelected > 0 && (
-          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-1.5 text-sm">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-4 py-1.5 text-sm md:px-6">
             <span className="text-muted-foreground">
               {totalSelected} selected
             </span>

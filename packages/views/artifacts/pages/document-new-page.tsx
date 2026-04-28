@@ -93,7 +93,7 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-8 py-6">
+    <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button
           variant="ghost"
@@ -110,7 +110,7 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
       <h1 className="mb-4 text-2xl font-semibold">New document</h1>
 
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
             <Label htmlFor="doc-kind">Kind</Label>
             <Select
