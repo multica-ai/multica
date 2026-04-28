@@ -5,14 +5,12 @@ import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  /** Filter-keyed list. Empty filter is the canonical workspace-wide list. */
-  list: (wsId: string, filter: IssueListFilter = EMPTY_FILTER) =>
-    [...issueKeys.all(wsId), "list", normalizeFilter(filter)] as const,
+  list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
   /** Per-scope "my issues" list with filter identity baked into the key. */
-  myList: (wsId: string, scope: string, filter: IssueListFilter) =>
-    [...issueKeys.myAll(wsId), scope, normalizeFilter(filter)] as const,
+  myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
+    [...issueKeys.myAll(wsId), scope, filter] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -24,43 +22,12 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
-  /** Prefix used by mutations to broadcast cache updates across all filters. */
-  listPrefix: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
 };
 
-/**
- * Server-side filter passed to `GET /api/issues`. Status is excluded because
- * the cache buckets per-status — each bucket is fetched with its own status
- * query param (see {@link fetchFirstPages}).
- */
-export type IssueListFilter = Omit<
+export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "limit" | "offset" | "workspace_id" | "status" | "open_only"
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
 >;
-
-/** Backwards-compat alias — old name was specific to the My Issues page. */
-export type MyIssuesFilter = IssueListFilter;
-
-const EMPTY_FILTER: IssueListFilter = {};
-
-/**
- * Normalizes a filter object so semantically-identical filters produce
- * identical query keys. Sorts arrays (so `[a, b]` and `[b, a]` cache to the
- * same key) and drops empty/falsy entries (so `{}` and `{ priorities: [] }`
- * are equivalent).
- */
-function normalizeFilter(filter: IssueListFilter): IssueListFilter {
-  const out: IssueListFilter = {};
-  if (filter.priorities?.length) out.priorities = [...filter.priorities].sort();
-  if (filter.assignee_types?.length) out.assignee_types = [...filter.assignee_types].sort();
-  if (filter.assignee_ids?.length) out.assignee_ids = [...filter.assignee_ids].sort();
-  if (filter.include_no_assignee) out.include_no_assignee = true;
-  if (filter.creator_ids?.length) out.creator_ids = [...filter.creator_ids].sort();
-  if (filter.project_ids?.length) out.project_ids = [...filter.project_ids].sort();
-  if (filter.include_no_project) out.include_no_project = true;
-  if (filter.label_ids?.length) out.label_ids = [...filter.label_ids].sort();
-  return out;
-}
 
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
@@ -78,7 +45,7 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: IssueListFilter = {}): Promise<ListIssuesCache> {
+async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
@@ -98,15 +65,13 @@ async function fetchFirstPages(filter: IssueListFilter = {}): Promise<ListIssues
  * `Issue[]` for consumers. Mutations and ws-updaters must use
  * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches the first page of each paginated status in parallel. Filter goes
- * into both the cache key and the request, so filter changes trigger a
- * fresh server-side fetch and don't share cache with other filters. Use
- * {@link useLoadMoreByStatus} to paginate a specific status.
+ * Fetches the first page of each paginated status in parallel. Use
+ * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string, filter: IssueListFilter = EMPTY_FILTER) {
+export function issueListOptions(wsId: string) {
   return queryOptions({
-    queryKey: issueKeys.list(wsId, filter),
-    queryFn: () => fetchFirstPages(filter),
+    queryKey: issueKeys.list(wsId),
+    queryFn: () => fetchFirstPages(),
     select: flattenIssueBuckets,
   });
 }
@@ -118,7 +83,7 @@ export function issueListOptions(wsId: string, filter: IssueListFilter = EMPTY_F
 export function myIssueListOptions(
   wsId: string,
   scope: string,
-  filter: IssueListFilter,
+  filter: MyIssuesFilter,
 ) {
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),

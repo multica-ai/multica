@@ -1,57 +1,72 @@
-import type { IssuePriority } from "@multica/core/types";
-import type { IssueListFilter } from "@multica/core/issues/queries";
+import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 
-/**
- * Shape of the filter state held in the view store. Status is excluded — it
- * controls which buckets are visible on the page, not which buckets are
- * fetched (see {@link buildIssueListFilter} below).
- */
-export interface IssueViewFilters {
+export interface IssueFilters {
+  statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
-  labelFilters: string[];
 }
 
 /**
- * Translate the view-store filter state into the wire-shape filter accepted
- * by `GET /api/issues`. Each filter type is OR'd within itself and AND'd
- * with the others — same semantics the SQL layer enforces.
+ * Filter issues using positive selection model.
+ * Empty arrays = no filter (show all). Non-empty = show only matching.
  *
- * Assignee and project filters can mix actor IDs with the "no assignee /
- * project" toggle. The toggle is encoded as `include_no_*: true`, which the
- * backend OR's against the id-list match.
- *
- * Returns an empty object when nothing is selected — callers can pass this
- * to {@link issueListOptions} as a no-op filter.
+ * Assignee has a special "No assignee" toggle (includeNoAssignee):
+ * - When only includeNoAssignee is true → show only unassigned issues
+ * - When assigneeFilters has items → show only those assignees' issues
+ * - When both → show matching assignees + unassigned
  */
-export function buildIssueListFilter(
-  filters: IssueViewFilters,
-): IssueListFilter {
-  const out: IssueListFilter = {};
-  if (filters.priorityFilters.length > 0) {
-    out.priorities = [...filters.priorityFilters];
-  }
-  // Assignee + creator filters carry an actor type alongside the id, but the
-  // backend keys assignment by id alone (member/agent ids never collide), so
-  // we send only the ids.
-  if (filters.assigneeFilters.length > 0) {
-    out.assignee_ids = filters.assigneeFilters.map((f) => f.id);
-  }
-  if (filters.includeNoAssignee) out.include_no_assignee = true;
-  if (filters.creatorFilters.length > 0) {
-    out.creator_ids = filters.creatorFilters.map((f) => f.id);
-  }
-  if (filters.projectFilters.length > 0) {
-    out.project_ids = [...filters.projectFilters];
-  }
-  if (filters.includeNoProject) out.include_no_project = true;
-  if (filters.labelFilters.length > 0) {
-    out.label_ids = [...filters.labelFilters];
-  }
-  return out;
+export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
+  const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
+  const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+
+  return issues.filter((issue) => {
+    if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
+      return false;
+
+    if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))
+      return false;
+
+    if (hasAssigneeFilter) {
+      if (!issue.assignee_id) {
+        // Unassigned issue — show only if "No assignee" is checked
+        if (!includeNoAssignee) return false;
+      } else if (assigneeFilters.length > 0) {
+        // Assigned issue — show only if assignee is in the filter list
+        if (!assigneeFilters.some(
+          (f) => f.type === issue.assignee_type && f.id === issue.assignee_id,
+        )) return false;
+      } else {
+        // Only "No assignee" is checked, no specific assignees → hide assigned issues
+        return false;
+      }
+    }
+
+    if (
+      creatorFilters.length > 0 &&
+      !creatorFilters.some(
+        (f) => f.type === issue.creator_type && f.id === issue.creator_id,
+      )
+    ) {
+      return false;
+    }
+
+    if (hasProjectFilter) {
+      if (!issue.project_id) {
+        if (!includeNoProject) return false;
+      } else if (projectFilters.length > 0) {
+        if (!projectFilters.includes(issue.project_id)) return false;
+      } else {
+        // Only "No project" is checked → hide issues that have a project
+        return false;
+      }
+    }
+
+    return true;
+  });
 }

@@ -251,7 +251,6 @@ func init() {
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
-	issueListCmd.Flags().StringSlice("label", nil, "Filter by label ID (repeatable; matches issues with any of the given labels)")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 
@@ -373,9 +372,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		params.Set("project_id", v)
-	}
-	if labels, _ := cmd.Flags().GetStringSlice("label"); len(labels) > 0 {
-		params.Set("label_ids", strings.Join(labels, ","))
 	}
 
 	path := "/api/issues"

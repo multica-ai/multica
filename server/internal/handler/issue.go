@@ -609,75 +609,56 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Parse optional filter params. Malformed UUIDs in filters return 400 —
 	// silently coercing them to a zero UUID would mask a client bug and let
 	// the query return an empty result set (or worse, match a NULL row).
-	q := r.URL.Query()
-
-	priorities := splitCSV(q.Get("priorities"))
-	if priorities == nil {
-		// Backwards compat: accept legacy single-value `priority`.
-		if p := q.Get("priority"); p != "" {
-			priorities = []string{p}
+	var priorityFilter pgtype.Text
+	if p := r.URL.Query().Get("priority"); p != "" {
+		priorityFilter = pgtype.Text{String: p, Valid: true}
+	}
+	var assigneeFilter pgtype.UUID
+	if a := r.URL.Query().Get("assignee_id"); a != "" {
+		id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
+		if !ok {
+			return
 		}
+		assigneeFilter = id
 	}
-	assigneeTypes := splitCSV(q.Get("assignee_types"))
-	assigneeIds, ok := parseUUIDSliceOrBadRequest(w, splitCSV(q.Get("assignee_ids")), "assignee_ids")
-	if !ok {
-		return
-	}
-	if assigneeIds == nil {
-		// Backwards compat: accept legacy single-value `assignee_id`.
-		if a := q.Get("assignee_id"); a != "" {
-			id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
-			if !ok {
-				return
+	var assigneeIdsFilter []pgtype.UUID
+	if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
+		for _, raw := range strings.Split(ids, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				id, ok := parseUUIDOrBadRequest(w, s, "assignee_ids")
+				if !ok {
+					return
+				}
+				assigneeIdsFilter = append(assigneeIdsFilter, id)
 			}
-			assigneeIds = []pgtype.UUID{id}
 		}
 	}
-	creatorIds, ok := parseUUIDSliceOrBadRequest(w, splitCSV(q.Get("creator_ids")), "creator_ids")
-	if !ok {
-		return
-	}
-	if creatorIds == nil {
-		if c := q.Get("creator_id"); c != "" {
-			id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
-			if !ok {
-				return
-			}
-			creatorIds = []pgtype.UUID{id}
+	var creatorFilter pgtype.UUID
+	if c := r.URL.Query().Get("creator_id"); c != "" {
+		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
+		if !ok {
+			return
 		}
+		creatorFilter = id
 	}
-	projectIds, ok := parseUUIDSliceOrBadRequest(w, splitCSV(q.Get("project_ids")), "project_ids")
-	if !ok {
-		return
-	}
-	if projectIds == nil {
-		if p := q.Get("project_id"); p != "" {
-			id, ok := parseUUIDOrBadRequest(w, p, "project_id")
-			if !ok {
-				return
-			}
-			projectIds = []pgtype.UUID{id}
+	var projectFilter pgtype.UUID
+	if p := r.URL.Query().Get("project_id"); p != "" {
+		id, ok := parseUUIDOrBadRequest(w, p, "project_id")
+		if !ok {
+			return
 		}
+		projectFilter = id
 	}
-	labelIds, ok := parseUUIDSliceOrBadRequest(w, splitCSV(q.Get("label_ids")), "label_ids")
-	if !ok {
-		return
-	}
-	includeNoAssignee := pgtype.Bool{Bool: q.Get("include_no_assignee") == "true", Valid: true}
-	includeNoProject := pgtype.Bool{Bool: q.Get("include_no_project") == "true", Valid: true}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
-	if q.Get("open_only") == "true" {
+	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:       wsUUID,
-			Priorities:        priorities,
-			AssigneeTypes:     assigneeTypes,
-			AssigneeIds:       assigneeIds,
-			IncludeNoAssignee: includeNoAssignee,
-			CreatorIds:        creatorIds,
-			ProjectIds:        projectIds,
-			IncludeNoProject:  includeNoProject,
-			LabelIds:          labelIds,
+			WorkspaceID: wsUUID,
+			Priority:    priorityFilter,
+			AssigneeID:  assigneeFilter,
+			AssigneeIds: assigneeIdsFilter,
+			CreatorID:   creatorFilter,
+			ProjectID:   projectFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -709,35 +690,32 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	limit := 100
 	offset := 0
-	if l := q.Get("limit"); l != "" {
+	if l := r.URL.Query().Get("limit"); l != "" {
 		if v, err := strconv.Atoi(l); err == nil {
 			limit = v
 		}
 	}
-	if o := q.Get("offset"); o != "" {
+	if o := r.URL.Query().Get("offset"); o != "" {
 		if v, err := strconv.Atoi(o); err == nil {
 			offset = v
 		}
 	}
 
 	var statusFilter pgtype.Text
-	if s := q.Get("status"); s != "" {
+	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:       wsUUID,
-		Limit:             int32(limit),
-		Offset:            int32(offset),
-		Status:            statusFilter,
-		Priorities:        priorities,
-		AssigneeTypes:     assigneeTypes,
-		AssigneeIds:       assigneeIds,
-		IncludeNoAssignee: includeNoAssignee,
-		CreatorIds:        creatorIds,
-		ProjectIds:        projectIds,
-		IncludeNoProject:  includeNoProject,
-		LabelIds:          labelIds,
+		WorkspaceID: wsUUID,
+		Limit:       int32(limit),
+		Offset:      int32(offset),
+		Status:      statusFilter,
+		Priority:    priorityFilter,
+		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -746,16 +724,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID:       wsUUID,
-		Status:            statusFilter,
-		Priorities:        priorities,
-		AssigneeTypes:     assigneeTypes,
-		AssigneeIds:       assigneeIds,
-		IncludeNoAssignee: includeNoAssignee,
-		CreatorIds:        creatorIds,
-		ProjectIds:        projectIds,
-		IncludeNoProject:  includeNoProject,
-		LabelIds:          labelIds,
+		WorkspaceID: wsUUID,
+		Status:      statusFilter,
+		Priority:    priorityFilter,
+		AssigneeID:  assigneeFilter,
+		AssigneeIds: assigneeIdsFilter,
+		CreatorID:   creatorFilter,
+		ProjectID:   projectFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))

@@ -363,14 +363,11 @@ export class ApiClient {
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.status) search.set("status", params.status);
-    if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
-    if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
+    if (params?.priority) search.set("priority", params.priority);
+    if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
-    if (params?.include_no_assignee) search.set("include_no_assignee", "true");
-    if (params?.creator_ids?.length) search.set("creator_ids", params.creator_ids.join(","));
-    if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
-    if (params?.include_no_project) search.set("include_no_project", "true");
-    if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
+    if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.open_only) search.set("open_only", "true");
     return this.fetch(`/api/issues?${search}`);
   }

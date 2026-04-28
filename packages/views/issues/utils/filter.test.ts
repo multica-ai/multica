@@ -1,93 +1,164 @@
 import { describe, it, expect } from "vitest";
-import { buildIssueListFilter, type IssueViewFilters } from "./filter";
+import type { Issue } from "@multica/core/types";
+import { filterIssues, type IssueFilters } from "./filter";
 
-const NO_FILTER: IssueViewFilters = {
+const NO_FILTER: IssueFilters = {
+  statusFilters: [],
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
-  labelFilters: [],
 };
 
-describe("buildIssueListFilter", () => {
-  it("returns an empty object when nothing is selected", () => {
-    expect(buildIssueListFilter(NO_FILTER)).toEqual({});
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    id: "i-1",
+    workspace_id: "ws-1",
+    number: 1,
+    identifier: "MUL-1",
+    title: "Test",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "u-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    due_date: null,
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+const issues: Issue[] = [
+  makeIssue({ id: "1", status: "todo", priority: "high", assignee_type: "member", assignee_id: "u-1", creator_type: "member", creator_id: "u-1", project_id: "p-1" }),
+  makeIssue({ id: "2", status: "in_progress", priority: "medium", assignee_type: "agent", assignee_id: "a-1", creator_type: "agent", creator_id: "a-1", project_id: "p-2" }),
+  makeIssue({ id: "3", status: "done", priority: "low", assignee_type: null, assignee_id: null, creator_type: "member", creator_id: "u-2", project_id: null }),
+  makeIssue({ id: "4", status: "todo", priority: "urgent", assignee_type: "member", assignee_id: "u-2", creator_type: "member", creator_id: "u-1", project_id: "p-1" }),
+];
+
+describe("filterIssues", () => {
+  it("returns all issues when no filters are active", () => {
+    expect(filterIssues(issues, NO_FILTER)).toHaveLength(4);
   });
 
-  it("encodes priority filter as an array", () => {
-    expect(
-      buildIssueListFilter({ ...NO_FILTER, priorityFilters: ["high", "urgent"] }),
-    ).toEqual({ priorities: ["high", "urgent"] });
+  // --- Status ---
+  it("filters by status", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, statusFilters: ["todo"] });
+    expect(result.map((i) => i.id)).toEqual(["1", "4"]);
   });
 
-  it("encodes assignee filters as id-only arrays", () => {
-    expect(
-      buildIssueListFilter({
-        ...NO_FILTER,
-        assigneeFilters: [
-          { type: "member", id: "u-1" },
-          { type: "agent", id: "a-1" },
-        ],
-      }),
-    ).toEqual({ assignee_ids: ["u-1", "a-1"] });
+  // --- Priority ---
+  it("filters by priority", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, priorityFilters: ["high", "urgent"] });
+    expect(result.map((i) => i.id)).toEqual(["1", "4"]);
   });
 
-  it("encodes 'no assignee' as include_no_assignee", () => {
-    expect(buildIssueListFilter({ ...NO_FILTER, includeNoAssignee: true })).toEqual({
-      include_no_assignee: true,
+  // --- Assignee ---
+  it("filters by specific assignee", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilters: [{ type: "member", id: "u-1" }],
     });
+    expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 
-  it("combines assignee ids with the no-assignee toggle", () => {
-    expect(
-      buildIssueListFilter({
-        ...NO_FILTER,
-        assigneeFilters: [{ type: "member", id: "u-1" }],
-        includeNoAssignee: true,
-      }),
-    ).toEqual({ assignee_ids: ["u-1"], include_no_assignee: true });
+  it("filters by 'No assignee' only", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
+    expect(result.map((i) => i.id)).toEqual(["3"]);
   });
 
-  it("encodes creator and project filters", () => {
-    expect(
-      buildIssueListFilter({
-        ...NO_FILTER,
-        creatorFilters: [{ type: "member", id: "u-2" }],
-        projectFilters: ["p-1", "p-2"],
-        includeNoProject: true,
-      }),
-    ).toEqual({
-      creator_ids: ["u-2"],
-      project_ids: ["p-1", "p-2"],
-      include_no_project: true,
+  it("filters by assignee + No assignee combined", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilters: [{ type: "agent", id: "a-1" }],
+      includeNoAssignee: true,
     });
+    expect(result.map((i) => i.id)).toEqual(["2", "3"]);
   });
 
-  it("encodes label filters", () => {
-    expect(
-      buildIssueListFilter({ ...NO_FILTER, labelFilters: ["l-1", "l-2"] }),
-    ).toEqual({ label_ids: ["l-1", "l-2"] });
+  it("hides assigned issues when only 'No assignee' is selected", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, includeNoAssignee: true });
+    expect(result.every((i) => !i.assignee_id)).toBe(true);
   });
 
-  it("combines every filter dimension", () => {
-    expect(
-      buildIssueListFilter({
-        priorityFilters: ["high"],
-        assigneeFilters: [{ type: "member", id: "u-1" }],
-        includeNoAssignee: false,
-        creatorFilters: [{ type: "agent", id: "a-1" }],
-        projectFilters: ["p-1"],
-        includeNoProject: false,
-        labelFilters: ["l-1"],
-      }),
-    ).toEqual({
-      priorities: ["high"],
-      assignee_ids: ["u-1"],
-      creator_ids: ["a-1"],
-      project_ids: ["p-1"],
-      label_ids: ["l-1"],
+  // --- Creator ---
+  it("filters by creator", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      creatorFilters: [{ type: "agent", id: "a-1" }],
     });
+    expect(result.map((i) => i.id)).toEqual(["2"]);
+  });
+
+  // --- Combinations ---
+  it("applies status + assignee filters together", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      assigneeFilters: [{ type: "member", id: "u-1" }],
+    });
+    expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  it("applies status + priority + creator filters together", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      priorityFilters: ["urgent"],
+      creatorFilters: [{ type: "member", id: "u-1" }],
+    });
+    expect(result.map((i) => i.id)).toEqual(["4"]);
+  });
+
+  // --- Project ---
+  it("filters by specific project", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      projectFilters: ["p-1"],
+    });
+    expect(result.map((i) => i.id)).toEqual(["1", "4"]);
+  });
+
+  it("filters by multiple projects", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      projectFilters: ["p-1", "p-2"],
+    });
+    expect(result.map((i) => i.id)).toEqual(["1", "2", "4"]);
+  });
+
+  it("filters by 'No project' only", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, includeNoProject: true });
+    expect(result.map((i) => i.id)).toEqual(["3"]);
+  });
+
+  it("filters by project + No project combined", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      projectFilters: ["p-2"],
+      includeNoProject: true,
+    });
+    expect(result.map((i) => i.id)).toEqual(["2", "3"]);
+  });
+
+  it("hides project issues when only 'No project' is selected", () => {
+    const result = filterIssues(issues, { ...NO_FILTER, includeNoProject: true });
+    expect(result.every((i) => !i.project_id)).toBe(true);
+  });
+
+  it("applies status + project filters together", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      projectFilters: ["p-1"],
+    });
+    expect(result.map((i) => i.id)).toEqual(["1", "4"]);
   });
 });

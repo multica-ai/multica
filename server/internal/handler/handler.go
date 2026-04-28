@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -154,14 +153,7 @@ func parseUUIDOrBadRequest(w http.ResponseWriter, s, fieldName string) (pgtype.U
 	return u, true
 }
 
-// parseUUIDSliceOrBadRequest mirrors parseUUIDOrBadRequest for slice inputs.
-// An empty input slice returns nil (not a zero-length slice) so callers can
-// distinguish "not provided" from "explicitly empty" — both look the same on
-// the wire, but the SQL-layer narg check expects NULL for "no filter".
 func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName string) ([]pgtype.UUID, bool) {
-	if len(ids) == 0 {
-		return nil, true
-	}
 	uuids := make([]pgtype.UUID, len(ids))
 	for i, id := range ids {
 		u, err := util.ParseUUID(id)
@@ -172,26 +164,6 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
-}
-
-// splitCSV parses a comma-separated query-string value into a slice, trimming
-// whitespace and dropping empty entries. Returns nil for an empty input so
-// callers can distinguish "absent" from "present but empty".
-func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // publish sends a domain event through the event bus.

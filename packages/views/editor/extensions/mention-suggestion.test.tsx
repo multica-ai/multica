@@ -26,40 +26,20 @@ function fakeQc(data: {
   agents?: Array<{ id: string; name: string; archived_at: string | null }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
-  const map = new Map<string, { key: readonly unknown[]; data: unknown }>();
-  map.set(JSON.stringify(workspaceKeys.members("ws-1")), {
-    key: workspaceKeys.members("ws-1"),
-    data: data.members ?? [],
-  });
-  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), {
-    key: workspaceKeys.agents("ws-1"),
-    data: data.agents ?? [],
-  });
+  const map = new Map<string, unknown>();
+  map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
+  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
     byStatus[status as IssueStatus] = { issues: bucket as never, total: bucket.length };
   }
-  const listKey = issueKeys.list("ws-1");
-  map.set(JSON.stringify(listKey), {
-    key: listKey,
-    data: { byStatus } satisfies ListIssuesCache,
-  });
+  map.set(
+    JSON.stringify(issueKeys.list("ws-1")),
+    { byStatus } satisfies ListIssuesCache,
+  );
   return {
-    getQueryData: (key: readonly unknown[]) =>
-      map.get(JSON.stringify(key))?.data,
-    // Prefix-match implementation: any cached key whose prefix equals the
-    // filter's queryKey is returned. Mirrors TanStack's behavior closely
-    // enough for our cache-read paths.
-    getQueriesData: ({ queryKey }: { queryKey: readonly unknown[] }) => {
-      const prefix = JSON.stringify(queryKey);
-      const trimmed = prefix.slice(0, -1); // strip trailing ']'
-      const out: Array<readonly [readonly unknown[], unknown]> = [];
-      for (const [k, entry] of map.entries()) {
-        if (k.startsWith(trimmed)) out.push([entry.key, entry.data] as const);
-      }
-      return out;
-    },
+    getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
   } as unknown as QueryClient;
 }
 

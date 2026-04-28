@@ -11,6 +11,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useQuery } from "@tanstack/react-query";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { filterIssues } from "../../issues/utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -54,38 +55,36 @@ export function MyIssuesPage() {
 
   const filter: MyIssuesFilter = useMemo(() => {
     if (!user) return {};
-    // Server-side filtering — priority filters are added so paginated buckets
-    // reflect the user's selection even when matches sit past the first page.
-    // Status filtering stays client-side via `visibleStatuses`: each status
-    // bucket is fetched independently anyway, so hiding columns is a render
-    // concern, not a data-fetching one.
-    const base: MyIssuesFilter =
-      priorityFilters.length > 0 ? { priorities: [...priorityFilters] } : {};
     switch (scope) {
       case "assigned":
-        return { ...base, assignee_ids: [user.id] };
+        return { assignee_id: user.id };
       case "created":
-        return { ...base, creator_ids: [user.id] };
+        return { creator_id: user.id };
       case "agents":
-        return { ...base, assignee_ids: myAgentIds };
+        return { assignee_ids: myAgentIds };
       default:
-        return { ...base, assignee_ids: [user.id] };
+        return { assignee_id: user.id };
     }
-  }, [scope, user, myAgentIds, priorityFilters]);
+  }, [scope, user, myAgentIds]);
 
-  // The "My Agents" tab is empty by definition when the user owns no agents.
-  // Without this guard the filter would resolve to `assignee_ids: []`, which
-  // the API client and query-key normalizer drop as falsy — the request would
-  // then go out unfiltered and surface other people's issues under "My Agents".
-  const myAgentsEmpty = scope === "agents" && myAgentIds.length === 0;
-  const { data: myIssues = [], isLoading: loading } = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
-    enabled: !myAgentsEmpty,
-  });
-  // Server-side filtering means `myIssues` already reflects the active scope
-  // + priority filter; rendering this directly avoids the pagination bug
-  // that the old client-side `filterIssues` step caused.
-  const issues = myIssues;
+  const { data: myIssues = [], isLoading: loading } = useQuery(
+    myIssueListOptions(wsId, scope, filter),
+  );
+
+  // Apply status/priority filters from view store
+  const issues = useMemo(
+    () =>
+      filterIssues(myIssues, {
+        statusFilters,
+        priorityFilters,
+        assigneeFilters: [],
+        includeNoAssignee: false,
+        creatorFilters: [],
+        projectFilters: [],
+        includeNoProject: false,
+      }),
+    [myIssues, statusFilters, priorityFilters],
+  );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
