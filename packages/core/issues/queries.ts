@@ -22,6 +22,9 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
+  taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
+  taskMessages: (taskId: string) => ["tasks", "messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
@@ -148,5 +151,29 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueAttachmentsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attachments(issueId),
+    queryFn: () => api.listAttachments(issueId),
+    enabled: !!issueId,
+  });
+}
+
+export function issueTaskRunsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskRuns(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    enabled: !!issueId,
+  });
+}
+
+export function taskMessagesOptions(taskId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskMessages(taskId),
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: !!taskId,
   });
 }

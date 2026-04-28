@@ -9,13 +9,30 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 export function Screen({
   children,
   padded = true,
-}: PropsWithChildren<{ padded?: boolean }>) {
-  return <View style={[styles.screen, padded && styles.padded]}>{children}</View>;
+  safeArea = true,
+}: PropsWithChildren<{ padded?: boolean; safeArea?: boolean }>) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      style={[
+        styles.screen,
+        safeArea && {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+        },
+        padded && styles.padded,
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
 export function Heading({ children }: PropsWithChildren) {
@@ -117,8 +134,12 @@ export const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     color: colors.foreground,
     fontSize: 16,
-    minHeight: 48,
+    height: 48,
+    includeFontPadding: false,
+    lineHeight: 22,
     paddingHorizontal: spacing.md,
+    paddingVertical: 0,
+    textAlignVertical: "center",
   },
   button: {
     alignItems: "center",

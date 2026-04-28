@@ -21,6 +21,8 @@
     "@tanstack/react-query": "catalog:",
     "expo": "^55.0.17",
     "expo-constants": "^55.0.15",
+    "expo-document-picker": "^55.0.13",
+    "expo-image-picker": "^55.0.19",
     "expo-linking": "^55.0.14",
     "expo-notifications": "^55.0.20",
     "expo-router": "~55.0.13",

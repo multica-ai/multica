@@ -1,7 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { useAuthStore } from "@multica/core/auth";
 import { Button, Screen } from "../../components/ui/primitives";
-import { WorkspaceHeader } from "../../components/ui/workspace-header";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 export function MineScreen() {
@@ -10,7 +9,6 @@ export function MineScreen() {
 
   return (
     <Screen>
-      <WorkspaceHeader title="Mine" />
       <View style={styles.card}>
         <Text style={styles.name}>{user?.name || user?.email}</Text>
         <Text style={styles.email}>{user?.email}</Text>

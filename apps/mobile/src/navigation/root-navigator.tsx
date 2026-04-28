@@ -9,10 +9,13 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuthStore } from "@multica/core/auth";
 import { setCurrentWorkspace } from "@multica/core/platform";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
 import type { Workspace } from "@multica/core/types";
 import { EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
+import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
+import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
 import { ProjectsScreen } from "../screens/projects/projects-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
@@ -23,6 +26,7 @@ import { WorkspaceContext } from "./workspace-context";
 export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
+  CreateIssue: undefined;
   ProjectDetail: { projectId: string };
   Search: undefined;
 };
@@ -63,6 +67,7 @@ export function RootNavigator() {
           >
             <Stack.Screen component={MainTabs} name="Main" />
             <Stack.Screen component={IssueDetailScreen} name="IssueDetail" />
+            <Stack.Screen component={CreateIssueScreen} name="CreateIssue" />
             <Stack.Screen component={ProjectDetailScreen} name="ProjectDetail" />
             <Stack.Screen component={SearchScreen} name="Search" />
           </Stack.Navigator>
@@ -89,9 +94,11 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
   if (!workspace) return <EmptyState title="No workspaces available" />;
 
   return (
-    <WorkspaceContext.Provider value={{ workspace, setWorkspace }}>
-      {children}
-    </WorkspaceContext.Provider>
+    <WorkspaceSlugProvider slug={workspace.slug}>
+      <WorkspaceContext.Provider value={{ workspace, setWorkspace }}>
+        {children}
+      </WorkspaceContext.Provider>
+    </WorkspaceSlugProvider>
   );
 }
 
@@ -110,15 +117,6 @@ function MainTabs() {
       <Tabs.Screen component={ProjectsScreen} name="Projects" />
       <Tabs.Screen component={MineScreen} name="Mine" />
     </Tabs.Navigator>
-  );
-}
-
-function IssueDetailScreen() {
-  return (
-    <Screen>
-      <Text style={styles.title}>Issue detail</Text>
-      <Text style={styles.muted}>Detail, comments, attachments, reactions, child issues, and transcript views are the next implementation slice.</Text>
-    </Screen>
   );
 }
 

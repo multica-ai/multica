@@ -7,7 +7,13 @@ import { Button } from "./primitives";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
 
-export function WorkspaceHeader({ title }: { title: string }) {
+export function WorkspaceHeader({
+  centered = false,
+  title,
+}: {
+  centered?: boolean;
+  title?: string;
+}) {
   const { workspace, setWorkspace } = useMobileWorkspace();
   const { data: workspaces = [] } = useWorkspaceList();
   const [open, setOpen] = useState(false);
@@ -18,10 +24,48 @@ export function WorkspaceHeader({ title }: { title: string }) {
     setOpen(false);
   }
 
+  if (centered) {
+    return (
+      <View style={styles.centeredHeader}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setOpen((value) => !value)}
+          style={styles.centeredTitleButton}
+        >
+          <Text numberOfLines={1} style={styles.centeredWorkspace}>
+            {workspace.name}
+          </Text>
+          <Text style={styles.chevron}>{open ? "⌃" : "⌄"}</Text>
+        </Pressable>
+        {open ? (
+          <View style={styles.dropdown}>
+            {workspaces.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => selectWorkspace(item)}
+                style={[
+                  styles.dropdownRow,
+                  item.id === workspace.id && styles.dropdownRowActive,
+                ]}
+              >
+                <Text numberOfLines={1} style={styles.dropdownName}>
+                  {item.name}
+                </Text>
+                <Text numberOfLines={1} style={styles.dropdownSlug}>
+                  {item.slug}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.header}>
       <View style={styles.titleGroup}>
-        <Text style={styles.title}>{title}</Text>
+        {title ? <Text style={styles.title}>{title}</Text> : null}
         <Pressable onPress={() => setOpen(true)}>
           <Text style={styles.workspace}>{workspace.name}</Text>
         </Pressable>
@@ -56,6 +100,62 @@ export function WorkspaceHeader({ title }: { title: string }) {
 const styles = StyleSheet.create({
   header: {
     paddingBottom: spacing.md,
+  },
+  centeredHeader: {
+    alignItems: "center",
+    flex: 1,
+    position: "relative",
+    zIndex: 20,
+  },
+  centeredTitleButton: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: "58%",
+    minHeight: 44,
+  },
+  centeredWorkspace: {
+    color: colors.foreground,
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  chevron: {
+    color: colors.mutedForeground,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  dropdown: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minWidth: 220,
+    paddingVertical: spacing.xs,
+    position: "absolute",
+    top: 46,
+    shadowColor: "#000000",
+    shadowOffset: { height: 4, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  dropdownRow: {
+    gap: spacing.xs,
+    minHeight: 50,
+    justifyContent: "center",
+    paddingHorizontal: spacing.md,
+  },
+  dropdownRowActive: {
+    backgroundColor: colors.muted,
+  },
+  dropdownName: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  dropdownSlug: {
+    color: colors.mutedForeground,
+    fontSize: 12,
   },
   titleGroup: {
     gap: spacing.xs,

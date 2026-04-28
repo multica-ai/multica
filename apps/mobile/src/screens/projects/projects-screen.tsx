@@ -12,7 +12,9 @@ export function ProjectsScreen() {
 
   return (
     <Screen>
-      <WorkspaceHeader title="Projects" />
+      <View style={styles.headerRow}>
+        <WorkspaceHeader centered />
+      </View>
       {isLoading ? <LoadingState /> : null}
       {isError ? <EmptyState title="Unable to load projects" /> : null}
       {!isLoading && !isError ? (
@@ -48,6 +50,14 @@ function ProjectCard({ project }: { project: Project }) {
 }
 
 const styles = StyleSheet.create({
+  headerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
+    minHeight: 44,
+    position: "relative",
+    zIndex: 20,
+  },
   list: {
     gap: spacing.sm,
     paddingBottom: spacing.xl,
