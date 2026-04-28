@@ -56,9 +56,23 @@ type Daemon struct {
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 }
 
+// repoCacheRoot returns the bare-clone cache directory for the daemon. It is
+// per-profile so two daemons running side-by-side (e.g. Desktop's
+// profile=desktop-<host> daemon + a user-managed CLI daemon on the default
+// profile) don't fight over git lockfiles in the same `.git/`.
+// repocache.repoLocks is process-local and would not protect concurrent
+// fetch/worktree-add across processes if they shared a path.
+func repoCacheRoot(cfg Config) string {
+	dir := ".repos"
+	if cfg.Profile != "" {
+		dir = ".repos-" + cfg.Profile
+	}
+	return filepath.Join(cfg.WorkspacesRoot, dir)
+}
+
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
-	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	cacheRoot := repoCacheRoot(cfg)
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).

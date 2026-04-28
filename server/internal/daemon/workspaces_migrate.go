@@ -51,7 +51,7 @@ func MigrateLegacyWorkspacesRoot(cfg Config, logger *slog.Logger) {
 		return
 	}
 
-	if err := migrateWorkspacesRoot(legacyRoot, defaultRoot); err != nil {
+	if err := migrateWorkspacesRoot(legacyRoot, defaultRoot, cfg.Profile); err != nil {
 		logger.Warn("migrate legacy workspaces root failed; legacy dir kept in place",
 			"legacy", legacyRoot, "target", defaultRoot, "error", err)
 		return
@@ -65,22 +65,32 @@ func MigrateLegacyWorkspacesRoot(cfg Config, logger *slog.Logger) {
 // The on-disk layout is `<root>/<workspace_id>/<task_short>/...`, so when a
 // `<workspace_id>` directory already exists at the target (because Web/CLI
 // has run a task there) we still want to relocate the per-task subdirs from
-// the legacy `<workspace_id>` rather than abandon them. The walk therefore
-// merges one level deep:
+// the legacy `<workspace_id>` rather than abandon them. The walk merges one
+// level deep for workspace_id-shaped entries.
+//
+// The legacy `.repos` bare-clone cache gets special treatment: it is renamed
+// to `.repos-<profile>` at the target. Two profiled daemons must not share a
+// single `.repos/` (repocache.repoLocks is process-local and won't protect
+// concurrent git mutations across processes).
 //
 //   - If the legacy entry name does not exist at the target, the whole entry
-//     is renamed in one syscall (fast path; covers fresh workspaces and the
-//     `.repos` cache).
+//     is renamed in one syscall (fast path; covers fresh workspaces).
+//   - For `.repos`, the rename target is always `.repos-<profile>` regardless
+//     of whether `.repos` already exists at the target — they belong to
+//     different daemons. If `.repos-<profile>` already exists at the target,
+//     the legacy `.repos` is left in place (we don't overwrite a previously
+//     migrated cache).
 //   - Otherwise, if both sides are directories AND the entry name does not
-//     start with `.` (i.e. it looks like a workspace_id, not a hidden file
-//     like `.repos`), recurse and rename each task_short subdir whose name
-//     is free at the target. Conflicting task_short subdirs stay in legacy
-//     for manual reconciliation.
-//   - Other conflicts (file vs dir, dotfiles, non-dirs) are left untouched.
+//     start with `.` (i.e. it looks like a workspace_id, not a hidden file),
+//     recurse and rename each task_short subdir whose name is free at the
+//     target. Conflicting task_short subdirs stay in legacy for manual
+//     reconciliation.
+//   - Other conflicts (file vs dir, non-`.repos` dotfiles, non-dirs) are
+//     left untouched.
 //
 // If, after the pass, legacyRoot is empty, it is removed; otherwise it stays
 // so the user can reconcile leftovers.
-func migrateWorkspacesRoot(legacyRoot, targetRoot string) error {
+func migrateWorkspacesRoot(legacyRoot, targetRoot, profile string) error {
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
 		return fmt.Errorf("ensure target root: %w", err)
 	}
@@ -99,8 +109,26 @@ func migrateWorkspacesRoot(legacyRoot, targetRoot string) error {
 
 	for _, e := range entries {
 		src := filepath.Join(legacyRoot, e.Name())
-		dst := filepath.Join(targetRoot, e.Name())
 
+		// Special-case the bare-repo cache: relocate to a per-profile path so
+		// the unified workspaces root doesn't put two daemons on the same
+		// .git/.
+		if e.Name() == ".repos" && profile != "" {
+			dst := filepath.Join(targetRoot, ".repos-"+profile)
+			if _, err := os.Lstat(dst); err == nil {
+				// Already migrated — leave legacy in place.
+				continue
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				recordErr(fmt.Errorf("stat target %s: %w", dst, err))
+				continue
+			}
+			if err := os.Rename(src, dst); err != nil {
+				recordErr(fmt.Errorf("rename %s -> %s: %w", src, dst, err))
+			}
+			continue
+		}
+
+		dst := filepath.Join(targetRoot, e.Name())
 		dstInfo, err := os.Lstat(dst)
 		if errors.Is(err, fs.ErrNotExist) {
 			if err := os.Rename(src, dst); err != nil {
@@ -114,7 +142,7 @@ func migrateWorkspacesRoot(legacyRoot, targetRoot string) error {
 		}
 
 		// Only merge into existing workspace_id-shaped dirs (skip dotfiles
-		// like `.repos` to avoid stomping shared cache state).
+		// to avoid stomping shared cache state).
 		if !e.IsDir() || !dstInfo.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}

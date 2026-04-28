@@ -56,8 +56,8 @@ func TestMigrateLegacyWorkspacesRoot_MovesContentsAndRemovesLegacyDir(t *testing
 	if b, err := os.ReadFile(moved); err != nil || string(b) != "hello" {
 		t.Fatalf("expected moved file with content 'hello', got %q err=%v", string(b), err)
 	}
-	if _, err := os.Stat(filepath.Join(target, ".repos", "github.com", "foo", "bar", "HEAD")); err != nil {
-		t.Fatalf("expected .repos cache to be moved, got err=%v", err)
+	if _, err := os.Stat(filepath.Join(target, ".repos-"+profile, "github.com", "foo", "bar", "HEAD")); err != nil {
+		t.Fatalf("expected legacy .repos to be relocated to .repos-<profile>, got err=%v", err)
 	}
 }
 
@@ -210,15 +210,17 @@ func TestMigrateLegacyWorkspacesRoot_PreservesConflictingTaskShort(t *testing.T)
 	}
 }
 
-func TestMigrateLegacyWorkspacesRoot_LeavesDotfileConflictAlone(t *testing.T) {
+func TestMigrateLegacyWorkspacesRoot_RelocatesReposNextToExistingTargetCache(t *testing.T) {
 	home := withFakeHome(t)
 	profile := "desktop-foo"
 
 	legacy := filepath.Join(home, "multica_workspaces_"+profile)
 	target := filepath.Join(home, "multica_workspaces")
 
-	// Both have a `.repos` cache. Don't merge into existing cache (just
-	// leave the legacy copy; the daemon will lazily repopulate target).
+	// Both daemons have populated bare-repo caches. Each must keep its own.
+	// Legacy `.repos` belongs to the profiled daemon and is relocated to
+	// `.repos-<profile>`; the default-profile daemon's existing `.repos` at
+	// the target stays untouched.
 	mustWriteFile(t, filepath.Join(legacy, ".repos", "github.com", "foo", "HEAD"), "legacy")
 	mustWriteFile(t, filepath.Join(target, ".repos", "github.com", "bar", "HEAD"), "target")
 
@@ -228,13 +230,70 @@ func TestMigrateLegacyWorkspacesRoot_LeavesDotfileConflictAlone(t *testing.T) {
 	}
 	MigrateLegacyWorkspacesRoot(cfg, newSilentLogger())
 
-	if _, err := os.Stat(filepath.Join(legacy, ".repos", "github.com", "foo", "HEAD")); err != nil {
-		t.Fatalf("legacy dotfile dir should be left in place when target dotfile exists: %v", err)
+	if _, err := os.Stat(filepath.Join(target, ".repos-"+profile, "github.com", "foo", "HEAD")); err != nil {
+		t.Fatalf("legacy .repos should land at .repos-<profile>, got err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(target, ".repos", "github.com", "bar", "HEAD")); err != nil {
-		t.Fatalf("target dotfile dir should be untouched: %v", err)
+		t.Fatalf("default-profile .repos should be untouched, got err=%v", err)
 	}
+	// Target's default .repos must not have absorbed any legacy entries.
 	if _, err := os.Stat(filepath.Join(target, ".repos", "github.com", "foo")); !os.IsNotExist(err) {
-		t.Fatalf("target dotfile dir should not be merged into, err=%v", err)
+		t.Fatalf("legacy entries must not leak into target .repos, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, ".repos")); !os.IsNotExist(err) {
+		t.Fatalf("legacy .repos should be moved, err=%v", err)
+	}
+}
+
+func TestRepoCacheRoot_PerProfile(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     Config
+		wantDir string
+	}{
+		{
+			name:    "default profile",
+			cfg:     Config{WorkspacesRoot: "/ws", Profile: ""},
+			wantDir: filepath.Join("/ws", ".repos"),
+		},
+		{
+			name:    "named profile",
+			cfg:     Config{WorkspacesRoot: "/ws", Profile: "desktop-api.multica.ai"},
+			wantDir: filepath.Join("/ws", ".repos-desktop-api.multica.ai"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := repoCacheRoot(tc.cfg); got != tc.wantDir {
+				t.Fatalf("repoCacheRoot = %q, want %q", got, tc.wantDir)
+			}
+		})
+	}
+}
+
+func TestMigrateLegacyWorkspacesRoot_DoesNotOverwriteExistingPerProfileRepos(t *testing.T) {
+	home := withFakeHome(t)
+	profile := "desktop-foo"
+
+	legacy := filepath.Join(home, "multica_workspaces_"+profile)
+	target := filepath.Join(home, "multica_workspaces")
+
+	// A previous migration already populated .repos-<profile>. The new
+	// migration must not clobber it; the residual legacy .repos stays put
+	// for manual reconciliation.
+	mustWriteFile(t, filepath.Join(legacy, ".repos", "github.com", "foo", "HEAD"), "legacy")
+	mustWriteFile(t, filepath.Join(target, ".repos-"+profile, "github.com", "old", "HEAD"), "already-migrated")
+
+	cfg := Config{
+		Profile:        profile,
+		WorkspacesRoot: target,
+	}
+	MigrateLegacyWorkspacesRoot(cfg, newSilentLogger())
+
+	if b, err := os.ReadFile(filepath.Join(target, ".repos-"+profile, "github.com", "old", "HEAD")); err != nil || string(b) != "already-migrated" {
+		t.Fatalf("existing per-profile cache must be preserved, got %q err=%v", string(b), err)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, ".repos", "github.com", "foo", "HEAD")); err != nil {
+		t.Fatalf("legacy .repos should remain when per-profile cache already exists, err=%v", err)
 	}
 }
