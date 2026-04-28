@@ -13,6 +13,7 @@ import {
   Settings,
   KeyRound,
   Terminal,
+  Copy,
 } from "lucide-react";
 import type { Agent, RuntimeDevice, MemberWithUser } from "@multica/core/types";
 import {
@@ -28,6 +29,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -60,6 +62,7 @@ export function AgentDetail({
   members,
   currentUserId,
   onUpdate,
+  onDuplicate,
   onArchive,
   onRestore,
 }: {
@@ -68,6 +71,7 @@ export function AgentDetail({
   members: MemberWithUser[];
   currentUserId: string | null;
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
+  onDuplicate: (id: string) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
 }) {
@@ -75,7 +79,17 @@ export function AgentDetail({
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const isArchived = !!agent.archived_at;
+
+  const handleDuplicate = async () => {
+    setDuplicating(true);
+    try {
+      await onDuplicate(agent.id);
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -116,26 +130,36 @@ export function AgentDetail({
             </span>
           </div>
         </div>
-        {!isArchived && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" />
-              }
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="icon-sm" />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem
+              disabled={duplicating}
+              onClick={handleDuplicate}
             >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => setConfirmArchive(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Archive Agent
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+              <Copy className="h-3.5 w-3.5" />
+              {duplicating ? "Duplicating..." : "Duplicate Agent"}
+            </DropdownMenuItem>
+            {!isArchived && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => setConfirmArchive(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Archive Agent
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Tabs */}

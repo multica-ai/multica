@@ -68,6 +68,18 @@ export function AgentsPage() {
     }
   };
 
+  const handleDuplicate = async (id: string) => {
+    try {
+      const agent = await api.duplicateAgent(id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      setShowArchived(false);
+      setSelectedId(agent.id);
+      toast.success(`Duplicated agent "${agent.name}"`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to duplicate agent");
+    }
+  };
+
   const handleArchive = async (id: string) => {
     try {
       await api.archiveAgent(id);
@@ -206,6 +218,7 @@ export function AgentsPage() {
             members={members}
             currentUserId={currentUser?.id ?? null}
             onUpdate={handleUpdate}
+            onDuplicate={handleDuplicate}
             onArchive={handleArchive}
             onRestore={handleRestore}
           />
