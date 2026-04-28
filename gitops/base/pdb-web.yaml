@@ -1,0 +1,15 @@
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentfarm-web
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: agentfarm
+      component: web

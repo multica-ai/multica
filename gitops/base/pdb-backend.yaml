@@ -1,0 +1,15 @@
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentfarm-backend
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: backend
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: agentfarm
+      component: backend

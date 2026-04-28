@@ -8,7 +8,6 @@ metadata:
     app: agentfarm
     component: backend
 spec:
-  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:

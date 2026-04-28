@@ -26,6 +26,10 @@ resources:
   - pgvector-init-job.yaml
   - deployment-backend.yaml
   - deployment-web.yaml
+  - hpa-backend.yaml
+  - hpa-web.yaml
+  - pdb-backend.yaml
+  - pdb-web.yaml
   - service-backend.yaml
   - service-web.yaml
   - ingress.yaml
