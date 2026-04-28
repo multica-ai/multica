@@ -132,6 +132,30 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
+		return
+	}
+	item, err := h.Queries.MarkInboxUnread(r.Context(), parseUUID(id))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark unread")
+		return
+	}
+
+	// Re-publish as unread so other clients update cache
+	userID := requestUserID(r)
+	workspaceID := uuidToString(item.WorkspaceID)
+	h.publish(protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+		"read":         false,
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {

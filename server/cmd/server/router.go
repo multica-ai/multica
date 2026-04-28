@@ -425,15 +425,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
-				r.Get("/", h.ListInbox)
-				r.Get("/unread-count", h.CountUnreadInbox)
-				r.Post("/mark-all-read", h.MarkAllInboxRead)
-				r.Post("/archive-all", h.ArchiveAllInbox)
-				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
-				r.Post("/archive-completed", h.ArchiveCompletedInbox)
-				r.Post("/{id}/read", h.MarkInboxRead)
-				r.Post("/{id}/archive", h.ArchiveInboxItem)
-			})
+			r.Get("/", h.ListInbox)
+			r.Get("/unread-count", h.CountUnreadInbox)
+			r.Post("/mark-all-read", h.MarkAllInboxRead)
+			r.Post("/archive-all", h.ArchiveAllInbox)
+			r.Post("/archive-all-read", h.ArchiveAllReadInbox)
+			r.Post("/archive-completed", h.ArchiveCompletedInbox)
+			r.Post("/{id}/read", h.MarkInboxRead)
+			r.Post("/{id}/unread", h.MarkInboxUnread)
+			r.Post("/{id}/archive", h.ArchiveInboxItem)
+		})
 		})
 	})
 

@@ -27,6 +27,11 @@ UPDATE inbox_item SET read = true
 WHERE id = $1
 RETURNING *;
 
+-- name: MarkInboxUnread :one
+UPDATE inbox_item SET read = false
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
