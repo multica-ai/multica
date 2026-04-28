@@ -340,6 +340,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
 			"developerInstructions": nilIfEmpty(opts.SystemPrompt),
+			"compactPrompt":         nilIfEmpty(opts.SystemPrompt),
 		})
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -361,7 +362,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"config":                 nil,
 		"baseInstructions":       nil,
 		"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
-		"compactPrompt":          nil,
+		"compactPrompt":          nilIfEmpty(opts.SystemPrompt),
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": true,

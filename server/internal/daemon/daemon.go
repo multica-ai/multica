@@ -50,6 +50,10 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// backendFactory is overridable in tests so runTask can inject fakeBackends
+	// without requiring real agent binaries on PATH.
+	backendFactory func(agentType string, cfg agent.Config) (agent.Backend, error)
+
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
@@ -919,7 +923,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
-	provider := rt.Provider
+	provider := strings.ToLower(rt.Provider)
 
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
@@ -1048,6 +1052,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
 
+	provider = strings.ToLower(provider)
+
 	entry, ok := d.cfg.Agents[provider]
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -1075,6 +1081,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentInstructions:       instructions,
 		AgentSkills:             convertSkillsForEnv(skills),
 		Repos:                   convertReposForEnv(task.Repos),
+		DefaultRepoURL:          task.DefaultRepoURL,
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1160,11 +1167,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			agentEnv[k] = v
 		}
 	}
-	backend, err := agent.New(provider, agent.Config{
-		ExecutablePath: entry.Path,
-		Env:            agentEnv,
-		Logger:         d.logger,
-	})
+	var backend agent.Backend
+	var err error
+	if d.backendFactory != nil {
+		backend, err = d.backendFactory(provider, agent.Config{
+			ExecutablePath: entry.Path,
+			Env:            agentEnv,
+			Logger:         d.logger,
+		})
+	} else {
+		backend, err = agent.New(provider, agent.Config{
+			ExecutablePath: entry.Path,
+			Env:            agentEnv,
+			Logger:         d.logger,
+		})
+	}
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
@@ -1213,15 +1230,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
-	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
-	// workspace dir rather than the task workdir, so the AGENTS.md written by
-	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
-	// via SystemPrompt so the backend can prepend them to the --message payload.
-	// Other providers already surface instructions through their runtime config
-	// file and don't need this.
-	if provider == "openclaw" {
-		execOpts.SystemPrompt = instructions
-	}
+	// Pass agent instructions inline via SystemPrompt for all providers.
+	// Backends that support system prompts (Kimi, Hermes, Kiro, Claude,
+	// Codex, OpenClaw) will prepend or append them natively. File-only
+	// providers (Cursor, Copilot, Gemini, Pi, OpenCode) ignore SystemPrompt
+	// and continue to receive instructions via their runtime config file.
+	execOpts.SystemPrompt = instructions
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {

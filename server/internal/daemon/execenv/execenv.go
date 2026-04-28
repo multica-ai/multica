@@ -38,6 +38,7 @@ type TaskContextForEnv struct {
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
 	Repos                   []RepoContextForEnv // workspace repos available for checkout
+	DefaultRepoURL          string              // primary repository for the project's repo_url binding
 	ChatSessionID           string              // non-empty for chat tasks
 	AutopilotRunID          string              // non-empty for autopilot run_only tasks
 	AutopilotID             string
