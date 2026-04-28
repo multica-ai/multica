@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -49,6 +50,23 @@ func notificationDeliveriesForEvent(t *testing.T, queries *db.Queries, eventID s
 		t.Fatalf("ListNotificationDeliveriesByEvent: %v", err)
 	}
 	return items
+}
+
+func issueIdentifierForTest(t *testing.T, queries *db.Queries, issueID string) string {
+	t.Helper()
+
+	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	issue, err := queries.GetIssueInWorkspace(context.Background(), db.GetIssueInWorkspaceParams{
+		ID:          util.ParseUUID(issueID),
+		WorkspaceID: util.ParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetIssueInWorkspace: %v", err)
+	}
+	return fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
 }
 
 // cleanupInboxForIssue deletes all inbox items related to a given issue.
@@ -919,6 +937,15 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 	if len(snapshot.NotificationEvent) == 0 {
 		t.Fatal("expected nested notification_event payload in dingtalk snapshot")
 	}
+	var nested struct {
+		IssueIdentifier string `json:"issue_identifier"`
+	}
+	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
+		t.Fatalf("unmarshal nested notification_event: %v", err)
+	}
+	if expected := issueIdentifierForTest(t, queries, issueID); nested.IssueIdentifier != expected {
+		t.Fatalf("expected nested issue_identifier %q, got %q", expected, nested.IssueIdentifier)
+	}
 }
 
 func TestNotification_SelfMentionQueuesDingTalkDeliveryWhenEnabled(t *testing.T) {
@@ -987,5 +1014,21 @@ func TestNotification_SelfMentionQueuesDingTalkDeliveryWhenEnabled(t *testing.T)
 	}
 	if deliveries[1].Status != "pending" {
 		t.Fatalf("expected dingtalk delivery status 'pending', got %q", deliveries[1].Status)
+	}
+
+	var snapshot struct {
+		NotificationEvent json.RawMessage `json:"notification_event"`
+	}
+	if err := json.Unmarshal(deliveries[1].PayloadSnapshot, &snapshot); err != nil {
+		t.Fatalf("unmarshal dingtalk payload snapshot: %v", err)
+	}
+	var nested struct {
+		IssueIdentifier string `json:"issue_identifier"`
+	}
+	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
+		t.Fatalf("unmarshal nested notification_event: %v", err)
+	}
+	if expected := issueIdentifierForTest(t, queries, issueID); nested.IssueIdentifier != expected {
+		t.Fatalf("expected nested issue_identifier %q, got %q", expected, nested.IssueIdentifier)
 	}
 }

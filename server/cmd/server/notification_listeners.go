@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -69,8 +70,17 @@ func parseMentions(content string) []mention {
 }
 
 func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID string) string {
+	return buildNotificationContext(ctx, queries, workspaceID, issueID, commentID).Link
+}
+
+type notificationContext struct {
+	Link            string
+	IssueIdentifier string
+}
+
+func buildNotificationContext(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID string) notificationContext {
 	if workspaceID == "" || issueID == "" {
-		return ""
+		return notificationContext{}
 	}
 
 	workspace, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
@@ -81,14 +91,35 @@ func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID
 			"comment_id", commentID,
 			"error", err,
 		)
-		return ""
+		return notificationContext{}
+	}
+
+	identifier := ""
+	if issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(issueID),
+		WorkspaceID: parseUUID(workspaceID),
+	}); err == nil {
+		identifier = fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
+	} else {
+		slog.Error("failed to resolve issue identifier for notification",
+			"workspace_id", workspaceID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
 	}
 
 	baseURL := notifyutil.AppURL()
 	if commentID != "" {
-		return notifyutil.CommentURL(baseURL, workspace.Slug, issueID, commentID)
+		return notificationContext{
+			Link:            notifyutil.CommentURL(baseURL, workspace.Slug, issueID, commentID),
+			IssueIdentifier: identifier,
+		}
 	}
-	return notifyutil.IssueURL(baseURL, workspace.Slug, issueID)
+	return notificationContext{
+		Link:            notifyutil.IssueURL(baseURL, workspace.Slug, issueID),
+		IssueIdentifier: identifier,
+	}
 }
 
 func recordMentionNotification(
@@ -101,6 +132,7 @@ func recordMentionNotification(
 	title string,
 	body string,
 	link string,
+	issueIdentifier string,
 	details []byte,
 ) {
 	if len(details) == 0 {
@@ -108,14 +140,15 @@ func recordMentionNotification(
 	}
 
 	payloadSnapshot, err := json.Marshal(map[string]any{
-		"type":       "mentioned",
-		"severity":   "info",
-		"title":      title,
-		"body":       body,
-		"link":       link,
-		"issue_id":   issueID,
-		"comment_id": commentID,
-		"details":    json.RawMessage(details),
+		"type":             "mentioned",
+		"severity":         "info",
+		"title":            title,
+		"body":             body,
+		"link":             link,
+		"issue_id":         issueID,
+		"issue_identifier": issueIdentifier,
+		"comment_id":       commentID,
+		"details":          json.RawMessage(details),
 	})
 	if err != nil {
 		payloadSnapshot = emptyDetails
@@ -571,7 +604,7 @@ func notifyMentionedMembers(
 		return
 	}
 
-	notificationLink := buildNotificationLink(ctx, queries, e.WorkspaceID, issueID, commentID)
+	notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID)
 
 	for id := range recipientIDs {
 		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
@@ -608,7 +641,7 @@ func notifyMentionedMembers(
 			Payload:     map[string]any{"item": resp},
 		})
 
-		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationLink, details)
+		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
 	}
 }
 

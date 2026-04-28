@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -35,10 +36,11 @@ type dingtalkDeliveryPayload struct {
 }
 
 type notificationEventPayload struct {
-	Type  string `json:"type"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Link  string `json:"link"`
+	Type            string `json:"type"`
+	Title           string `json:"title"`
+	Body            string `json:"body"`
+	Link            string `json:"link"`
+	IssueIdentifier string `json:"issue_identifier"`
 }
 
 type dingTalkBindingMetadata struct {
@@ -156,7 +158,7 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 		}
 	}
 
-	if _, err := cfg.SendActionCardMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryActionCard(eventPayload)); err != nil {
+	if _, err := cfg.SendMarkdownMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryMarkdown(eventPayload)); err != nil {
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -416,31 +418,50 @@ func buildDingTalkDeliveryText(event notificationEventPayload) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func buildDingTalkDeliveryActionCard(event notificationEventPayload) notifyutil.DingTalkActionCardMessage {
-	title := strings.TrimSpace(event.Title)
-	if title == "" {
-		title = "Multica Notification"
-	}
-
+func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.DingTalkMarkdownMessage {
+	title := buildDingTalkIssueLabel(event)
 	body := sanitizeDingTalkMessageText(event.Body)
 	link := strings.TrimSpace(event.Link)
 	parts := []string{"### Multica Notification"}
-	if title != "" && title != "Multica Notification" {
+	if title != "" {
 		parts = append(parts, "**Issue**\n"+title)
 	}
 	if body != "" {
 		parts = append(parts, "**Message**\n"+body)
 	}
 	if link != "" {
-		parts = append(parts, "[Open in Multica]("+link+")")
+		parts = append(parts, "[Open In Multica]("+dingtalkExternalBrowserURL(link)+")")
 	}
 
-	return notifyutil.DingTalkActionCardMessage{
-		Title:       truncateDingTalkCardText(title, 80),
-		Text:        truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
-		SingleTitle: "Open in Multica",
-		SingleURL:   link,
+	cardTitle := title
+	if cardTitle == "" {
+		cardTitle = "Multica Notification"
 	}
+
+	return notifyutil.DingTalkMarkdownMessage{
+		Title: truncateDingTalkCardText(cardTitle, 80),
+		Text:  truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
+	}
+}
+
+func buildDingTalkIssueLabel(event notificationEventPayload) string {
+	title := strings.TrimSpace(event.Title)
+	identifier := strings.TrimSpace(event.IssueIdentifier)
+	if title == "" {
+		return identifier
+	}
+	if identifier == "" || title == identifier || strings.HasPrefix(title, identifier+" ") || strings.HasPrefix(title, identifier+" ·") {
+		return title
+	}
+	return identifier + " · " + title
+}
+
+func dingtalkExternalBrowserURL(raw string) string {
+	link := strings.TrimSpace(raw)
+	if link == "" {
+		return ""
+	}
+	return "dingtalk://dingtalkclient/page/link?url=" + url.QueryEscape(link) + "&pc_slide=false"
 }
 
 func sanitizeDingTalkMessageText(raw string) string {
