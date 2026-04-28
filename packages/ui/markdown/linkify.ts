@@ -93,6 +93,88 @@ function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
   return ranges.some((r) => pos >= r.start && pos < r.end)
 }
 
+function isEscaped(text: string, index: number): boolean {
+  let slashCount = 0
+  for (let i = index - 1; i >= 0 && text[i] === '\\'; i--) {
+    slashCount++
+  }
+  return slashCount % 2 === 1
+}
+
+function findMatchingBracket(text: string, openIndex: number): number {
+  let depth = 0
+
+  for (let i = openIndex; i < text.length; i++) {
+    if (isEscaped(text, i)) continue
+
+    const char = text[i]
+    if (char === '[') {
+      depth++
+    } else if (char === ']') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+
+  return -1
+}
+
+function findInlineLinkEnd(text: string, openParenIndex: number): number {
+  let depth = 0
+
+  for (let i = openParenIndex; i < text.length; i++) {
+    if (isEscaped(text, i)) continue
+
+    const char = text[i]
+    if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      depth--
+      if (depth === 0) return i + 1
+    }
+  }
+
+  return -1
+}
+
+/**
+ * Find existing markdown link/image spans so auto-linkification does not create
+ * nested links inside their labels or destinations.
+ */
+function findMarkdownLinkRanges(text: string): CodeRange[] {
+  const ranges: CodeRange[] = []
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '[' || isEscaped(text, i)) continue
+    if (ranges.some((r) => i >= r.start && i < r.end)) continue
+
+    const labelEnd = findMatchingBracket(text, i)
+    if (labelEnd === -1) continue
+
+    const start = i > 0 && text[i - 1] === '!' && !isEscaped(text, i - 1) ? i - 1 : i
+    const nextChar = text[labelEnd + 1]
+
+    if (nextChar === '(') {
+      const end = findInlineLinkEnd(text, labelEnd + 1)
+      if (end !== -1) {
+        ranges.push({ start, end })
+        i = end - 1
+      }
+      continue
+    }
+
+    if (nextChar === '[') {
+      const referenceEnd = findMatchingBracket(text, labelEnd + 1)
+      if (referenceEnd !== -1) {
+        ranges.push({ start, end: referenceEnd + 1 })
+        i = referenceEnd
+      }
+    }
+  }
+
+  return ranges
+}
+
 /**
  * Check if a link at given position is already a markdown link
  * Looks for patterns like [text](url) or [text][ref]
@@ -216,6 +298,7 @@ export function preprocessLinks(text: string): string {
   }
 
   const codeRanges = findCodeRanges(text)
+  const markdownLinkRanges = findMarkdownLinkRanges(text)
   const links = detectLinks(text)
 
   if (links.length === 0) return text
@@ -227,6 +310,9 @@ export function preprocessLinks(text: string): string {
   for (const link of links) {
     // Skip if inside code block
     if (isInsideCode(link.start, codeRanges)) continue
+
+    // Skip if this match is inside an existing markdown link or image.
+    if (markdownLinkRanges.some((range) => rangesOverlap(link, range))) continue
 
     // Skip if already a markdown link
     if (isAlreadyLinked(text, link.start, link.end)) continue
