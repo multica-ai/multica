@@ -16,12 +16,14 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { artifactDetailOptions } from "@multica/core/artifacts/queries";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useDeleteArtifact } from "@multica/core/artifacts/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { ArtifactBody } from "../components/artifact-body";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
@@ -44,6 +46,80 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * The "people + things" line under the title — author and the issues / project
+ * the document is connected to. Each is clickable: agent goes to the agent
+ * profile (placeholder for now via /agents), members are non-link, issues and
+ * projects deep-link.
+ */
+function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").Artifact }) {
+  const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const { getActorName } = useActorName();
+  // Resolve the issue title / identifier when the doc has any issue link.
+  const linkedIssueId = artifact.issue_id ?? artifact.origin_issue_id;
+  const { data: linkedIssue } = useQuery({
+    ...issueDetailOptions(wsId, linkedIssueId ?? ""),
+    enabled: Boolean(wsId && linkedIssueId),
+  });
+  const showOriginSeparately =
+    artifact.origin_issue_id && artifact.origin_issue_id !== artifact.issue_id;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      <span className="flex items-center gap-1.5">
+        <ActorAvatar
+          actorType={artifact.author_type}
+          actorId={artifact.author_id}
+          size={18}
+        />
+        <span className="font-medium">
+          {getActorName(artifact.author_type, artifact.author_id)}
+        </span>
+        {artifact.author_type === "agent" && (
+          <Badge variant="outline" className="text-[10px]">
+            agent
+          </Badge>
+        )}
+      </span>
+      {artifact.issue_id && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          on{" "}
+          <a
+            href={wsPaths.issueDetail(artifact.issue_id)}
+            className="underline hover:text-foreground"
+          >
+            {linkedIssue?.identifier ?? "issue"}
+            {linkedIssue?.title ? ` — ${linkedIssue.title}` : ""}
+          </a>
+        </span>
+      )}
+      {artifact.project_id && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          on{" "}
+          <a
+            href={wsPaths.projectDetail(artifact.project_id)}
+            className="underline hover:text-foreground"
+          >
+            project
+          </a>
+        </span>
+      )}
+      {showOriginSeparately && artifact.origin_issue_id && (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          from{" "}
+          <a
+            href={wsPaths.issueDetail(artifact.origin_issue_id)}
+            className="underline hover:text-foreground"
+          >
+            {linkedIssue?.identifier ?? "issue"}
+          </a>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -52,7 +128,6 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     artifactDetailOptions(wsId, artifactId),
   );
   const userId = useAuthStore((s) => s.user?.id);
-  const { getActorName } = useActorName();
   const remove = useDeleteArtifact();
   const [confirmDelete, setConfirmDelete] = React.useState(false);
 
@@ -131,9 +206,9 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
       </div>
 
       <h1 className="text-2xl font-semibold leading-tight">{artifact.title}</h1>
+      <ConnectionRow artifact={artifact} />
       <p className="mt-1 text-xs text-muted-foreground">
-        {getActorName(artifact.author_type, artifact.author_id)} ·{" "}
-        {formatDateTime(artifact.updated_at)}
+        Updated {formatDateTime(artifact.updated_at)}
       </p>
 
       <div className="mt-6">

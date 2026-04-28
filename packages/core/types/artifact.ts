@@ -10,6 +10,7 @@ export interface Artifact {
   project_id: string | null;
   issue_id: string | null;
   folder_id: string | null;
+  origin_issue_id: string | null;
   kind: ArtifactKind;
   format: ArtifactFormat;
   title: string;
@@ -34,6 +35,7 @@ export interface CreateArtifactRequest {
   project_id?: string;
   issue_id?: string;
   folder_id?: string;
+  origin_issue_id?: string;
 }
 
 export interface UpdateArtifactRequest {
@@ -58,6 +60,9 @@ export type ArtifactScope = "all" | "workspace" | "project" | "issue";
 export interface ListArtifactsParams {
   kind?: ArtifactKind;
   scope?: ArtifactScope;
+  author_type?: "all" | ArtifactAuthorType;
+  author_id?: string;
+  origin_issue_id?: string;
   q?: string;
   limit?: number;
   offset?: number;

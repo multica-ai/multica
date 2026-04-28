@@ -1,12 +1,13 @@
 -- name: CreateArtifact :one
 INSERT INTO artifact (
-    id, workspace_id, project_id, issue_id, folder_id,
+    id, workspace_id, project_id, issue_id, folder_id, origin_issue_id,
     kind, format, title, body, file_url, file_size_bytes, metadata,
     author_type, author_id
 )
 VALUES (
     $1, $2,
     sqlc.narg(project_id), sqlc.narg(issue_id), sqlc.narg(folder_id),
+    sqlc.narg(origin_issue_id),
     $3, $4, $5, $6,
     sqlc.narg(file_url), sqlc.narg(file_size_bytes),
     $7, $8, $9
@@ -63,6 +64,7 @@ DELETE FROM artifact WHERE id = $1 AND workspace_id = $2;
 -- nullable; pass NULL to skip the filter. The scope filter values are:
 -- 'workspace' (no project_id, no issue_id), 'project' (project_id IS NOT NULL),
 -- 'issue' (issue_id IS NOT NULL), or NULL/'all' (no scope filter).
+-- The author_type filter narrows by 'member', 'agent', or NULL/'all'.
 SELECT * FROM artifact
 WHERE workspace_id = $1
   AND (sqlc.narg('kind')::text IS NULL OR kind = sqlc.narg('kind'))
@@ -72,6 +74,17 @@ WHERE workspace_id = $1
      OR (sqlc.narg('scope')::text = 'workspace' AND project_id IS NULL AND issue_id IS NULL)
      OR (sqlc.narg('scope')::text = 'project'   AND project_id IS NOT NULL)
      OR (sqlc.narg('scope')::text = 'issue'     AND issue_id IS NOT NULL)
+  )
+  AND (
+        sqlc.narg('author_type')::text IS NULL
+     OR sqlc.narg('author_type')::text = 'all'
+     OR author_type = sqlc.narg('author_type')
+  )
+  AND (sqlc.narg('author_id')::uuid IS NULL OR author_id = sqlc.narg('author_id'))
+  AND (
+        sqlc.narg('origin_issue_id')::uuid IS NULL
+     OR origin_issue_id = sqlc.narg('origin_issue_id')
+     OR issue_id = sqlc.narg('origin_issue_id')
   )
   AND (
         sqlc.narg('q')::text IS NULL

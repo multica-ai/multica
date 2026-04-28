@@ -40,6 +40,7 @@ type ArtifactResponse struct {
 	ProjectID     *string        `json:"project_id"`
 	IssueID       *string        `json:"issue_id"`
 	FolderID      *string        `json:"folder_id"`
+	OriginIssueID *string        `json:"origin_issue_id"`
 	Kind          string         `json:"kind"`
 	Format        string         `json:"format"`
 	Title         string         `json:"title"`
@@ -79,6 +80,10 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 		s := uuidToString(a.FolderID)
 		resp.FolderID = &s
 	}
+	if a.OriginIssueID.Valid {
+		s := uuidToString(a.OriginIssueID)
+		resp.OriginIssueID = &s
+	}
 	if a.FileUrl.Valid {
 		s := a.FileUrl.String
 		resp.FileURL = &s
@@ -108,6 +113,7 @@ type CreateArtifactRequest struct {
 	ProjectID     *string        `json:"project_id"`
 	IssueID       *string        `json:"issue_id"`
 	FolderID      *string        `json:"folder_id"`
+	OriginIssueID *string        `json:"origin_issue_id"`
 }
 
 func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +196,18 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		folderID = folder.ID
 	}
+	var originIssueID pgtype.UUID
+	if req.OriginIssueID != nil && *req.OriginIssueID != "" {
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parseUUID(*req.OriginIssueID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "origin issue not found")
+			return
+		}
+		originIssueID = issue.ID
+	}
 
 	authorType, authorID := h.resolveActor(r, userID, workspaceID)
 
@@ -216,6 +234,7 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		ProjectID:     projectID,
 		IssueID:       issueID,
 		FolderID:      folderID,
+		OriginIssueID: originIssueID,
 		Kind:          req.Kind,
 		Format:        format,
 		Title:         req.Title,
@@ -477,6 +496,21 @@ func (h *Handler) SearchArtifacts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid scope; expected all|workspace|project|issue")
 			return
 		}
+	}
+	if v := q.Get("author_type"); v != "" {
+		switch v {
+		case "all", "member", "agent":
+			params.AuthorType = pgtype.Text{String: v, Valid: true}
+		default:
+			writeError(w, http.StatusBadRequest, "invalid author_type; expected all|member|agent")
+			return
+		}
+	}
+	if v := q.Get("author_id"); v != "" {
+		params.AuthorID = parseUUID(v)
+	}
+	if v := q.Get("origin_issue_id"); v != "" {
+		params.OriginIssueID = parseUUID(v)
 	}
 	if v := q.Get("q"); v != "" {
 		params.Q = pgtype.Text{String: v, Valid: true}

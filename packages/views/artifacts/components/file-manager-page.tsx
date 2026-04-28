@@ -74,8 +74,14 @@ import {
 } from "@multica/core/artifacts/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { Artifact, ArtifactFolder } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type {
+  Artifact,
+  ArtifactFolder,
+  ArtifactAuthorType,
+} from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
 
 // ---------------------------------------------------------------------------
@@ -139,6 +145,7 @@ function formatDate(iso: string): string {
 
 function ScopeBadge({ artifact }: { artifact: Artifact }) {
   const wsPaths = useWorkspacePaths();
+  // Prefer the strongest connection: scope-issue > scope-project > origin-issue > workspace.
   if (artifact.issue_id) {
     return (
       <Badge variant="outline" className="text-[10px]">
@@ -163,10 +170,41 @@ function ScopeBadge({ artifact }: { artifact: Artifact }) {
       </Badge>
     );
   }
+  if (artifact.origin_issue_id) {
+    return (
+      <Badge variant="outline" className="text-[10px]" title="Created from issue">
+        <a
+          href={wsPaths.issueDetail(artifact.origin_issue_id)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          From issue
+        </a>
+      </Badge>
+    );
+  }
   return (
     <Badge variant="outline" className="text-[10px] text-muted-foreground">
       Workspace
     </Badge>
+  );
+}
+
+function AuthorCell({ artifact }: { artifact: Artifact }) {
+  const { getActorName } = useActorName();
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <ActorAvatar
+        actorType={artifact.author_type}
+        actorId={artifact.author_id}
+        size={18}
+      />
+      <span className="truncate text-xs text-muted-foreground">
+        {getActorName(artifact.author_type, artifact.author_id)}
+      </span>
+    </div>
   );
 }
 
@@ -359,6 +397,9 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     new Set(),
   );
   const [batchDeleteOpen, setBatchDeleteOpen] = React.useState(false);
+  const [authorFilter, setAuthorFilter] = React.useState<
+    "all" | ArtifactAuthorType
+  >("all");
 
   React.useEffect(() => {
     setFolderId(initialFolderId ?? null);
@@ -372,7 +413,11 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
 
   const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
   const { data: allArtifacts = [], isLoading } = useQuery(
-    artifactSearchOptions(wsId, { q: query.trim() || undefined, limit: 200 }),
+    artifactSearchOptions(wsId, {
+      q: query.trim() || undefined,
+      author_type: authorFilter === "all" ? undefined : authorFilter,
+      limit: 200,
+    }),
   );
 
   const updateFolder = useUpdateArtifactFolder();
@@ -614,6 +659,29 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 className="h-8 pl-7 w-56"
               />
             </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="outline" size="sm" />}
+              >
+                Author:{" "}
+                {authorFilter === "all"
+                  ? "Anyone"
+                  : authorFilter === "agent"
+                    ? "Agents"
+                    : "Members"}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => setAuthorFilter("all")}>
+                  Anyone
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setAuthorFilter("member")}>
+                  Members only
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setAuthorFilter("agent")}>
+                  Agents only
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               size="sm"
               variant="outline"
@@ -687,8 +755,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-[40px_minmax(0,1fr)_120px_120px_140px_120px] text-sm">
-              <div className="col-span-6 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
+            <div className="grid grid-cols-[40px_minmax(0,1fr)_100px_80px_160px_120px_110px] text-sm">
+              <div className="col-span-7 grid grid-cols-subgrid border-b border-border bg-muted/20 px-6 py-1 text-xs font-medium uppercase text-muted-foreground">
                 <div className="flex items-center">
                   <Checkbox
                     checked={allInViewSelected}
@@ -699,7 +767,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 <div>Name</div>
                 <div>Kind</div>
                 <div>Format</div>
-                <div>Scope</div>
+                <div>Author</div>
+                <div>Linked to</div>
                 <div>Modified</div>
               </div>
               {childFolders.map((f) => (
@@ -712,7 +781,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       const id = e.dataTransfer.getData("text/multica-artifact");
                       if (id) handleMoveArtifact(id, f.id);
                     }}
-                    className="col-span-6 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-7 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
                     <div
                       className="flex items-center"
@@ -729,6 +798,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       <span className="truncate font-medium">{f.name}</span>
                     </div>
                     <div className="text-xs text-muted-foreground">Folder</div>
+                    <div />
                     <div />
                     <div />
                     <div className="text-xs text-muted-foreground">
@@ -763,7 +833,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
-                    className="col-span-6 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
+                    className="col-span-7 grid grid-cols-subgrid items-center px-6 py-2 text-left hover:bg-accent/50 cursor-pointer"
                   >
                     <div
                       className="flex items-center"
@@ -791,6 +861,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         ? ` · ${formatBytes(a.file_size_bytes)}`
                         : ""}
                     </div>
+                    <AuthorCell artifact={a} />
                     <div>
                       <ScopeBadge artifact={a} />
                     </div>

@@ -1013,6 +1013,10 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.kind) search.set("kind", params.kind);
     if (params?.scope) search.set("scope", params.scope);
+    if (params?.author_type) search.set("author_type", params.author_type);
+    if (params?.author_id) search.set("author_id", params.author_id);
+    if (params?.origin_issue_id)
+      search.set("origin_issue_id", params.origin_issue_id);
     if (params?.q) search.set("q", params.q);
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.offset != null) search.set("offset", String(params.offset));

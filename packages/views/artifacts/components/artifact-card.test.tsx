@@ -19,6 +19,7 @@ const baseArtifact: Artifact = {
   project_id: null,
   issue_id: "issue-1",
   folder_id: null,
+  origin_issue_id: null,
   kind: "report",
   format: "md",
   title: "Investigation results",

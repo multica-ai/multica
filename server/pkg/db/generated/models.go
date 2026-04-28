@@ -103,6 +103,7 @@ type Artifact struct {
 	Format        string             `json:"format"`
 	FileUrl       pgtype.Text        `json:"file_url"`
 	FileSizeBytes pgtype.Int8        `json:"file_size_bytes"`
+	OriginIssueID pgtype.UUID        `json:"origin_issue_id"`
 }
 
 type ArtifactFolder struct {
