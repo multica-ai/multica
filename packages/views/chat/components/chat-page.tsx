@@ -179,7 +179,10 @@ export function ChatPage() {
       qc.setQueryData(chatKeys.pendingTask(activeSessionId), {});
       qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
     }
-  }, [pendingTaskId, activeSessionId, qc]);
+    if (wsId) {
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
+    }
+  }, [pendingTaskId, activeSessionId, wsId, qc]);
 
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
