@@ -241,6 +241,7 @@ install_cli_binary() {
   if ! echo "$PATH" | tr ':' '\n' | grep -q "^$CLI_BIN_DIR$"; then
     export PATH="$CLI_BIN_DIR:$PATH"
     add_to_path "$CLI_BIN_DIR"
+    print_current_shell_path_hint
   fi
 
   rm -rf "$tmp_dir"
@@ -263,6 +264,23 @@ add_to_path() {
       printf '\n# Added by Multica installer\n%s\n' "$line" >> "$rc"
     fi
   done
+}
+
+print_current_shell_path_hint() {
+  local shell_name shell_rc
+  shell_name="${SHELL##*/}"
+  case "$shell_name" in
+    zsh) shell_rc="$HOME/.zshrc" ;;
+    bash) shell_rc="$HOME/.bashrc" ;;
+    *) shell_rc="" ;;
+  esac
+
+  warn "This installer runs in a child shell, so your current terminal may not see the new PATH immediately."
+  if [ -n "$shell_rc" ]; then
+    warn "For this terminal, run: source \"$shell_rc\""
+  else
+    warn "For this terminal, run: export PATH=\"$CLI_BIN_DIR:\$PATH\""
+  fi
 }
 
 get_latest_version() {
