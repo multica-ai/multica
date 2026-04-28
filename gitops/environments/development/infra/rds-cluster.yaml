@@ -37,4 +37,6 @@ spec:
       Name: agentfarm-postgres-cluster
       Environment: development
       Application: agentfarm
-      Purpose: "agentfarm application database (dev)"
+      # AWS tag values restrict charset to letters/digits/whitespace + _ . : / = + - @
+      # Parens () are NOT in the allowed set — using "- dev" suffix instead.
+      Purpose: "agentfarm application database - dev"
