@@ -58,3 +58,5 @@ server/server
 data/
 .kilo
 .idea
+.env
+docker-compose.production.yml
