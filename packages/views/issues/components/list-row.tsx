@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Paperclip } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -46,12 +47,14 @@ export const ListRow = memo(function ListRow({
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
+  const attachmentCount = issue.attachment_count ?? 0;
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const showAttachments = storeProperties.attachments && attachmentCount > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -101,6 +104,15 @@ export const ListRow = memo(function ListRow({
                     +{labels.length - 3}
                   </span>
                 )}
+              </span>
+            )}
+            {showAttachments && (
+              <span
+                className="ml-1.5 inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground tabular-nums"
+                aria-label={`${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`}
+              >
+                <Paperclip className="size-3" />
+                {attachmentCount}
               </span>
             )}
           </span>

@@ -43,6 +43,12 @@ type IssueResponse struct {
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	// AttachmentCount is bulk-attached by list/detail endpoints so the board /
+	// list cards can render a paperclip indicator without an N+1 fetch per row.
+	// Pointer + omitempty so paths that don't load it (UpdateIssue, batch
+	// UpdateIssues, the issue:updated WS broadcast) emit no field at all and
+	// the client cache merge preserves whatever value is already present.
+	AttachmentCount    *int64                  `json:"attachment_count,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
@@ -99,6 +105,30 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+}
+
+// attachmentCountByIssue bulk-loads attachment counts for the given issue IDs
+// and returns a map keyed by issue UUID string. Issues with no attachments are
+// absent from the map; callers should treat absent as zero. On error or empty
+// input, returns an empty map — the indicator is non-critical and we'd rather
+// serve issues without it than fail the whole list call.
+func (h *Handler) attachmentCountByIssue(ctx context.Context, wsUUID pgtype.UUID, issueIDs []pgtype.UUID) map[string]int64 {
+	out := map[string]int64{}
+	if len(issueIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.CountAttachmentsForIssues(ctx, db.CountAttachmentsForIssuesParams{
+		IssueIds:    issueIDs,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		slog.Warn("CountAttachmentsForIssues failed", "error", err)
+		return out
+	}
+	for _, r := range rows {
+		out[uuidToString(r.IssueID)] = r.Count
+	}
+	return out
 }
 
 // labelsByIssue bulk-loads labels for the given issue IDs and returns a map
@@ -671,6 +701,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			ids[i] = issue.ID
 		}
 		labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+		attachmentCounts := h.attachmentCountByIssue(ctx, wsUUID, ids)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
@@ -679,6 +710,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 				labels = []LabelResponse{}
 			}
 			resp[i].Labels = &labels
+			count := attachmentCounts[resp[i].ID]
+			resp[i].AttachmentCount = &count
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -742,6 +775,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ids[i] = issue.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	attachmentCounts := h.attachmentCountByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
@@ -750,6 +784,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			labels = []LabelResponse{}
 		}
 		resp[i].Labels = &labels
+		count := attachmentCounts[resp[i].ID]
+		resp[i].AttachmentCount = &count
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -786,12 +822,15 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 	})
+	count := int64(0)
 	if err == nil && len(attachments) > 0 {
 		resp.Attachments = make([]AttachmentResponse, len(attachments))
 		for i, a := range attachments {
 			resp.Attachments[i] = h.attachmentToResponse(a)
 		}
+		count = int64(len(attachments))
 	}
+	resp.AttachmentCount = &count
 
 	writeJSON(w, http.StatusOK, resp)
 }

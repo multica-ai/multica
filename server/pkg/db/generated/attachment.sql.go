@@ -60,6 +60,48 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 	return i, err
 }
 
+const countAttachmentsForIssues = `-- name: CountAttachmentsForIssues :many
+SELECT issue_id, COUNT(*)::bigint AS count
+FROM attachment
+WHERE issue_id = ANY($1::uuid[])
+  AND workspace_id = $2::uuid
+GROUP BY issue_id
+`
+
+type CountAttachmentsForIssuesParams struct {
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type CountAttachmentsForIssuesRow struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	Count   int64       `json:"count"`
+}
+
+// Bulk variant: returns (issue_id, count) for each issue that has at least one
+// attachment, so the issue list endpoints can fold an attachment indicator into
+// each row without N+1 queries from the client. Workspace-guarded the same way
+// as ListAttachmentsByIssue.
+func (q *Queries) CountAttachmentsForIssues(ctx context.Context, arg CountAttachmentsForIssuesParams) ([]CountAttachmentsForIssuesRow, error) {
+	rows, err := q.db.Query(ctx, countAttachmentsForIssues, arg.IssueIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAttachmentsForIssuesRow{}
+	for rows.Next() {
+		var i CountAttachmentsForIssuesRow
+		if err := rows.Scan(&i.IssueID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteAttachment = `-- name: DeleteAttachment :exec
 DELETE FROM attachment WHERE id = $1 AND workspace_id = $2
 `

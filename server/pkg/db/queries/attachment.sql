@@ -8,6 +8,17 @@ SELECT * FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: CountAttachmentsForIssues :many
+-- Bulk variant: returns (issue_id, count) for each issue that has at least one
+-- attachment, so the issue list endpoints can fold an attachment indicator into
+-- each row without N+1 queries from the client. Workspace-guarded the same way
+-- as ListAttachmentsByIssue.
+SELECT issue_id, COUNT(*)::bigint AS count
+FROM attachment
+WHERE issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND workspace_id = sqlc.arg('workspace_id')::uuid
+GROUP BY issue_id;
+
 -- name: ListAttachmentsByComment :many
 SELECT * FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2

@@ -7,7 +7,7 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Paperclip } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -62,6 +62,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   });
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
+  const attachmentCount = issue.attachment_count ?? 0;
 
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
@@ -81,6 +82,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const showAttachments = storeProperties.attachments && attachmentCount > 0;
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
@@ -92,8 +94,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         {issue.title}
       </p>
 
-      {/* Sub-issue progress + project + labels */}
-      {(showChildProgress || showProject || showLabels) && (
+      {/* Sub-issue progress + project + labels + attachments */}
+      {(showChildProgress || showProject || showLabels || showAttachments) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showChildProgress && (
             <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
@@ -112,6 +114,15 @@ export const BoardCardContent = memo(function BoardCardContent({
           {showLabels && labels.map((label) => (
             <LabelChip key={label.id} label={label} />
           ))}
+          {showAttachments && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground tabular-nums"
+              aria-label={`${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`}
+            >
+              <Paperclip className="size-3" />
+              {attachmentCount}
+            </span>
+          )}
         </div>
       )}
 

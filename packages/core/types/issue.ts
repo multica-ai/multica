@@ -41,6 +41,7 @@ export interface Issue {
   due_date: string | null;
   reactions?: IssueReaction[];
   labels?: Label[];
+  attachment_count?: number;
   created_at: string;
   updated_at: string;
 }
