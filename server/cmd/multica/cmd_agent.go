@@ -156,6 +156,11 @@ func resolveProfile(cmd *cobra.Command) string {
 	return val
 }
 
+func resolveConfigPath(cmd *cobra.Command) string {
+	val, _ := cmd.Flags().GetString("config")
+	return val
+}
+
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	serverURL := resolveServerURL(cmd)
 	workspaceID := resolveWorkspaceID(cmd)
@@ -182,7 +187,8 @@ func resolveServerURL(cmd *cobra.Command) string {
 		return normalizeAPIBaseURL(val)
 	}
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err == nil && cfg.ServerURL != "" {
 		return normalizeAPIBaseURL(cfg.ServerURL)
 	}
@@ -221,7 +227,8 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 		return ""
 	}
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
 	return cfg.WorkspaceID
 }
 

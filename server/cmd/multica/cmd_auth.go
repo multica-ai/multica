@@ -47,7 +47,8 @@ func resolveToken(cmd *cobra.Command) string {
 		return v
 	}
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
 	return cfg.Token
 }
 
@@ -58,7 +59,8 @@ func resolveAppURL(cmd *cobra.Command) string {
 		}
 	}
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err == nil && cfg.AppURL != "" {
 		return strings.TrimRight(cfg.AppURL, "/")
 	}
@@ -216,12 +218,13 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// Save to config. Reset workspace data on every login — the user or
 	// server may have changed, so stale workspaces must not persist.
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
 	cfg.WorkspaceID = ""
 	cfg.Token = patResp.Token
 	cfg.ServerURL = serverURL
 	cfg.AppURL = appURL
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -258,11 +261,12 @@ func runAuthLoginToken(cmd *cobra.Command) error {
 	}
 
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
 	cfg.WorkspaceID = ""
 	cfg.Token = token
 	cfg.ServerURL = serverURL
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -343,14 +347,15 @@ const callbackSuccessHTML = `<!DOCTYPE html>
 
 func runAuthLogout(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
 	if cfg.Token == "" {
 		fmt.Fprintln(os.Stderr, "Not authenticated.")
 		return nil
 	}
 
 	cfg.Token = ""
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 

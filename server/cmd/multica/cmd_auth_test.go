@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,8 +11,20 @@ import (
 // registered, matching the rootCmd setup used in production.
 func testCmd() *cobra.Command {
 	cmd := &cobra.Command{}
-	cmd.PersistentFlags().String("profile", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("config", "", "")
 	return cmd
+}
+
+func TestResolveConfigPath(t *testing.T) {
+	cmd := testCmd()
+	want := filepath.Join(t.TempDir(), "dev.json")
+	if err := cmd.Flags().Set("config", want); err != nil {
+		t.Fatalf("set config flag: %v", err)
+	}
+	if got := resolveConfigPath(cmd); got != want {
+		t.Fatalf("resolveConfigPath() = %q, want %q", got, want)
+	}
 }
 
 func TestResolveAppURL(t *testing.T) {
