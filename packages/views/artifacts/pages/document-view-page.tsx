@@ -17,7 +17,11 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { artifactDetailOptions } from "@multica/core/artifacts/queries";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useDeleteArtifact } from "@multica/core/artifacts/mutations";
+import {
+  useDeleteArtifact,
+  useUpdateArtifact,
+} from "@multica/core/artifacts/mutations";
+import { Input } from "@multica/ui/components/ui/input";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -129,7 +133,10 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   );
   const userId = useAuthStore((s) => s.user?.id);
   const remove = useDeleteArtifact();
+  const update = useUpdateArtifact();
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [renaming, setRenaming] = React.useState(false);
+  const [titleDraft, setTitleDraft] = React.useState("");
 
   if (isLoading) {
     return (
@@ -160,6 +167,24 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     router.push(wsPaths.documents());
   };
 
+  const startRename = () => {
+    setTitleDraft(artifact.title);
+    setRenaming(true);
+  };
+  const commitRename = async () => {
+    const next = titleDraft.trim();
+    if (!next || next === artifact.title) {
+      setRenaming(false);
+      return;
+    }
+    await update.mutateAsync({ id: artifact.id, data: { title: next } });
+    setRenaming(false);
+  };
+  const cancelRename = () => {
+    setRenaming(false);
+    setTitleDraft(artifact.title);
+  };
+
   return (
     <div className="mx-auto w-full max-w-3xl px-8 py-6">
       <div className="mb-3 flex items-center justify-between">
@@ -169,12 +194,15 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
         <div className="flex items-center gap-1">
           {canEdit && (
             <>
+              <Button variant="ghost" size="sm" onClick={startRename}>
+                <Pencil className="mr-1 size-4" /> Rename
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => router.push(wsPaths.documentEdit(artifact.id))}
               >
-                <Pencil className="mr-1 size-4" /> Edit
+                <Pencil className="mr-1 size-4" /> Edit body
               </Button>
               <MoveScopeMenu artifact={artifact} />
               <Button
@@ -205,7 +233,35 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
         )}
       </div>
 
-      <h1 className="text-2xl font-semibold leading-tight">{artifact.title}</h1>
+      {renaming ? (
+        <Input
+          autoFocus
+          value={titleDraft}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelRename();
+            }
+          }}
+          className="text-2xl font-semibold leading-tight h-auto py-1"
+        />
+      ) : (
+        <h1
+          className={
+            "text-2xl font-semibold leading-tight" +
+            (canEdit ? " cursor-text hover:bg-accent/30 rounded px-1 -mx-1" : "")
+          }
+          onClick={canEdit ? startRename : undefined}
+          title={canEdit ? "Click to rename" : undefined}
+        >
+          {artifact.title}
+        </h1>
+      )}
       <ConnectionRow artifact={artifact} />
       <p className="mt-1 text-xs text-muted-foreground">
         Updated {formatDateTime(artifact.updated_at)}

@@ -71,6 +71,7 @@ import {
   useDeleteArtifactFolder,
   useMoveArtifactToFolder,
   useDeleteArtifact,
+  useUpdateArtifact,
 } from "@multica/core/artifacts/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -388,8 +389,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     null,
   );
   const [renameDraft, setRenameDraft] = React.useState("");
+  const [renameArtifactTarget, setRenameArtifactTarget] =
+    React.useState<Artifact | null>(null);
+  const [renameArtifactDraft, setRenameArtifactDraft] = React.useState("");
   const [deleteFolderTarget, setDeleteFolderTarget] =
     React.useState<ArtifactFolder | null>(null);
+  const [deleteArtifactTarget, setDeleteArtifactTarget] =
+    React.useState<Artifact | null>(null);
   const [selectedFolders, setSelectedFolders] = React.useState<Set<string>>(
     new Set(),
   );
@@ -424,6 +430,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const deleteFolder = useDeleteArtifactFolder();
   const moveArtifact = useMoveArtifactToFolder();
   const deleteArtifact = useDeleteArtifact();
+  const updateArtifact = useUpdateArtifact();
 
   const tree = React.useMemo(() => buildFolderTree(folders), [folders]);
   const breadcrumbs = React.useMemo(
@@ -481,6 +488,21 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     await deleteFolder.mutateAsync({ id: deleteFolderTarget.id });
     if (folderId === deleteFolderTarget.id) setFolderId(null);
     setDeleteFolderTarget(null);
+  };
+
+  const handleRenameArtifact = async () => {
+    if (!renameArtifactTarget || !renameArtifactDraft.trim()) return;
+    await updateArtifact.mutateAsync({
+      id: renameArtifactTarget.id,
+      data: { title: renameArtifactDraft.trim() },
+    });
+    setRenameArtifactTarget(null);
+  };
+
+  const handleDeleteArtifact = async () => {
+    if (!deleteArtifactTarget) return;
+    await deleteArtifact.mutateAsync(deleteArtifactTarget);
+    setDeleteArtifactTarget(null);
   };
 
   // ---- Selection helpers ----
@@ -871,11 +893,19 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                   </ContextMenuTrigger>
                   <ContextMenuContent>
                     <ContextMenuItem
+                      onSelect={() => {
+                        setRenameArtifactTarget(a);
+                        setRenameArtifactDraft(a.title);
+                      }}
+                    >
+                      <Pencil className="mr-2 size-3.5" /> Rename
+                    </ContextMenuItem>
+                    <ContextMenuItem
                       onSelect={() =>
                         router.push(wsPaths.documentEdit(a.id))
                       }
                     >
-                      <Pencil className="mr-2 size-3.5" /> Edit
+                      <Pencil className="mr-2 size-3.5" /> Edit body
                     </ContextMenuItem>
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>
@@ -899,6 +929,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         ))}
                       </ContextMenuSubContent>
                     </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      className="text-destructive"
+                      onSelect={() => setDeleteArtifactTarget(a)}
+                    >
+                      <Trash2 className="mr-2 size-3.5" /> Delete
+                    </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               ))}
@@ -965,6 +1002,68 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               disabled={deleteFolder.isPending}
             >
               {deleteFolder.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={Boolean(renameArtifactTarget)}
+        onOpenChange={(open) => !open && setRenameArtifactTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename document</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={renameArtifactDraft}
+            onChange={(e) => setRenameArtifactDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleRenameArtifact();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setRenameArtifactTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRenameArtifact}
+              disabled={
+                !renameArtifactDraft.trim() || updateArtifact.isPending
+              }
+            >
+              {updateArtifact.isPending ? "Saving…" : "Rename"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={Boolean(deleteArtifactTarget)}
+        onOpenChange={(open) => !open && setDeleteArtifactTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes &ldquo;{deleteArtifactTarget?.title}
+              &rdquo;. Cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteArtifact}
+              disabled={deleteArtifact.isPending}
+            >
+              {deleteArtifact.isPending ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
