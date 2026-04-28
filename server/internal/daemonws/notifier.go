@@ -24,8 +24,9 @@ func (n *RelayNotifier) NotifyTaskAvailable(runtimeID, taskID string) {
 	if runtimeID == "" {
 		return
 	}
+	eventID := ulid.Make().String()
 	if n.local != nil {
-		n.local.NotifyTaskAvailable(runtimeID, taskID)
+		n.local.notifyTaskAvailable(runtimeID, taskID, eventID)
 	}
 	if n.relay == nil {
 		return
@@ -35,7 +36,6 @@ func (n *RelayNotifier) NotifyTaskAvailable(runtimeID, taskID string) {
 		M.WakeupPublishErrors.Add(1)
 		return
 	}
-	eventID := ulid.Make().String()
 	shardKey := taskID
 	if shardKey == "" {
 		shardKey = eventID

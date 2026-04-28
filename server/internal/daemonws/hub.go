@@ -32,6 +32,36 @@ type client struct {
 	send     chan []byte
 	identity ClientIdentity
 	runtimes map[string]struct{}
+
+	dedupMu  sync.Mutex
+	seenIDs  map[string]struct{}
+	seenList []string
+}
+
+const eventDedupCapacity = 128
+
+// markSeen records eventID as already delivered to this client. Empty event IDs
+// disable dedup and are always delivered.
+func (c *client) markSeen(eventID string) bool {
+	if eventID == "" {
+		return true
+	}
+	c.dedupMu.Lock()
+	defer c.dedupMu.Unlock()
+	if c.seenIDs == nil {
+		c.seenIDs = make(map[string]struct{}, eventDedupCapacity)
+	}
+	if _, ok := c.seenIDs[eventID]; ok {
+		return false
+	}
+	c.seenIDs[eventID] = struct{}{}
+	c.seenList = append(c.seenList, eventID)
+	if len(c.seenList) > eventDedupCapacity {
+		drop := c.seenList[0]
+		c.seenList = c.seenList[1:]
+		delete(c.seenIDs, drop)
+	}
+	return true
 }
 
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
@@ -98,6 +128,10 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 
 // NotifyTaskAvailable sends a best-effort wakeup to daemons watching runtimeID.
 func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
+	h.notifyTaskAvailable(runtimeID, taskID, "")
+}
+
+func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
 	}
@@ -105,9 +139,10 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	if err != nil {
 		return
 	}
-	if h.notifyFrame(runtimeID, data) {
+	delivered, deduped := h.notifyFrame(runtimeID, data, eventID)
+	if delivered {
 		M.WakeupDeliveredHit.Add(1)
-	} else {
+	} else if !deduped {
 		M.WakeupDeliveredMiss.Add(1)
 	}
 }
@@ -133,19 +168,23 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	if h.notifyFrame(payload.RuntimeID, frame) {
+	delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+	if delivered {
 		M.WakeupDeliveredHit.Add(1)
-	} else {
+	} else if !deduped {
 		M.WakeupDeliveredMiss.Add(1)
 	}
 }
 
-func (h *Hub) notifyFrame(runtimeID string, data []byte) bool {
+func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delivered bool, deduped bool) {
 	h.mu.RLock()
 	clients := h.byRuntime[runtimeID]
 	slow := make([]*client, 0)
-	delivered := false
 	for c := range clients {
+		if !c.markSeen(eventID) {
+			deduped = true
+			continue
+		}
 		select {
 		case c.send <- data:
 			delivered = true
@@ -162,7 +201,7 @@ func (h *Hub) notifyFrame(runtimeID string, data []byte) bool {
 	if len(slow) > 0 {
 		M.SlowEvictionsTotal.Add(int64(len(slow)))
 	}
-	return delivered
+	return delivered, deduped
 }
 
 func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {

@@ -103,6 +103,56 @@ func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
 	}
 }
 
+func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonTestClient(hub, "runtime-1")
+	relay := &localFirstDaemonRelayPublisher{t: t, client: client}
+	notifier := NewRelayNotifier(hub, relay)
+
+	notifier.NotifyTaskAvailable("runtime-1", "task-1")
+
+	if !relay.called {
+		t.Fatal("expected relay publish to be invoked")
+	}
+	if relay.eventID == "" {
+		t.Fatal("expected event id")
+	}
+	if M.WakeupDeliveredHit.Load() != 1 {
+		t.Fatalf("delivered hit metric = %d, want 1", M.WakeupDeliveredHit.Load())
+	}
+
+	hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+
+	select {
+	case duplicate := <-client.send:
+		t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if M.WakeupDeliveredHit.Load() != 1 {
+		t.Fatalf("delivered hit metric after loopback = %d, want 1", M.WakeupDeliveredHit.Load())
+	}
+	if M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
+	c := &client{
+		send:     make(chan []byte, 2),
+		runtimes: map[string]struct{}{runtimeID: {}},
+	}
+
+	hub.mu.Lock()
+	hub.clients[c] = true
+	hub.byRuntime[runtimeID] = map[*client]bool{c: true}
+	hub.mu.Unlock()
+
+	return c
+}
+
 type recordingRelayPublisher struct {
 	scopeType string
 	scopeID   string
@@ -117,5 +167,34 @@ func (r *recordingRelayPublisher) PublishWithID(scopeType, scopeID, exclude stri
 	r.exclude = exclude
 	r.frame = append([]byte(nil), frame...)
 	r.eventID = id
+	return nil
+}
+
+type localFirstDaemonRelayPublisher struct {
+	t      *testing.T
+	client *client
+
+	called     bool
+	scopeType  string
+	scopeID    string
+	exclude    string
+	frame      []byte
+	eventID    string
+	localFrame []byte
+}
+
+func (p *localFirstDaemonRelayPublisher) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
+	p.called = true
+	p.scopeType = scopeType
+	p.scopeID = scopeID
+	p.exclude = exclude
+	p.frame = append([]byte(nil), frame...)
+	p.eventID = id
+
+	select {
+	case p.localFrame = <-p.client.send:
+	default:
+		p.t.Fatal("expected local fanout to happen before relay publish")
+	}
 	return nil
 }
