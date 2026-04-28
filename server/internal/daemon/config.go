@@ -41,6 +41,7 @@ type Config struct {
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile            string                // profile name (empty = default)
+	ConfigPath         string                // explicit config path (empty = profile/default resolution)
 	Agents             map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
@@ -331,6 +332,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		DeviceName:         deviceName,
 		RuntimeName:        runtimeName,
 		Profile:            profile,
+		ConfigPath:         configPath,
 		Agents:             agents,
 		WorkspacesRoot:     workspacesRoot,
 		KeepEnvAfterTask:   keepEnv,

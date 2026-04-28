@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,39 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	// Should still contain CLI hint for fetching issue context.
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint for issue context")
+	}
+}
+
+func TestResolveAuthUsesExplicitConfigPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	configPath := filepath.Join(t.TempDir(), "instance", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configJSON := `{
+  "server_url": "http://127.0.0.1:18090",
+  "app_url": "http://127.0.0.1:13003",
+  "token": "explicit-config-token"
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	d := &Daemon{
+		cfg: Config{
+			Profile:    "local",
+			ConfigPath: configPath,
+		},
+		client: NewClient("http://127.0.0.1:18090"),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	if err := d.resolveAuth(); err != nil {
+		t.Fatalf("resolveAuth returned error: %v", err)
+	}
+	if got := d.client.Token(); got != "explicit-config-token" {
+		t.Fatalf("client token = %q, want %q", got, "explicit-config-token")
 	}
 }
 
