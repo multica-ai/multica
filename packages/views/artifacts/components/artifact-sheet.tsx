@@ -35,6 +35,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ArtifactBody } from "./artifact-body";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
+import { MoveScopeMenu } from "./move-scope-menu";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -174,6 +175,7 @@ export function ArtifactSheet({
                     >
                       <Pencil className="mr-1 size-4" /> Edit
                     </Button>
+                    <MoveScopeMenu artifact={artifact} />
                     <Button
                       variant="ghost"
                       size="sm"

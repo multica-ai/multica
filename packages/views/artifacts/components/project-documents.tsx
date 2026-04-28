@@ -9,6 +9,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { ArtifactCard } from "./artifact-card";
 import { ArtifactSheet } from "./artifact-sheet";
 import { CreateArtifactSheet } from "./create-artifact-sheet";
+import {
+  ArtifactFilters,
+  applyArtifactFilter,
+  type ArtifactFilterState,
+} from "./artifact-filters";
 
 /**
  * Documents tab content for a project. Shows project-scoped artifacts as
@@ -22,6 +27,12 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
   );
   const [creating, setCreating] = React.useState(false);
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [filters, setFilters] = React.useState<ArtifactFilterState>({ q: "" });
+
+  const filtered = React.useMemo(
+    () => applyArtifactFilter(artifacts, filters),
+    [artifacts, filters],
+  );
 
   return (
     <div className="mx-auto w-full max-w-4xl px-8 py-6">
@@ -31,6 +42,14 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
           <Plus className="mr-1 size-4" /> New artifact
         </Button>
       </div>
+
+      {artifacts.length > 0 && (
+        <ArtifactFilters
+          value={filters}
+          onChange={setFilters}
+          className="mb-4"
+        />
+      )}
 
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
@@ -49,9 +68,13 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
             <Plus className="mr-1 size-4" /> Create one
           </Button>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
+          No artifacts match these filters.
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {artifacts.map((a) => (
+          {filtered.map((a) => (
             <ArtifactCard
               key={a.id}
               artifact={a}

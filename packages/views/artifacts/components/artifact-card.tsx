@@ -1,5 +1,6 @@
 "use client";
 
+import { Folder, ListTodo, Globe } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { Artifact } from "@multica/core/types";
@@ -30,10 +31,13 @@ export function ArtifactCard({
   artifact,
   onClick,
   className,
+  showScope = false,
 }: {
   artifact: Artifact;
   onClick?: (artifact: Artifact) => void;
   className?: string;
+  /** Show a scope badge (Workspace / Project / Issue). Used on cross-scope lists. */
+  showScope?: boolean;
 }) {
   const { getActorName } = useActorName();
   const authorName = getActorName(artifact.author_type, artifact.author_id);
@@ -54,6 +58,26 @@ export function ArtifactCard({
         <Badge variant="secondary" className="text-xs font-normal">
           {KIND_LABELS[artifact.kind]}
         </Badge>
+        {showScope && (
+          <Badge
+            variant="outline"
+            className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground"
+          >
+            {artifact.issue_id ? (
+              <>
+                <ListTodo className="size-3" /> Issue
+              </>
+            ) : artifact.project_id ? (
+              <>
+                <Folder className="size-3" /> Project
+              </>
+            ) : (
+              <>
+                <Globe className="size-3" /> Workspace
+              </>
+            )}
+          </Badge>
+        )}
         <span className="ml-auto truncate text-xs text-muted-foreground">
           {formatDate(artifact.updated_at)}
         </span>

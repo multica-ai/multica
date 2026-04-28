@@ -23,12 +23,14 @@ import {
 import { useCreateArtifact } from "@multica/core/artifacts/mutations";
 import type { ArtifactKind } from "@multica/core/types";
 import { KIND_LABELS } from "./kind-icon";
+import { KIND_TEMPLATES, KIND_HELP } from "./kind-templates";
 
 const KINDS: ArtifactKind[] = ["report", "plan", "decision", "diagram", "note"];
 
 type Scope =
-  | { issueId: string; projectId?: undefined }
-  | { issueId?: undefined; projectId: string };
+  | { issueId: string; projectId?: undefined; workspaceScoped?: false }
+  | { issueId?: undefined; projectId: string; workspaceScoped?: false }
+  | { issueId?: undefined; projectId?: undefined; workspaceScoped: true };
 
 export type CreateArtifactSheetProps = Scope & {
   open: boolean;
@@ -43,15 +45,39 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
     props.defaultKind ?? "report",
   );
   const [title, setTitle] = React.useState("");
-  const [body, setBody] = React.useState("");
+  const [body, setBody] = React.useState(
+    KIND_TEMPLATES[props.defaultKind ?? "report"],
+  );
+  // Track whether the user has hand-edited the body. We only auto-fill the
+  // template when switching kind on a fresh body — overwriting user content
+  // would be hostile.
+  const [bodyDirty, setBodyDirty] = React.useState(false);
 
   React.useEffect(() => {
     if (!props.open) {
-      setKind(props.defaultKind ?? "report");
+      const k = props.defaultKind ?? "report";
+      setKind(k);
       setTitle("");
-      setBody("");
+      setBody(KIND_TEMPLATES[k]);
+      setBodyDirty(false);
     }
   }, [props.open, props.defaultKind]);
+
+  const handleKindChange = (next: ArtifactKind) => {
+    setKind(next);
+    if (!bodyDirty) setBody(KIND_TEMPLATES[next]);
+  };
+
+  const handleBodyChange = (value: string) => {
+    setBody(value);
+    setBodyDirty(value !== KIND_TEMPLATES[kind]);
+  };
+
+  const scopeLabel = props.issueId
+    ? "this issue"
+    : props.projectId
+      ? "this project"
+      : "the workspace";
 
   const canSubmit = title.trim().length > 0 && !create.isPending;
 
@@ -62,6 +88,7 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
       body,
       ...(props.issueId ? { issue_id: props.issueId } : {}),
       ...(props.projectId ? { project_id: props.projectId } : {}),
+      // workspaceScoped: omit both ids → server stores as workspace scope.
     });
     props.onOpenChange(false);
   };
@@ -72,8 +99,7 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
         <SheetHeader>
           <SheetTitle>New artifact</SheetTitle>
           <SheetDescription>
-            Create a typed document scoped to{" "}
-            {props.issueId ? "this issue" : "this project"}.
+            Create a typed document scoped to {scopeLabel}.
           </SheetDescription>
         </SheetHeader>
 
@@ -82,7 +108,7 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
             <Label htmlFor="artifact-kind">Kind</Label>
             <Select
               value={kind}
-              onValueChange={(v) => setKind(v as ArtifactKind)}
+              onValueChange={(v) => handleKindChange(v as ArtifactKind)}
             >
               <SelectTrigger id="artifact-kind">
                 <SelectValue />
@@ -95,6 +121,7 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">{KIND_HELP[kind]}</p>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -113,12 +140,8 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
             <Textarea
               id="artifact-body"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={
-                kind === "diagram"
-                  ? "```mermaid\nflowchart LR\n  A --> B\n```"
-                  : "Markdown content"
-              }
+              onChange={(e) => handleBodyChange(e.target.value)}
+              placeholder="Markdown content"
               className="min-h-[300px] flex-1 font-mono text-sm"
             />
           </div>
