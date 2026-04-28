@@ -136,7 +136,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 		WorkspaceID:    "ws-test-002",
 		TaskID:         "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		AgentName:      "Code Reviewer",
-		Provider:       "claude",
+		Provider:       "opencode",
 		Task:           taskCtx,
 	}, testLogger())
 	if err != nil {
@@ -145,26 +145,26 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Inject runtime config (done separately in daemon, replicate here).
-	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	// Workdir should be empty (no pre-created repo dirs).
+	// Workdir should only contain expected entries.
 	entries, err := os.ReadDir(env.WorkDir)
 	if err != nil {
 		t.Fatalf("failed to read workdir: %v", err)
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "CLAUDE.md" && name != ".claude" {
+		if name != ".agent_context" && name != "AGENTS.md" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}
 
-	// CLAUDE.md should contain repo info.
-	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	// AGENTS.md should contain repo info.
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "AGENTS.md"))
 	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
+		t.Fatalf("failed to read AGENTS.md: %v", err)
 	}
 	s := string(content)
 	for _, want := range []string{
@@ -175,7 +175,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 		"React frontend",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
+			t.Errorf("AGENTS.md missing %q", want)
 		}
 	}
 }
@@ -406,27 +406,19 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		},
 	}
 
+	// Pre-create a stale CLAUDE.md to verify deletion.
+	stalePath := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"Multica Agent Runtime",
-		"multica issue get",
-		"multica issue comment list",
-		"Go Conventions",
-		"PR Review",
-		"discovered automatically",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
-		}
+	// Claude is an inline provider: CLAUDE.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("claude provider should not create CLAUDE.md and should delete stale ones")
 	}
 }
 
@@ -477,21 +469,19 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
-	}
-
-	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
-		t.Error("AGENTS.md missing meta skill header")
-	}
-	if !strings.Contains(s, "Coding") {
-		t.Error("AGENTS.md missing skill name")
+	// Codex is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("codex provider should not create AGENTS.md and should delete stale ones")
 	}
 }
 
@@ -501,13 +491,13 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	ctx := TaskContextForEnv{IssueID: "test-issue-id"}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
+		t.Fatalf("failed to read AGENTS.md: %v", err)
 	}
 
 	s := string(content)
@@ -691,24 +681,19 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
-	}
-
-	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
-		t.Error("AGENTS.md missing meta skill header")
-	}
-	if !strings.Contains(s, "Coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md missing native skill discovery hint")
+	// Kiro is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("kiro provider should not create AGENTS.md and should delete stale ones")
 	}
 }
 
@@ -792,12 +777,12 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if err := InjectRuntimeConfig(dir, "claude", tc.ctx); err != nil {
+			if err := InjectRuntimeConfig(dir, "opencode", tc.ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
-			data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+			data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 			if err != nil {
-				t.Fatalf("read CLAUDE.md: %v", err)
+				t.Fatalf("read AGENTS.md: %v", err)
 			}
 			s := string(data)
 
@@ -809,7 +794,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			}
 			for _, want := range mustContain {
 				if !strings.Contains(s, want) {
-					t.Errorf("%s: CLAUDE.md missing %q\n---\n%s", tc.name, want, s)
+					t.Errorf("%s: AGENTS.md missing %q\n---\n%s", tc.name, want, s)
 				}
 			}
 
@@ -838,12 +823,12 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	s := string(data)
 
@@ -856,25 +841,18 @@ func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 		"--description-stdin",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)
+			t.Errorf("AGENTS.md missing multi-line guidance %q\n---\n%s", want, s)
 		}
 	}
 }
 
 func TestInjectRuntimeConfigCodexEmphasizesStdinForFormattedComments(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	if err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
+	// Codex is an inline provider: test content generation directly.
+	s := buildMetaSkillContent("codex", TaskContextForEnv{
 		IssueID:          "issue-1",
 		TriggerCommentID: "comment-1",
-	}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
+	})
 
 	for _, want := range []string{
 		"Codex-Specific Comment Formatting",
@@ -884,7 +862,7 @@ func TestInjectRuntimeConfigCodexEmphasizesStdinForFormattedComments(t *testing.
 		"Do not compress a multi-paragraph answer",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing Codex multiline guidance %q\n---\n%s", want, s)
+			t.Errorf("Codex content missing multiline guidance %q\n---\n%s", want, s)
 		}
 	}
 }
@@ -901,7 +879,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -948,6 +926,96 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigKimi(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InjectRuntimeConfig(dir, "kimi", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// Kimi is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("kimi provider should not create AGENTS.md and should delete stale ones")
+	}
+}
+
+func TestInjectRuntimeConfigFileOnlyProvidersStillWrite(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		wantFile string
+	}{
+		{"cursor", "AGENTS.md"},
+		{"copilot", "AGENTS.md"},
+		{"gemini", "GEMINI.md"},
+		{"opencode", "AGENTS.md"},
+		// Case normalization
+		{"Cursor", "AGENTS.md"},
+		{"COPILOT", "AGENTS.md"},
+		{"Gemini", "GEMINI.md"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+
+			ctx := TaskContextForEnv{
+				IssueID:     "test-issue-id",
+				AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+			}
+
+			if err := InjectRuntimeConfig(dir, tc.provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(dir, tc.wantFile))
+			if err != nil {
+				t.Fatalf("expected %s to be written for provider %q: %v", tc.wantFile, tc.provider, err)
+			}
+			if !strings.Contains(string(content), "Multica Agent Runtime") {
+				t.Errorf("%s missing meta skill header", tc.wantFile)
+			}
+		})
+	}
+}
+
+func TestInjectRuntimeConfigProviderNormalization(t *testing.T) {
+	t.Parallel()
+
+	// Verify that uppercase / mixed-case provider strings are normalized.
+	for _, provider := range []string{"CLAUDE", "Claude", "cLaUdE", "CODEX", "Kimi", "HERMES", "KIRO"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+
+			ctx := TaskContextForEnv{IssueID: "test-issue-id"}
+			if err := InjectRuntimeConfig(dir, provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+
+			// All these are inline providers; no file should be written.
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 0 {
+				t.Fatalf("expected no files for normalized provider %q, got %d entries", provider, len(entries))
+			}
+		})
+	}
+}
+
 func TestInjectRuntimeConfigHermes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -957,36 +1025,69 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	// Hermes uses AGENTS.md.
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
+	// Hermes is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("hermes provider should not create AGENTS.md and should delete stale ones")
+	}
+}
+
+func TestInjectRuntimeConfigOpenclaw(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
-		t.Error("AGENTS.md missing meta skill header")
-	}
-	if !strings.Contains(s, "Coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	// Hermes has no native skill discovery path wired up, so AGENTS.md must
-	// point the agent at the .agent_context/skills/ fallback — NOT claim that
-	// skills are "discovered automatically".
-	if strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Hermes should not claim native skill discovery")
-	}
-	if !strings.Contains(s, ".agent_context/skills/") {
-		t.Error("AGENTS.md for Hermes should reference .agent_context/skills/ fallback path")
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	// CLAUDE.md should NOT exist.
-	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Error("expected CLAUDE.md to NOT exist for Hermes provider")
+	if err := InjectRuntimeConfig(dir, "openclaw", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// OpenClaw is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("openclaw provider should not create AGENTS.md and should delete stale ones")
+	}
+}
+
+func TestInjectRuntimeConfigPi(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InjectRuntimeConfig(dir, "pi", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	// Pi is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("pi provider should not create AGENTS.md and should delete stale ones")
 	}
 }
 
@@ -1766,22 +1867,22 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	}
 	assignmentCtx := TaskContextForEnv{IssueID: "issue-1"}
 
-	readClaudeMD := func(t *testing.T, ctx TaskContextForEnv) string {
+	readRuntimeConfig := func(t *testing.T, ctx TaskContextForEnv) string {
 		t.Helper()
 		dir := t.TempDir()
-		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 			t.Fatalf("InjectRuntimeConfig failed: %v", err)
 		}
-		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 		if err != nil {
-			t.Fatalf("read CLAUDE.md: %v", err)
+			t.Fatalf("read AGENTS.md: %v", err)
 		}
 		return string(data)
 	}
 
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
-		s := readClaudeMD(t, assignmentCtx)
+		s := readRuntimeConfig(t, assignmentCtx)
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
@@ -1798,27 +1899,27 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 
 	t.Run("closing-line-no-longer-says-always-mention", func(t *testing.T) {
 		t.Parallel()
-		s := readClaudeMD(t, assignmentCtx)
+		s := readRuntimeConfig(t, assignmentCtx)
 		// The old footer said "**always** use the mention format" which models
 		// over-generalized to agent/member mentions. Guard against regression.
 		if strings.Contains(s, "**always** use the mention format") {
-			t.Errorf("CLAUDE.md still contains the overreaching \"**always** use the mention format\" guidance")
+			t.Errorf("AGENTS.md still contains the overreaching \"**always** use the mention format\" guidance")
 		}
 	})
 
 	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
 		t.Parallel()
-		s := readClaudeMD(t, commentTriggerCtx)
-		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
-		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
-		// so the signal can't decay back into pure prose again.
+		s := readRuntimeConfig(t, commentTriggerCtx)
+		// The anti-loop signal lives in the numbered workflow steps (4 + 5),
+		// not in a dedicated preamble. Lock in the key phrases so the signal
+		// can't decay back into pure prose again.
 		for _, want := range []string{
 			"Decide whether a reply is warranted",
 			"Silence is a valid and preferred way",
 			"Never @mention the agent you are replying to as a thank-you or sign-off",
 		} {
 			if !strings.Contains(s, want) {
-				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
+				t.Errorf("comment-triggered AGENTS.md missing %q", want)
 			}
 		}
 	})

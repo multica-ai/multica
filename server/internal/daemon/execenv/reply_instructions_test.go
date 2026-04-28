@@ -48,13 +48,13 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 		IssueID:          issueID,
 		TriggerCommentID: triggerID,
 	}
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+		t.Fatalf("read AGENTS.md: %v", err)
 	}
 
 	s := string(content)
@@ -64,7 +64,7 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
+			t.Errorf("AGENTS.md missing %q", want)
 		}
 	}
 }

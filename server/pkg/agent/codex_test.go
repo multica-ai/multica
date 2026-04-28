@@ -798,6 +798,81 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadSetsCompactPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["compactPrompt"] != "compact instructions" {
+					t.Errorf("compactPrompt = %v, want \"compact instructions\"", params["compactPrompt"])
+				}
+				if params["developerInstructions"] != "compact instructions" {
+					t.Errorf("developerInstructions = %v, want \"compact instructions\"", params["developerInstructions"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", SystemPrompt: "compact instructions"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true when thread/resume succeeded")
+	}
+
+	// Reset client state and test thread/start fallback.
+	c2, fs2, _ := newTestCodexClient(t)
+	wait2 := drainRPCScript(t, c2, fs2, []rpcResponse{
+		{
+			method:  "thread/resume",
+			errMsg:  "unknown thread",
+			errCode: -32602,
+		},
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["compactPrompt"] != "compact instructions" {
+					t.Errorf("compactPrompt = %v, want \"compact instructions\"", params["compactPrompt"])
+				}
+				if params["developerInstructions"] != "compact instructions" {
+					t.Errorf("developerInstructions = %v, want \"compact instructions\"", params["developerInstructions"])
+				}
+			},
+		},
+	})
+	defer wait2()
+
+	threadID, resumed, err = c2.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale", SystemPrompt: "compact instructions"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_new" {
+		t.Errorf("threadID = %q, want thr_new", threadID)
+	}
+	if resumed {
+		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

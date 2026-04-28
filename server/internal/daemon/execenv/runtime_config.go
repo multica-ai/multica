@@ -7,27 +7,39 @@ import (
 	"strings"
 )
 
-// InjectRuntimeConfig writes the meta skill content into the runtime-specific
-// config file so the agent discovers its environment through its native mechanism.
+// InjectRuntimeConfig sets up the runtime-specific config for the given provider.
 //
-// For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
-// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
-// For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
-// For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
-// For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
-// For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
-// For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
-// For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
-// For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
-// For Kimi:     writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
-// For Kiro:     writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
+// Inline providers (Claude, Codex, Hermes, Kimi, Kiro, OpenClaw, Pi) receive
+// instructions via SystemPrompt and do not need a native config file. Any stale
+// native config file is deleted to prevent double injection.
+//
+// File-only providers write the native config file so the agent discovers its
+// environment through its native mechanism:
+//   Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
+//   Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
+//   Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
+//   OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
+	provider = strings.ToLower(provider)
 	content := buildMetaSkillContent(provider, ctx)
 
+	// Inline providers receive instructions via SystemPrompt and do not need
+	// a native config file. Delete any stale file to prevent double injection.
 	switch provider {
 	case "claude":
-		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
+		_ = os.Remove(filepath.Join(workDir, "CLAUDE.md"))
+		return nil
+	case "codex":
+		_ = os.Remove(filepath.Join(workDir, "AGENTS.md"))
+		return nil
+	case "hermes", "kimi", "kiro", "openclaw", "pi":
+		_ = os.Remove(filepath.Join(workDir, "AGENTS.md"))
+		return nil
+	}
+
+	// File-only providers: write the native config file.
+	switch provider {
+	case "cursor", "copilot", "opencode":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -116,6 +128,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
+		if ctx.DefaultRepoURL != "" {
+			fmt.Fprintf(&b, "The default repository for this project is: `%s`\n\n", ctx.DefaultRepoURL)
+		}
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
 		b.WriteString("| URL | Description |\n")
@@ -124,6 +139,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			desc := repo.Description
 			if desc == "" {
 				desc = "—"
+			}
+			if ctx.DefaultRepoURL == repo.URL {
+				desc = "**default** — " + desc
 			}
 			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
 		}

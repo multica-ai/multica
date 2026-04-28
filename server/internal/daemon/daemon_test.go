@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -337,6 +338,108 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 		logger:       slog.Default(),
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
+	}
+}
+
+func TestRunTaskSetsSystemPromptForAllProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"claude", "codex", "hermes", "kimi", "kiro", "openclaw", "cursor", "copilot", "gemini", "pi", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+
+			fb := &fakeBackend{
+				results: []agent.Result{{Status: "completed", Output: "done"}},
+			}
+
+			d := &Daemon{
+				cfg: Config{
+					WorkspacesRoot: t.TempDir(),
+					Agents: map[string]AgentEntry{
+						provider: {Path: "dummy"},
+					},
+				},
+				client: NewClient("http://localhost:9999"),
+				logger: slog.Default(),
+				backendFactory: func(agentType string, cfg agent.Config) (agent.Backend, error) {
+					return fb, nil
+				},
+			}
+
+			task := Task{
+				ID:          "task-1",
+				WorkspaceID: "ws-1",
+				Agent: &AgentData{
+					ID:           "agent-1",
+					Name:         "Test",
+					Instructions: "You are a test agent.",
+				},
+			}
+
+			result, err := d.runTask(context.Background(), task, provider, slog.Default())
+			if err != nil {
+				t.Fatalf("runTask error: %v", err)
+			}
+			if result.Status != "completed" {
+				t.Fatalf("expected completed, got %s", result.Status)
+			}
+
+			if len(fb.calls) != 1 {
+				t.Fatalf("expected 1 call, got %d", len(fb.calls))
+			}
+			if fb.calls[0].SystemPrompt != "You are a test agent." {
+				t.Errorf("SystemPrompt = %q, want %q", fb.calls[0].SystemPrompt, "You are a test agent.")
+			}
+		})
+	}
+}
+
+func TestRunTaskNormalizesProviderString(t *testing.T) {
+	t.Parallel()
+
+	for i, provider := range []string{"CLAUDE", "Claude", "cLaUdE"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+
+			fb := &fakeBackend{
+				results: []agent.Result{{Status: "completed", Output: "done"}},
+			}
+
+			d := &Daemon{
+				cfg: Config{
+					WorkspacesRoot: t.TempDir(),
+					Agents: map[string]AgentEntry{
+						"claude": {Path: "dummy"},
+					},
+				},
+				client: NewClient("http://localhost:9999"),
+				logger: slog.Default(),
+				backendFactory: func(agentType string, cfg agent.Config) (agent.Backend, error) {
+					return fb, nil
+				},
+			}
+
+			task := Task{
+				ID:          fmt.Sprintf("task-%d", i),
+				WorkspaceID: "ws-1",
+				Agent: &AgentData{
+					ID:           "agent-1",
+					Name:         "Test",
+					Instructions: "You are a test agent.",
+				},
+			}
+
+			result, err := d.runTask(context.Background(), task, provider, slog.Default())
+			if err != nil {
+				t.Fatalf("runTask error: %v", err)
+			}
+			if result.Status != "completed" {
+				t.Fatalf("expected completed, got %s", result.Status)
+			}
+			if len(fb.calls) != 1 {
+				t.Fatalf("expected 1 call, got %d", len(fb.calls))
+			}
+		})
 	}
 }
 
