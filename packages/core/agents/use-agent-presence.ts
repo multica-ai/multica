@@ -50,36 +50,47 @@ export function useWorkspacePresenceMap(wsId: string | undefined): {
   byAgent: Map<string, AgentPresenceDetail>;
   loading: boolean;
 } {
-  const { data: agents, isPending: agentsPending } = useQuery({
+  const { data: agents, isPending: agentsPending, isError: agentsErr } = useQuery({
     ...agentListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: runtimes, isPending: runtimesPending } = useQuery({
+  const { data: runtimes, isPending: runtimesPending, isError: runtimesErr } = useQuery({
     ...runtimeListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: snapshot, isPending: snapshotPending } = useQuery({
+  const { data: snapshot, isPending: snapshotPending, isError: snapshotErr } = useQuery({
     ...agentTaskSnapshotOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const tick = usePresenceTick();
 
   const byAgent = useMemo(() => {
-    if (!agents || !runtimes || !snapshot) {
+    // Treat errored queries as empty so the map still builds — a 404 on
+    // the snapshot endpoint shouldn't leave every row's presence blank.
+    const safeAgents = agents ?? (agentsErr ? [] : null);
+    const safeRuntimes = runtimes ?? (runtimesErr ? [] : null);
+    const safeSnapshot = snapshot ?? (snapshotErr ? [] : null);
+    if (!safeAgents || !safeRuntimes || !safeSnapshot) {
       return new Map<string, AgentPresenceDetail>();
     }
     return buildPresenceMap({
-      agents,
-      runtimes,
-      snapshot,
+      agents: safeAgents,
+      runtimes: safeRuntimes,
+      snapshot: safeSnapshot,
       now: Date.now(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, runtimes, snapshot, tick]);
+  }, [agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
 
   return {
     byAgent,
-    loading: agentsPending || runtimesPending || snapshotPending,
+    // "loading" only while the queries are genuinely pending — once they
+    // settle (success OR error), we render with whatever we have. This
+    // matches the detail-version behaviour: don't spin forever on errors.
+    loading:
+      (agentsPending && !agentsErr) ||
+      (runtimesPending && !runtimesErr) ||
+      (snapshotPending && !snapshotErr),
   };
 }
 
@@ -93,19 +104,31 @@ export function useWorkspacePresenceMap(wsId: string | undefined): {
  * Runtime detail), prefer `useWorkspacePresenceMap` to avoid forest of
  * redundant subscriptions.
  */
+// Synthesised fallback shown when we can't resolve a real agent (deleted,
+// archived, or referenced by stale data) but still need to render something
+// next to the avatar. Yields a gray dot + idle last-task — better than a
+// skeleton spinning forever.
+const MISSING_AGENT_DETAIL: AgentPresenceDetail = {
+  availability: "offline",
+  lastTask: "idle",
+  runningCount: 0,
+  queuedCount: 0,
+  capacity: 0,
+};
+
 export function useAgentPresenceDetail(
   wsId: string | undefined,
   agentId: string | undefined,
 ): AgentPresenceDetail | "loading" {
-  const { data: agents } = useQuery({
+  const { data: agents, isError: agentsErr } = useQuery({
     ...agentListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: runtimes } = useQuery({
+  const { data: runtimes, isError: runtimesErr } = useQuery({
     ...runtimeListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: snapshot } = useQuery({
+  const { data: snapshot, isError: snapshotErr } = useQuery({
     ...agentTaskSnapshotOptions(wsId ?? ""),
     enabled: !!wsId,
   });
@@ -113,17 +136,27 @@ export function useAgentPresenceDetail(
 
   return useMemo<AgentPresenceDetail | "loading">(() => {
     if (!wsId || !agentId) return "loading";
-    if (!agents || !runtimes || !snapshot) return "loading";
 
-    const agent = agents.find((a) => a.id === agentId);
-    if (!agent) return "loading";
+    // Treat query errors as "no data" rather than "still loading". A 404 /
+    // 5xx on the snapshot endpoint (e.g. backend hasn't deployed the new
+    // route yet) used to leave the UI spinning forever; now we degrade to
+    // an empty list and the dot still renders based on runtime health.
+    const safeAgents = agents ?? (agentsErr ? [] : null);
+    const safeRuntimes = runtimes ?? (runtimesErr ? [] : null);
+    const safeSnapshot = snapshot ?? (snapshotErr ? [] : null);
+    if (!safeAgents || !safeRuntimes || !safeSnapshot) return "loading";
+
+    const agent = safeAgents.find((a) => a.id === agentId);
+    // Agent referenced but not in the workspace's active list (most often:
+    // archived assignee on an old issue). Render a gray-offline fallback
+    // instead of looping in "loading".
+    if (!agent) return MISSING_AGENT_DETAIL;
     // Missing runtime is a legitimate state (offline) — pass null and let
-    // derive handle it. The previous implementation looped forever in
-    // "loading" when runtime was deleted.
-    const runtime = runtimes.find((r) => r.id === agent.runtime_id) ?? null;
+    // derive handle it.
+    const runtime = safeRuntimes.find((r) => r.id === agent.runtime_id) ?? null;
 
-    const tasks = snapshot.filter((t) => t.agent_id === agentId);
+    const tasks = safeSnapshot.filter((t) => t.agent_id === agentId);
     return deriveAgentPresenceDetail({ agent, runtime, tasks, now: Date.now() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsId, agentId, agents, runtimes, snapshot, tick]);
+  }, [wsId, agentId, agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
 }
