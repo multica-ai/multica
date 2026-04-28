@@ -12,7 +12,7 @@ import (
 
 const (
 	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 3 * time.Second
+	DefaultPollInterval                   = 30 * time.Second
 	DefaultHeartbeatInterval              = 15 * time.Second
 	DefaultAgentTimeout                   = 2 * time.Hour
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
