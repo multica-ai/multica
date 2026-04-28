@@ -233,10 +233,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
-					// Documents tab (PKM browser, read-only — MUL-16).
+
+					// Documents tab (PKM browser — MUL-16 read, MUL-18 write).
 					r.Get("/documents/tree", h.GetDocumentsTree)
 					r.Get("/documents/file", h.GetDocumentsFile)
 					r.Get("/documents/image", h.GetDocumentsImage)
+					r.Put("/documents/file", h.PutDocumentFile)
+					r.Post("/documents/file", h.CreateDocumentFile)
+					r.Delete("/documents/file", h.DeleteDocumentFile)
+					r.Post("/documents/folder", h.CreateDocumentFolder)
+					r.Delete("/documents/folder", h.DeleteDocumentFolder)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
