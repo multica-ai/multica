@@ -11,57 +11,60 @@ import (
 )
 
 const (
-	DefaultServerURL             = "ws://localhost:8080/ws"
-	DefaultPollInterval          = 3 * time.Second
-	DefaultHeartbeatInterval     = 15 * time.Second
-	DefaultAgentTimeout          = 2 * time.Hour
-	DefaultRuntimeName           = "Local Agent"
-	DefaultWorkspaceSyncInterval = 30 * time.Second
-	DefaultHealthPort            = 19514
-	DefaultMaxConcurrentTasks    = 20
-	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 24 * time.Hour     // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL           = 72 * time.Hour     // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultServerURL                      = "ws://localhost:8080/ws"
+	DefaultPollInterval                   = 30 * time.Second
+	DefaultHeartbeatInterval              = 15 * time.Second
+	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	DefaultRuntimeName                    = "Local Agent"
+	DefaultWorkspaceSyncInterval          = 30 * time.Second
+	DefaultHealthPort                     = 19514
+	DefaultMaxConcurrentTasks             = 20
+	DefaultGCInterval                     = 1 * time.Hour
+	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 )
 
 // Config holds all daemon configuration.
 type Config struct {
-	ServerBaseURL      string
-	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
-	DeviceName         string
-	RuntimeName        string
-	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
-	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi
-	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
-	KeepEnvAfterTask   bool                  // preserve env after task for debugging
-	HealthPort         int                   // local HTTP port for health checks (default: 19514)
-	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
-	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
-	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 24h)
-	GCOrphanTTL        time.Duration         // clean orphan dirs with no meta older than this (default: 72h). Dirs whose issue returned 404 are cleaned immediately.
-	PollInterval       time.Duration
-	HeartbeatInterval  time.Duration
-	AgentTimeout       time.Duration
+	ServerBaseURL                  string
+	DaemonID                       string
+	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	DeviceName                     string
+	RuntimeName                    string
+	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
+	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
+	Profile                        string                // profile name (empty = default)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask               bool                  // preserve env after task for debugging
+	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
+	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
+	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval                     time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL                          time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 24h)
+	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta older than this (default: 72h). Dirs whose issue returned 404 are cleaned immediately.
+	PollInterval                   time.Duration
+	HeartbeatInterval              time.Duration
+	AgentTimeout                   time.Duration
+	CodexSemanticInactivityTimeout time.Duration
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL          string
-	WorkspacesRoot     string
-	PollInterval       time.Duration
-	HeartbeatInterval  time.Duration
-	AgentTimeout       time.Duration
-	MaxConcurrentTasks int
-	DaemonID           string
-	DeviceName         string
-	RuntimeName        string
-	Profile            string // profile name (empty = default)
-	HealthPort         int    // health check port (0 = use default)
+	ServerURL                      string
+	WorkspacesRoot                 string
+	PollInterval                   time.Duration
+	HeartbeatInterval              time.Duration
+	AgentTimeout                   time.Duration
+	CodexSemanticInactivityTimeout time.Duration
+	MaxConcurrentTasks             int
+	DaemonID                       string
+	DeviceName                     string
+	RuntimeName                    string
+	Profile                        string // profile name (empty = default)
+	HealthPort                     int    // health check port (0 = use default)
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -149,8 +152,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
 		}
 	}
+	kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
+	if _, err := exec.LookPath(kiroPath); err == nil {
+		agents["kiro"] = AgentEntry{
+			Path:  kiroPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, or kimi and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
 	}
 
 	// Host info
@@ -182,6 +192,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.AgentTimeout > 0 {
 		agentTimeout = overrides.AgentTimeout
+	}
+
+	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.CodexSemanticInactivityTimeout > 0 {
+		codexSemanticInactivityTimeout = overrides.CodexSemanticInactivityTimeout
 	}
 
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
@@ -289,24 +307,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	return Config{
-		ServerBaseURL:      serverBaseURL,
-		DaemonID:           daemonID,
-		LegacyDaemonIDs:    legacyDaemonIDs,
-		DeviceName:         deviceName,
-		RuntimeName:        runtimeName,
-		Profile:            profile,
-		Agents:             agents,
-		WorkspacesRoot:     workspacesRoot,
-		KeepEnvAfterTask:   keepEnv,
-		GCEnabled:          gcEnabled,
-		GCInterval:         gcInterval,
-		GCTTL:              gcTTL,
-		GCOrphanTTL:        gcOrphanTTL,
-		HealthPort:         healthPort,
-		MaxConcurrentTasks: maxConcurrentTasks,
-		PollInterval:       pollInterval,
-		HeartbeatInterval:  heartbeatInterval,
-		AgentTimeout:       agentTimeout,
+		ServerBaseURL:                  serverBaseURL,
+		DaemonID:                       daemonID,
+		LegacyDaemonIDs:                legacyDaemonIDs,
+		DeviceName:                     deviceName,
+		RuntimeName:                    runtimeName,
+		Profile:                        profile,
+		Agents:                         agents,
+		WorkspacesRoot:                 workspacesRoot,
+		KeepEnvAfterTask:               keepEnv,
+		GCEnabled:                      gcEnabled,
+		GCInterval:                     gcInterval,
+		GCTTL:                          gcTTL,
+		GCOrphanTTL:                    gcOrphanTTL,
+		HealthPort:                     healthPort,
+		MaxConcurrentTasks:             maxConcurrentTasks,
+		PollInterval:                   pollInterval,
+		HeartbeatInterval:              heartbeatInterval,
+		AgentTimeout:                   agentTimeout,
+		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 	}, nil
 }
 

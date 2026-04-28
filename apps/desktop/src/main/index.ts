@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -212,6 +212,64 @@ if (!gotTheLock) {
     ipcMain.handle("window:setImmersive", (_event, immersive: boolean) => {
       if (process.platform !== "darwin") return;
       mainWindow?.setWindowButtonVisibility(!immersive);
+    });
+
+    // IPC: show a native OS notification for a new inbox item. The renderer
+    // only fires this when the app is unfocused (it gates on
+    // `document.hasFocus()`), so we don't fight macOS foreground suppression
+    // here. Clicking the banner focuses the main window and routes to the
+    // inbox item via a renderer-side listener.
+    ipcMain.on(
+      "notification:show",
+      (
+        _event,
+        {
+          slug,
+          itemId,
+          issueKey,
+          title,
+          body,
+        }: {
+          slug: string;
+          itemId: string;
+          issueKey: string;
+          title: string;
+          body: string;
+        },
+      ) => {
+        if (!Notification.isSupported()) return;
+        const notification = new Notification({ title, body });
+        notification.on("click", () => {
+          if (!mainWindow) return;
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+          // Ship the full context back — the renderer pins the route to the
+          // source workspace (slug), marks the row read (itemId), and uses
+          // issueKey as the ?issue=<…> selector.
+          mainWindow.webContents.send("inbox:open", {
+            slug,
+            itemId,
+            issueKey,
+          });
+        });
+        notification.show();
+      },
+    );
+
+    // IPC: update the dock / taskbar unread badge. Values above 99 render as
+    // "99+". macOS is the primary target (user-visible dock badge); Linux
+    // Unity launchers also respect `setBadgeCount`. Windows' taskbar overlay
+    // needs a pre-rendered PNG and is deferred — the OS notification + the
+    // in-app inbox sidebar cover the core UX there for now.
+    ipcMain.on("badge:set", (_event, rawCount: number) => {
+      const count = Math.max(0, Math.floor(rawCount));
+      if (process.platform === "darwin") {
+        const label = count === 0 ? "" : count > 99 ? "99+" : String(count);
+        app.dock?.setBadge(label);
+      } else {
+        app.setBadgeCount(count);
+      }
     });
 
     createWindow();

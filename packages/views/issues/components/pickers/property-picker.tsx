@@ -33,6 +33,7 @@ export function PropertyPicker({
   header,
   tooltip,
   children,
+  footer,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -53,6 +54,13 @@ export function PropertyPicker({
    *  open (otherwise tooltip + popover would stack on the same anchor). */
   tooltip?: React.ReactNode;
   children: React.ReactNode;
+  /**
+   * Optional footer rendered below the listbox. Unlike items rendered as
+   * children, the footer is *not* included in arrow-key navigation — use it
+   * for actions like "Create new…" or "Manage…" that shouldn't be treated as
+   * selectable listbox options.
+   */
+  footer?: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -164,6 +172,7 @@ export function PropertyPicker({
         )}
         {header && <div className="border-b">{header}</div>}
         <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
+        {footer && <div className="border-t p-1">{footer}</div>}
       </PopoverContent>
     </Popover>
   );
@@ -200,10 +209,13 @@ export function PickerItem({
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
+      {/* min-w-0 lets long children (like truncated label names) shrink
+          inside the flex row instead of pushing the selected checkmark off
+          the right edge. The check column always reserves its 14px slot
+          (visible when selected, invisible otherwise) so unselected rows
+          align with selected rows and the eye doesn't chase a jittery
+          right edge. */}
       <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
-      {/* Check column always reserves its 14px slot (visible when selected,
-          invisible otherwise) so unselected rows align with selected rows
-          and the eye doesn't have to chase a jittery right edge. */}
       <Check
         className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${
           selected ? "" : "invisible"

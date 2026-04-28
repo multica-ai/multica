@@ -70,6 +70,35 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".kiro", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Kiro Review\ndescription: Review code with Kiro\n---\n# Kiro Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("kiro")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("kiro should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skills[0].Key)
+	}
+	if skills[0].Name != "Kiro Review" {
+		t.Fatalf("name = %q, want Kiro Review", skills[0].Name)
+	}
+	if skills[0].SourcePath != "~/.kiro/skills/review-helper" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
 // Skill installers (for example lark-cli) place every skill at a shared
 // location like ~/.agents/skills/<name> and symlink each one into the
 // runtime root (~/.claude/skills/<name>). The previous filepath.WalkDir
@@ -180,8 +209,8 @@ func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 	// Top-level skill — should register at key="top" and its child SKILL.md
 	// must NOT register as a separate skill.
 	writeTestLocalSkill(t, root, "top", map[string]string{
-		"SKILL.md":            "---\nname: Top\n---\n",
-		"templates/SKILL.md":  "not a real skill — sub-template that happens to share the filename",
+		"SKILL.md":           "---\nname: Top\n---\n",
+		"templates/SKILL.md": "not a real skill — sub-template that happens to share the filename",
 	})
 
 	// Nested skill — only valid SKILL.md is at depth 2.

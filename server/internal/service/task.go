@@ -26,10 +26,19 @@ type TaskService struct {
 	TxStarter TxStarter
 	Hub       *realtime.Hub
 	Bus       *events.Bus
+	Wakeup    TaskWakeupNotifier
 }
 
-func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
+type TaskWakeupNotifier interface {
+	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
+	var wakeup TaskWakeupNotifier
+	if len(wakeups) > 0 {
+		wakeup = wakeups[0]
+	}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -73,6 +82,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	}
 
 	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -107,6 +117,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -137,6 +148,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -182,6 +194,24 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	return cancelled, nil
 }
 
+// CancelTasksByTriggerComment cancels active tasks whose trigger is the given
+// comment. Called from DeleteComment so an agent does not run with the
+// now-deleted content already embedded in its prompt. Must be invoked BEFORE
+// the comment row is deleted because the FK ON DELETE SET NULL would
+// otherwise nullify trigger_comment_id and we'd lose the ability to find
+// the affected tasks.
+func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) error {
+	cancelled, err := s.Queries.CancelAgentTasksByTriggerComment(ctx, commentID)
+	if err != nil {
+		return err
+	}
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return nil
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
@@ -213,7 +243,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
-		outcome                                                            = "unknown"
+		outcome                                                              = "unknown"
 		getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs int64
 	)
 	defer func() {
@@ -256,10 +286,10 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
 
-	// Update agent status to working. Hits the DB and may publish events,
-	// so it must be inside the timed window.
+	// Refresh agent status from active tasks. This avoids a stale unconditional
+	// working write racing after a just-cancelled claim.
 	t0 = time.Now()
-	s.updateAgentStatus(ctx, agentID, "working")
+	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
 	// Broadcast task:dispatch. ResolveTaskWorkspaceID inside this path can
@@ -278,10 +308,10 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
-		outcome             = "no_task"
-		listMs, loopMs      int64
-		listCount, tried    int
-		claimedFlag         bool
+		outcome          = "no_task"
+		listMs, loopMs   int64
+		listCount, tried int
+		claimedFlag      bool
 	)
 	defer func() {
 		totalMs := time.Since(start).Milliseconds()
@@ -648,6 +678,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"attempt", child.Attempt,
 		"max_attempts", child.MaxAttempts,
 	)
+	s.notifyTaskAvailable(child)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskDispatch, child)
 	return &child, nil
 }
@@ -827,18 +858,14 @@ func (s *TaskService) ReportProgress(ctx context.Context, taskID string, workspa
 	})
 }
 
-// ReconcileAgentStatus checks running task count and sets agent status accordingly.
+// ReconcileAgentStatus refreshes agent status from the current active task set.
 func (s *TaskService) ReconcileAgentStatus(ctx context.Context, agentID pgtype.UUID) {
-	running, err := s.Queries.CountRunningTasks(ctx, agentID)
+	agent, err := s.Queries.RefreshAgentStatusFromTasks(ctx, agentID)
 	if err != nil {
 		return
 	}
-	newStatus := "idle"
-	if running > 0 {
-		newStatus = "working"
-	}
-	slog.Debug("agent status reconciled", "agent_id", util.UUIDToString(agentID), "status", newStatus, "running_tasks", running)
-	s.updateAgentStatus(ctx, agentID, newStatus)
+	slog.Debug("agent status reconciled", "agent_id", util.UUIDToString(agentID), "status", agent.Status)
+	s.publishAgentStatus(agent)
 }
 
 func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID, status string) {
@@ -849,6 +876,10 @@ func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID
 	if err != nil {
 		return
 	}
+	s.publishAgentStatus(agent)
+}
+
+func (s *TaskService) publishAgentStatus(agent db.Agent) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAgentStatus,
 		WorkspaceID: util.UUIDToString(agent.WorkspaceID),
@@ -903,6 +934,13 @@ func priorityToInt(p string) int32 {
 	default:
 		return 0
 	}
+}
+
+func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
+	if s.Wakeup == nil || !task.RuntimeID.Valid {
+		return
+	}
+	s.Wakeup.NotifyTaskAvailable(util.UUIDToString(task.RuntimeID), util.UUIDToString(task.ID))
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {

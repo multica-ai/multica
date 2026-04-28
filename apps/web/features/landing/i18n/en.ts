@@ -284,6 +284,51 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.19",
+        date: "2026-04-28",
+        title: "Kiro CLI Runtime, Desktop Notifications & Issue Label Filter",
+        changes: [],
+        features: [
+          "Kiro CLI added as a local agent runtime option",
+          "macOS dock badge for unread issues, plus a native notification when the window is unfocused — click to jump straight to the issue",
+          "Issue list now supports filtering by label, combinable with status / priority / assignee",
+          "Daemon receives task wakeups over WebSocket — task startup latency drops noticeably",
+        ],
+        improvements: [
+          "List and board status group headers are simpler, with clearer color cues",
+          "Author-written markdown links are preserved through linkify",
+          "Label attach now applies optimistically, no server round-trip wait",
+          "Mention picker's issue search refreshes as you type",
+        ],
+        fixes: [
+          "Deleting a comment now cancels any agent task it triggered — no more ghost runs",
+          "Stalled Codex turns now time out instead of holding the slot",
+          "Windows daemon no longer dies when the parent shell closes",
+          "Agent-to-agent mention threads no longer cause feedback loops",
+        ],
+      },
+      {
+        version: "0.2.18",
+        date: "2026-04-27",
+        title: "Issue Labels, Labs Tab & Sidebar Invite Dot",
+        changes: [],
+        features: [
+          "Issue labels — color-code and filter issues across list, board and detail views",
+          "Labs settings tab for experimental toggles",
+          "Sidebar shows a dot when you have an unread workspace invite",
+        ],
+        improvements: [
+          "Project picker now shows the selected project's icon",
+          "Sidebar parent items stay highlighted on detail pages",
+          "Self-hosted deployments correctly honor signup gating env vars",
+        ],
+        fixes: [
+          "Agent comments preserve line breaks again",
+          "Desktop RPM no longer conflicts with Slack / VS Code on Fedora",
+          "Windows agents handle multi-line prompts correctly",
+        ],
+      },
+      {
         version: "0.2.17",
         date: "2026-04-26",
         title: "Custom Agent Env, Better Failure Messages & Reliability Fixes",

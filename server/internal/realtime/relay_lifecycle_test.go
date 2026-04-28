@@ -50,6 +50,23 @@ func TestMirroredRelayRecordsDivergenceWhenOneBackendFails(t *testing.T) {
 	}
 }
 
+func TestMirroredRelayDoesNotMirrorDaemonRuntimeEvents(t *testing.T) {
+	primary := &recordingManagedRelay{nodeID: "primary"}
+	mirror := &recordingManagedRelay{nodeID: "mirror"}
+	relay := NewMirroredRelay(primary, mirror)
+
+	if err := relay.PublishWithID(ScopeDaemonRuntime, "task-1", "", []byte(`{"type":"daemon:task_available"}`), "event-1"); err != nil {
+		t.Fatalf("PublishWithID: %v", err)
+	}
+
+	if len(primary.calls) != 1 {
+		t.Fatalf("expected primary publish call, got %d", len(primary.calls))
+	}
+	if len(mirror.calls) != 0 {
+		t.Fatalf("expected daemon runtime event not to hit mirror, got %d calls", len(mirror.calls))
+	}
+}
+
 type relayPublishCall struct {
 	scopeType string
 	scopeID   string

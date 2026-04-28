@@ -19,6 +19,7 @@ import {
   onIssueCreated,
   onIssueUpdated,
   onIssueDeleted,
+  onIssueLabelsChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -32,6 +33,7 @@ import type {
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
+  IssueLabelsChangedPayload,
   InboxNewPayload,
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -118,6 +120,17 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      label: () => {
+        // label:created/updated/deleted — also refresh issues, since each
+        // issue carries a denormalized snapshot of its labels (rename/recolor
+        // /delete on a label needs to flush the chips on every issue showing
+        // it).
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: ["labels", wsId] });
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
+      },
       pin: () => {
         const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
@@ -167,7 +180,7 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "activity:created",
       "reaction:added", "reaction:removed",
@@ -229,11 +242,53 @@ export function useRealtimeSync(
       }
     });
 
+    const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
+      const { issue_id, labels } = p as IssueLabelsChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
     const unsubInboxNew = ws.on("inbox:new", (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
       const wsId = getCurrentWsId();
       if (wsId) onInboxNew(qc, wsId, item);
+      // Fire a native OS notification only when the app isn't focused. When
+      // the user is already looking at Multica, the inbox sidebar's unread
+      // styling is enough — no need to interrupt with a banner. `desktopAPI`
+      // is injected by the preload script; its absence (web app) skips silently.
+      if (typeof document !== "undefined" && document.hasFocus()) return;
+      // Capture the source workspace slug at emit time. The user may switch
+      // workspaces before clicking the banner (macOS Notification Center
+      // holds banners), so routing must not read "current slug" at click
+      // time — otherwise notifications from workspace A click through to
+      // workspace B's inbox and 404.
+      const slug = getCurrentSlug();
+      if (!slug) return;
+      const desktopAPI = (
+        window as unknown as {
+          desktopAPI?: {
+            showNotification?: (payload: {
+              slug: string;
+              itemId: string;
+              issueKey: string;
+              title: string;
+              body: string;
+            }) => void;
+          };
+        }
+      ).desktopAPI;
+      // `issueKey` matches the inbox page's URL selector (issue id when the
+      // item is attached to an issue, otherwise the inbox item id). `itemId`
+      // is the inbox row's own id, needed to fire markInboxRead on click.
+      desktopAPI?.showNotification?.({
+        slug,
+        itemId: item.id,
+        issueKey: item.issue_id ?? item.id,
+        title: item.title,
+        body: item.body ?? "",
+      });
     });
 
     // --- Timeline event handlers (global fallback) ---
@@ -391,7 +446,7 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     });
 
-    // --- Chat / task events (global, survives chat page unmount) ---
+    // --- Chat / task events (global, survives ChatWindow unmount) ---
     //
     // Single source of truth: the Query cache. No Zustand writes here — the
     // earlier mirror caused a race where the cache and store disagreed
@@ -493,6 +548,7 @@ export function useRealtimeSync(
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
+      unsubIssueLabelsChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

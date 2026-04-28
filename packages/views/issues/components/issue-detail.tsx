@@ -37,7 +37,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
@@ -386,6 +386,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PropRow>
           <PropRow label="Project">
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label="Labels">
+            <LabelPicker issueId={issue.id} align="start" />
           </PropRow>
         </div>}
       </div>

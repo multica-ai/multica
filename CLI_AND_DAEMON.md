@@ -146,6 +146,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Gemini | `gemini` | Google's coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
+| Kimi | `kimi` | Moonshot coding agent |
+| Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -166,6 +168,7 @@ Daemon behavior is configured via flags or environment variables:
 | Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `2h` |
+| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
@@ -192,6 +195,10 @@ Agent-specific overrides:
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
+| `MULTICA_KIMI_MODEL` | Override the Kimi model used |
+| `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
+| `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 
 ### Self-Hosted Server
 

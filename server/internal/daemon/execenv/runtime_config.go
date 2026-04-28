@@ -20,13 +20,14 @@ import (
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
 // For Kimi:     writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
+// For Kiro:     writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	content := buildMetaSkillContent(provider, ctx)
 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -86,7 +87,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--assignee X] [--parent <issue-id>] [--status X]` — Create a new issue\n")
 	b.WriteString("- `multica issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use --unassign to remove assignee)\n")
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
-	b.WriteString("  - For content with special characters (backticks, quotes), pipe via stdin: `cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin`\n")
+	b.WriteString("  - **For multi-line content (anything with line breaks, paragraphs, code blocks, backticks, or quotes), you MUST pipe via stdin** — bash does NOT expand `\\n` inside double quotes, so writing `--content \"para1\\n\\npara2\"` stores the literal 4-char sequence and the comment renders without line breaks. Use a HEREDOC instead:\n")
+	b.WriteString("\n")
+	b.WriteString("    ```\n")
+	b.WriteString("    cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin\n")
+	b.WriteString("    First paragraph.\n")
+	b.WriteString("\n")
+	b.WriteString("    Second paragraph with `code` and \"quotes\".\n")
+	b.WriteString("    COMMENT\n")
+	b.WriteString("    ```\n")
+	b.WriteString("\n")
+	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")
@@ -158,7 +169,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
-		b.WriteString("4. **Decide whether a reply is warranted.** If the triggering comment is an acknowledgment / thanks / sign-off from another agent and no concrete question or task is being asked of you, do NOT post a reply — just exit. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+		b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 		b.WriteString("5. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
 		b.WriteString("6. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
 		b.WriteString(BuildCommentReplyInstructions(ctx.IssueID, ctx.TriggerCommentID))
@@ -181,8 +192,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, and Kimi discover skills natively from their respective paths — just list names.
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
+			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "gemini", "hermes":
 			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path

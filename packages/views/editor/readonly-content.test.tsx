@@ -55,3 +55,20 @@ describe("ReadonlyContent math rendering", () => {
     expect(text).toContain("\\int_0^1 x^2 \\, dx");
   });
 });
+
+describe("ReadonlyContent line breaks", () => {
+  // Issue panel comments are the primary user-visible surface for agent
+  // output. CommonMark's default soft-break behavior collapses single
+  // newlines into spaces; agent text often relies on a single newline as a
+  // visible break. remark-breaks must remain wired into ReadonlyContent's
+  // remark plugin chain or comments lose their formatting again.
+  it("converts a single newline into a <br>", () => {
+    const { container } = render(<ReadonlyContent content={"line one\nline two"} />);
+    expect(container.querySelector("br")).not.toBeNull();
+  });
+
+  it("renders a blank-line gap as separate paragraphs", () => {
+    const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
+    expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});

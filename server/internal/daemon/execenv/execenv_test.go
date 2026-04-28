@@ -619,6 +619,33 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "kiro-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "kiro", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".kiro", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .kiro/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Kiro provider")
+	}
+}
+
 func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -652,6 +679,36 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	// CLAUDE.md should NOT exist.
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Error("expected CLAUDE.md to NOT exist for OpenCode provider")
+	}
+}
+
+func TestInjectRuntimeConfigKiro(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md missing native skill discovery hint")
 	}
 }
 
@@ -768,6 +825,39 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestInjectRuntimeConfigDirectsMultiLineWritesToStdin pins the guidance that
+// any multi-line content for `multica issue comment add` must go through
+// `--content-stdin` + a HEREDOC. Agents that reached for the inline
+// `--content "...\n\n..."` form ended up with literal 4-char `\n` sequences
+// in stored comments because bash does not expand backslash escapes inside
+// double quotes; see MUL-1467. This test prevents the multi-line guidance
+// from silently regressing back into a "for special characters" footnote.
+func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"multi-line content",
+		"MUST pipe via stdin",
+		"--content-stdin",
+		"<<'COMMENT'",
+		"`--description`",
+		"--description-stdin",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)
+		}
 	}
 }
 

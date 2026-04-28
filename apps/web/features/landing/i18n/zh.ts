@@ -284,6 +284,51 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.19",
+        date: "2026-04-28",
+        title: "Kiro CLI Runtime、桌面通知红点与 Issue 标签过滤",
+        changes: [],
+        features: [
+          "新增 Kiro CLI 作为本地 Agent runtime 选项",
+          "macOS Dock 显示未读 Issue 红点；窗口失焦时弹出原生通知，点击直达对应 Issue",
+          "Issue 列表新增 Label 过滤，可与状态、优先级、Assignee 等组合使用",
+          "Daemon 通过 WebSocket 接收任务唤醒，任务起跑延迟显著降低",
+        ],
+        improvements: [
+          "List/Board 视图的状态分组 header 更简洁，颜色提示更清晰",
+          "评论中作者手写的 Markdown 链接不再被自动 linkify 替换",
+          "添加 Label 现在乐观更新，无需等待服务端往返",
+          "Mention 输入时的 Issue 搜索结果会随着输入实时刷新",
+        ],
+        fixes: [
+          "Comment 被删除时会取消已触发的 Agent 任务，不再有幽灵 run",
+          "Codex 卡住的对话回合会超时退出，避免占用配额",
+          "Windows Daemon 不再随父 shell 关闭被一同杀掉",
+          "Agent 之间的 mention 不再相互触发，避免死循环",
+        ],
+      },
+      {
+        version: "0.2.18",
+        date: "2026-04-27",
+        title: "Issue 标签、Labs 设置页与邀请红点",
+        changes: [],
+        features: [
+          "Issue 标签——给 Issue 上色、分类，列表、看板和详情页都能用",
+          "新增 Labs 设置页，集中放实验性开关",
+          "有未读工作区邀请时，侧边栏会出现红点提示",
+        ],
+        improvements: [
+          "Project 选择器会显示当前所选 Project 的图标",
+          "进入详情页时，侧边栏父级菜单保持高亮",
+          "自托管部署正确读取注册放行相关的环境变量",
+        ],
+        fixes: [
+          "Agent 评论的换行恢复正常显示",
+          "桌面端 RPM 不再与 Slack / VS Code 在 Fedora 上冲突",
+          "Windows 下 Agent 能正确处理多行 prompt",
+        ],
+      },
+      {
         version: "0.2.17",
         date: "2026-04-26",
         title: "Agent 自定义环境变量、更清晰的失败信息与一系列稳定性修复",

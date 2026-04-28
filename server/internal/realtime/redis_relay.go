@@ -106,12 +106,16 @@ func redisString(v any) string {
 	}
 }
 
-func deliverEnvelope(hub *Hub, ev envelope) {
+func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope) {
 	if ev.PayloadJSON == "" {
 		return
 	}
 	frame := injectEventID([]byte(ev.PayloadJSON), ev.EventID)
 	switch ev.Scope {
+	case ScopeDaemonRuntime:
+		if daemonRuntime != nil {
+			daemonRuntime.DeliverDaemonRuntime(ev.ScopeID, frame, ev.EventID)
+		}
 	case "global":
 		hub.fanoutAllDedup(frame, "", ev.EventID)
 	case ScopeUser:
@@ -134,6 +138,8 @@ type RedisRelay struct {
 	consumers map[scopeKey]*scopeConsumer
 	stopping  bool
 	wg        sync.WaitGroup
+
+	daemonRuntime DaemonRuntimeDeliverer
 }
 
 type scopeConsumer struct {
@@ -166,6 +172,10 @@ func NewRedisRelayWithClients(hub *Hub, writeRDB, readRDB *redis.Client) *RedisR
 
 // NodeID returns this relay's randomly-assigned node identifier.
 func (r *RedisRelay) NodeID() string { return r.nodeID }
+
+func (r *RedisRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
+	r.daemonRuntime = d
+}
 
 // Wait blocks until all relay-owned goroutines have exited after the Start
 // context is canceled.
@@ -394,7 +404,7 @@ func (r *RedisRelay) deliverMessage(scopeType, scopeID string, msg redis.XMessag
 	if ev.ScopeID == "" {
 		ev.ScopeID = scopeID
 	}
-	deliverEnvelope(r.hub, ev)
+	deliverEnvelope(r.hub, r.daemonRuntime, ev)
 }
 
 // fanoutUser is implemented in hub.go.

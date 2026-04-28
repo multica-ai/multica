@@ -36,6 +36,15 @@ func (r *MirroredRelay) NodeID() string {
 	return r.primary.NodeID()
 }
 
+func (r *MirroredRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
+	if setter, ok := r.primary.(interface{ SetDaemonRuntimeDeliverer(DaemonRuntimeDeliverer) }); ok {
+		setter.SetDaemonRuntimeDeliverer(d)
+	}
+	if setter, ok := r.mirror.(interface{ SetDaemonRuntimeDeliverer(DaemonRuntimeDeliverer) }); ok {
+		setter.SetDaemonRuntimeDeliverer(d)
+	}
+}
+
 func (r *MirroredRelay) Start(ctx context.Context) {
 	r.primary.Start(ctx)
 	r.mirror.Start(ctx)
@@ -74,6 +83,9 @@ func (r *MirroredRelay) Broadcast(message []byte) {
 
 func (r *MirroredRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	primaryErr := r.primary.PublishWithID(scopeType, scopeID, exclude, frame, id)
+	if scopeType == ScopeDaemonRuntime {
+		return primaryErr
+	}
 	mirrorErr := r.mirror.PublishWithID(scopeType, scopeID, exclude, frame, id)
 
 	if primaryErr != nil {

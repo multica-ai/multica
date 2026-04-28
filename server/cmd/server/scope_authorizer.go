@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -31,9 +32,12 @@ func (a *dbScopeAuthorizer) AuthorizeScope(ctx context.Context, userID, workspac
 	if workspaceID == "" || scopeID == "" {
 		return false, nil
 	}
-	wsUUID := parseUUID(workspaceID)
-	idUUID := parseUUID(scopeID)
-	if !wsUUID.Valid || !idUUID.Valid {
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return false, nil
+	}
+	idUUID, err := util.ParseUUID(scopeID)
+	if err != nil {
 		return false, nil
 	}
 	switch scopeType {
@@ -60,8 +64,8 @@ func (a *dbScopeAuthorizer) AuthorizeScope(ctx context.Context, userID, workspac
 			if sess.WorkspaceID != wsUUID {
 				return false, nil
 			}
-			uidUUID := parseUUID(userID)
-			if !uidUUID.Valid || sess.CreatorID != uidUUID {
+			uidUUID, err := util.ParseUUID(userID)
+			if err != nil || sess.CreatorID != uidUUID {
 				return false, nil
 			}
 			return true, nil
@@ -81,8 +85,8 @@ func (a *dbScopeAuthorizer) AuthorizeScope(ctx context.Context, userID, workspac
 		// otherwise any workspace member who learns a session_id could
 		// subscribe to chat:message / chat:done / chat:session_read for a
 		// peer's private chat.
-		uidUUID := parseUUID(userID)
-		if !uidUUID.Valid || sess.CreatorID != uidUUID {
+		uidUUID, err := util.ParseUUID(userID)
+		if err != nil || sess.CreatorID != uidUUID {
 			return false, nil
 		}
 		return true, nil
