@@ -1113,6 +1113,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 	}
 
+	// Write prompt stratification files: REFERENCE.md (full instructions) and
+	// CONTRACT.md (compact contract). REFERENCE.md write failure is fatal.
+	pm, err := execenv.WritePromptStratificationFiles(env.WorkDir, provider, taskCtx)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("write prompt stratification files: %w", err)
+	}
+	pm.CompactionDetected = task.PriorSessionID != ""
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
@@ -1168,7 +1176,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 	}
 	var backend agent.Backend
-	var err error
 	if d.backendFactory != nil {
 		backend, err = d.backendFactory(provider, agent.Config{
 			ExecutablePath: entry.Path,
@@ -1230,12 +1237,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
-	// Pass agent instructions inline via SystemPrompt for all providers.
-	// Backends that support system prompts (Kimi, Hermes, Kiro, Claude,
-	// Codex, OpenClaw) will prepend or append them natively. File-only
-	// providers (Cursor, Copilot, Gemini, Pi, OpenCode) ignore SystemPrompt
-	// and continue to receive instructions via their runtime config file.
-	execOpts.SystemPrompt = instructions
+	// Inline providers receive the compact contract via SystemPrompt.
+	// File-only providers (Cursor, Copilot, Gemini) ignore SystemPrompt
+	// and continue to receive full instructions via their native config file.
+	if execenv.IsInlineProvider(provider) {
+		execOpts.SystemPrompt = execenv.BuildContract(taskCtx)
+	} else {
+		execOpts.SystemPrompt = instructions
+	}
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
@@ -1264,7 +1273,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"status", result.Status,
 		"duration", elapsed.String(),
 		"tools", tools,
+		"system_prompt_tokens", pm.SystemPromptTokens,
+		"reference_tokens", pm.ReferenceTokens,
+		"instructions_tokens", pm.InstructionsTokens,
+		"compaction_detected", pm.CompactionDetected,
 	)
+
+	// Report prompt metrics independently so they're captured even for
+	// failed/blocked tasks.
+	if err := d.client.ReportPromptMetrics(ctx, task.ID, map[string]any{
+		"system_prompt_tokens": pm.SystemPromptTokens,
+		"reference_tokens":     pm.ReferenceTokens,
+		"instructions_tokens":  pm.InstructionsTokens,
+		"compaction_detected":  pm.CompactionDetected,
+	}); err != nil {
+		taskLog.Warn("report prompt metrics failed", "error", err)
+	}
 
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -387,8 +388,18 @@ func TestRunTaskSetsSystemPromptForAllProviders(t *testing.T) {
 			if len(fb.calls) != 1 {
 				t.Fatalf("expected 1 call, got %d", len(fb.calls))
 			}
-			if fb.calls[0].SystemPrompt != "You are a test agent." {
-				t.Errorf("SystemPrompt = %q, want %q", fb.calls[0].SystemPrompt, "You are a test agent.")
+			got := fb.calls[0].SystemPrompt
+			if execenv.IsInlineProvider(provider) {
+				// Inline providers receive the compact contract, which contains
+				// the identity anchor.
+				if !strings.Contains(got, "You are a test agent.") {
+					t.Errorf("SystemPrompt = %q, want it to contain identity anchor %q", got, "You are a test agent.")
+				}
+			} else {
+				// File-only providers still receive raw instructions (ignored by backend).
+				if got != "You are a test agent." {
+					t.Errorf("SystemPrompt = %q, want %q", got, "You are a test agent.")
+				}
 			}
 		})
 	}

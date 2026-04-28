@@ -2182,3 +2182,4 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
 	}
 }
+

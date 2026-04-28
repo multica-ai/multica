@@ -132,6 +132,7 @@ type AgentTaskResponse struct {
 	ParentTaskID            *string         `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData  `json:"agent,omitempty"`
 	Repos                   []RepoData      `json:"repos,omitempty"`
+	DefaultRepoURL          string          `json:"default_repo_url,omitempty"`
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue

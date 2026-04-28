@@ -8,18 +8,25 @@ import (
 )
 
 // BuildPrompt constructs the task prompt for an agent CLI.
-// Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
-// injected by execenv.InjectRuntimeConfig.
+// Keep this minimal — detailed instructions live in REFERENCE.md.
 func BuildPrompt(task Task) string {
+	var prompt string
 	if task.ChatSessionID != "" {
-		return buildChatPrompt(task)
+		prompt = buildChatPrompt(task)
+	} else if task.TriggerCommentID != "" {
+		prompt = buildCommentPrompt(task)
+	} else if task.AutopilotRunID != "" {
+		prompt = buildAutopilotPrompt(task)
+	} else {
+		prompt = buildAssignmentPrompt(task)
 	}
-	if task.TriggerCommentID != "" {
-		return buildCommentPrompt(task)
+	if task.PriorSessionID != "" {
+		prompt += "\n\n⚠️ This session was resumed from a previous turn. Prior context may have been compacted or truncated. If you need your full instructions, read REFERENCE.md in the workdir.\n"
 	}
-	if task.AutopilotRunID != "" {
-		return buildAutopilotPrompt(task)
-	}
+	return prompt
+}
+
+func buildAssignmentPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)

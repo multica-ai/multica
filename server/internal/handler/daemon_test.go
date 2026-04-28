@@ -1617,3 +1617,105 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
 }
+
+// TestClaimTaskByRuntime_ProjectRepoURL_ReordersRepos verifies that when an
+// issue is bound to a project with a repo_url, that repo is moved to position 0
+// in the returned repos list and DefaultRepoURL is set.
+func TestClaimTaskByRuntime_ProjectRepoURL_ReordersRepos(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	// Set workspace repos
+	reposJSON := `[{"url":"https://github.com/acme/alpha","description":"Alpha"},{"url":"https://github.com/acme/beta","description":"Beta"},{"url":"https://github.com/acme/gamma","description":"Gamma"}]`
+	_, err := testPool.Exec(ctx, `UPDATE workspace SET repos = $1::jsonb WHERE id = $2`, reposJSON, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("setup: set workspace repos: %v", err)
+	}
+	defer testPool.Exec(ctx, `UPDATE workspace SET repos = '[]'::jsonb WHERE id = $1`, testWorkspaceID)
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Ensure the agent has capacity to claim tasks
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 10 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("setup: increase agent capacity: %v", err)
+	}
+	// Clean up any lingering tasks for this agent
+	if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, agentID); err != nil {
+		t.Fatalf("setup: clean agent tasks: %v", err)
+	}
+
+	// Create project bound to beta (position 1 in the list)
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, status, priority, repo_url)
+		VALUES ($1, 'Repo reorder test', 'planned', 'none', 'https://github.com/acme/beta')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("setup: create project: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+
+	// Create issue bound to project
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number, project_id)
+		VALUES ($1, 'Repo reorder issue', 'todo', 'medium', 'agent', $2, 'member', $3, 99901, $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, projectID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+
+	// Create queued task for the issue
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, scheduled_at)
+		VALUES ($1, $2, $3, 'queued', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-repo-reorder")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			Repos          []RepoData `json:"repos"`
+			DefaultRepoURL string     `json:"default_repo_url"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected a task in response, got nil")
+	}
+	if len(resp.Task.Repos) != 3 {
+		t.Fatalf("expected 3 repos, got %d", len(resp.Task.Repos))
+	}
+	if resp.Task.Repos[0].URL != "https://github.com/acme/beta" {
+		t.Fatalf("expected beta at position 0, got %s", resp.Task.Repos[0].URL)
+	}
+	if resp.Task.DefaultRepoURL != "https://github.com/acme/beta" {
+		t.Fatalf("expected DefaultRepoURL beta, got %s", resp.Task.DefaultRepoURL)
+	}
+}

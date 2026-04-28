@@ -136,7 +136,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 		WorkspaceID:    "ws-test-002",
 		TaskID:         "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		AgentName:      "Code Reviewer",
-		Provider:       "opencode",
+		Provider:       "cursor",
 		Task:           taskCtx,
 	}, testLogger())
 	if err != nil {
@@ -145,7 +145,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Inject runtime config (done separately in daemon, replicate here).
-	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
+	if err := InjectRuntimeConfig(env.WorkDir, "cursor", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -491,7 +491,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	ctx := TaskContextForEnv{IssueID: "test-issue-id"}
 
-	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "cursor", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -645,30 +645,19 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
+	// Pre-create a stale AGENTS.md to verify deletion.
+	stalePath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	// OpenCode uses AGENTS.md (same as codex).
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
-	}
-
-	s := string(content)
-	if !strings.Contains(s, "Multica Agent Runtime") {
-		t.Error("AGENTS.md missing meta skill header")
-	}
-	if !strings.Contains(s, "Coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md missing native skill discovery hint")
-	}
-
-	// CLAUDE.md should NOT exist.
-	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Error("expected CLAUDE.md to NOT exist for OpenCode provider")
+	// OpenCode is an inline provider: AGENTS.md must not exist.
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Error("opencode provider should not create AGENTS.md and should delete stale ones")
 	}
 }
 
@@ -706,6 +695,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 		Repos: []RepoContextForEnv{
 			{URL: "https://github.com/org/backend", Description: "Go backend"},
 		},
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: workspacesRoot,
@@ -724,32 +714,25 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	// Workdir should only contain expected entries.
+	// Workdir should contain .agent_context and .config (OpenCode skills), but no AGENTS.md.
 	entries, err := os.ReadDir(env.WorkDir)
 	if err != nil {
 		t.Fatalf("failed to read workdir: %v", err)
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "AGENTS.md" {
+		if name != ".agent_context" && name != ".config" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}
 
-	// AGENTS.md should contain repo info.
-	content, err := os.ReadFile(filepath.Join(env.WorkDir, "AGENTS.md"))
+	// Skills should be in .config/opencode/skills/ (native discovery).
+	skillMd, err := os.ReadFile(filepath.Join(env.WorkDir, ".config", "opencode", "skills", "coding", "SKILL.md"))
 	if err != nil {
-		t.Fatalf("failed to read AGENTS.md: %v", err)
+		t.Fatalf("failed to read .config/opencode/skills/coding/SKILL.md: %v", err)
 	}
-	s := string(content)
-	for _, want := range []string{
-		"multica repo checkout",
-		"https://github.com/org/backend",
-		"Go backend",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing %q", want)
-		}
+	if !strings.Contains(string(skillMd), "Write good code.") {
+		t.Error("SKILL.md missing content")
 	}
 }
 
@@ -777,7 +760,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if err := InjectRuntimeConfig(dir, "opencode", tc.ctx); err != nil {
+			if err := InjectRuntimeConfig(dir, "cursor", tc.ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
 			data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -823,7 +806,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := InjectRuntimeConfig(dir, "opencode", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+	if err := InjectRuntimeConfig(dir, "cursor", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -879,7 +862,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+	if err := InjectRuntimeConfig(dir, "cursor", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -961,7 +944,6 @@ func TestInjectRuntimeConfigFileOnlyProvidersStillWrite(t *testing.T) {
 		{"cursor", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"gemini", "GEMINI.md"},
-		{"opencode", "AGENTS.md"},
 		// Case normalization
 		{"Cursor", "AGENTS.md"},
 		{"COPILOT", "AGENTS.md"},
@@ -1870,7 +1852,7 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	readRuntimeConfig := func(t *testing.T, ctx TaskContextForEnv) string {
 		t.Helper()
 		dir := t.TempDir()
-		if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+		if err := InjectRuntimeConfig(dir, "cursor", ctx); err != nil {
 			t.Fatalf("InjectRuntimeConfig failed: %v", err)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -1923,4 +1905,26 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRuntimeConfig_DefaultRepoURL_AnnotatesRepositories(t *testing.T) {
+	ctx := TaskContextForEnv{
+		IssueID:        "issue-1",
+		Repos:          []RepoContextForEnv{
+			{URL: "https://github.com/acme/alpha", Description: "Alpha"},
+			{URL: "https://github.com/acme/beta", Description: "Beta"},
+		},
+		DefaultRepoURL: "https://github.com/acme/beta",
+	}
+	s := buildMetaSkillContent("opencode", ctx)
+
+	if !strings.Contains(s, "The default repository for this project is: `https://github.com/acme/beta`") {
+		t.Errorf("AGENTS.md missing default repo annotation")
+	}
+	if !strings.Contains(s, "**default** — Beta") {
+		t.Errorf("AGENTS.md missing default marker on beta repo")
+	}
+	if strings.Contains(s, "**default** — Alpha") {
+		t.Errorf("AGENTS.md incorrectly marked alpha as default")
+	}
 }

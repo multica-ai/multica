@@ -165,6 +165,10 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+func (c *Client) ReportPromptMetrics(ctx context.Context, taskID string, metrics map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/prompt-metrics", taskID), metrics, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {

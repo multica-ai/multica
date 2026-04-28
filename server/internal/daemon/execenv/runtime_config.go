@@ -9,16 +9,15 @@ import (
 
 // InjectRuntimeConfig sets up the runtime-specific config for the given provider.
 //
-// Inline providers (Claude, Codex, Hermes, Kimi, Kiro, OpenClaw, Pi) receive
-// instructions via SystemPrompt and do not need a native config file. Any stale
-// native config file is deleted to prevent double injection.
+// Inline providers (Claude, Codex, Hermes, Kimi, Kiro, OpenClaw, Pi, OpenCode)
+// receive instructions via SystemPrompt and do not need a native config file.
+// Any stale native config file is deleted to prevent double injection.
 //
 // File-only providers write the native config file so the agent discovers its
 // environment through its native mechanism:
 //   Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
 //   Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 //   Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
-//   OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .config/opencode/skills/)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
 	provider = strings.ToLower(provider)
 	content := buildMetaSkillContent(provider, ctx)
@@ -32,14 +31,14 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	case "codex":
 		_ = os.Remove(filepath.Join(workDir, "AGENTS.md"))
 		return nil
-	case "hermes", "kimi", "kiro", "openclaw", "pi":
+	case "hermes", "kimi", "kiro", "openclaw", "pi", "opencode":
 		_ = os.Remove(filepath.Join(workDir, "AGENTS.md"))
 		return nil
 	}
 
 	// File-only providers: write the native config file.
 	switch provider {
-	case "cursor", "copilot", "opencode":
+	case "cursor", "copilot":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)

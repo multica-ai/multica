@@ -1114,6 +1114,41 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// ReportTaskPromptMetrics stores per-task prompt stratification metrics.
+func (h *Handler) ReportTaskPromptMetrics(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	// Verify the caller owns this task's workspace.
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req struct {
+		SystemPromptTokens int  `json:"system_prompt_tokens"`
+		ReferenceTokens    int  `json:"reference_tokens"`
+		InstructionsTokens int  `json:"instructions_tokens"`
+		CompactionDetected bool `json:"compaction_detected"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.Queries.UpdateTaskPromptMetrics(r.Context(), db.UpdateTaskPromptMetricsParams{
+		ID:                 parseUUID(taskID),
+		SystemPromptTokens: int64(req.SystemPromptTokens),
+		ReferenceTokens:    int64(req.ReferenceTokens),
+		InstructionsTokens: int64(req.InstructionsTokens),
+		CompactionDetected: req.CompactionDetected,
+	}); err != nil {
+		slog.Warn("update task prompt metrics failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update prompt metrics")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // GetTaskStatus returns the current status of a task.
 // Used by the daemon to check whether a task was cancelled mid-execution.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {

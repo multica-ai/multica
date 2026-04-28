@@ -62,3 +62,11 @@ SELECT
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
+
+-- name: UpdateTaskPromptMetrics :exec
+UPDATE agent_task_queue
+SET system_prompt_tokens = $2,
+    reference_tokens = $3,
+    instructions_tokens = $4,
+    compaction_detected = $5
+WHERE id = $1;
