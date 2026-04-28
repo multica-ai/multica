@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -9,13 +9,16 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle, Copy, Check, Clock } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { toast } from "sonner";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -33,7 +36,37 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
-  useAutoScroll(scrollRef);
+  const { suppressAutoScroll, isAtBottom, scrollToBottom } = useAutoScroll(scrollRef);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const scrollLockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hover bridge: the floating panel is absolutely positioned and sits below
+  // the trigger with a small visual gap, so React's mouseleave fires when the
+  // pointer crosses the gap. A short close delay gives the cursor time to
+  // reach the panel and re-arm the open state before it unmounts.
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      if (scrollLockTimeoutRef.current) clearTimeout(scrollLockTimeoutRef.current);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+  const openTimeline = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setShowTimeline(true);
+  };
+  const queueCloseTimeline = () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      setShowTimeline(false);
+      closeTimerRef.current = null;
+    }, 200);
+  };
 
   // While a task is in flight and its assistant message hasn't landed yet,
   // inject a synthetic placeholder carrying the same task_id. AssistantMessage
@@ -56,22 +89,118 @@ export function ChatMessageList({
       }]
     : messages;
 
+  const userMessages = displayMessages.filter(m => m.role === "user");
+
+  const scrollToMessage = (messageId: string) => {
+    if (scrollLockTimeoutRef.current) {
+      clearTimeout(scrollLockTimeoutRef.current);
+    }
+    const releaseLock = suppressAutoScroll();
+
+    const element = document.getElementById(`msg-${messageId}`);
+    const container = scrollRef.current;
+    if (element && container) {
+      const elementRect = element.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const relativeTop = elementRect.top - containerRect.top + container.scrollTop;
+      const elementHeight = elementRect.height;
+      const containerHeight = containerRect.height;
+
+      container.scrollTo({
+        top: Math.max(0, relativeTop - containerHeight / 2 + elementHeight / 2),
+        behavior: "smooth",
+      });
+
+      // Add highlight effect (rounded-2xl on the bubble keeps the ring contour tight)
+      element.classList.add("ring-2", "ring-primary", "ring-offset-2");
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        element.classList.remove("ring-2", "ring-primary", "ring-offset-2");
+        highlightTimerRef.current = null;
+      }, 2000);
+    }
+
+    scrollLockTimeoutRef.current = setTimeout(() => {
+      releaseLock();
+      scrollLockTimeoutRef.current = null;
+    }, 500);
+  };
+
   return (
-    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
-      {/* Inner container matches issue / project detail width convention
-       *  (max-w-4xl + mx-auto) so switching between chat and content
-       *  views doesn't jolt the reading width. px-5 is a touch tighter
-       *  than issue-detail's px-8 because the chat window can be narrow. */}
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {displayMessages.map((msg) => (
-          <MessageBubble
-            key={msg.role === "assistant" && msg.task_id ? `task-${msg.task_id}` : msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId && !pendingAlreadyPersisted}
-          />
-        ))}
-        {isWaiting && !pendingTaskId && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+    <div className="relative flex-1 flex overflow-hidden">
+      {/* Chat content - full width, no margin changes */}
+      <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
+        {/* Inner container matches issue / project detail width convention
+         *  (max-w-4xl + mx-auto) so switching between chat and content
+         *  views doesn't jolt the reading width. px-5 is a touch tighter
+         *  than issue-detail's px-8 because the chat window can be narrow. */}
+        <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
+          {displayMessages.map((msg) => (
+            <MessageBubble
+              key={msg.role === "assistant" && msg.task_id ? `task-${msg.task_id}` : msg.id}
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId && !pendingAlreadyPersisted}
+            />
+          ))}
+          {isWaiting && !pendingTaskId && (
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          )}
+        </div>
+      </div>
+
+      {/* Scroll-to-bottom button */}
+      {!isAtBottom && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-3 z-30 flex items-center justify-center size-8 rounded-full bg-background/80 backdrop-blur-sm border shadow-sm hover:bg-accent transition-colors"
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </button>
+      )}
+
+      {/* Timeline - floating trigger button + dropdown panel */}
+      <div className="absolute right-3 top-3 z-30">
+        {/* Trigger button */}
+        <button
+          type="button"
+          className="flex items-center justify-center size-8 rounded-full bg-background/80 backdrop-blur-sm border shadow-sm hover:bg-accent transition-colors"
+          onMouseEnter={openTimeline}
+          onMouseLeave={queueCloseTimeline}
+        >
+          <Clock className="size-4 text-muted-foreground" />
+        </button>
+
+        {/* Floating panel */}
+        {showTimeline && (
+          <div
+            className="absolute right-0 top-10 w-56 bg-background/95 backdrop-blur-sm border rounded-lg shadow-lg overflow-hidden"
+            onMouseEnter={openTimeline}
+            onMouseLeave={queueCloseTimeline}
+          >
+            <div className="p-2.5 space-y-1.5 overflow-y-auto max-h-[50vh]">
+              <div className="text-xs font-medium text-muted-foreground mb-1">Timeline</div>
+              {userMessages.length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-3">No user messages yet</div>
+              )}
+              {userMessages.map((msg) => (
+                <button
+                  key={msg.id}
+                  onClick={() => scrollToMessage(msg.id)}
+                  className="w-full text-left p-1.5 rounded hover:bg-accent transition-colors group"
+                >
+                  <div className="text-xs text-muted-foreground mb-0.5">
+                    {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  <div className="text-xs line-clamp-2 group-hover:text-foreground">
+                    {msg.content.slice(0, 60)}{msg.content.length > 60 ? '...' : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -120,9 +249,41 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending?: boolean }) {
   if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
+    return <UserMessage message={message} />;
+  }
+
+  return <AssistantMessage message={message} isPending={isPending} />;
+}
+
+function UserMessage({ message }: { message: ChatMessage }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!navigator.clipboard) {
+      toast.error("Your browser does not support automatic copying. Please manually select and copy the text.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed:", err);
+      toast.error("Copy failed. Please manually select and copy the text.");
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div className="group flex justify-end">
+      <div className="max-w-[80%] space-y-1">
+        <div id={`msg-${message.id}`} className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words scroll-mt-4">
           {/* User messages are authored as markdown in ContentEditor, so
            * render them through the same pipeline as assistant replies.
            * Neutralise prose's leading/trailing margin so single-line
@@ -131,11 +292,37 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
             <Markdown>{message.content}</Markdown>
           </div>
         </div>
-      </div>
-    );
-  }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
+        {/* Action bar with copy button and timestamp — right-aligned */}
+        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 [@media(hover:none)]:size-11"
+                onClick={handleCopy}
+                aria-label="Copy message"
+              >
+                {copied ? (
+                  <Check className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {copied ? "Copied!" : "Copy"}
+            </TooltipContent>
+          </Tooltip>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="size-3" />
+            {formatTime(message.created_at)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AssistantMessage({
@@ -146,6 +333,7 @@ function AssistantMessage({
   isPending?: boolean;
 }) {
   const taskId = message.task_id;
+  const [copied, setCopied] = useState(false);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
@@ -157,8 +345,30 @@ function AssistantMessage({
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
 
+  const handleCopy = async () => {
+    if (!navigator.clipboard) {
+      toast.error("Your browser does not support automatic copying. Please manually select and copy the text.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed:", err);
+      toast.error("Copy failed. Please manually select and copy the text.");
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
-    <div className="w-full space-y-1.5">
+    <div className="group relative w-full space-y-1.5">
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
       ) : message.content ? (
@@ -168,6 +378,34 @@ function AssistantMessage({
       ) : isPending ? (
         <Loader2 className="size-4 animate-spin text-muted-foreground" />
       ) : null}
+
+      {/* Action bar with copy button and timestamp */}
+      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity [@media(hover:none)]:opacity-100">
+        <Tooltip>
+          <TooltipTrigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 [@media(hover:none)]:size-11"
+              onClick={handleCopy}
+              aria-label="Copy message"
+            >
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {copied ? "Copied!" : "Copy"}
+          </TooltipContent>
+        </Tooltip>
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Clock className="size-3" />
+          {formatTime(message.created_at)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -274,6 +512,10 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
     case "thinking":
       return <ThinkingRow item={item} />;
     case "error":
+      // Silent handling for task cancellation - user initiated action, not an error
+      if (item.content?.includes("task_cancelled") || item.content?.includes("Task cancelled")) {
+        return null;
+      }
       return <ErrorRow item={item} />;
     default:
       return null;
