@@ -95,4 +95,9 @@ const (
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"
+
+	// Webhook events
+	EventWebhookCreated = "webhook:created"
+	EventWebhookUpdated = "webhook:updated"
+	EventWebhookDeleted = "webhook:deleted"
 )

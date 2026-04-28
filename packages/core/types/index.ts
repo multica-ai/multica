@@ -61,3 +61,12 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  WebhookEndpoint,
+  WebhookDelivery,
+  CreateWebhookEndpointRequest,
+  UpdateWebhookEndpointRequest,
+  CreateWebhookEndpointResponse,
+  WebhookEventType,
+} from "./webhook";
+export { WEBHOOK_EVENT_TYPES } from "./webhook";

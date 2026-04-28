@@ -423,6 +423,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
+			// Webhooks (admin/owner only)
+			r.Route("/api/webhooks", func(r chi.Router) {
+				r.Get("/", h.ListWebhookEndpoints)
+				r.Post("/", h.CreateWebhookEndpoint)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWebhookEndpoint)
+					r.Put("/", h.UpdateWebhookEndpoint)
+					r.Delete("/", h.DeleteWebhookEndpoint)
+					r.Post("/test", h.TestWebhookEndpoint)
+					r.Get("/deliveries", h.ListWebhookDeliveries)
+				})
+			})
+
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)

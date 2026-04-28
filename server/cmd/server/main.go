@@ -232,6 +232,7 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerWebhookListeners(bus, queries)
 
 	r := NewRouter(pool, hub, bus, analyticsClient, storeRedis)
 

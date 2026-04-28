@@ -71,6 +71,11 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WebhookEndpoint,
+  WebhookDelivery,
+  CreateWebhookEndpointRequest,
+  UpdateWebhookEndpointRequest,
+  CreateWebhookEndpointResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1106,5 +1111,40 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Webhooks
+  async listWebhookEndpoints(): Promise<WebhookEndpoint[]> {
+    return this.fetch("/api/webhooks");
+  }
+
+  async getWebhookEndpoint(id: string): Promise<WebhookEndpoint> {
+    return this.fetch(`/api/webhooks/${id}`);
+  }
+
+  async createWebhookEndpoint(data: CreateWebhookEndpointRequest): Promise<CreateWebhookEndpointResponse> {
+    return this.fetch("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWebhookEndpoint(id: string, data: UpdateWebhookEndpointRequest): Promise<WebhookEndpoint> {
+    return this.fetch(`/api/webhooks/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWebhookEndpoint(id: string): Promise<void> {
+    await this.fetch(`/api/webhooks/${id}`, { method: "DELETE" });
+  }
+
+  async testWebhookEndpoint(id: string): Promise<{ status: string }> {
+    return this.fetch(`/api/webhooks/${id}/test`, { method: "POST" });
+  }
+
+  async listWebhookDeliveries(id: string): Promise<WebhookDelivery[]> {
+    return this.fetch(`/api/webhooks/${id}/deliveries`);
   }
 }
