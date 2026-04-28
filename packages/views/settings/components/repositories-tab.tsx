@@ -44,6 +44,8 @@ export function RepositoriesTab() {
   const membersWithRuntimes = members.filter((member) =>
     runtimes.some((runtime) => runtime.owner_id === member.user_id),
   );
+  const myRuntimes = runtimes.filter((r) => r.owner_id === user?.id);
+  const myDeviceNames = new Set(myRuntimes.map(deviceNameForRuntime));
 
   useEffect(() => {
     setRepos(workspace?.repos ?? []);
@@ -79,7 +81,10 @@ export function RepositoriesTab() {
 
   const getMachineDraft = (index: number): MachinePathDraft => {
     const draft = machineDrafts[index];
-    const ownerId = draft?.ownerId || membersWithRuntimes[0]?.user_id || "";
+    const defaultOwnerId = canManageWorkspace
+      ? membersWithRuntimes[0]?.user_id ?? ""
+      : user?.id ?? "";
+    const ownerId = draft?.ownerId || defaultOwnerId;
     const ownerRuntimes = runtimes.filter((runtime) => runtime.owner_id === ownerId);
     const runtimeId = ownerRuntimes.some((runtime) => runtime.id === draft?.runtimeId)
       ? draft?.runtimeId ?? ""
@@ -142,6 +147,13 @@ export function RepositoriesTab() {
                 .filter((runtime) => runtime.owner_id === draft.ownerId)
                 .filter((runtime, idx, arr) => arr.findIndex((r) => deviceNameForRuntime(r) === deviceNameForRuntime(runtime)) === idx);
               const machinePathEntries = Object.entries(repo.machine_paths ?? {});
+              const visibleMachinePathEntries = canManageWorkspace
+                ? machinePathEntries
+                : machinePathEntries.filter(([deviceName]) => myDeviceNames.has(deviceName));
+              const myDeduplicatedRuntimes = myRuntimes.filter(
+                (r, idx, arr) =>
+                  arr.findIndex((x) => deviceNameForRuntime(x) === deviceNameForRuntime(r)) === idx,
+              );
 
               return (
                 <div key={index} className="space-y-3 border-b border-border/70 pb-3 last:border-b-0 last:pb-0">
@@ -201,9 +213,9 @@ export function RepositoriesTab() {
 
                     {machinePathsOpen[index] && (
                       <div className="space-y-2 rounded-md bg-muted/30 p-2">
-                        {machinePathEntries.length > 0 && (
+                        {visibleMachinePathEntries.length > 0 && (
                           <div className="space-y-1">
-                            {machinePathEntries.map(([deviceName, path]) => {
+                            {visibleMachinePathEntries.map(([deviceName, path]) => {
                               const runtime = runtimes.find((item) => deviceNameForRuntime(item) === deviceName);
                               const owner = runtime?.owner_id
                                 ? members.find((member) => member.user_id === runtime.owner_id)
@@ -215,7 +227,7 @@ export function RepositoriesTab() {
                                     <div className="truncate font-medium">{owner?.name ?? deviceName}</div>
                                     <div className="truncate text-muted-foreground">{deviceName} · {path}</div>
                                   </div>
-                                  {canManageWorkspace && (
+                                  {(canManageWorkspace || myDeviceNames.has(deviceName)) && (
                                     <Button
                                       type="button"
                                       variant="ghost"
@@ -278,11 +290,59 @@ export function RepositoriesTab() {
                           </div>
                         )}
 
+                        {!canManageWorkspace && myDeduplicatedRuntimes.length > 0 && (
+                          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+                            <NativeSelect
+                              size="sm"
+                              className="w-full"
+                              value={draft.runtimeId}
+                              onChange={(e) =>
+                                updateMachineDraft(index, {
+                                  ...draft,
+                                  ownerId: user?.id ?? "",
+                                  runtimeId: e.target.value,
+                                })
+                              }
+                            >
+                              {myDeduplicatedRuntimes.map((runtime) => (
+                                <NativeSelectOption key={runtime.id} value={runtime.id}>
+                                  {deviceNameForRuntime(runtime)}
+                                </NativeSelectOption>
+                              ))}
+                            </NativeSelect>
+                            <Input
+                              value={draft.path}
+                              onChange={(e) =>
+                                updateMachineDraft(index, {
+                                  ...draft,
+                                  ownerId: user?.id ?? "",
+                                  path: e.target.value,
+                                })
+                              }
+                              placeholder="Local path on this machine"
+                              className="h-7 text-sm"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-7"
+                              disabled={!draft.runtimeId || !draft.path.trim()}
+                              onClick={() => handleAddMachinePath(index)}
+                            >
+                              <Plus className="h-3 w-3" />
+                              Add
+                            </Button>
+                          </div>
+                        )}
+
                         {canManageWorkspace && runtimes.length === 0 && (
                           <p className="text-xs text-muted-foreground">No runtimes registered.</p>
                         )}
                         {canManageWorkspace && runtimes.length > 0 && membersWithRuntimes.length === 0 && (
                           <p className="text-xs text-muted-foreground">No user-owned runtimes registered.</p>
+                        )}
+                        {!canManageWorkspace && myRuntimes.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No runtimes registered for your account.</p>
                         )}
                       </div>
                     )}
@@ -308,9 +368,18 @@ export function RepositoriesTab() {
               </div>
             )}
 
+            {!canManageWorkspace && myRuntimes.length > 0 && (
+              <div className="flex justify-end pt-1">
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  <Save className="h-3 w-3" />
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            )}
+
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage repositories.
+                Only admins and owners can add or remove repositories.
               </p>
             )}
           </CardContent>

@@ -28,7 +28,7 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
   { value: "pipelines", label: "Pipelines", icon: Workflow },
   { value: "environment", label: "Environment", icon: KeyRound },
-  { value: "preferences", label: "Preferências", icon: SlidersHorizontal },
+  { value: "preferences", label: "Preferences", icon: SlidersHorizontal },
 ];
 
 export interface ExtraSettingsTab {
