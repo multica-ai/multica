@@ -13,7 +13,7 @@ Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——
 
 - **Multica 服务器**——你看到的工作区、issue 列表、评论线都存在它的数据库里。它同时是 WebSocket hub，把你和同事之间的实时更新推送过去。它**不**执行任何智能体任务。
 - **守护进程**（daemon）——Multica CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，开始每 3 秒领一次任务、每 15 秒发一次心跳。
-- **AI 编程工具**——[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi) 十款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
+- **AI 编程工具**——[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi) 11 款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
 
 工具链在本地的结果：**你的 API 密钥、代码目录、已授权的工具**都只在本地使用；Multica 服务器一个都看不到。自部署还是用 Cloud 都不改变这一点。
 

@@ -125,6 +125,17 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
+// Kiro CLI — compact "K" mark for runtime rows.
+function KiroLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0F172A" />
+      <path d="M6.5 5.5h3v5.1l4.7-5.1h3.5l-5.1 5.4 5.4 7.6h-3.6l-3.8-5.5-1.1 1.2v4.3h-3V5.5Z" fill="#38BDF8" />
+      <path d="M9.5 14.2 14.2 9l1.8 2.2-4.7 5.1-1.8-2.1Z" fill="#A7F3D0" opacity="0.9" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -151,6 +162,8 @@ export function ProviderLogo({
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
+    case "kiro":
+      return <KiroLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -98,6 +98,8 @@ You also need at least one AI agent CLI installed:
 - Gemini (`gemini` on PATH)
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
+- Kimi (`kimi` on PATH)
+- Kiro CLI (`kiro-cli` on PATH)
 
 ### b) One-command setup
 

@@ -961,7 +961,7 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 // ── Helpers ──
 
 // extractACPSessionID pulls `sessionId` out of a session/new or
-// session/resume response. Shared by all ACP backends (hermes, kimi,
+// session/resume response. Shared by all ACP backends (hermes, kimi, kiro,
 // and anything else that follows the standard ACP schema).
 func extractACPSessionID(result json.RawMessage) string {
 	var r struct {

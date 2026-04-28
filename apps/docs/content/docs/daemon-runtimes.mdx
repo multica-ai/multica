@@ -21,7 +21,7 @@ multica daemon start
 On startup it does four things:
 
 1. Reads the credentials saved when you logged in
-2. Detects AI coding tools installed on your `PATH` (10 built-in: [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
+2. Detects AI coding tools installed on your `PATH` (11 built-in: [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
 3. Registers itself with the server, along with a runtime for each detected tool
 4. Keeps **polling every 3 seconds** for tasks to pick up, and **sends a heartbeat every 15 seconds**
 
@@ -108,4 +108,4 @@ More scenarios in [Troubleshooting](/troubleshooting).
 ## Next
 
 - [Tasks](/tasks) — the full lifecycle of a task once the daemon picks it up
-- [Providers Matrix](/providers) — capability differences across the 10 AI coding tools
+- [Providers Matrix](/providers) — capability differences across the 11 AI coding tools

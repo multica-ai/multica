@@ -24,7 +24,7 @@ type PrepareParams struct {
 	WorkspaceID    string            // workspace UUID — tasks are grouped under this
 	TaskID         string            // task UUID — used for directory name
 	AgentName      string            // for git branch naming only
-	Provider       string            // agent provider ("claude", "codex") — determines skill injection paths
+	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
 	Task           TaskContextForEnv // context data for writing files
 }
