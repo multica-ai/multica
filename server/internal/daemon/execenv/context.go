@@ -18,6 +18,7 @@ import (
 // Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Kiro:     skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
@@ -74,6 +75,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
 		skillsDir = filepath.Join(workDir, ".kimi", "skills")
+	case "kiro":
+		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
+		// in the workdir.
+		skillsDir = filepath.Join(workDir, ".kiro", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

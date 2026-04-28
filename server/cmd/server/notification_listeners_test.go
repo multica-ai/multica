@@ -18,9 +18,9 @@ import (
 func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID string) []db.ListInboxItemsRow {
 	t.Helper()
 	items, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
-		WorkspaceID:   util.ParseUUID(testWorkspaceID),
+		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
 		RecipientType: "member",
-		RecipientID:   util.ParseUUID(recipientID),
+		RecipientID:   util.MustParseUUID(recipientID),
 	})
 	if err != nil {
 		t.Fatalf("ListInboxItems: %v", err)

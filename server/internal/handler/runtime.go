@@ -79,8 +79,12 @@ type RuntimeUsageResponse struct {
 // same tool).
 func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
@@ -93,7 +97,7 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	since := parseSinceParam(r, 90)
 
 	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
-		RuntimeID: parseUUID(runtimeID),
+		RuntimeID: rt.ID,
 		Since:     since,
 	})
 	if err != nil {
@@ -102,9 +106,10 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]RuntimeUsageResponse, len(rows))
+	resolvedRuntimeID := uuidToString(rt.ID)
 	for i, row := range rows {
 		resp[i] = RuntimeUsageResponse{
-			RuntimeID:        runtimeID,
+			RuntimeID:        resolvedRuntimeID,
 			Date:             row.Date.Time.Format("2006-01-02"),
 			Provider:         row.Provider,
 			Model:            row.Model,
@@ -121,8 +126,12 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 // GetRuntimeTaskActivity returns hourly task activity distribution for a runtime.
 func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
@@ -132,7 +141,7 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	rows, err := h.Queries.GetRuntimeTaskHourlyActivity(r.Context(), parseUUID(runtimeID))
+	rows, err := h.Queries.GetRuntimeTaskHourlyActivity(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get task activity")
 		return
@@ -276,8 +285,12 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.
 func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
@@ -320,7 +333,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("runtime deleted", "runtime_id", runtimeID, "deleted_by", userID)
+	slog.Info("runtime deleted", "runtime_id", uuidToString(rt.ID), "deleted_by", userID)
 
 	// Notify frontend to refresh runtime list.
 	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{

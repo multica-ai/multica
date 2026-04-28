@@ -82,6 +82,7 @@ export function MyIssuesPage() {
         creatorFilters: [],
         projectFilters: [],
         includeNoProject: false,
+        labelFilters: [],
       }),
     [myIssues, statusFilters, priorityFilters],
   );

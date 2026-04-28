@@ -94,6 +94,7 @@ const (
 	EventAutopilotRunDone  = "autopilot:run_done"
 
 	// Daemon events
-	EventDaemonHeartbeat = "daemon:heartbeat"
-	EventDaemonRegister  = "daemon:register"
+	EventDaemonHeartbeat     = "daemon:heartbeat"
+	EventDaemonRegister      = "daemon:register"
+	EventDaemonTaskAvailable = "daemon:task_available"
 )

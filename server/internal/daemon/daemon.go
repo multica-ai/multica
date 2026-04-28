@@ -45,6 +45,7 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSetCh chan struct{}      // notifies the WS wakeup loop to reconnect with a new runtime set
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -69,6 +70,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
 		runtimeIndex:  make(map[string]Runtime),
+		runtimeSetCh:  make(chan struct{}, 1),
 		agentVersions: make(map[string]string),
 	}
 }
@@ -87,6 +89,23 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+func (d *Daemon) notifyRuntimeSetChanged() {
+	select {
+	case d.runtimeSetCh <- struct{}{}:
+	default:
+	}
+}
+
+func (d *Daemon) drainRuntimeSetChanged() {
+	for {
+		select {
+		case <-d.runtimeSetCh:
+		default:
+			return
+		}
+	}
 }
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
@@ -132,10 +151,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
 
+	taskWakeups := make(chan struct{}, 1)
+	d.drainRuntimeSetChanged()
+	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
-	return d.pollLoop(ctx)
+	return d.pollLoop(ctx, taskWakeups)
 }
 
 // RestartBinary returns the path to the new binary if the daemon needs to restart
@@ -422,6 +444,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	d.mu.Unlock()
 
 	var registered int
+	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
 			continue // important: never replace existing workspaceState; ensureRepoReady holds ws.repoRefreshMu from the original pointer
@@ -473,7 +496,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			delete(d.workspaces, id)
 			d.mu.Unlock()
 			d.logger.Info("stopped watching workspace", "workspace_id", id)
+			removed++
 		}
+	}
+	if registered > 0 || removed > 0 {
+		d.notifyRuntimeSetChanged()
 	}
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
@@ -799,7 +826,7 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
-func (d *Daemon) pollLoop(ctx context.Context) error {
+func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
 	sem := make(chan struct{}, d.cfg.MaxConcurrentTasks)
 	var wg sync.WaitGroup
 
@@ -822,7 +849,7 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
-			if err := sleepWithContext(ctx, d.cfg.PollInterval); err != nil {
+			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
 				wg.Wait()
 				return err
 			}
@@ -878,7 +905,7 @@ func (d *Daemon) pollLoop(ctx context.Context) error {
 				d.logger.Debug("poll: no tasks", "runtimes", runtimeIDs, "cycle", pollCount)
 			}
 			pollOffset = (pollOffset + 1) % n
-			if err := sleepWithContext(ctx, d.cfg.PollInterval); err != nil {
+			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
 				wg.Wait()
 				return err
 			}

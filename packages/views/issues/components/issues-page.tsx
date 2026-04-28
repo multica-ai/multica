@@ -86,6 +86,7 @@ export function IssuesPage() {
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const labelFilters = useIssueViewStore((s) => s.labelFilters);
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
 
@@ -180,6 +181,7 @@ export function IssuesPage() {
         creatorFilters,
         projectFilters,
         includeNoProject,
+        labelFilters,
       }),
     [
       scopedIssues,
@@ -190,6 +192,7 @@ export function IssuesPage() {
       creatorFilters,
       projectFilters,
       includeNoProject,
+      labelFilters,
     ],
   );
 
@@ -258,6 +261,7 @@ export function IssuesPage() {
         creatorFilters,
         projectFilters,
         includeNoProject,
+        labelFilters,
       });
     },
     [
@@ -269,6 +273,7 @@ export function IssuesPage() {
       creatorFilters,
       projectFilters,
       includeNoProject,
+      labelFilters,
     ],
   );
 

@@ -2,11 +2,11 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,6 +35,8 @@ func (e SignupError) Error() string {
 
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
+
+const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
 type UserResponse struct {
 	ID                      string          `json:"id"`
@@ -90,6 +92,35 @@ func generateCode() (string, error) {
 	}
 	n := binary.BigEndian.Uint32(buf[:]) % 1000000
 	return fmt.Sprintf("%06d", n), nil
+}
+
+func isDevVerificationCode(code string) bool {
+	if isProductionEnv() {
+		return false
+	}
+
+	devCode := strings.TrimSpace(os.Getenv(devVerificationCodeEnv))
+	if !isSixDigitCode(devCode) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(code), []byte(devCode)) == 1
+}
+
+func isProductionEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+}
+
+func isSixDigitCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, ch := range code {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
@@ -311,8 +342,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
-	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	isDevCode := isDevVerificationCode(code)
+	if !isDevCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return

@@ -26,10 +26,19 @@ type TaskService struct {
 	TxStarter TxStarter
 	Hub       *realtime.Hub
 	Bus       *events.Bus
+	Wakeup    TaskWakeupNotifier
 }
 
-func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
+type TaskWakeupNotifier interface {
+	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
+	var wakeup TaskWakeupNotifier
+	if len(wakeups) > 0 {
+		wakeup = wakeups[0]
+	}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -74,6 +83,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 
 	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -109,6 +119,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -140,6 +151,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -651,6 +663,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"max_attempts", child.MaxAttempts,
 	)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
+	s.notifyTaskAvailable(child)
 	return &child, nil
 }
 
@@ -905,6 +918,13 @@ func priorityToInt(p string) int32 {
 	default:
 		return 0
 	}
+}
+
+func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
+	if s.Wakeup == nil || !task.RuntimeID.Valid {
+		return
+	}
+	s.Wakeup.NotifyTaskAvailable(util.UUIDToString(task.RuntimeID), util.UUIDToString(task.ID))
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {

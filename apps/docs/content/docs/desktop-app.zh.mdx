@@ -66,12 +66,25 @@ macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的
 
 安装后第一次打开需要登录——和 Web 版一样的 email + 验证码流程。登录成功后 Desktop 自动把工作区列表同步下来。
 
-<Callout type="info">
-**桌面版连哪个后端** 由登录时选的地址决定。默认连 Multica Cloud；如果你用自部署版本，在首次登录页点"连接到自部署实例"填你的 server 地址即可。
+<Callout type="warning">
+**发布版的 Desktop 是锁死连 Multica Cloud 的**。后端 / WebSocket / Web 前端 URL（`VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`）在构建时就写死了，应用内**没有切换后端的入口**。要让 Desktop 连自部署后端，需要你自己从源码 build：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+# 编辑 apps/desktop/.env.production：
+#   VITE_API_URL=https://api.your-domain
+#   VITE_WS_URL=wss://api.your-domain/ws
+#   VITE_APP_URL=https://your-domain
+pnpm install
+pnpm --filter @multica/desktop package
+```
+
+不想自己 build 的话，自部署的官方路径是 **Web 前端 + CLI**——见 [自部署快速上手](/self-host-quickstart)。Desktop 运行时切换后端的能力跟踪在 [issue #1371](https://github.com/multica-ai/multica/issues/1371)。
 </Callout>
 
 ## 下一步
 
 - [Cloud Quickstart](/cloud-quickstart) —— Desktop 版的 Cloud 接入流程
-- [Self-Host Quickstart](/self-host-quickstart) —— Desktop 连自部署后端
+- [Self-Host Quickstart](/self-host-quickstart) —— 自部署后端（Desktop 连自部署需要自行构建，见上方提示）
 - [守护进程与运行时](/daemon-runtimes) —— 守护进程机制（Desktop 自动起它，但行为一样）
