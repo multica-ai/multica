@@ -407,7 +407,7 @@ export class ApiClient {
     code: string,
     state: string,
   ): Promise<CompleteGoogleBindingResponse> {
-    return this.fetch("/api/me/notification-bindings/google/callback", {
+    return this.fetch("/api/notification-bindings/google/callback", {
       method: "POST",
       body: JSON.stringify({ code, state }),
     });

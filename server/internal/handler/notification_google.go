@@ -82,7 +82,14 @@ func (h *Handler) CompleteMyGoogleBinding(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	h.completeGoogleBinding(w, r, &userID)
+}
 
+func (h *Handler) CompleteGoogleBindingByState(w http.ResponseWriter, r *http.Request) {
+	h.completeGoogleBinding(w, r, nil)
+}
+
+func (h *Handler) completeGoogleBinding(w http.ResponseWriter, r *http.Request, currentUserID *string) {
 	var req CompleteGoogleBindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -98,10 +105,11 @@ func (h *Handler) CompleteMyGoogleBinding(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid Google callback state")
 		return
 	}
-	if state.UserID != userID {
+	if currentUserID != nil && state.UserID != *currentUserID {
 		writeError(w, http.StatusForbidden, "Google callback state does not match the current user")
 		return
 	}
+	userID := state.UserID
 	if time.Since(time.Unix(state.IssuedAt, 0)) > googleStateTTL {
 		writeError(w, http.StatusBadRequest, "Google callback state has expired")
 		return

@@ -268,7 +268,7 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 

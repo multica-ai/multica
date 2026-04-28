@@ -11,6 +11,7 @@ const {
   mockGoogleLogin,
   mockDingtalkLogin,
   mockCompleteDingTalkBinding,
+  mockCompleteGoogleBinding,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
@@ -20,6 +21,7 @@ const {
   mockGoogleLogin: vi.fn(),
   mockDingtalkLogin: vi.fn(),
   mockCompleteDingTalkBinding: vi.fn(),
+  mockCompleteGoogleBinding: vi.fn(),
 }));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
@@ -67,6 +69,7 @@ vi.mock("@multica/core/api", () => ({
     googleLogin: mockGoogleLogin,
     dingtalkLogin: mockDingtalkLogin,
     completeDingTalkBinding: mockCompleteDingTalkBinding,
+    completeGoogleBinding: mockCompleteGoogleBinding,
   },
 }));
 
@@ -86,6 +89,19 @@ describe("CallbackPage", () => {
         provider: "dingtalk",
         external_user_id: "ding-open-id",
         display_name: "Ding User",
+        status: "active",
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      next_path: "/acme/settings",
+    });
+    mockCompleteGoogleBinding.mockResolvedValue({
+      binding: {
+        id: "binding-google",
+        provider: "google",
+        external_user_id: "google-user-id",
+        display_name: "Google User",
         status: "active",
         metadata: {},
         created_at: "2026-01-01T00:00:00Z",
@@ -311,5 +327,20 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.root());
     });
+  });
+
+  it("routes google binding callbacks through the state-based completion API", async () => {
+    mockSearchParams.set("state", "google.signed-state");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockCompleteGoogleBinding).toHaveBeenCalledWith(
+        "test-code",
+        "google.signed-state",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/acme/settings");
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
   });
 });

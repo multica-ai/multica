@@ -61,3 +61,17 @@ func TestStartMyGoogleBindingUsesRequestedCallbackRedirect(t *testing.T) {
 		t.Fatal("expected non-zero issued_at in Google state")
 	}
 }
+
+func TestCompleteGoogleBindingByStateRejectsInvalidState(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/notification-bindings/google/callback", map[string]any{
+		"code":  "test-code",
+		"state": "google.invalid-state",
+	})
+
+	testHandler.CompleteGoogleBindingByState(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}

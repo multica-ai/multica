@@ -134,6 +134,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/dingtalk", h.DingTalkLogin)
 	r.Post("/auth/logout", h.Logout)
+	r.Post("/api/notification-bindings/google/callback", h.CompleteGoogleBindingByState)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {

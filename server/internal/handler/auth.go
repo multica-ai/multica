@@ -2,11 +2,11 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -358,7 +358,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
-	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
@@ -568,7 +568,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
@@ -611,7 +611,7 @@ func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	auth.ClearAuthCookies(w)
+	auth.ClearAuthCookiesForRequest(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 

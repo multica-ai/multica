@@ -82,6 +82,27 @@ describe("ApiClient", () => {
     }
   });
 
+  it("uses the state-based Google binding callback endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ binding: {}, next_path: "/settings" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.completeGoogleBinding("code-1", "google.signed-state");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/notification-bindings/google/callback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ code: "code-1", state: "google.signed-state" }),
+      }),
+    );
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {

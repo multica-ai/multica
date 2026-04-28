@@ -99,3 +99,43 @@ func TestSetAuthCookies_HTTPSProduction(t *testing.T) {
 		}
 	}
 }
+
+func TestSetAuthCookiesForRequest_LocalhostIgnoresProductionCookieEnv(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.wujieai.com")
+	t.Setenv("COOKIE_DOMAIN", ".wujieai.com")
+
+	req := httptest.NewRequest("POST", "http://localhost:3000/auth/dingtalk", nil)
+	rec := httptest.NewRecorder()
+	if err := SetAuthCookiesForRequest(rec, req, "test-token"); err != nil {
+		t.Fatalf("SetAuthCookiesForRequest: %v", err)
+	}
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Secure {
+			t.Errorf("cookie %q has Secure=true for localhost HTTP request", c.Name)
+		}
+		if c.Domain != "" {
+			t.Errorf("cookie %q Domain = %q, want host-only for localhost", c.Name, c.Domain)
+		}
+	}
+}
+
+func TestSetAuthCookiesForRequest_ProductionUsesConfiguredCookieEnv(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.wujieai.com")
+	t.Setenv("COOKIE_DOMAIN", ".wujieai.com")
+
+	req := httptest.NewRequest("POST", "http://multica.wujieai.com/auth/dingtalk", nil)
+	rec := httptest.NewRecorder()
+	if err := SetAuthCookiesForRequest(rec, req, "test-token"); err != nil {
+		t.Fatalf("SetAuthCookiesForRequest: %v", err)
+	}
+
+	for _, c := range rec.Result().Cookies() {
+		if !c.Secure {
+			t.Errorf("cookie %q missing Secure flag for production origin", c.Name)
+		}
+		if c.Domain != "wujieai.com" {
+			t.Errorf("cookie %q Domain = %q, want %q", c.Name, c.Domain, "wujieai.com")
+		}
+	}
+}
