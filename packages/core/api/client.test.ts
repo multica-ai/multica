@@ -6,6 +6,55 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("does not clear a newer token when a stale request returns 401", async () => {
+    let resolveStaleRequest:
+      | ((response: Response) => void)
+      | undefined;
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveStaleRequest = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "u1", email: "u@example.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+    client.setToken("old-token");
+
+    const staleRequest = client.getMe().catch((err: unknown) => err);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer old-token",
+    });
+
+    client.setToken("new-token");
+    resolveStaleRequest?.(
+      new Response(JSON.stringify({ error: "invalid token" }), {
+        status: 401,
+        statusText: "Unauthorized",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(staleRequest).resolves.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+
+    await client.getMe();
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer new-token",
+    });
+  });
+
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
