@@ -45,6 +45,8 @@ import type {
   Artifact,
   CreateArtifactRequest,
   UpdateArtifactRequest,
+  UpdateArtifactScopeRequest,
+  ListArtifactsParams,
   ChatSession,
   ChatMessage,
   ChatPendingTask,
@@ -1000,5 +1002,26 @@ export class ApiClient {
 
   async deleteArtifact(id: string): Promise<void> {
     await this.fetch(`/api/artifacts/${id}`, { method: "DELETE" });
+  }
+
+  async searchArtifacts(params?: ListArtifactsParams): Promise<Artifact[]> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.scope) search.set("scope", params.scope);
+    if (params?.q) search.set("q", params.q);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/artifacts${qs ? `?${qs}` : ""}`);
+  }
+
+  async updateArtifactScope(
+    id: string,
+    data: UpdateArtifactScopeRequest,
+  ): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}/scope`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 }

@@ -42,8 +42,11 @@ export type {
   Artifact,
   ArtifactKind,
   ArtifactAuthorType,
+  ArtifactScope,
   CreateArtifactRequest,
   UpdateArtifactRequest,
+  UpdateArtifactScopeRequest,
+  ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";

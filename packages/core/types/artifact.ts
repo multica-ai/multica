@@ -31,3 +31,18 @@ export interface UpdateArtifactRequest {
   body?: string;
   metadata?: Record<string, unknown>;
 }
+
+export interface UpdateArtifactScopeRequest {
+  project_id?: string | null;
+  issue_id?: string | null;
+}
+
+export type ArtifactScope = "all" | "workspace" | "project" | "issue";
+
+export interface ListArtifactsParams {
+  kind?: ArtifactKind;
+  scope?: ArtifactScope;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}

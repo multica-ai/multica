@@ -2,7 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { artifactKeys } from "./queries";
-import type { Artifact, CreateArtifactRequest, UpdateArtifactRequest } from "../types";
+import type {
+  Artifact,
+  CreateArtifactRequest,
+  UpdateArtifactRequest,
+  UpdateArtifactScopeRequest,
+} from "../types";
 
 function invalidateArtifactScopes(
   qc: ReturnType<typeof useQueryClient>,
@@ -76,6 +81,28 @@ export function useUpdateArtifact() {
     onSuccess: (artifact) => {
       qc.setQueryData(artifactKeys.detail(wsId, artifact.id), artifact);
       invalidateArtifactScopes(qc, wsId, artifact);
+    },
+  });
+}
+
+export function useMoveArtifact() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      artifact,
+      data,
+    }: {
+      artifact: Pick<Artifact, "id" | "issue_id" | "project_id">;
+      data: UpdateArtifactScopeRequest;
+    }) => api.updateArtifactScope(artifact.id, data),
+    onSuccess: (updated, { artifact: previous }) => {
+      qc.setQueryData(artifactKeys.detail(wsId, updated.id), updated);
+      // Invalidate both old and new scopes so they refetch their lists.
+      invalidateArtifactScopes(qc, wsId, previous);
+      invalidateArtifactScopes(qc, wsId, updated);
+      // Workspace search cache spans all scopes.
+      qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
     },
   });
 }
