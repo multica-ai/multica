@@ -50,6 +50,9 @@ const desktopAPI = {
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
+  /** Show a native OS notification. Used for inbox:new events. */
+  showNotification: (title: string, body: string) =>
+    ipcRenderer.send("notification:show", { title, body }),
 };
 
 interface DaemonStatus {

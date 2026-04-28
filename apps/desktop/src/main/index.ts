@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -213,6 +213,18 @@ if (!gotTheLock) {
       if (process.platform !== "darwin") return;
       mainWindow?.setWindowButtonVisibility(!immersive);
     });
+
+    // IPC: show a native OS notification. Triggered by the renderer when a
+    // new inbox item arrives via WebSocket. Uses Electron's Notification API
+    // so the OS handles permission, sound, and Notification Center delivery.
+    ipcMain.on(
+      "notification:show",
+      (_event, { title, body }: { title: string; body: string }) => {
+        if (Notification.isSupported()) {
+          new Notification({ title, body }).show();
+        }
+      },
+    );
 
     createWindow();
 

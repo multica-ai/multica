@@ -225,6 +225,10 @@ export function useRealtimeSync(
       if (!item) return;
       const wsId = getCurrentWsId();
       if (wsId) onInboxNew(qc, wsId, item);
+      // Fire a native OS notification in the Electron desktop app. `desktopAPI`
+      // is injected by the preload script; its absence means we're in the browser.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).desktopAPI?.showNotification?.(item.title, item.body ?? "");
     });
 
     // --- Timeline event handlers (global fallback) ---
