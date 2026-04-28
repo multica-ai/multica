@@ -46,6 +46,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
+import { useQuery } from "@tanstack/react-query";
 import {
   usePipelines,
   usePipelineColumns,
@@ -55,7 +56,9 @@ import {
   useSetDefaultPipeline,
   useSyncPipelineColumns,
 } from "@multica/core/pipeline";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import type { Pipeline, PipelineColumnInput } from "@multica/core/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -68,10 +71,15 @@ interface LocalColumn extends PipelineColumnInput {
 
 export function PipelinesTab() {
   const wsId = useWorkspaceId();
+  const user = useAuthStore((s) => s.user);
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pipelines = [], isLoading } = usePipelines(wsId);
   const createPipeline = useCreatePipeline(wsId);
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
+  const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground py-8 text-center">Loading pipelines…</div>;
@@ -86,11 +94,19 @@ export function PipelinesTab() {
             Configure named column sets for your board. Custom status keys define workflow stages.
           </p>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" />
-          New pipeline
-        </Button>
+        {canManageWorkspace && (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+            New pipeline
+          </Button>
+        )}
       </div>
+
+      {!canManageWorkspace && (
+        <p className="text-sm text-muted-foreground">
+          Only admins and owners can manage pipelines.
+        </p>
+      )}
 
       {pipelines.length === 0 ? (
         <Card>
@@ -100,10 +116,12 @@ export function PipelinesTab() {
             <p className="text-xs text-muted-foreground max-w-xs">
               Create a pipeline to define custom columns for your board with instructions and transition rules.
             </p>
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
-              Create pipeline
-            </Button>
+            {canManageWorkspace && (
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <Plus className="size-4" />
+                Create pipeline
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -113,6 +131,7 @@ export function PipelinesTab() {
               key={pipeline.id}
               pipeline={pipeline}
               wsId={wsId}
+              canManageWorkspace={canManageWorkspace}
               expanded={expandedId === pipeline.id}
               onToggleExpand={() =>
                 setExpandedId((prev) => (prev === pipeline.id ? null : pipeline.id))
@@ -122,7 +141,7 @@ export function PipelinesTab() {
         </div>
       )}
 
-      {createOpen && (
+      {canManageWorkspace && createOpen && (
         <CreatePipelineDialog
           wsId={wsId}
           onClose={() => setCreateOpen(false)}
@@ -142,11 +161,13 @@ export function PipelinesTab() {
 function PipelineRow({
   pipeline,
   wsId,
+  canManageWorkspace,
   expanded,
   onToggleExpand,
 }: {
   pipeline: Pipeline;
   wsId: string;
+  canManageWorkspace: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
 }) {
@@ -218,61 +239,63 @@ function PipelineRow({
             )}
           </button>
 
-          <div className="flex items-center gap-1 shrink-0">
-            {editMode ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleSaveEdit}
-                  disabled={updatePipeline.isPending}
-                >
-                  <Check className="size-3.5 text-success" />
-                </Button>
-                <Button variant="ghost" size="icon-sm" onClick={handleCancelEdit}>
-                  <X className="size-3.5" />
-                </Button>
-              </>
-            ) : (
-              <>
-                {!pipeline.is_default && (
+          {canManageWorkspace && (
+            <div className="flex items-center gap-1 shrink-0">
+              {editMode ? (
+                <>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() =>
-                      setDefault
-                        .mutateAsync(pipeline.id)
-                        .then(() => toast.success("Default pipeline updated"))
-                    }
-                    disabled={setDefault.isPending}
+                    size="icon-sm"
+                    onClick={handleSaveEdit}
+                    disabled={updatePipeline.isPending}
                   >
-                    Set default
+                    <Check className="size-3.5 text-success" />
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setEditMode(true)}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setDeleteOpen(true)}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </>
-            )}
-          </div>
+                  <Button variant="ghost" size="icon-sm" onClick={handleCancelEdit}>
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {!pipeline.is_default && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() =>
+                        setDefault
+                          .mutateAsync(pipeline.id)
+                          .then(() => toast.success("Default pipeline updated"))
+                      }
+                      disabled={setDefault.isPending}
+                    >
+                      Set default
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setEditMode(true)}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setDeleteOpen(true)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {expanded && (
           <div className="border-t px-4 py-4">
-            <PipelineColumnsEditor wsId={wsId} pipelineId={pipeline.id} />
+            <PipelineColumnsEditor wsId={wsId} pipelineId={pipeline.id} canManageWorkspace={canManageWorkspace} />
           </div>
         )}
       </CardContent>
@@ -314,9 +337,11 @@ function PipelineRow({
 function PipelineColumnsEditor({
   wsId,
   pipelineId,
+  canManageWorkspace,
 }: {
   wsId: string;
   pipelineId: string;
+  canManageWorkspace: boolean;
 }) {
   const { data: serverColumns = [], isLoading } = usePipelineColumns(wsId, pipelineId);
   const syncColumns = useSyncPipelineColumns(wsId, pipelineId);
@@ -410,17 +435,19 @@ function PipelineColumnsEditor({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Columns</p>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={addColumn}>
-            <Plus className="size-3.5" />
-            Add column
-          </Button>
-          {dirty && (
-            <Button size="sm" onClick={handleSave} disabled={syncColumns.isPending}>
-              {syncColumns.isPending ? "Saving…" : "Save columns"}
+        {canManageWorkspace && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={addColumn}>
+              <Plus className="size-3.5" />
+              Add column
             </Button>
-          )}
-        </div>
+            {dirty && (
+              <Button size="sm" onClick={handleSave} disabled={syncColumns.isPending}>
+                {syncColumns.isPending ? "Saving…" : "Save columns"}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {displayed.length === 0 ? (
@@ -443,6 +470,7 @@ function PipelineColumnsEditor({
                   key={col._localId}
                   col={col}
                   allColumns={displayed}
+                  readOnly={!canManageWorkspace}
                   expanded={expandedColId === col._localId}
                   onToggleExpand={() =>
                     setExpandedColId((prev) =>
@@ -466,6 +494,7 @@ function PipelineColumnsEditor({
 function SortableColumnRow({
   col,
   allColumns,
+  readOnly,
   expanded,
   onToggleExpand,
   onChange,
@@ -473,6 +502,7 @@ function SortableColumnRow({
 }: {
   col: LocalColumn;
   allColumns: LocalColumn[];
+  readOnly: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
   onChange: (patch: Partial<LocalColumn>) => void;
@@ -497,13 +527,15 @@ function SortableColumnRow({
       className="rounded-lg border bg-card"
     >
       <div className="flex items-center gap-2 px-3 py-2.5">
-        <button
-          className="cursor-grab touch-none text-muted-foreground shrink-0"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-4" />
-        </button>
+        {!readOnly && (
+          <button
+            className="cursor-grab touch-none text-muted-foreground shrink-0"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-4" />
+          </button>
+        )}
 
         <div className="flex flex-1 gap-2 min-w-0">
           <Input
@@ -511,12 +543,14 @@ function SortableColumnRow({
             onChange={(e) => onChange({ status_key: e.target.value.replace(/\s/g, "_") })}
             placeholder="status_key"
             className="h-7 text-xs font-mono w-36 shrink-0"
+            disabled={readOnly}
           />
           <Input
             value={col.label}
             onChange={(e) => onChange({ label: e.target.value })}
             placeholder="Display label"
             className="h-7 text-sm flex-1 min-w-0"
+            disabled={readOnly}
           />
         </div>
 
@@ -528,14 +562,16 @@ function SortableColumnRow({
             {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             More
           </button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onRemove}
-            className="text-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
+          {!readOnly && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onRemove}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -546,6 +582,7 @@ function SortableColumnRow({
             <Switch
               checked={col.is_terminal}
               onCheckedChange={(v) => onChange({ is_terminal: v })}
+              disabled={readOnly}
             />
           </div>
 
@@ -556,6 +593,7 @@ function SortableColumnRow({
               onChange={(e) => onChange({ instructions: e.target.value })}
               placeholder="Write guidance for agents working in this column…"
               className="text-sm min-h-[80px] resize-y"
+              disabled={readOnly}
             />
           </div>
 
@@ -568,7 +606,7 @@ function SortableColumnRow({
                   return (
                     <label
                       key={other._localId}
-                      className="flex items-center gap-1.5 cursor-pointer"
+                      className={`flex items-center gap-1.5 ${readOnly ? "cursor-default" : "cursor-pointer"}`}
                     >
                       <input
                         type="checkbox"
@@ -580,6 +618,7 @@ function SortableColumnRow({
                           onChange({ allowed_transitions: next });
                         }}
                         className="accent-primary"
+                        disabled={readOnly}
                       />
                       <span className="text-xs font-mono">{other.status_key}</span>
                       {other.label && (
