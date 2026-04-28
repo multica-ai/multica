@@ -354,6 +354,22 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type Repo struct {
+	ID          pgtype.UUID        `json:"id"`
+	Url         string             `json:"url"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RepoBinding struct {
+	ID        pgtype.UUID        `json:"id"`
+	RepoID    pgtype.UUID        `json:"repo_id"`
+	ScopeType string             `json:"scope_type"`
+	ScopeID   pgtype.UUID        `json:"scope_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -432,7 +448,6 @@ type Workspace struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }

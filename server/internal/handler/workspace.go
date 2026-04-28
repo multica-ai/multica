@@ -45,7 +45,7 @@ type WorkspaceResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-func workspaceToResponse(w db.Workspace) WorkspaceResponse {
+func workspaceToResponse(w db.Workspace, repos []RepoData) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
@@ -53,12 +53,8 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	var repos any
-	if w.Repos != nil {
-		json.Unmarshal(w.Repos, &repos)
-	}
 	if repos == nil {
-		repos = []any{}
+		repos = []RepoData{}
 	}
 	return WorkspaceResponse{
 		ID:          uuidToString(w.ID),
@@ -106,7 +102,12 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = workspaceToResponse(ws)
+		repos, err := h.loadWorkspaceRepoData(r.Context(), ws.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+			return
+		}
+		resp[i] = workspaceToResponse(ws, repos)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -124,7 +125,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	repos, err := h.loadWorkspaceRepoData(r.Context(), ws.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+		return
+	}
+	writeJSON(w, http.StatusOK, workspaceToResponse(ws, repos))
 }
 
 type CreateWorkspaceRequest struct {
@@ -213,16 +219,18 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.Analytics.Capture(analytics.WorkspaceCreated(userID, uuidToString(ws.ID)))
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
-	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
+	// New workspace has no repo bindings yet — pass nil so the response
+	// renders an empty array.
+	writeJSON(w, http.StatusCreated, workspaceToResponse(ws, nil))
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
+	Name        *string     `json:"name"`
+	Description *string     `json:"description"`
+	Context     *string     `json:"context"`
+	Settings    any         `json:"settings"`
+	Repos       *[]RepoData `json:"repos"`
+	IssuePrefix *string     `json:"issue_prefix"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -259,10 +267,6 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
-	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
-		params.Repos = reposJSON
-	}
 	if req.IssuePrefix != nil {
 		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
 		if prefix != "" {
@@ -277,11 +281,30 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Repos live in the polymorphic `repo_binding` table now, so they're
+	// updated separately from the workspace row. Treating a nil pointer as
+	// "leave bindings alone" preserves the prior PATCH semantics: callers
+	// that only touch the name/description don't accidentally wipe the
+	// workspace's repo list.
+	if req.Repos != nil {
+		if err := h.setRepoBindingsForScope(r.Context(), repoScopeWorkspace, ws.ID, *req.Repos); err != nil {
+			slog.Warn("update workspace repos failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update workspace repos: "+err.Error())
+			return
+		}
+	}
+
+	repos, err := h.loadWorkspaceRepoData(r.Context(), ws.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+		return
+	}
+
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws, repos)})
 
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, workspaceToResponse(ws, repos))
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
@@ -639,6 +662,19 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
+	}
+
+	// Drop the workspace's repo bindings, then garbage-collect any repo rows
+	// that no scope references anymore. This is application-level rather than
+	// FK-level because repo_binding.scope_id is polymorphic across workspace
+	// / project / issue and FKs can't enforce that.
+	if err := h.Queries.DeleteRepoBindingsForScope(r.Context(), db.DeleteRepoBindingsForScopeParams{
+		ScopeType: repoScopeWorkspace,
+		ScopeID:   requester.WorkspaceID,
+	}); err != nil {
+		slog.Warn("delete workspace repo bindings failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+	} else if err := h.Queries.DeleteOrphanRepos(r.Context()); err != nil {
+		slog.Warn("delete orphan repos failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 	}
 
 	slog.Info("workspace deleted", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)

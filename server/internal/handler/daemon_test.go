@@ -57,18 +57,50 @@ func (s *popRecordingLocalSkillImportStore) PopPending(ctx context.Context, runt
 	return s.LocalSkillImportStore.PopPending(ctx, runtimeID)
 }
 
+// setHandlerTestWorkspaceRepos rewrites the workspace's repo bindings to
+// exactly the supplied list. The on-disk shape changed from a JSONB column to
+// the polymorphic `repo` + `repo_binding` tables in migration 060, so this
+// helper mirrors the production setRepoBindingsForScope path: clear existing
+// workspace-scoped bindings, upsert each (url, description), then bind it.
+// Cleanup drops everything back to a clean slate so subsequent tests see no
+// repos.
 func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	t.Helper()
-	data, err := json.Marshal(repos)
-	if err != nil {
-		t.Fatalf("marshal repos: %v", err)
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM repo_binding WHERE scope_type = 'workspace' AND scope_id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("clear workspace repo bindings: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	for _, r := range repos {
+		url := strings.TrimSpace(r["url"])
+		if url == "" {
+			continue
+		}
+		description := strings.TrimSpace(r["description"])
+		var repoID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO repo (url, description) VALUES ($1, $2)
+			ON CONFLICT (url) DO UPDATE SET description = EXCLUDED.description, updated_at = now()
+			RETURNING id
+		`, url, description).Scan(&repoID); err != nil {
+			t.Fatalf("upsert repo %q: %v", url, err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO repo_binding (repo_id, scope_type, scope_id) VALUES ($1, 'workspace', $2)
+			ON CONFLICT (repo_id, scope_type, scope_id) DO NOTHING
+		`, repoID, testWorkspaceID); err != nil {
+			t.Fatalf("bind repo %q: %v", url, err)
+		}
 	}
 	t.Cleanup(func() {
-		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
-			t.Fatalf("reset workspace repos: %v", err)
+		if _, err := testPool.Exec(ctx, `DELETE FROM repo_binding WHERE scope_type = 'workspace' AND scope_id = $1`, testWorkspaceID); err != nil {
+			t.Fatalf("reset workspace repo bindings: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			DELETE FROM repo WHERE NOT EXISTS (
+				SELECT 1 FROM repo_binding rb WHERE rb.repo_id = repo.id
+			)
+		`); err != nil {
+			t.Fatalf("reset orphan repos: %v", err)
 		}
 	})
 }
@@ -750,17 +782,22 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 
 	version1 := getReposVersion()
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
+	// Same URL set, swapped order and edited descriptions: the version should
+	// be stable.
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": "git@example.com:team/web.git", "description": "frontend"},
+		{"url": "git@example.com:team/api.git", "description": "backend"},
+	})
 	version2 := getReposVersion()
 	if version1 != version2 {
 		t.Fatalf("expected repos_version to ignore order/description changes, got %s vs %s", version1, version2)
 	}
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
+	// Different URL set: the version must change so daemons re-sync.
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": "git@example.com:team/api.git", "description": "backend"},
+		{"url": "git@example.com:team/mobile.git", "description": "mobile"},
+	})
 	version3 := getReposVersion()
 	if strings.EqualFold(version2, version3) {
 		t.Fatalf("expected repos_version to change when URL set changes, got %s", version3)

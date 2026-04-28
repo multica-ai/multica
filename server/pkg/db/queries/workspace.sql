@@ -23,7 +23,6 @@ UPDATE workspace SET
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
     settings = COALESCE(sqlc.narg('settings'), settings),
-    repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
     updated_at = now()
 WHERE id = $1

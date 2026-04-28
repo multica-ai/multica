@@ -174,20 +174,8 @@ func workspaceReposVersion(repos []RepoData) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func parseWorkspaceRepos(raw []byte) []RepoData {
-	if len(raw) == 0 {
-		return []RepoData{}
-	}
-
-	var repos []RepoData
-	if err := json.Unmarshal(raw, &repos); err != nil {
-		return []RepoData{}
-	}
-	return normalizeWorkspaceRepos(repos)
-}
-
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
-	repos := parseWorkspaceRepos(raw)
+func workspaceReposResponse(workspaceID string, repos []RepoData) daemonWorkspaceReposResponse {
+	repos = normalizeWorkspaceRepos(repos)
 	return daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
@@ -338,7 +326,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
+	repos, err := h.loadWorkspaceRepoData(r.Context(), ws.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+		return
+	}
+	repoResp := workspaceReposResponse(req.WorkspaceID, repos)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
@@ -434,13 +427,18 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
+	wsUUID := parseUUID(workspaceID)
+	if _, err := h.Queries.GetWorkspace(r.Context(), wsUUID); err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	repos, err := h.loadWorkspaceRepoData(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+		return
+	}
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, repos))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -763,11 +761,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			if repos, err := h.loadWorkspaceRepoData(r.Context(), issue.WorkspaceID); err == nil && len(repos) > 0 {
+				resp.Repos = repos
 			}
 		}
 
@@ -818,11 +813,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			if repos, err := h.loadWorkspaceRepoData(r.Context(), cs.WorkspaceID); err == nil && len(repos) > 0 {
+				resp.Repos = repos
 			}
 			// Resume from the chat session's persistent session, falling back
 			// to the most recent task that recorded a session_id when the
@@ -876,11 +868,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
 				}
 				if len(resp.Repos) == 0 {
-					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						var repos []RepoData
-						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-							resp.Repos = repos
-						}
+					if repos, err := h.loadWorkspaceRepoData(r.Context(), ap.WorkspaceID); err == nil && len(repos) > 0 {
+						resp.Repos = repos
 					}
 				}
 			}
