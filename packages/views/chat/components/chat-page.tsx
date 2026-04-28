@@ -42,11 +42,13 @@ import {
 } from "./context-anchor";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatSession } from "@multica/core/types";
+import { useChatT, type ChatDict } from "../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 
 export function ChatPage() {
+  const t = useChatT();
   const wsId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -206,7 +208,7 @@ export function ChatPage() {
   );
 
   const hasMessages = messages.length > 0 || !!pendingTaskId;
-  const activeTitle = currentSession?.title?.trim() || "New chat";
+  const activeTitle = currentSession?.title?.trim() || t.page.activeTitleFallback;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -218,6 +220,7 @@ export function ChatPage() {
             agents={agents}
             activeSessionId={activeSessionId}
             onSelectSession={handleSelectSession}
+            t={t}
           />
           <Tooltip>
             <TooltipTrigger
@@ -227,13 +230,13 @@ export function ChatPage() {
                   size="icon-sm"
                   className="text-muted-foreground"
                   onClick={handleNewChat}
-                  aria-label="New chat"
+                  aria-label={t.page.newChatAria}
                 />
               }
             >
               <Plus />
             </TooltipTrigger>
-            <TooltipContent side="bottom">New chat</TooltipContent>
+            <TooltipContent side="bottom">{t.page.newChat}</TooltipContent>
           </Tooltip>
         </div>
       </PageHeader>
@@ -253,7 +256,7 @@ export function ChatPage() {
             />
           </div>
         ) : (
-          <EmptyState agentName={activeAgent?.name} onPickPrompt={handleSend} />
+          <EmptyState agentName={activeAgent?.name} onPickPrompt={handleSend} t={t} />
         )}
 
         <div className="mx-auto w-full max-w-3xl pb-4">
@@ -270,6 +273,7 @@ export function ChatPage() {
                 activeAgent={activeAgent}
                 userId={user?.id}
                 onSelect={handleSelectAgent}
+                t={t}
               />
             }
             rightAdornment={<ContextAnchorButton />}
@@ -291,11 +295,13 @@ function HistoryPopover({
   agents,
   activeSessionId,
   onSelectSession,
+  t,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
+  t: ChatDict;
 }) {
   const [open, setOpen] = React.useState(false);
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
@@ -311,7 +317,7 @@ function HistoryPopover({
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
-                  aria-label="History"
+                  aria-label={t.page.historyAria}
                 />
               }
             />
@@ -319,16 +325,16 @@ function HistoryPopover({
         >
           <History />
         </TooltipTrigger>
-        <TooltipContent side="bottom">History</TooltipContent>
+        <TooltipContent side="bottom">{t.page.history}</TooltipContent>
       </Tooltip>
       <PopoverContent align="end" sideOffset={6} className="w-80 p-0">
         <div className="px-3 py-2 border-b">
-          <span className="text-xs font-medium text-muted-foreground">History</span>
+          <span className="text-xs font-medium text-muted-foreground">{t.page.history}</span>
         </div>
         <div className="max-h-96 overflow-y-auto">
           {sessions.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No previous chats
+              {t.page.noPreviousChats}
             </div>
           ) : (
             sessions.map((session) => {
@@ -350,10 +356,10 @@ function HistoryPopover({
                   <AgentAvatarSmall agent={agent} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm">
-                      {session.title?.trim() || "New chat"}
+                      {session.title?.trim() || t.page.activeTitleFallback}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {agent?.name ?? "Unknown agent"}
+                      {agent?.name ?? t.page.unknownAgent}
                     </div>
                   </div>
                   {session.has_unread && (
@@ -377,11 +383,13 @@ function AgentDropdown({
   activeAgent,
   userId,
   onSelect,
+  t,
 }: {
   agents: Agent[];
   activeAgent: Agent | null;
   userId: string | undefined;
   onSelect: (agent: Agent) => void;
+  t: ChatDict;
 }) {
   const { mine, others } = useMemo(() => {
     const mine: Agent[] = [];
@@ -394,7 +402,7 @@ function AgentDropdown({
   }, [agents, userId]);
 
   if (!activeAgent) {
-    return <span className="text-xs text-muted-foreground">No agents</span>;
+    return <span className="text-xs text-muted-foreground">{t.agentPicker.noAgents}</span>;
   }
 
   return (
@@ -407,7 +415,7 @@ function AgentDropdown({
       <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
         {mine.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>My agents</DropdownMenuLabel>
+            <DropdownMenuLabel>{t.agentPicker.myAgents}</DropdownMenuLabel>
             {mine.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
@@ -421,7 +429,7 @@ function AgentDropdown({
         {mine.length > 0 && others.length > 0 && <DropdownMenuSeparator />}
         {others.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Others</DropdownMenuLabel>
+            <DropdownMenuLabel>{t.agentPicker.others}</DropdownMenuLabel>
             {others.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
@@ -469,29 +477,32 @@ function AgentAvatarSmall({ agent }: { agent: Agent | null }) {
   );
 }
 
-const STARTER_PROMPTS: { icon: string; text: string }[] = [
-  { icon: "📋", text: "List my open tasks by priority" },
-  { icon: "📝", text: "Summarize what I did today" },
-  { icon: "💡", text: "Plan what to work on next" },
-];
+const STARTER_PROMPT_ICONS = ["📋", "📝", "💡"] as const;
 
 function EmptyState({
   agentName,
   onPickPrompt,
+  t,
 }: {
   agentName?: string;
   onPickPrompt: (text: string) => void;
+  t: ChatDict;
 }) {
+  const starterPrompts: { icon: string; text: string }[] = [
+    { icon: STARTER_PROMPT_ICONS[0], text: t.emptyState.starterListTasks },
+    { icon: STARTER_PROMPT_ICONS[1], text: t.emptyState.starterSummarize },
+    { icon: STARTER_PROMPT_ICONS[2], text: t.emptyState.starterPlanNext },
+  ];
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-12">
       <div className="text-center space-y-1">
         <h3 className="text-xl font-semibold">
-          {agentName ? `Hi, I'm ${agentName}` : "Welcome to Multica"}
+          {agentName ? t.emptyState.greeting(agentName) : t.emptyState.welcome}
         </h3>
-        <p className="text-sm text-muted-foreground">How can I help?</p>
+        <p className="text-sm text-muted-foreground">{t.emptyState.helpPrompt}</p>
       </div>
       <div className="w-full max-w-md space-y-2">
-        {STARTER_PROMPTS.map((prompt) => (
+        {starterPrompts.map((prompt) => (
           <button
             key={prompt.text}
             type="button"

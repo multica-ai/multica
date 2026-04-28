@@ -61,6 +61,7 @@ import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { useIssuesT } from "../i18n";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -170,6 +171,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
+  const t = useIssuesT();
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
@@ -370,11 +372,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   if (!issue) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        <p>This issue does not exist or has been deleted in this workspace.</p>
+        <p>{t.detail.notFound}</p>
         {!onDelete && (
           <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            Back to Issues
+            {t.detail.backToIssues}
           </Button>
         )}
       </div>
@@ -389,26 +391,26 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
-          Properties
+          {t.detail.properties}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Status">
+          <PropRow label={t.detail.status}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Priority">
+          <PropRow label={t.detail.priority}>
             <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Assignee">
+          <PropRow label={t.detail.assignee}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label="Due date">
+          <PropRow label={t.detail.dueDate}>
             <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
           </PropRow>
-          <PropRow label="Project">
+          <PropRow label={t.detail.project}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
-          <PropRow label="Labels">
+          <PropRow label={t.detail.labels}>
             <LabelPicker issueId={issue.id} align="start" />
           </PropRow>
         </div>}
@@ -421,7 +423,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
-            Parent issue
+            {t.detail.parentIssue}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
@@ -443,18 +445,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
-          Details
+          {t.detail.details}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
         {detailsOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Created by">
+          <PropRow label={t.detail.createdBy}>
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} />
             <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
-          <PropRow label="Created">
+          <PropRow label={t.detail.created}>
             <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
           </PropRow>
-          <PropRow label="Updated">
+          <PropRow label={t.detail.updated}>
             <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
           </PropRow>
         </div>}
@@ -467,24 +469,27 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
-            Token usage
+            {t.detail.tokenUsage}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
           </button>
           {tokenUsageOpen && <div className="space-y-0.5 pl-2">
-            <PropRow label="Input">
+            <PropRow label={t.detail.tokenInput}>
               <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
             </PropRow>
-            <PropRow label="Output">
+            <PropRow label={t.detail.tokenOutput}>
               <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
             </PropRow>
             {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label="Cache">
+              <PropRow label={t.detail.tokenCache}>
                 <span className="text-muted-foreground">
-                  {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
+                  {t.detail.tokenCacheReadWrite(
+                    formatTokenCount(usage.total_cache_read_tokens),
+                    formatTokenCount(usage.total_cache_write_tokens),
+                  )}
                 </span>
               </PropRow>
             )}
-            <PropRow label="Runs">
+            <PropRow label={t.detail.tokenRuns}>
               <span className="text-muted-foreground">{usage.task_count}</span>
             </PropRow>
           </div>}
@@ -542,7 +547,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">{actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+              <TooltipContent side="bottom">{actions.isPinned ? t.detail.unpinFromSidebar : t.detail.pinToSidebar}</TooltipContent>
             </Tooltip>
             <IssueActionsDropdown
               issue={issue}
@@ -578,7 +583,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </Button>
                 }
               />
-              <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              <TooltipContent side="bottom">{t.detail.toggleSidebar}</TooltipContent>
             </Tooltip>
           </div>
         </PageHeader>
@@ -589,7 +594,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <TitleEditor
             key={`title-${id}`}
             defaultValue={issue.title}
-            placeholder="Issue title"
+            placeholder={t.detail.issueTitlePlaceholder}
             className="w-full text-2xl font-bold leading-snug tracking-tight"
             onBlur={(value) => {
               const trimmed = value.trim();
@@ -602,7 +607,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               href={paths.issueDetail(parentIssue.id)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
-              <span className="font-medium shrink-0">Sub-issue of</span>
+              <span className="font-medium shrink-0">{t.detail.subIssueOf}</span>
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
               <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
               <span className="truncate group-hover/parent:text-foreground">
@@ -627,7 +632,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               ref={descEditorRef}
               key={id}
               defaultValue={issue.description || ""}
-              placeholder="Add description..."
+              placeholder={t.detail.addDescriptionPlaceholder}
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
@@ -663,7 +668,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 }
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span>Add sub-issues</span>
+                <span>{t.detail.addSubIssues}</span>
               </button>
             </div>
           )}
@@ -684,7 +689,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                         subIssuesCollapsed && "-rotate-90",
                       )}
                     />
-                    <span>Sub-issues</span>
+                    <span>{t.detail.subIssues}</span>
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
@@ -704,13 +709,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                               parent_issue_identifier: issue.identifier,
                             })
                           }
-                          aria-label="Add sub-issue"
+                          aria-label={t.detail.addSubIssue}
                         >
                           <Plus className="h-4 w-4" />
                         </button>
                       }
                     />
-                    <TooltipContent side="bottom">Add sub-issue</TooltipContent>
+                    <TooltipContent side="bottom">{t.detail.addSubIssue}</TooltipContent>
                   </Tooltip>
                 </div>
 
@@ -771,14 +776,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">Activity</h2>
+                <h2 className="text-base font-semibold">{t.detail.activity}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isSubscribed ? "Unsubscribe" : "Subscribe"}
+                  {isSubscribed ? t.detail.unsubscribe : t.detail.subscribe}
                 </button>
                 <Popover>
                   <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
@@ -804,11 +809,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-64 p-0">
                     <Command>
-                      <CommandInput placeholder="Change subscribers..." />
+                      <CommandInput placeholder={t.detail.changeSubscribers} />
                       <CommandList className="max-h-64">
-                        <CommandEmpty>No results found</CommandEmpty>
+                        <CommandEmpty>{t.detail.noResults}</CommandEmpty>
                         {members.length > 0 && (
-                          <CommandGroup heading="Members">
+                          <CommandGroup heading={t.detail.membersHeading}>
                             {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
                               const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
                               const isSubbed = !!sub;
@@ -828,7 +833,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           </CommandGroup>
                         )}
                         {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading="Agents">
+                          <CommandGroup heading={t.detail.agentsHeading}>
                             {agents.filter((a) => !a.archived_at).map((a) => {
                               const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
                               const isSubbed = !!sub;

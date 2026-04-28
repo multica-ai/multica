@@ -1,0 +1,66 @@
+import type { ProjectsDict } from "./types";
+
+export function createZhTwDict(): ProjectsDict {
+  return {
+    page: {
+      title: "專案",
+      newProject: "新增專案",
+      emptyTitle: "目前沒有任何專案",
+      emptyAction: "建立第一個專案",
+      columnName: "名稱",
+      columnPriority: "優先順序",
+      columnStatus: "狀態",
+      columnProgress: "進度",
+      columnLead: "負責人",
+      columnCreated: "建立時間",
+      today: "今天",
+      dayAgo: "1 天前",
+      daysAgo: (days) => `${days} 天前`,
+      monthsAgo: (months) => `${months} 個月前`,
+    },
+    detail: {
+      notFound: "找不到此專案",
+      breadcrumbFallback: "專案",
+      titlePlaceholder: "專案標題",
+      changeIcon: "更換圖示",
+      properties: "屬性",
+      progress: "進度",
+      description: "描述",
+      descriptionPlaceholder: "新增描述…",
+      status: "狀態",
+      priority: "優先順序",
+      lead: "負責人",
+      noLead: "尚未指定負責人",
+      pinToSidebar: "釘選到側邊欄",
+      unpinFromSidebar: "從側邊欄取消釘選",
+      toggleSidebar: "切換側邊欄",
+      copyLink: "複製連結",
+      linkCopied: "已複製連結",
+      deleteProject: "刪除專案",
+      deleteTitle: "刪除專案",
+      deleteDescription:
+        "此操作將刪除專案，但其中的 Issue 不會被刪除，僅會解除關聯。",
+      deleteCancel: "取消",
+      deleteConfirm: "刪除",
+      deleteSuccess: "專案已刪除",
+      issuesEmptyTitle: "尚未關聯任何 Issue",
+      issuesEmptyHint: "請從 Issue 詳細頁將 Issue 指派至此專案。",
+      moveIssueFailed: "Issue 搬移失敗",
+    },
+    picker: {
+      noProject: "未選擇專案",
+      noProjectsYet: "尚未建立任何專案",
+      removeFromProject: "從專案中移除",
+    },
+    chip: {
+      fallback: "專案",
+    },
+    leadPopover: {
+      placeholder: "指派負責人…",
+      noLead: "尚未指定負責人",
+      membersHeading: "成員",
+      agentsHeading: "Agent",
+      noResults: "找不到結果",
+    },
+  };
+}

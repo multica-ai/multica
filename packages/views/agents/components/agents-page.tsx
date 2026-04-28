@@ -19,11 +19,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { PageHeader } from "../../layout/page-header";
+import { useAgentsT } from "../i18n";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentListItem } from "./agent-list-item";
 import { AgentDetail } from "./agent-detail";
 
 export function AgentsPage() {
+  const t = useAgentsT();
   const currentUser = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -61,9 +63,9 @@ export function AgentsPage() {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent updated");
+      toast.success(t.toasts.agentUpdated);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update agent");
+      toast.error(e instanceof Error ? e.message : t.toasts.failedToUpdate);
       throw e;
     }
   };
@@ -72,9 +74,9 @@ export function AgentsPage() {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent archived");
+      toast.success(t.toasts.agentArchived);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
+      toast.error(e instanceof Error ? e.message : t.toasts.failedToArchive);
     }
   };
 
@@ -82,9 +84,9 @@ export function AgentsPage() {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent restored");
+      toast.success(t.toasts.agentRestored);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
+      toast.error(e instanceof Error ? e.message : t.toasts.failedToRestore);
     }
   };
 
@@ -141,14 +143,14 @@ export function AgentsPage() {
         {/* Left column — agent list */}
         <div className="overflow-y-auto h-full border-r">
           <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Agents</h1>
+            <h1 className="text-sm font-semibold">{t.page.title}</h1>
             <div className="flex items-center gap-1">
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
                   size="icon-sm"
                   onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? "Show active agents" : "Show archived agents"}
+                  title={showArchived ? t.page.showActiveAgents : t.page.showArchivedAgents}
                 >
                   <Archive className="text-muted-foreground" />
                 </Button>
@@ -166,7 +168,7 @@ export function AgentsPage() {
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived ? "No archived agents" : archivedCount > 0 ? "No active agents" : "No agents yet"}
+                {showArchived ? t.page.emptyArchived : archivedCount > 0 ? t.page.emptyActive : t.page.emptyAll}
               </p>
               {!showArchived && (
                 <Button
@@ -175,7 +177,7 @@ export function AgentsPage() {
                   className="mt-3"
                 >
                   <Plus className="h-3 w-3" />
-                  Create Agent
+                  {t.page.createAgent}
                 </Button>
               )}
             </div>
@@ -212,14 +214,14 @@ export function AgentsPage() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select an agent to view details</p>
+            <p className="mt-3 text-sm">{t.page.selectToView}</p>
             <Button
               onClick={() => setShowCreate(true)}
               size="xs"
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              Create Agent
+              {t.page.createAgent}
             </Button>
           </div>
         )}

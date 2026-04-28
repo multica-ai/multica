@@ -6,6 +6,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { childIssuesOptions } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { IssuePickerModal } from "./issue-picker-modal";
+import { useModalsT } from "./i18n";
 
 export function SetParentIssueModal({
   onClose,
@@ -16,6 +17,7 @@ export function SetParentIssueModal({
 }) {
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
+  const t = useModalsT();
   const updateIssue = useUpdateIssue();
 
   const { data: children = [] } = useQuery({
@@ -31,15 +33,15 @@ export function SetParentIssueModal({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      title="Set parent issue"
-      description="Search for an issue to set as the parent of this issue"
+      title={t.setParentIssue.title}
+      description={t.setParentIssue.description}
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
           { id: issueId, parent_issue_id: selected.id },
-          { onError: () => toast.error("Failed to update issue") },
+          { onError: () => toast.error(t.setParentIssue.failed) },
         );
-        toast.success(`Set ${selected.identifier} as parent issue`);
+        toast.success(t.setParentIssue.success(selected.identifier));
       }}
     />
   );

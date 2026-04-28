@@ -6,6 +6,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { RuntimeUsage } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { formatTokens, estimateCost, aggregateByDate } from "../utils";
+import { useRuntimesT } from "../i18n";
 import { TokenCard } from "./shared";
 import {
   ActivityHeatmap,
@@ -16,14 +17,15 @@ import {
 } from "./charts";
 
 const TIME_RANGES = [
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
+  { key: "7d" as const, days: 7 as const },
+  { key: "30d" as const, days: 30 as const },
+  { key: "90d" as const, days: 90 as const },
 ] as const;
 
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
 
 export function UsageSection({ runtimeId }: { runtimeId: string }) {
+  const t = useRuntimesT();
   const [usage, setUsage] = useState<RuntimeUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState<TimeRange>(30);
@@ -62,7 +64,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
     return (
       <div className="flex flex-col items-center rounded-lg border border-dashed py-6">
         <BarChart3 className="h-5 w-5 text-muted-foreground/40" />
-        <p className="mt-2 text-xs text-muted-foreground">No usage data yet</p>
+        <p className="mt-2 text-xs text-muted-foreground">{t.usage.noUsage}</p>
       </div>
     );
   }
@@ -109,23 +111,23 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             }`}
           >
-            {range.label}
+            {t.usage.rangeLabels[range.key]}
           </button>
         ))}
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-3">
-        <TokenCard label="Input" value={formatTokens(totals.input)} />
-        <TokenCard label="Output" value={formatTokens(totals.output)} />
-        <TokenCard label="Cache Read" value={formatTokens(totals.cacheRead)} />
-        <TokenCard label="Cache Write" value={formatTokens(totals.cacheWrite)} />
+        <TokenCard label={t.usage.inputLabel} value={formatTokens(totals.input)} />
+        <TokenCard label={t.usage.outputLabel} value={formatTokens(totals.output)} />
+        <TokenCard label={t.usage.cacheReadLabel} value={formatTokens(totals.cacheRead)} />
+        <TokenCard label={t.usage.cacheWriteLabel} value={formatTokens(totals.cacheWrite)} />
       </div>
 
       {totals.cost > 0 && (
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
           <span className="text-xs text-muted-foreground">
-            Estimated cost ({days}d):{" "}
+            {t.usage.estimatedCost(days)}
           </span>
           <span className="text-sm font-semibold">
             ${totals.cost.toFixed(2)}
@@ -150,12 +152,12 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
       {/* Daily breakdown table */}
       <div className="rounded-lg border">
         <div className="grid grid-cols-[100px_1fr_80px_80px_80px_80px] gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-          <div>Date</div>
-          <div>Model</div>
-          <div className="text-right">Input</div>
-          <div className="text-right">Output</div>
-          <div className="text-right">Cache R</div>
-          <div className="text-right">Cache W</div>
+          <div>{t.usage.tableDate}</div>
+          <div>{t.usage.tableModel}</div>
+          <div className="text-right">{t.usage.tableInput}</div>
+          <div className="text-right">{t.usage.tableOutput}</div>
+          <div className="text-right">{t.usage.tableCacheR}</div>
+          <div className="text-right">{t.usage.tableCacheW}</div>
         </div>
         <div className="max-h-64 overflow-y-auto divide-y">
           {[...byDate.entries()].map(([date, rows]) =>

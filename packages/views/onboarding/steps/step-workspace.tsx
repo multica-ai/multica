@@ -28,12 +28,12 @@ import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import {
-  WORKSPACE_SLUG_CONFLICT_ERROR,
-  WORKSPACE_SLUG_FORMAT_ERROR,
   WORKSPACE_SLUG_REGEX,
   isWorkspaceSlugConflict,
   nameToWorkspaceSlug,
 } from "../../workspace/slug";
+import { useWorkspaceT } from "../../workspace/i18n";
+import { useOnboardingT } from "../i18n";
 
 /**
  * Step 2 — create your first workspace, or continue with one set up in
@@ -74,6 +74,8 @@ export function StepWorkspace({
   onCreated: (workspace: Workspace) => void | Promise<void>;
   onBack?: () => void;
 }) {
+  const t = useOnboardingT();
+  const tw = useWorkspaceT();
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
@@ -99,7 +101,7 @@ export function StepWorkspace({
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
-      ? WORKSPACE_SLUG_FORMAT_ERROR
+      ? tw.createForm.slugFormatError
       : null;
   const slugError = slugValidationError ?? slugServerError;
   const canCreate =
@@ -129,11 +131,11 @@ export function StepWorkspace({
         onSuccess: onCreated,
         onError: (error) => {
           if (isWorkspaceSlugConflict(error)) {
-            setSlugServerError(WORKSPACE_SLUG_CONFLICT_ERROR);
-            toast.error("Choose a different workspace URL");
+            setSlugServerError(tw.createForm.slugConflictError);
+            toast.error(t.workspace.chooseDifferentSlug);
             return;
           }
-          toast.error("Failed to create workspace");
+          toast.error(t.workspace.createFailed);
         },
       },
     );
@@ -153,31 +155,31 @@ export function StepWorkspace({
   let onContinue: () => void;
 
   if (existingActive && reusing) {
-    hint = `Opening ${reusing.name}.`;
-    continueLabel = `Open ${reusing.name}`;
+    hint = `${t.workspace.hintOpeningPrefix}${reusing.name}${t.workspace.hintOpeningSuffix}`;
+    continueLabel = `${t.workspace.openLabelPrefix}${reusing.name}`;
     continueDisabled = isCreating;
     onContinue = () => onCreated(reusing);
   } else if (creatingActive) {
     if (isCreating) {
-      hint = `Creating ${name.trim() || "your workspace"}…`;
-      continueLabel = "Creating…";
+      hint = `${t.workspace.hintCreatingPrefix}${name.trim() || t.workspace.hintCreatingFallback}…`;
+      continueLabel = t.workspace.creatingLabel;
       continueDisabled = true;
       onContinue = () => {};
     } else if (canCreate) {
-      hint = `Creating ${name.trim()}.`;
-      continueLabel = `Create ${name.trim()}`;
+      hint = `${t.workspace.hintCreatingPrefix}${name.trim()}${t.workspace.hintCreatingSuffix}`;
+      continueLabel = `${t.workspace.createLabelPrefix}${name.trim()}`;
       continueDisabled = false;
       onContinue = handleCreate;
     } else {
-      hint = "Name your workspace to create it.";
-      continueLabel = "Create workspace";
+      hint = t.workspace.hintNeedName;
+      continueLabel = t.workspace.createWorkspaceLabel;
       continueDisabled = true;
       onContinue = () => {};
     }
   } else {
     // Resume path, nothing picked yet.
-    hint = "Pick your workspace or start a new one.";
-    continueLabel = "Continue";
+    hint = t.workspace.hintPickFirst;
+    continueLabel = t.workspace.continueLabel;
     continueDisabled = true;
     onContinue = () => {};
   }
@@ -189,7 +191,7 @@ export function StepWorkspace({
           htmlFor="ws-name"
           className="text-xs font-medium text-muted-foreground"
         >
-          Workspace name
+          {t.workspace.nameLabel}
         </Label>
         <Input
           id="ws-name"
@@ -197,7 +199,7 @@ export function StepWorkspace({
           type="text"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
-          placeholder="Acme Inc, My Lab, Side Projects…"
+          placeholder={t.workspace.namePlaceholder}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
         />
       </div>
@@ -206,7 +208,7 @@ export function StepWorkspace({
           htmlFor="ws-slug"
           className="text-xs font-medium text-muted-foreground"
         >
-          URL
+          {t.workspace.urlLabel}
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
@@ -217,7 +219,7 @@ export function StepWorkspace({
             type="text"
             value={slug}
             onChange={(e) => handleSlugChange(e.target.value)}
-            placeholder="acme"
+            placeholder={t.workspace.slugPlaceholder}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
@@ -226,14 +228,14 @@ export function StepWorkspace({
       </div>
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium text-muted-foreground">
-          Issue prefix
+          {t.workspace.issuePrefixLabel}
         </div>
         <div className="text-sm leading-[1.55] text-muted-foreground">
-          Issues will look like{" "}
+          {t.workspace.issuePrefixHintPrefix}
           <span className="font-mono text-foreground">
             {issuePrefix(slug)}-123
           </span>
-          . You can change this later in settings.
+          {t.workspace.issuePrefixHintSuffix}
         </div>
       </div>
     </div>
@@ -253,7 +255,7 @@ export function StepWorkspace({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t.common.back}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -270,17 +272,17 @@ export function StepWorkspace({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              {reusing ? "Pick up or start fresh" : "Your first workspace"}
+              {reusing ? t.workspace.eyebrowReusing : t.workspace.eyebrowFresh}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
-                ? `Continue with ${reusing.name}, or start another.`
-                : "Name your workspace."}
+                ? `${t.workspace.titleReusingPrefix}${reusing.name}${t.workspace.titleReusingSuffix}`
+                : t.workspace.titleFresh}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
               {reusing
-                ? "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces."
-                : "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later."}
+                ? t.workspace.descriptionReusing
+                : t.workspace.descriptionFresh}
             </p>
 
             <div className="mt-10">
@@ -388,6 +390,7 @@ function CreateNewWorkspaceCard({
   onSelect: () => void;
   children: ReactNode;
 }) {
+  const t = useOnboardingT();
   return (
     <div
       className={cn(
@@ -413,10 +416,10 @@ function CreateNewWorkspaceCard({
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="truncate text-[14.5px] font-medium text-foreground">
-            Create a new workspace
+            {t.workspace.createNewTitle}
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            Start fresh — a separate space for a different side of your work.
+            {t.workspace.createNewSubtitle}
           </div>
         </div>
         <RadioMark selected={selected} />
@@ -427,45 +430,48 @@ function CreateNewWorkspaceCard({
 }
 
 function CreateWorkspaceSide() {
+  const t = useOnboardingT();
   return (
     <div className="flex flex-col gap-6">
       <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        What lives inside a workspace
+        {t.workspace.side.whatLivesEyebrow}
       </div>
 
-      <WorkspacePreviewCard name="Your workspace" slug="workspace" />
+      <WorkspacePreviewCard
+        name={t.workspace.side.previewWorkspaceName}
+        slug={t.workspace.side.previewSlug}
+      />
 
       <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        Things you&apos;ll do here
+        {t.workspace.side.thingsYouDoEyebrow}
       </div>
       <div className="flex flex-col gap-3.5">
-        <PerkRow>Assign issues to agents like you would a teammate</PerkRow>
-        <PerkRow>Chat with any agent without creating an issue</PerkRow>
-        <PerkRow>Invite teammates — they see only this workspace</PerkRow>
-        <PerkRow>Switch to other workspaces anytime from the top-left</PerkRow>
+        <PerkRow>{t.workspace.side.perks.assignAgents}</PerkRow>
+        <PerkRow>{t.workspace.side.perks.chatAgents}</PerkRow>
+        <PerkRow>{t.workspace.side.perks.inviteTeammates}</PerkRow>
+        <PerkRow>{t.workspace.side.perks.switchWorkspaces}</PerkRow>
       </div>
     </div>
   );
 }
 
 function ExistingWorkspaceSide({ workspace }: { workspace: Workspace }) {
+  const t = useOnboardingT();
   return (
     <div className="flex flex-col gap-6">
       <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        Your workspace
+        {t.workspace.side.yourWorkspaceEyebrow}
       </div>
 
       <WorkspacePreviewCard name={workspace.name} slug={workspace.slug} />
 
       <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        What&apos;s next
+        {t.workspace.side.whatsNextEyebrow}
       </div>
       <div className="flex flex-col gap-3.5">
-        <PerkRow>
-          Connect a runtime so your agents have somewhere to run
-        </PerkRow>
-        <PerkRow>Create your first agent matched to your role</PerkRow>
-        <PerkRow>Watch it pick up a starter task and reply</PerkRow>
+        <PerkRow>{t.workspace.side.perks.connectRuntime}</PerkRow>
+        <PerkRow>{t.workspace.side.perks.createAgent}</PerkRow>
+        <PerkRow>{t.workspace.side.perks.watchAgent}</PerkRow>
       </div>
     </div>
   );
@@ -486,6 +492,7 @@ function WorkspacePreviewCard({
   name: string;
   slug: string;
 }) {
+  const t = useOnboardingT();
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
@@ -506,44 +513,44 @@ function WorkspacePreviewCard({
       <div className="flex flex-col">
         <EntityRow
           icon={<Inbox className="h-4 w-4" />}
-          label="Inbox"
-          meta="your notifications"
+          label={t.workspace.side.sidebarLabels.inbox}
+          meta={t.workspace.side.sidebarLabels.inboxMeta}
         />
         <EntityRow
           icon={<ListTodo className="h-4 w-4" />}
-          label="Issues"
-          meta="shared task board"
+          label={t.workspace.side.sidebarLabels.issues}
+          meta={t.workspace.side.sidebarLabels.issuesMeta}
         />
         <EntityRow
           icon={<Bot className="h-4 w-4" />}
-          label="Agents"
-          meta="your AI teammates"
+          label={t.workspace.side.sidebarLabels.agents}
+          meta={t.workspace.side.sidebarLabels.agentsMeta}
         />
         <EntityRow
           icon={<FolderKanban className="h-4 w-4" />}
-          label="Projects"
-          meta="group related issues"
+          label={t.workspace.side.sidebarLabels.projects}
+          meta={t.workspace.side.sidebarLabels.projectsMeta}
         />
         <EntityRow
           icon={<Zap className="h-4 w-4" />}
-          label="Autopilot"
-          meta="scheduled automation"
+          label={t.workspace.side.sidebarLabels.autopilot}
+          meta={t.workspace.side.sidebarLabels.autopilotMeta}
         />
         <EntityRow
           icon={<Monitor className="h-4 w-4" />}
-          label="Runtimes"
-          meta="where agents run"
+          label={t.workspace.side.sidebarLabels.runtimes}
+          meta={t.workspace.side.sidebarLabels.runtimesMeta}
         />
         <EntityRow
           icon={<BookOpenText className="h-4 w-4" />}
-          label="Skills"
-          meta="reusable playbooks"
+          label={t.workspace.side.sidebarLabels.skills}
+          meta={t.workspace.side.sidebarLabels.skillsMeta}
         />
         <EntityRow
           dim
           icon={<MoreHorizontal className="h-4 w-4" />}
-          label="And more"
-          meta="and more"
+          label={t.workspace.side.sidebarLabels.andMore}
+          meta={t.workspace.side.sidebarLabels.andMoreMeta}
         />
       </div>
     </div>

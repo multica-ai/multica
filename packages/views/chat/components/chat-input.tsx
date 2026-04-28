@@ -6,6 +6,7 @@ import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
+import { useChatT } from "../i18n";
 
 const logger = createLogger("chat.ui");
 
@@ -35,6 +36,7 @@ export function ChatInput({
   rightAdornment,
   topSlot,
 }: ChatInputProps) {
+  const t = useChatT();
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -74,10 +76,10 @@ export function ChatInput({
   };
 
   const placeholder = disabled
-    ? "This session is archived"
+    ? t.input.archivedPlaceholder
     : agentName
-      ? `Tell ${agentName} what to do…`
-      : "Tell me what to do…";
+      ? t.input.placeholderForAgent(agentName)
+      : t.input.placeholderDefault;
 
   return (
     <div className="px-5 pb-3 pt-0">

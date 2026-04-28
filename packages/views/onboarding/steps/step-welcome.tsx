@@ -11,6 +11,7 @@ import { STATUS_CONFIG } from "@multica/core/issues/config";
 import type { IssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import { useOnboardingT } from "../i18n";
 
 /**
  * Step 0 — the one-shot product intro shown on every onboarding
@@ -45,6 +46,7 @@ export function StepWelcome({
   onSkip?: () => void | Promise<void>;
   isWeb?: boolean;
 }) {
+  const t = useOnboardingT();
   // Tracks which button is mid-flight so we can show a per-button
   // spinner and disable both while one is in progress.
   const [pending, setPending] = useState<"next" | "skip" | null>(null);
@@ -79,30 +81,26 @@ export function StepWelcome({
             <div className="flex items-center gap-2.5">
               <MulticaIcon className="size-5 text-foreground" noSpin />
               <span className="font-serif text-xl font-medium tracking-tight">
-                Welcome to Multica
+                {t.welcome.brand}
               </span>
             </div>
 
             <h1 className="text-balance font-serif text-5xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
-              Your AI teammates,
+              {t.welcome.headline1}
               <br />
-              in <em className="italic text-brand">one workspace.</em>
+              {t.welcome.headline2Prefix}
+              <em className="italic text-brand">
+                {t.welcome.headline2Emphasis}
+              </em>
+              {t.welcome.headline2Suffix}
             </h1>
 
             <div className="flex flex-col gap-4">
               <p className="text-lg leading-relaxed text-foreground/85">
-                Assign them work like you&apos;d assign a colleague — they
-                pick it up, update status, and comment when done.
+                {t.welcome.leadParagraph}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {isWeb ? (
-                  <>
-                    Desktop bundles the runtime — nothing to install.
-                    Continue on web to connect your own CLI.
-                  </>
-                ) : (
-                  "By the end, a real agent will be replying to your first issue."
-                )}
+                {isWeb ? t.welcome.secondaryWeb : t.welcome.secondaryDesktop}
               </p>
             </div>
 
@@ -124,7 +122,7 @@ export function StepWelcome({
                     className={buttonVariants({ size: "lg" })}
                   >
                     <Download className="h-4 w-4" />
-                    Download Desktop
+                    {t.welcome.download}
                   </a>
                   <Button
                     size="lg"
@@ -135,7 +133,7 @@ export function StepWelcome({
                     {pending === "next" && (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     )}
-                    Continue on web
+                    {t.welcome.continueOnWeb}
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </>
@@ -148,7 +146,7 @@ export function StepWelcome({
                   {pending === "next" && (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   )}
-                  Start exploring
+                  {t.welcome.startExploring}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               )}
@@ -162,7 +160,7 @@ export function StepWelcome({
                   {pending === "skip" && (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   )}
-                  I&apos;ve done this before
+                  {t.welcome.skipExisting}
                 </Button>
               )}
             </div>
@@ -180,8 +178,7 @@ export function StepWelcome({
         <DragStrip />
         <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
           <p className="max-w-[440px] text-balance text-center font-serif text-[15px] italic leading-snug text-muted-foreground">
-            Every issue, every thread, every decision — shared by your team and
-            agents.
+            {t.welcome.illustrationCaption}
           </p>
           <WelcomeIllustration />
         </div>
@@ -202,6 +199,10 @@ export function StepWelcome({
  * aesthetic of the left column.
  */
 function WelcomeIllustration() {
+  // The mock activity cards in this illustration use English placeholder
+  // text that mirrors live product content. They are decorative and
+  // intentionally not translated — the surrounding caption (passed in
+  // from the parent) is the user-facing copy.
   return (
     <div className="flex w-full max-w-[460px] flex-col gap-3">
       <MockActivityCard

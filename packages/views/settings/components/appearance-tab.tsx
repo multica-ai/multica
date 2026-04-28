@@ -2,6 +2,7 @@
 
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
+import { useSettingsT } from "../i18n";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -78,20 +79,21 @@ function WindowMockup({
   );
 }
 
-const themeOptions = [
-  { value: "light" as const, label: "Light" },
-  { value: "dark" as const, label: "Dark" },
-  { value: "system" as const, label: "System" },
-];
-
 export function AppearanceTab() {
   const { theme, setTheme } = useTheme();
+  const t = useSettingsT();
+
+  const themeOptions = [
+    { value: "light" as const, label: t.appearance.light },
+    { value: "dark" as const, label: t.appearance.dark },
+    { value: "system" as const, label: t.appearance.system },
+  ];
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Theme</h2>
-        <div className="flex gap-6" role="radiogroup" aria-label="Theme">
+        <h2 className="text-sm font-semibold">{t.appearance.sectionTitle}</h2>
+        <div className="flex gap-6" role="radiogroup" aria-label={t.appearance.themeAriaLabel}>
           {themeOptions.map((opt) => {
             const active = theme === opt.value;
             return (
@@ -99,7 +101,7 @@ export function AppearanceTab() {
                 key={opt.value}
                 role="radio"
                 aria-checked={active}
-                aria-label={`Select ${opt.label} theme`}
+                aria-label={t.appearance.selectThemeAria.replace("{label}", opt.label)}
                 onClick={() => setTheme(opt.value)}
                 className="group flex flex-col items-center gap-2"
               >

@@ -2,12 +2,14 @@
 
 import { FlaskConical } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { useSettingsT } from "../i18n";
 
 export function LabsTab() {
+  const t = useSettingsT();
   return (
     <div className="space-y-4">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Labs</h2>
+        <h2 className="text-sm font-semibold">{t.labs.sectionTitle}</h2>
 
         <Card>
           <CardContent>
@@ -16,9 +18,9 @@ export function LabsTab() {
                 <FlaskConical className="h-4 w-4" />
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium">No experimental features yet</p>
+                <p className="text-sm font-medium">{t.labs.emptyTitle}</p>
                 <p className="text-sm text-muted-foreground">
-                  Beta features that require manual opt-in will appear here.
+                  {t.labs.emptyDescription}
                 </p>
               </div>
             </div>

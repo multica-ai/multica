@@ -5,6 +5,7 @@ import {
   type OnboardingStep,
 } from "@multica/core/onboarding";
 import { cn } from "@multica/ui/lib/utils";
+import { useOnboardingT } from "../i18n";
 
 /**
  * Horizontal step indicator shown at the top of every onboarding step
@@ -30,12 +31,14 @@ import { cn } from "@multica/ui/lib/utils";
  * mapping from local UI step to the canonical `OnboardingStep`.
  */
 export function StepHeader({ currentStep }: { currentStep: OnboardingStep }) {
+  const t = useOnboardingT();
   const total = ONBOARDING_STEP_ORDER.length;
   const currentIndex = ONBOARDING_STEP_ORDER.indexOf(currentStep);
   // Defensive: unknown step → render a disabled-looking header rather
   // than throw. Happens if the caller's local step union and the store
   // enum drift during refactors.
   const safeIndex = currentIndex === -1 ? 0 : currentIndex;
+  const stepLabel = t.stepHeader.stepOf(safeIndex + 1, total);
 
   return (
     <div
@@ -43,7 +46,7 @@ export function StepHeader({ currentStep }: { currentStep: OnboardingStep }) {
       aria-valuemin={1}
       aria-valuemax={total}
       aria-valuenow={safeIndex + 1}
-      aria-label={`Step ${safeIndex + 1} of ${total}`}
+      aria-label={stepLabel}
       className="flex w-full items-center justify-between py-2"
     >
       <div className="flex items-center gap-2">
@@ -65,7 +68,7 @@ export function StepHeader({ currentStep }: { currentStep: OnboardingStep }) {
         })}
       </div>
       <span className="text-xs font-medium text-muted-foreground">
-        Step {safeIndex + 1} of {total}
+        {stepLabel}
       </span>
     </div>
   );

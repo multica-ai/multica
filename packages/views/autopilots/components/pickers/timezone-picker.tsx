@@ -7,6 +7,7 @@ import {
   PropertyPicker,
   PickerEmpty,
 } from "../../../issues/components/pickers/property-picker";
+import { useAutopilotsT } from "../../i18n";
 
 export interface TimezonePickerProps {
   value: string;
@@ -40,6 +41,7 @@ export function TimezonePicker({
   disabled,
   className,
 }: TimezonePickerProps) {
+  const t = useAutopilotsT();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
@@ -65,7 +67,7 @@ export function TimezonePicker({
       width="w-64"
       align="start"
       searchable
-      searchPlaceholder="Search timezone..."
+      searchPlaceholder={t.pickers.timezoneSearchPlaceholder}
       onSearchChange={setFilter}
       triggerRender={
         <button

@@ -14,6 +14,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { useNavigation } from "../navigation";
+import { useModalsT } from "./i18n";
 
 export function DeleteIssueConfirmModal({
   onClose,
@@ -27,17 +28,18 @@ export function DeleteIssueConfirmModal({
   const [deleting, setDeleting] = useState(false);
   const deleteIssue = useDeleteIssue();
   const navigation = useNavigation();
+  const t = useModalsT();
 
   const handleDelete = async () => {
     if (!issueId) return;
     setDeleting(true);
     try {
       await deleteIssue.mutateAsync(issueId);
-      toast.success("Issue deleted");
+      toast.success(t.deleteIssueConfirm.success);
       onClose();
       if (navigateTo) navigation.push(navigateTo);
     } catch {
-      toast.error("Failed to delete issue");
+      toast.error(t.deleteIssueConfirm.failed);
       setDeleting(false);
     }
   };
@@ -46,19 +48,19 @@ export function DeleteIssueConfirmModal({
     <AlertDialog open onOpenChange={(v) => { if (!v && !deleting) onClose(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete issue</AlertDialogTitle>
+          <AlertDialogTitle>{t.deleteIssueConfirm.title}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this issue and all its comments. This action cannot be undone.
+            {t.deleteIssueConfirm.description}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleting}>{t.deleteIssueConfirm.cancel}</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
             disabled={deleting}
             className="bg-destructive text-white hover:bg-destructive/90"
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t.deleteIssueConfirm.deleting : t.deleteIssueConfirm.confirm}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

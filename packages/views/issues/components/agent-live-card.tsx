@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui
 import { useActorName } from "@multica/core/workspace/hooks";
 import { redactSecrets } from "../utils/redact";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
+import { useIssuesT } from "../i18n";
 
 // ─── Shared types & helpers ─────────────────────────────────────────────────
 
@@ -270,6 +271,7 @@ interface SingleAgentLiveCardProps {
 }
 
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
+  const t = useIssuesT();
   const [elapsed, setElapsed] = useState("");
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -309,10 +311,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     try {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : t.agentCard.cancelFailed);
       setCancelling(false);
     }
-  }, [task.id, issueId, cancelling]);
+  }, [task.id, issueId, cancelling, t.agentCard.cancelFailed]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
@@ -341,17 +343,17 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="font-medium text-foreground truncate">{agentName} {t.agentCard.isWorking}</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            <span className="text-muted-foreground shrink-0">{toolCount} {t.agentCard.tools}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setTranscriptOpen(true); }}
             className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            title="Expand transcript"
+            title={t.agentCard.expandTranscript}
           >
             <Maximize2 className="h-3 w-3" />
           </button>
@@ -359,10 +361,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             onClick={(e) => { e.stopPropagation(); handleCancel(); }}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            title="Stop agent"
+            title={t.agentCard.stopAgent}
           >
             {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>Stop</span>
+            <span>{t.agentCard.stop}</span>
           </button>
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
         </div>
@@ -398,14 +400,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
                   className="sticky bottom-0 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full bg-background border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground shadow-sm"
                 >
                   <ArrowDown className="h-3 w-3" />
-                  Latest
+                  {t.agentCard.latest}
                 </button>
               )}
             </div>
           ) : (
             <div className="border-t border-info/10 px-3 py-3">
               <p className="text-xs text-muted-foreground">
-                Live log is not available for this agent provider. Results will appear when the task completes.
+                {t.agentCard.liveLogUnavailable}
               </p>
             </div>
           )}
@@ -432,6 +434,7 @@ interface TaskRunHistoryProps {
 }
 
 export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
+  const t = useIssuesT();
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -476,7 +479,7 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
       <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
         <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
         <Clock className="h-3 w-3" />
-        <span>Execution history ({completedTasks.length})</span>
+        <span>{t.agentCard.executionHistory(completedTasks.length)}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 space-y-2">
@@ -490,6 +493,7 @@ export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
 }
 
 function TaskRunEntry({ task }: { task: AgentTask }) {
+  const t = useIssuesT();
   const { getActorName } = useActorName();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TimelineItem[] | null>(null);
@@ -552,7 +556,7 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
             }
           }}
           className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-          title="Expand transcript"
+          title={t.agentCard.expandTranscript}
         >
           <Maximize2 className="h-3 w-3" />
         </span>
@@ -562,10 +566,10 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           {items === null ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Loading...
+              {t.agentCard.loading}
             </div>
           ) : items.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-2">No execution data recorded.</p>
+            <p className="text-xs text-muted-foreground py-2">{t.agentCard.noExecutionData}</p>
           ) : (
             items.map((item, idx) => (
               <TimelineRow key={`${item.seq}-${idx}`} item={item} />

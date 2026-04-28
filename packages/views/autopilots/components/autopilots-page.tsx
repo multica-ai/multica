@@ -16,6 +16,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { AutopilotDialog } from "./autopilot-dialog";
 import type { Autopilot } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
+import { useAutopilotsT, type AutopilotsDict } from "../i18n";
 
 interface AutopilotTemplate {
   title: string;
@@ -26,107 +27,130 @@ interface AutopilotTemplate {
   time: string;
 }
 
-const TEMPLATES: AutopilotTemplate[] = [
-  {
-    title: "Daily news digest",
-    summary: "Search and summarize today's news for the team",
-    prompt: `1. Search the web for news and announcements published today only (strictly today's date)
+// Prompts are intentionally English — they are read by the agent at runtime,
+// not shown as user-facing UI copy. Title/summary are translated via the dict.
+const TEMPLATE_PROMPTS = {
+  dailyNews: `1. Search the web for news and announcements published today only (strictly today's date)
 2. Filter for topics relevant to our team and industry
 3. For each item, write a short summary including: title, source, key takeaways
 4. Compile everything into a single digest post
 5. Post the digest as a comment on this issue and @mention all workspace members`,
-    icon: Newspaper,
-    frequency: "daily",
-    time: "09:00",
-  },
-  {
-    title: "PR review reminder",
-    summary: "Flag stale pull requests that need review",
-    prompt: `1. List all open pull requests in the repository
+  prReview: `1. List all open pull requests in the repository
 2. Identify PRs that have been open for more than 24 hours without a review
 3. For each stale PR, note the author, age, and a one-line summary of the change
 4. Post a comment on this issue listing all stale PRs with links
 5. @mention the team to remind them to review`,
-    icon: GitPullRequest,
-    frequency: "weekdays",
-    time: "10:00",
-  },
-  {
-    title: "Bug triage",
-    summary: "Assess and prioritize new bug reports",
-    prompt: `1. List all issues with status "triage" or "backlog" that have not been prioritized
+  bugTriage: `1. List all issues with status "triage" or "backlog" that have not been prioritized
 2. For each issue, read the description and any attached logs or screenshots
 3. Assess severity (critical / high / medium / low) based on user impact and scope
 4. Set the priority field on the issue accordingly
 5. Add a comment explaining your assessment and suggested next steps`,
-    icon: Bug,
-    frequency: "weekdays",
-    time: "09:00",
-  },
-  {
-    title: "Weekly progress report",
-    summary: "Compile a weekly summary of team progress",
-    prompt: `1. Gather all issues completed (status "done") in the past 7 days
+  weeklyReport: `1. Gather all issues completed (status "done") in the past 7 days
 2. Gather all issues currently in progress
 3. Identify any blocked issues and their blockers
 4. Calculate key metrics: issues closed, issues opened, net change
 5. Write a structured weekly report with sections: Completed, In Progress, Blocked, Metrics
 6. Post the report as a comment on this issue`,
-    icon: BarChart3,
-    frequency: "weekly",
-    time: "17:00",
-  },
-  {
-    title: "Dependency audit",
-    summary: "Scan for security vulnerabilities and outdated packages",
-    prompt: `1. Run dependency audit tools on the project (npm audit, go vuln check, etc.)
+  dependencyAudit: `1. Run dependency audit tools on the project (npm audit, go vuln check, etc.)
 2. Identify any packages with known security vulnerabilities
 3. List outdated packages that are more than 2 major versions behind
 4. For each finding, note the severity, affected package, and recommended fix
 5. Post a summary report as a comment with actionable items`,
-    icon: Shield,
-    frequency: "weekly",
-    time: "08:00",
-  },
-  {
-    title: "Documentation check",
-    summary: "Review recent changes for documentation gaps",
-    prompt: `1. List all code changes merged in the past 7 days (via git log)
+  docsCheck: `1. List all code changes merged in the past 7 days (via git log)
 2. For each significant change, check if related documentation was updated
 3. Identify any new APIs, config options, or features missing documentation
 4. Create a list of documentation gaps with file paths and suggested content
 5. Post the findings as a comment on this issue`,
-    icon: FileSearch,
-    frequency: "weekly",
-    time: "14:00",
-  },
-];
+} as const;
 
-function formatRelativeDate(date: string): string {
-  const diff = Date.now() - new Date(date).getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days < 1) return "Today";
-  if (days === 1) return "1d ago";
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
+function buildTemplates(t: AutopilotsDict["templates"]): AutopilotTemplate[] {
+  return [
+    {
+      title: t.dailyNewsTitle,
+      summary: t.dailyNewsSummary,
+      prompt: TEMPLATE_PROMPTS.dailyNews,
+      icon: Newspaper,
+      frequency: "daily",
+      time: "09:00",
+    },
+    {
+      title: t.prReviewTitle,
+      summary: t.prReviewSummary,
+      prompt: TEMPLATE_PROMPTS.prReview,
+      icon: GitPullRequest,
+      frequency: "weekdays",
+      time: "10:00",
+    },
+    {
+      title: t.bugTriageTitle,
+      summary: t.bugTriageSummary,
+      prompt: TEMPLATE_PROMPTS.bugTriage,
+      icon: Bug,
+      frequency: "weekdays",
+      time: "09:00",
+    },
+    {
+      title: t.weeklyReportTitle,
+      summary: t.weeklyReportSummary,
+      prompt: TEMPLATE_PROMPTS.weeklyReport,
+      icon: BarChart3,
+      frequency: "weekly",
+      time: "17:00",
+    },
+    {
+      title: t.dependencyAuditTitle,
+      summary: t.dependencyAuditSummary,
+      prompt: TEMPLATE_PROMPTS.dependencyAudit,
+      icon: Shield,
+      frequency: "weekly",
+      time: "08:00",
+    },
+    {
+      title: t.docsCheckTitle,
+      summary: t.docsCheckSummary,
+      prompt: TEMPLATE_PROMPTS.docsCheck,
+      icon: FileSearch,
+      frequency: "weekly",
+      time: "14:00",
+    },
+  ];
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Zap }> = {
-  active: { label: "Active", color: "text-emerald-500", icon: Play },
-  paused: { label: "Paused", color: "text-amber-500", icon: Pause },
-  archived: { label: "Archived", color: "text-muted-foreground", icon: AlertCircle },
-};
+function formatRelativeDate(date: string, t: AutopilotsDict["page"]): string {
+  const diff = Date.now() - new Date(date).getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days < 1) return t.today;
+  if (days === 1) return t.dayAgo;
+  if (days < 30) return t.daysAgo(days);
+  const months = Math.floor(days / 30);
+  return t.monthsAgo(months);
+}
 
-const EXECUTION_MODE_LABELS: Record<string, string> = {
-  create_issue: "Create Issue",
-  run_only: "Run Only",
-};
+function getStatusConfig(t: AutopilotsDict["page"]): Record<
+  string,
+  { label: string; color: string; icon: typeof Zap }
+> {
+  return {
+    active: { label: t.statusActive, color: "text-emerald-500", icon: Play },
+    paused: { label: t.statusPaused, color: "text-amber-500", icon: Pause },
+    archived: { label: t.statusArchived, color: "text-muted-foreground", icon: AlertCircle },
+  };
+}
+
+function getExecutionModeLabels(t: AutopilotsDict["page"]): Record<string, string> {
+  return {
+    create_issue: t.modeCreateIssue,
+    run_only: t.modeRunOnly,
+  };
+}
 
 function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const { getActorName } = useActorName();
   const wsPaths = useWorkspacePaths();
-  const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
+  const t = useAutopilotsT();
+  const statusConfig = getStatusConfig(t.page);
+  const executionModeLabels = getExecutionModeLabels(t.page);
+  const statusCfg = (statusConfig[autopilot.status] ?? statusConfig["active"])!;
   const StatusIcon = statusCfg.icon;
 
   return (
@@ -149,7 +173,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
 
       {/* Mode */}
       <span className="w-24 shrink-0 text-center text-xs text-muted-foreground">
-        {EXECUTION_MODE_LABELS[autopilot.execution_mode] ?? autopilot.execution_mode}
+        {executionModeLabels[autopilot.execution_mode] ?? autopilot.execution_mode}
       </span>
 
       {/* Status */}
@@ -160,7 +184,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
 
       {/* Last run */}
       <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
+        {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at, t.page) : "--"}
       </span>
     </div>
   );
@@ -168,6 +192,8 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
 
 export function AutopilotsPage() {
   const wsId = useWorkspaceId();
+  const t = useAutopilotsT();
+  const templates = buildTemplates(t.templates);
   const { data: autopilots = [], isLoading } = useQuery(autopilotListOptions(wsId));
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<AutopilotTemplate | null>(null);
@@ -183,14 +209,14 @@ export function AutopilotsPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Autopilot</h1>
+          <h1 className="text-sm font-medium">{t.page.title}</h1>
           {!isLoading && autopilots.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{autopilots.length}</span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={() => openCreate()}>
           <Plus className="h-3.5 w-3.5 mr-1" />
-          New autopilot
+          {t.page.newAutopilot}
         </Button>
       </PageHeader>
 
@@ -215,24 +241,24 @@ export function AutopilotsPage() {
         ) : autopilots.length === 0 ? (
           <div className="flex flex-col items-center py-16 px-5">
             <Zap className="h-10 w-10 mb-3 text-muted-foreground opacity-30" />
-            <p className="text-sm text-muted-foreground">No autopilots yet</p>
+            <p className="text-sm text-muted-foreground">{t.page.emptyTitle}</p>
             <p className="text-xs text-muted-foreground mt-1 mb-6">
-              Schedule recurring tasks for your AI agents. Pick a template or start from scratch.
+              {t.page.emptyHint}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-3xl">
-              {TEMPLATES.map((t) => {
-                const Icon = t.icon;
+              {templates.map((tpl) => {
+                const Icon = tpl.icon;
                 return (
                   <button
-                    key={t.title}
+                    key={tpl.title}
                     type="button"
                     className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
-                    onClick={() => openCreate(t)}
+                    onClick={() => openCreate(tpl)}
                   >
                     <Icon className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{t.title}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.summary}</div>
+                      <div className="text-sm font-medium">{tpl.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{tpl.summary}</div>
                     </div>
                   </button>
                 );
@@ -240,7 +266,7 @@ export function AutopilotsPage() {
             </div>
             <Button size="sm" variant="outline" className="mt-4" onClick={() => openCreate()}>
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Start from scratch
+              {t.page.emptyStartFromScratch}
             </Button>
           </div>
         ) : (
@@ -248,11 +274,11 @@ export function AutopilotsPage() {
             {/* Column headers */}
             <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
               <span className="shrink-0 w-4" />
-              <span className="min-w-0 flex-1">Name</span>
-              <span className="w-32 shrink-0">Agent</span>
-              <span className="w-24 text-center shrink-0">Mode</span>
-              <span className="w-20 text-center shrink-0">Status</span>
-              <span className="w-20 text-right shrink-0">Last run</span>
+              <span className="min-w-0 flex-1">{t.page.columnName}</span>
+              <span className="w-32 shrink-0">{t.page.columnAgent}</span>
+              <span className="w-24 text-center shrink-0">{t.page.columnMode}</span>
+              <span className="w-20 text-center shrink-0">{t.page.columnStatus}</span>
+              <span className="w-20 text-right shrink-0">{t.page.columnLastRun}</span>
             </div>
             {autopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />

@@ -20,6 +20,7 @@ import {
   PickerItem,
   PickerEmpty,
 } from "./property-picker";
+import { useIssuesT } from "../../i18n";
 
 interface LabelPickerProps {
   issueId: string;
@@ -67,6 +68,7 @@ export function LabelPicker({
   onOpenChange,
   align = "start",
 }: LabelPickerProps) {
+  const t = useIssuesT();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
@@ -119,7 +121,7 @@ export function LabelPicker({
           setFilter("");
         },
         onError: (err: unknown) => {
-          toast.error(err instanceof Error ? err.message : "Failed to create label");
+          toast.error(err instanceof Error ? err.message : t.labels.createFailed);
         },
         onSettled: () => {
           creatingRef.current = false;
@@ -146,7 +148,7 @@ export function LabelPicker({
         width="w-80"
         align={align}
         searchable
-        searchPlaceholder="Find or create a label…"
+        searchPlaceholder={t.labels.pickerSearchPlaceholder}
         onSearchChange={setFilter}
         triggerRender={
           hasLabels ? (
@@ -167,7 +169,7 @@ export function LabelPicker({
           ) : (
             <>
               <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Add label</span>
+              <span className="text-muted-foreground">{t.labels.pickerAddLabel}</span>
             </>
           )
         }
@@ -180,7 +182,7 @@ export function LabelPicker({
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent transition-colors"
           >
             <Settings2 className="h-3.5 w-3.5" />
-            <span>Manage labels…</span>
+            <span>{t.labels.pickerManage}</span>
           </button>
         }
       >
@@ -206,7 +208,7 @@ export function LabelPicker({
           <PickerItem selected={false} onClick={createAndAttach}>
             <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
-              Create <span className="font-medium">&ldquo;{query}&rdquo;</span>
+              {t.labels.pickerCreate} <span className="font-medium">&ldquo;{query}&rdquo;</span>
             </span>
             <span
               className="ml-auto inline-block h-3 w-3 shrink-0 rounded-full"
@@ -219,7 +221,7 @@ export function LabelPicker({
 
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent className="max-w-2xl">
-          <DialogTitle className="text-lg font-semibold">Manage labels</DialogTitle>
+          <DialogTitle className="text-lg font-semibold">{t.labels.managePanelTitle}</DialogTitle>
           <LabelsPanel />
         </DialogContent>
       </Dialog>

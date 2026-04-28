@@ -21,6 +21,7 @@ import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import { useOnboardingT } from "../i18n";
 
 /**
  * Step 3 (desktop) — connect a runtime.
@@ -94,6 +95,7 @@ function FancyView({
   onBack?: () => void;
   onWaitlistSubmitted?: () => void;
 }) {
+  const t = useOnboardingT();
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
@@ -190,14 +192,14 @@ function FancyView({
 
   const footerHint =
     phase === "found" && selected
-      ? `Selected: ${selected.name}`
+      ? `${t.runtime.footer.hintFoundSelectedPrefix}${selected.name}${t.runtime.footer.hintFoundSelectedSuffix}`
       : phase === "found"
-        ? "Pick a runtime above to continue."
+        ? t.runtime.footer.hintFoundPick
         : phase === "scanning"
-          ? "Waiting for the first result…"
+          ? t.runtime.footer.hintScanning
           : waitlistSubmitted
-            ? "You're on the waitlist — skip to keep exploring."
-            : "Skip to enter your workspace, or join the cloud waitlist above.";
+            ? t.runtime.footer.hintWaitlistedSubmitted
+            : t.runtime.footer.hintEmpty;
 
   return (
     <div className="animate-onboarding-enter grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
@@ -214,7 +216,7 @@ function FancyView({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t.common.back}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -278,7 +280,7 @@ function FancyView({
             disabled={submitting}
             onClick={handleSkip}
           >
-            Skip for now
+            {t.common.skipForNow}
           </Button>
           <Button
             size="lg"
@@ -286,7 +288,7 @@ function FancyView({
             onClick={handleContinue}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Continue
+            {t.common.continue}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -309,18 +311,14 @@ function FancyView({
 // ------------------------------------------------------------
 
 function ScanningView() {
+  const t = useOnboardingT();
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        Looking for your tools…
+        {t.runtime.scanning.title}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Multica drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others. We&apos;re waiting to hear back from your machine about
-        which ones are installed.
+        {t.runtime.scanning.body.prefix}
       </p>
       <div className="mt-10 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <SkeletonRuntimeCard />
@@ -341,30 +339,33 @@ function FoundView({
   onSelect: (id: string) => void;
   onlineCount: number;
 }) {
+  const t = useOnboardingT();
   const total = runtimes.length;
   const statusLabel =
     onlineCount === total
-      ? "all online"
+      ? t.runtime.found.allOnline
       : onlineCount === 0
-        ? "none online"
-        : `${onlineCount} online`;
+        ? t.runtime.found.noneOnline
+        : t.runtime.found.countOnline(onlineCount);
   const statusTone =
     onlineCount === 0 ? "text-muted-foreground" : "text-success";
 
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        We found your runtimes.
+        {t.runtime.found.title}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        We scanned your machine for AI coding tools you&apos;ve already
-        set up. Pick one for your first agent.
+        {t.runtime.found.description}
       </p>
 
       {/* Summary strip — trust signal ("we really did scan") */}
       <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-xs">
         <span className="font-semibold text-foreground">
-          {total} runtime{total === 1 ? "" : "s"}
+          {total}{" "}
+          {total === 1
+            ? t.runtime.found.summaryRuntimeSingular
+            : t.runtime.found.summaryRuntimePlural}
         </span>
         <span className="text-muted-foreground">·</span>
         <span className={cn("flex items-center gap-1", statusTone)}>
@@ -402,6 +403,7 @@ function EmptyView({
   onWaitlistSubmitted: () => void;
   onSkip: () => void;
 }) {
+  const t = useOnboardingT();
   // Two exits: "Skip for now" (enter the workspace in read-only mode)
   // or "Join waitlist" (capture interest in the hosted runtime we
   // haven't shipped yet). We deliberately don't link out to Claude
@@ -413,29 +415,28 @@ function EmptyView({
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        No supported tools detected.
+        {t.runtime.empty.title}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Multica drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others — we didn&apos;t find any on this machine. Install one and
-        come back, or pick a path below.
+        {t.runtime.empty.bodyPrefix}
       </p>
 
       <div className="mt-10 flex flex-col gap-3.5">
         <EmptyCard
-          title="Skip for now"
-          subtitle="Enter your workspace in read-only mode. Agents can't execute tasks until a runtime connects — but you can still browse, plan, and invite teammates."
-          actionLabel="Skip"
+          title={t.runtime.empty.skipTitle}
+          subtitle={t.runtime.empty.skipSubtitle}
+          actionLabel={t.runtime.empty.skipAction}
           onAction={onSkip}
         />
 
         <EmptyCard
-          title="Join the cloud runtime waitlist"
-          subtitle="We'll host the runtime for you — no local install, no setup. Not live yet; click to leave your email and get notified."
-          actionLabel={waitlistSubmitted ? "On the waitlist" : "Join waitlist"}
+          title={t.runtime.empty.waitlistTitle}
+          subtitle={t.runtime.empty.waitlistSubtitle}
+          actionLabel={
+            waitlistSubmitted
+              ? t.runtime.empty.waitlistJoined
+              : t.runtime.empty.waitlistAction
+          }
           onAction={() => setWaitlistOpen(true)}
         />
       </div>
@@ -446,10 +447,9 @@ function EmptyView({
       >
         <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
+            <DialogTitle>{t.runtime.waitlistDialog.title}</DialogTitle>
             <DialogDescription>
-              Cloud runtimes aren&apos;t live yet. Leave your email and
-              we&apos;ll email you when they are.
+              {t.runtime.waitlistDialog.description}
             </DialogDescription>
           </DialogHeader>
 
@@ -462,7 +462,7 @@ function EmptyView({
 
           <DialogFooter>
             <Button variant="ghost" onClick={() => setWaitlistOpen(false)}>
-              {waitlistSubmitted ? "Close" : "Cancel"}
+              {waitlistSubmitted ? t.common.close : t.common.cancel}
             </Button>
           </DialogFooter>
         </DialogContent>

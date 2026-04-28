@@ -35,6 +35,7 @@ import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
+import { useIssuesT } from "../i18n";
 
 const COLUMN_IDS = new Set<string>(ALL_STATUSES);
 
@@ -350,11 +351,12 @@ function HiddenColumnsPanel({
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
+  const t = useIssuesT();
   return (
     <div className="flex w-[240px] shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="text-sm font-medium text-muted-foreground">
-          Hidden columns
+          {t.board.hiddenColumns}
         </span>
       </div>
       <div className="flex-1 space-y-0.5">
@@ -377,6 +379,7 @@ function HiddenColumnRow({
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
+  const t = useIssuesT();
   const cfg = STATUS_CONFIG[status];
   const viewStoreApi = useViewStoreApi();
   const { total } = useLoadMoreByStatus(status, myIssuesOpts);
@@ -405,7 +408,7 @@ function HiddenColumnRow({
               onClick={() => viewStoreApi.getState().showStatus(status)}
             >
               <Eye className="size-3.5" />
-              Show column
+              {t.board.showColumn}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

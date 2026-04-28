@@ -7,6 +7,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import { useIssuesT } from "../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
@@ -23,7 +24,7 @@ export function PropertyPicker({
   width = "w-48",
   align = "end",
   searchable = false,
-  searchPlaceholder = "Filter...",
+  searchPlaceholder,
   onSearchChange,
   children,
   footer,
@@ -46,6 +47,8 @@ export function PropertyPicker({
    */
   footer?: React.ReactNode;
 }) {
+  const t = useIssuesT();
+  const effectiveSearchPlaceholder = searchPlaceholder ?? t.pickers.filterPlaceholder;
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
@@ -132,8 +135,8 @@ export function PropertyPicker({
                 onSearchChange?.(e.target.value);
               }}
               onKeyDown={handleKeyDown}
-              placeholder={searchPlaceholder}
-              aria-label="Filter options"
+              placeholder={effectiveSearchPlaceholder}
+              aria-label={t.pickers.filterAriaLabel}
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
@@ -205,9 +208,10 @@ export function PickerSection({
 // ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
+  const t = useIssuesT();
   return (
     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-      No results
+      {t.pickers.noResults}
     </div>
   );
 }

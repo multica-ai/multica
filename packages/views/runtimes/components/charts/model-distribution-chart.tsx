@@ -7,6 +7,7 @@ import {
 } from "@multica/ui/components/ui/chart";
 import type { ModelDistribution } from "../../utils";
 import { formatTokens } from "../../utils";
+import { useRuntimesT } from "../../i18n";
 
 const MODEL_COLORS = [
   "var(--color-chart-1)",
@@ -17,6 +18,7 @@ const MODEL_COLORS = [
 ];
 
 export function ModelDistributionChart({ data }: { data: ModelDistribution[] }) {
+  const t = useRuntimesT();
   if (data.length === 0) return null;
 
   const totalTokens = data.reduce((sum, d) => sum + d.tokens, 0);
@@ -29,7 +31,7 @@ export function ModelDistributionChart({ data }: { data: ModelDistribution[] }) 
 
   return (
     <div className="rounded-lg border p-4">
-      <h4 className="text-xs font-medium text-muted-foreground mb-3">Token Usage by Model</h4>
+      <h4 className="text-xs font-medium text-muted-foreground mb-3">{t.charts.tokenUsageByModel}</h4>
       <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[200px]">
         <PieChart>
           <ChartTooltip
@@ -65,7 +67,7 @@ export function ModelDistributionChart({ data }: { data: ModelDistribution[] }) 
                         {formatTokens(totalTokens)}
                       </tspan>
                       <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 18} className="fill-muted-foreground text-xs">
-                        tokens
+                        {t.charts.tokensLabel}
                       </tspan>
                     </text>
                   );

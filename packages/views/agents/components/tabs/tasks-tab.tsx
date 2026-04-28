@@ -10,9 +10,11 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useQueries } from "@tanstack/react-query";
 import { AppLink } from "../../../navigation";
-import { taskStatusConfig } from "../../config";
+import { taskStatusConfig, type AgentTaskStatusKey } from "../../config";
+import { useAgentsT } from "../../i18n";
 
 export function TasksTab({ agent }: { agent: Agent }) {
+  const t = useAgentsT();
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const wsId = useWorkspaceId();
@@ -87,25 +89,27 @@ export function TasksTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Task Queue</h3>
+        <h3 className="text-sm font-semibold">{t.tasks.title}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+          {t.tasks.description}
         </p>
       </div>
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <ListTodo className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">No tasks in queue</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t.tasks.emptyTitle}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Assign an issue to this agent to get started.
+            {t.tasks.emptyHelp}
           </p>
         </div>
       ) : (
         <div className="space-y-1.5">
           {sortedTasks.map((task) => {
-            const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
+            const statusKey = (task.status as AgentTaskStatusKey);
+            const config = taskStatusConfig[statusKey] ?? taskStatusConfig.queued;
             const Icon = config.icon;
+            const statusLabel = t.tasks.statusLabels[statusKey] ?? t.tasks.statusLabels.queued;
             // Tasks without a linked issue carry issue_id = "" — skip the
             // detail lookup and render them as non-link rows. The source
             // label is picked from chat_session_id / autopilot_run_id,
@@ -114,10 +118,10 @@ export function TasksTab({ agent }: { agent: Agent }) {
             const hasIssue = task.issue_id !== "";
             const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
             const sourcelessLabel = task.chat_session_id
-              ? "Chat session"
+              ? t.tasks.chatSession
               : task.autopilot_run_id
-                ? "Autopilot run"
-                : "Task without linked issue";
+                ? t.tasks.autopilotRun
+                : t.tasks.taskWithoutLinkedIssue;
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
             const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
@@ -143,23 +147,23 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? (hasIssue ? `Issue ${task.issue_id.slice(0, 8)}...` : sourcelessLabel)}
+                      {issue?.title ?? (hasIssue ? t.tasks.issueFallback(task.issue_id.slice(0, 8)) : sourcelessLabel)}
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {isRunning && task.started_at
-                      ? `Started ${new Date(task.started_at).toLocaleString()}`
+                      ? t.tasks.started(new Date(task.started_at).toLocaleString())
                       : task.status === "dispatched" && task.dispatched_at
-                        ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
+                        ? t.tasks.dispatched(new Date(task.dispatched_at).toLocaleString())
                         : task.status === "completed" && task.completed_at
-                          ? `Completed ${new Date(task.completed_at).toLocaleString()}`
+                          ? t.tasks.completed(new Date(task.completed_at).toLocaleString())
                           : task.status === "failed" && task.completed_at
-                            ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                            : `Queued ${new Date(task.created_at).toLocaleString()}`}
+                            ? t.tasks.failed(new Date(task.completed_at).toLocaleString())
+                            : t.tasks.queued(new Date(task.created_at).toLocaleString())}
                   </div>
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${config.color}`}>
-                  {config.label}
+                  {statusLabel}
                 </span>
               </>
             );

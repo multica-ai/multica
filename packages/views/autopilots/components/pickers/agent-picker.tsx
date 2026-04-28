@@ -11,6 +11,7 @@ import {
   PickerItem,
   PickerEmpty,
 } from "../../../issues/components/pickers/property-picker";
+import { useAutopilotsT } from "../../i18n";
 
 export function AgentPicker({
   agentId,
@@ -26,6 +27,7 @@ export function AgentPicker({
   align?: "start" | "center" | "end";
 }) {
   const wsId = useWorkspaceId();
+  const t = useAutopilotsT();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -44,7 +46,7 @@ export function AgentPicker({
       width="w-56"
       align={align}
       searchable
-      searchPlaceholder="Filter agents..."
+      searchPlaceholder={t.pickers.agentFilterPlaceholder}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={
@@ -58,7 +60,7 @@ export function AgentPicker({
             ) : (
               <>
                 <Bot className="size-3" />
-                <span>Select agent</span>
+                <span>{t.pickers.agentSelectFallback}</span>
               </>
             )}
           </>

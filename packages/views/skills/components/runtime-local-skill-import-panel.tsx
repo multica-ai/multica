@@ -35,6 +35,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { toast } from "sonner";
+import { useSkillsT, type SkillsDict } from "../i18n";
 
 function runtimeLabel(runtime: AgentRuntime): string {
   return `${runtime.name} (${runtime.provider})`;
@@ -52,6 +53,7 @@ function SkillItem({
   description,
   onNameChange,
   onDescriptionChange,
+  t,
 }: {
   skill: RuntimeLocalSkillSummary;
   selected: boolean;
@@ -60,6 +62,7 @@ function SkillItem({
   description: string;
   onNameChange: (v: string) => void;
   onDescriptionChange: (v: string) => void;
+  t: SkillsDict;
 }) {
   return (
     <div
@@ -90,7 +93,7 @@ function SkillItem({
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
-          {skill.file_count} file{skill.file_count === 1 ? "" : "s"}
+          {skill.file_count} {skill.file_count === 1 ? t.runtimeImport.fileSingular : t.runtimeImport.filePlural}
         </Badge>
       </button>
 
@@ -98,7 +101,7 @@ function SkillItem({
         <div className="space-y-2.5 border-t bg-card px-4 py-3">
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">
-              Workspace skill name
+              {t.runtimeImport.workspaceSkillName}
             </Label>
             <Input
               value={name}
@@ -109,12 +112,12 @@ function SkillItem({
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">
-              Description
+              {t.runtimeImport.descriptionLabel}
             </Label>
             <Textarea
               value={description}
               onChange={(e) => onDescriptionChange(e.target.value)}
-              placeholder="Optional — describe when an agent should use this skill."
+              placeholder={t.runtimeImport.descriptionPlaceholder}
               rows={2}
               className="resize-none text-sm"
             />
@@ -138,6 +141,7 @@ export function RuntimeLocalSkillImportPanel({
 }: {
   onImported?: (skill: Skill) => void;
 }) {
+  const t = useSkillsT();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -226,11 +230,11 @@ export function RuntimeLocalSkillImportPanel({
         qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
         qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
       ]);
-      toast.success("Skill imported");
+      toast.success(t.toasts.skillImported);
       onImported?.(result.skill);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to import skill",
+        error instanceof Error ? error.message : t.toasts.skillImportFailed,
       );
     } finally {
       setImporting(false);
@@ -254,10 +258,10 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            No local runtimes available
+            {t.runtimeImport.noLocalRuntimes}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Connect a local runtime to browse and import its local skills.
+            {t.runtimeImport.connectLocalRuntime}
           </p>
         </div>
       );
@@ -266,7 +270,7 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            Choose a runtime to continue
+            {t.runtimeImport.chooseRuntime}
           </p>
         </div>
       );
@@ -275,7 +279,7 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          Runtime must be online to browse local skills.
+          {t.runtimeImport.runtimeMustBeOnline}
         </div>
       );
     }
@@ -297,7 +301,7 @@ export function RuntimeLocalSkillImportPanel({
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {skillsQuery.error instanceof Error
             ? skillsQuery.error.message
-            : "Failed to load runtime local skills"}
+            : t.runtimeImport.failedToLoad}
         </div>
       );
     }
@@ -305,16 +309,16 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          This runtime provider does not expose local skill inventory yet.
+          {t.runtimeImport.notSupportedYet}
         </div>
       );
     }
     if (runtimeSkills.length === 0) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">No local skills found</p>
+          <p className="text-sm text-muted-foreground">{t.runtimeImport.noLocalSkillsTitle}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            This runtime does not have any discoverable local skills yet.
+            {t.runtimeImport.noLocalSkillsBody}
           </p>
         </div>
       );
@@ -331,6 +335,7 @@ export function RuntimeLocalSkillImportPanel({
             description={selectedSkillKey === s.key ? description : ""}
             onNameChange={setName}
             onDescriptionChange={setDescription}
+            t={t}
           />
         ))}
       </div>
@@ -349,13 +354,13 @@ export function RuntimeLocalSkillImportPanel({
         }`}
       >
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Runtime</Label>
+          <Label className="text-xs text-muted-foreground">{t.runtimeImport.runtimeLabel}</Label>
           <Select
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select a local runtime">
+              <SelectValue placeholder={t.runtimeImport.runtimePlaceholder}>
                 {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
               </SelectValue>
             </SelectTrigger>
@@ -397,25 +402,16 @@ export function RuntimeLocalSkillImportPanel({
       >
         {middle}
         <p className="mt-3 text-xs text-muted-foreground">
-          Symlinks, unreadable files, oversized files, and very large bundles
-          are ignored during import.
+          {t.runtimeImport.importHint}
         </p>
       </div>
 
       {/* Sticky bottom: Import button + context */}
       <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
         <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-          {selectedSkill ? (
-            <>
-              Ready to import{" "}
-              <span className="font-medium text-foreground">
-                {name.trim() || selectedSkill.name}
-              </span>{" "}
-              into this workspace.
-            </>
-          ) : (
-            "Select a skill to continue."
-          )}
+          {selectedSkill
+            ? t.runtimeImport.readyToImport(name.trim() || selectedSkill.name)
+            : t.runtimeImport.selectSkill}
         </div>
         <Button
           type="button"
@@ -426,12 +422,12 @@ export function RuntimeLocalSkillImportPanel({
           {importing ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Importing…
+              {t.runtimeImport.importing}
             </>
           ) : (
             <>
               <Download className="h-3 w-3" />
-              Import to Workspace
+              {t.runtimeImport.importToWorkspace}
             </>
           )}
         </Button>

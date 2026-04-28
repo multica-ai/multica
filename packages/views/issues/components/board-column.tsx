@@ -19,6 +19,7 @@ import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context"
 import { StatusIcon } from "./status-icon";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
+import { useIssuesT } from "../i18n";
 
 export function BoardColumn({
   status,
@@ -35,6 +36,7 @@ export function BoardColumn({
   totalCount?: number;
   footer?: ReactNode;
 }) {
+  const t = useIssuesT();
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
@@ -76,7 +78,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                {t.board.hideColumn}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -93,7 +95,7 @@ export function BoardColumn({
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t.board.addIssue}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -110,7 +112,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            {t.board.emptyColumn}
           </p>
         )}
         {footer}

@@ -46,6 +46,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { readOrigin, totalFileCount } from "../lib/origin";
+import { useSkillsT, type SkillsDict } from "../i18n";
 import { CreateSkillDialog } from "./create-skill-dialog";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
@@ -58,28 +59,30 @@ function SourceCell({
   skill,
   creator,
   runtime,
+  t,
 }: {
   skill: Skill;
   creator: MemberWithUser | null;
   runtime: AgentRuntime | null;
+  t: SkillsDict;
 }) {
   const origin = readOrigin(skill);
 
   let icon = <Pencil className="h-3 w-3 shrink-0" />;
-  let label = "Created manually";
+  let label = t.list.sourceCreatedManually;
   if (origin.type === "runtime_local") {
     icon = <HardDrive className="h-3 w-3 shrink-0" />;
     label = runtime
-      ? `From ${runtime.name}`
+      ? t.list.sourceFromRuntime(runtime.name)
       : origin.provider
-        ? `From ${origin.provider} runtime`
-        : "From a runtime";
+        ? t.list.sourceFromProvider(origin.provider)
+        : t.list.sourceFromUnknownRuntime;
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From ClawHub";
+    label = t.list.sourceFromClawhub;
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From Skills.sh";
+    label = t.list.sourceFromSkillsSh;
   }
 
   return (
@@ -98,7 +101,7 @@ function SourceCell({
             avatarUrl={creator.avatar_url}
             size={14}
           />
-          <span className="min-w-0 truncate">by {creator.name}</span>
+          <span className="min-w-0 truncate">{t.list.bySomeone(creator.name)}</span>
         </div>
       )}
     </div>
@@ -109,9 +112,9 @@ function SourceCell({
 // Agent avatar stack
 // ---------------------------------------------------------------------------
 
-function AgentAssignees({ agents }: { agents: Agent[] }) {
+function AgentAssignees({ agents, t }: { agents: Agent[]; t: SkillsDict }) {
   if (agents.length === 0) {
-    return <span className="text-xs text-muted-foreground/70">— unused</span>;
+    return <span className="text-xs text-muted-foreground/70">{t.list.unused}</span>;
   }
   const visible = agents.slice(0, 3);
   const extra = agents.length - visible.length;
@@ -158,6 +161,7 @@ function SkillRow({
   runtime,
   canEdit,
   href,
+  t,
 }: {
   skill: Skill;
   agents: Agent[];
@@ -165,6 +169,7 @@ function SkillRow({
   runtime: AgentRuntime | null;
   canEdit: boolean;
   href: string;
+  t: SkillsDict;
 }) {
   return (
     <AppLink
@@ -182,7 +187,7 @@ function SkillRow({
                 }
               />
               <TooltipContent>
-                Read-only — only creator or admin can edit
+                {t.list.readOnlyTooltip}
               </TooltipContent>
             </Tooltip>
           )}
@@ -198,13 +203,13 @@ function SkillRow({
               : "italic text-muted-foreground/50"
           }`}
         >
-          {skill.description || "No description"}
+          {skill.description || t.list.noDescription}
         </div>
       </div>
       <div className="min-w-0">
-        <AgentAssignees agents={agents} />
+        <AgentAssignees agents={agents} t={t} />
       </div>
-      <SourceCell skill={skill} creator={creator} runtime={runtime} />
+      <SourceCell skill={skill} creator={creator} runtime={runtime} t={t} />
       <div className="min-w-0 whitespace-nowrap text-xs text-muted-foreground">
         {timeAgo(skill.updated_at)}
       </div>
@@ -213,15 +218,15 @@ function SkillRow({
   );
 }
 
-function ListColumnHeader() {
+function ListColumnHeader({ t }: { t: SkillsDict }) {
   return (
     <div
       className={`${ROW_GRID} shrink-0 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground`}
     >
-      <span>Name</span>
-      <span>Used by</span>
-      <span>Source · Added by</span>
-      <span>Updated</span>
+      <span>{t.list.name}</span>
+      <span>{t.list.usedBy}</span>
+      <span>{t.list.sourceAddedBy}</span>
+      <span>{t.list.updated}</span>
       <span className="w-4" />
     </div>
   );
@@ -231,12 +236,15 @@ function ListColumnHeader() {
 // Scope tab — matches Issues/MyIssues header pattern
 // ---------------------------------------------------------------------------
 
-const SCOPES: { value: FilterKey; label: string; description: string }[] = [
-  { value: "all", label: "All", description: "All skills in this workspace" },
-  { value: "used", label: "In use", description: "Skills assigned to at least one agent" },
-  { value: "unused", label: "Unused", description: "Skills not assigned to any agent" },
-  { value: "mine", label: "Created by me", description: "Skills you created" },
-];
+const SCOPE_KEYS: FilterKey[] = ["all", "used", "unused", "mine"];
+
+function getScopes(t: SkillsDict): { value: FilterKey; label: string; description: string }[] {
+  return SCOPE_KEYS.map((key) => ({
+    value: key,
+    label: t.scopes[key].label,
+    description: t.scopes[key].description,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Page header bar — uses shared PageHeader so the mobile sidebar trigger and
@@ -246,15 +254,17 @@ const SCOPES: { value: FilterKey; label: string; description: string }[] = [
 function PageHeaderBar({
   totalCount,
   onCreate,
+  t,
 }: {
   totalCount: number;
   onCreate: () => void;
+  t: SkillsDict;
 }) {
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">Skills</h1>
+        <h1 className="text-sm font-medium">{t.page.title}</h1>
         {totalCount > 0 && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
             {totalCount}
@@ -263,7 +273,7 @@ function PageHeaderBar({
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
-        New skill
+        {t.page.newSkill}
       </Button>
     </PageHeader>
   );
@@ -280,12 +290,15 @@ function CardToolbar({
   setSearch,
   filter,
   setFilter,
+  t,
 }: {
   search: string;
   setSearch: (v: string) => void;
   filter: FilterKey;
   setFilter: (v: FilterKey) => void;
+  t: SkillsDict;
 }) {
+  const scopes = getScopes(t);
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
       <div className="relative">
@@ -293,11 +306,11 @@ function CardToolbar({
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search skills…"
+          placeholder={t.toolbar.searchPlaceholder}
           className="h-8 w-64 pl-8 text-sm"
         />
       </div>
-      {SCOPES.map((s) => (
+      {scopes.map((s) => (
         <Tooltip key={s.value}>
           <TooltipTrigger
             render={
@@ -326,20 +339,19 @@ function CardToolbar({
 // Empty state
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, t }: { onCreate: () => void; t: SkillsDict }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <BookOpen className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h2 className="mt-4 text-base font-semibold">No skills yet</h2>
+      <h2 className="mt-4 text-base font-semibold">{t.emptyState.title}</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Create your first skill, import one from a URL, or copy one from a
-        connected runtime — and every agent in the workspace can use it.
+        {t.emptyState.body}
       </p>
       <Button type="button" onClick={onCreate} size="sm" className="mt-5">
         <Plus className="h-3 w-3" />
-        New skill
+        {t.emptyState.newSkill}
       </Button>
     </div>
   );
@@ -350,6 +362,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 // ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
+  const t = useSkillsT();
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -428,7 +441,7 @@ export default function SkillsPage() {
   if (isLoading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} t={t} />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
           <div className="space-y-3 pl-4">
             <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
@@ -456,15 +469,15 @@ export default function SkillsPage() {
   if (listError) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} t={t} />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-sm font-medium">Couldn&rsquo;t load skills</p>
+            <p className="text-sm font-medium">{t.page.couldntLoadTitle}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {listError instanceof Error
                 ? listError.message
-                : "Something went wrong fetching the skill list."}
+                : t.page.couldntLoadFallback}
             </p>
           </div>
           <Button
@@ -473,7 +486,7 @@ export default function SkillsPage() {
             size="sm"
             onClick={() => refetchList()}
           >
-            Try again
+            {t.page.tryAgain}
           </Button>
         </div>
       </div>
@@ -490,6 +503,7 @@ export default function SkillsPage() {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
+        t={t}
       />
 
       {/* Non-blocking banner when supporting queries fail — list still renders
@@ -501,8 +515,7 @@ export default function SkillsPage() {
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>
-            Some workspace data failed to load. Creator attribution, runtime
-            names, or edit permissions may appear incomplete.
+            {t.page.partialDataWarning}
           </span>
         </div>
       )}
@@ -513,24 +526,23 @@ export default function SkillsPage() {
         {!showEmpty && (
           <div className="space-y-3 pl-4">
             <p className="text-base text-foreground">
-              Instructions any agent in this workspace can use.{" "}
+              {t.page.intro}{" "}
               <a
                 href="https://multica.ai/docs/skills"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-muted-foreground underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
               >
-                Learn more about Skills →
+                {t.page.learnMore}
               </a>
             </p>
             <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">
-                Shared with your workspace.
-              </span>{" "}
-              Anyone can create a skill, import one from a URL, or copy one
-              from their local runtime — and every agent can use it.{" "}
+                {t.page.sharedTitle}
+              </span>
+              {t.page.sharedBody}
               <span className="font-semibold text-brand">
-                Local runtime skills stay private until you copy one here.
+                {t.page.sharedLocalNote}
               </span>
             </div>
           </div>
@@ -538,7 +550,7 @@ export default function SkillsPage() {
 
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
-            <EmptyState onCreate={() => setCreateOpen(true)} />
+            <EmptyState onCreate={() => setCreateOpen(true)} t={t} />
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
@@ -547,21 +559,21 @@ export default function SkillsPage() {
               setSearch={setSearch}
               filter={filter}
               setFilter={setFilter}
+              t={t}
             />
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
                 <Search className="h-8 w-8 text-muted-foreground/40" />
-                <p className="text-sm">No matches</p>
+                <p className="text-sm">{t.noMatches.title}</p>
                 <p className="max-w-xs text-xs">
                   {search
-                    ? `No skills match "${search}"${filter !== "all" ? " in this filter" : ""}.`
-                    : "No skills match this filter."}{" "}
-                  Try a different query.
+                    ? t.noMatches.withSearch(search, filter !== "all")
+                    : t.noMatches.withoutSearch}
                 </p>
               </div>
             ) : (
               <>
-                <ListColumnHeader />
+                <ListColumnHeader t={t} />
                 <div
                   ref={scrollRef}
                   style={fadeStyle}
@@ -590,6 +602,7 @@ export default function SkillsPage() {
                             role: myRole,
                           })}
                           href={paths.skillDetail(skill.id)}
+                          t={t}
                         />
                       );
                     })}

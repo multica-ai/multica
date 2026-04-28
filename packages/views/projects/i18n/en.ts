@@ -1,0 +1,66 @@
+import type { ProjectsDict } from "./types";
+
+export function createEnDict(): ProjectsDict {
+  return {
+    page: {
+      title: "Projects",
+      newProject: "New project",
+      emptyTitle: "No projects yet",
+      emptyAction: "Create your first project",
+      columnName: "Name",
+      columnPriority: "Priority",
+      columnStatus: "Status",
+      columnProgress: "Progress",
+      columnLead: "Lead",
+      columnCreated: "Created",
+      today: "Today",
+      dayAgo: "1d ago",
+      daysAgo: (days) => `${days}d ago`,
+      monthsAgo: (months) => `${months}mo ago`,
+    },
+    detail: {
+      notFound: "Project not found",
+      breadcrumbFallback: "Projects",
+      titlePlaceholder: "Project title",
+      changeIcon: "Change icon",
+      properties: "Properties",
+      progress: "Progress",
+      description: "Description",
+      descriptionPlaceholder: "Add description...",
+      status: "Status",
+      priority: "Priority",
+      lead: "Lead",
+      noLead: "No lead",
+      pinToSidebar: "Pin to sidebar",
+      unpinFromSidebar: "Unpin from sidebar",
+      toggleSidebar: "Toggle sidebar",
+      copyLink: "Copy link",
+      linkCopied: "Link copied",
+      deleteProject: "Delete project",
+      deleteTitle: "Delete project",
+      deleteDescription:
+        "This will delete the project. Issues will not be deleted but will be unlinked.",
+      deleteCancel: "Cancel",
+      deleteConfirm: "Delete",
+      deleteSuccess: "Project deleted",
+      issuesEmptyTitle: "No issues linked",
+      issuesEmptyHint: "Assign issues to this project from the issue detail page.",
+      moveIssueFailed: "Failed to move issue",
+    },
+    picker: {
+      noProject: "No project",
+      noProjectsYet: "No projects yet",
+      removeFromProject: "Remove from project",
+    },
+    chip: {
+      fallback: "Project",
+    },
+    leadPopover: {
+      placeholder: "Assign lead...",
+      noLead: "No lead",
+      membersHeading: "Members",
+      agentsHeading: "Agents",
+      noResults: "No results",
+    },
+  };
+}

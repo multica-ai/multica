@@ -13,6 +13,7 @@ import {
   CommandItem,
 } from "@multica/ui/components/ui/command";
 import { StatusIcon } from "../issues/components/status-icon";
+import { useModalsT } from "./i18n";
 
 interface IssuePickerModalProps {
   open: boolean;
@@ -31,6 +32,7 @@ export function IssuePickerModal({
   excludeIds,
   onSelect,
 }: IssuePickerModalProps) {
+  const t = useModalsT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Issue[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -90,7 +92,7 @@ export function IssuePickerModal({
     >
       <Command shouldFilter={false}>
         <CommandInput
-          placeholder="Search issues..."
+          placeholder={t.issuePicker.placeholder}
           value={query}
           onValueChange={(v) => {
             setQuery(v);
@@ -100,15 +102,15 @@ export function IssuePickerModal({
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Searching...
+              {t.issuePicker.searching}
             </div>
           )}
           {!isLoading && query.trim() && results.length === 0 && (
-            <CommandEmpty>No issues found.</CommandEmpty>
+            <CommandEmpty>{t.issuePicker.noResults}</CommandEmpty>
           )}
           {!isLoading && !query.trim() && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Type to search issues
+              {t.issuePicker.typeToSearch}
             </div>
           )}
           {results.length > 0 && (

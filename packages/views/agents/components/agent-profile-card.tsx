@@ -9,6 +9,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { statusConfig } from "../config";
+import { useAgentsT, type AgentsDict } from "../i18n";
 import { formatLastSeen } from "../../runtimes/utils";
 
 interface AgentProfileCardProps {
@@ -16,6 +17,7 @@ interface AgentProfileCardProps {
 }
 
 export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
+  const t = useAgentsT();
   const wsId = useWorkspaceId();
   const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
@@ -37,7 +39,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">Agent unavailable</div>
+      <div className="text-xs text-muted-foreground">{t.profileCard.agentUnavailable}</div>
     );
   }
 
@@ -70,11 +72,11 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
             <p className="truncate text-sm font-semibold">{agent.name}</p>
             {isArchived && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                Archived
+                {t.profileCard.archived}
               </span>
             )}
           </div>
-          <AgentStatusLine agent={agent} />
+          <AgentStatusLine agent={agent} t={t} />
         </div>
       </div>
 
@@ -87,23 +89,23 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
       {/* Meta rows */}
       <div className="flex flex-col gap-1.5 text-xs">
-        <RuntimeRow agent={agent} runtime={runtime} />
-        {agent.model && <MetaRow label="Model" value={agent.model} mono />}
+        <RuntimeRow agent={agent} runtime={runtime} t={t} />
+        {agent.model && <MetaRow label={t.profileCard.model} value={agent.model} mono />}
         {agent.skills.length > 0 && (
-          <SkillsRow skills={agent.skills.map((s) => s.name)} />
+          <SkillsRow skills={agent.skills.map((s) => s.name)} label={t.profileCard.skills} />
         )}
-        {owner && <MetaRow label="Owner" value={owner.name} />}
+        {owner && <MetaRow label={t.profileCard.owner} value={owner.name} />}
       </div>
     </div>
   );
 }
 
-function AgentStatusLine({ agent }: { agent: Agent }) {
+function AgentStatusLine({ agent, t }: { agent: Agent; t: AgentsDict }) {
   const st = statusConfig[agent.status];
   return (
     <div className="mt-0.5 flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-      <span className={`text-xs ${st.color}`}>{st.label}</span>
+      <span className={`text-xs ${st.color}`}>{t.status[agent.status]}</span>
     </div>
   );
 }
@@ -111,9 +113,11 @@ function AgentStatusLine({ agent }: { agent: Agent }) {
 function RuntimeRow({
   agent,
   runtime,
+  t,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
+  t: AgentsDict;
 }) {
   const isCloud = agent.runtime_mode === "cloud";
   const Icon = isCloud ? Cloud : Monitor;
@@ -123,18 +127,18 @@ function RuntimeRow({
 
   let detail: string;
   if (isCloud) {
-    detail = runtime?.name ?? "Cloud";
+    detail = runtime?.name ?? t.profileCard.cloud;
   } else if (runtime) {
     detail = isOnline
       ? runtime.name
-      : `${runtime.name} · last seen ${formatLastSeen(runtime.last_seen_at)}`;
+      : `${runtime.name} · ${t.profileCard.lastSeen(formatLastSeen(runtime.last_seen_at))}`;
   } else {
-    detail = "Unknown runtime";
+    detail = t.profileCard.unknownRuntime;
   }
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">Runtime</span>
+      <span className="w-12 shrink-0 text-muted-foreground">{t.profileCard.runtime}</span>
       <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
       <span className="truncate" title={detail}>
         {detail}
@@ -167,12 +171,12 @@ function MetaRow({
   );
 }
 
-function SkillsRow({ skills }: { skills: string[] }) {
+function SkillsRow({ skills, label }: { skills: string[]; label: string }) {
   const visible = skills.slice(0, 3);
   const overflow = skills.length - visible.length;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">Skills</span>
+      <span className="w-12 shrink-0 text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
           <span

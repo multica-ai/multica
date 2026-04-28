@@ -40,7 +40,19 @@
     "./invite": "./invite/index.ts",
     "./onboarding": "./onboarding/index.ts",
     "./platform": "./platform/index.ts",
-    "./issues/i18n": "./issues/i18n/index.ts"
+    "./issues/i18n": "./issues/i18n/index.ts",
+    "./layout/i18n": "./layout/i18n/index.ts",
+    "./inbox/i18n": "./inbox/i18n/index.ts",
+    "./settings/i18n": "./settings/i18n/index.ts",
+    "./agents/i18n": "./agents/i18n/index.ts",
+    "./skills/i18n": "./skills/i18n/index.ts",
+    "./runtimes/i18n": "./runtimes/i18n/index.ts",
+    "./my-issues/i18n": "./my-issues/i18n/index.ts",
+    "./search/i18n": "./search/i18n/index.ts",
+    "./chat/i18n": "./chat/i18n/index.ts",
+    "./projects/i18n": "./projects/i18n/index.ts",
+    "./autopilots/i18n": "./autopilots/i18n/index.ts",
+    "./modals/i18n": "./modals/i18n/index.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

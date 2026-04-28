@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ProjectIcon } from "./project-icon";
+import { useProjectsT } from "../i18n";
 
 export function ProjectPicker({
   projectId,
@@ -26,6 +27,7 @@ export function ProjectPicker({
   align?: "start" | "center" | "end";
 }) {
   const wsId = useWorkspaceId();
+  const t = useProjectsT();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = projects.find((p) => p.id === projectId);
 
@@ -40,7 +42,7 @@ export function ProjectPicker({
         ) : (
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="truncate">{current ? current.title : "No project"}</span>
+        <span className="truncate">{current ? current.title : t.picker.noProject}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((p) => (
@@ -54,11 +56,11 @@ export function ProjectPicker({
         {projectId && (
           <DropdownMenuItem onClick={() => onUpdate({ project_id: null })}>
             <X className="h-3.5 w-3.5 text-muted-foreground" />
-            Remove from project
+            {t.picker.removeFromProject}
           </DropdownMenuItem>
         )}
         {projects.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">No projects yet</div>
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">{t.picker.noProjectsYet}</div>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

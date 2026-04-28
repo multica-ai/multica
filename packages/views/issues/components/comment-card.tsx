@@ -37,6 +37,7 @@ import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useIssuesT } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,21 +71,22 @@ function DeleteCommentDialog({
   onConfirm: () => void;
   hasReplies?: boolean;
 }) {
+  const t = useIssuesT();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete comment</AlertDialogTitle>
+          <AlertDialogTitle>{t.comments.deleteTitle}</AlertDialogTitle>
           <AlertDialogDescription>
             {hasReplies
-              ? "This comment and all its replies will be permanently deleted. This cannot be undone."
-              : "This comment will be permanently deleted. This cannot be undone."}
+              ? t.comments.deleteDescriptionWithReplies
+              : t.comments.deleteDescription}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t.comments.cancel}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            Delete
+            {t.comments.deleteConfirm}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -164,6 +166,7 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
+  const t = useIssuesT();
   const { getActorName } = useActorName();
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
@@ -202,7 +205,7 @@ function CommentRow({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t.comments.updateFailed);
     }
   };
 
@@ -247,22 +250,22 @@ function CommentRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
                 copyMarkdown(entry.content ?? "");
-                toast.success("Copied");
+                toast.success(t.comments.copied);
               }}>
                 <Copy className="h-3.5 w-3.5" />
-                Copy
+                {t.comments.copyAction}
               </DropdownMenuItem>
               {isOwn && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={startEdit}>
                     <Pencil className="h-3.5 w-3.5" />
-                    Edit
+                    {t.comments.editAction}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                     <Trash2 className="h-3.5 w-3.5" />
-                    Delete
+                    {t.comments.deleteAction}
                   </DropdownMenuItem>
                 </>
               )}
@@ -287,7 +290,7 @@ function CommentRow({
             <ContentEditor
               ref={editEditorRef}
               defaultValue={entry.content ?? ""}
-              placeholder="Edit comment..."
+              placeholder={t.comments.editPlaceholder}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
@@ -300,8 +303,8 @@ function CommentRow({
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>{t.comments.cancel}</Button>
+              <Button size="sm" variant="outline" onClick={saveEdit}>{t.comments.save}</Button>
             </div>
           </div>
           {isDragOver && <FileDropOverlay />}
@@ -343,6 +346,7 @@ function CommentCard({
   onToggleReaction,
   highlightedCommentId,
 }: CommentCardProps) {
+  const t = useIssuesT();
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
@@ -385,7 +389,7 @@ function CommentCard({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t.comments.updateFailed);
     }
   };
 
@@ -441,7 +445,7 @@ function CommentCard({
             )}
             {!open && replyCount > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
-                {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                {replyCount} {replyCount === 1 ? t.comments.replySingular : t.comments.replyPlural}
               </span>
             )}
 
@@ -462,22 +466,22 @@ function CommentCard({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
                     copyMarkdown(entry.content ?? "");
-                    toast.success("Copied");
+                    toast.success(t.comments.copied);
                   }}>
                     <Copy className="h-3.5 w-3.5" />
-                    Copy
+                    {t.comments.copyAction}
                   </DropdownMenuItem>
                   {isOwn && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={startEdit}>
                         <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                        {t.comments.editAction}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                         <Trash2 className="h-3.5 w-3.5" />
-                        Delete
+                        {t.comments.deleteAction}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -508,7 +512,7 @@ function CommentCard({
                   <ContentEditor
                     ref={editEditorRef}
                     defaultValue={entry.content ?? ""}
-                    placeholder="Edit comment..."
+                    placeholder={t.comments.editPlaceholder}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
@@ -521,8 +525,8 @@ function CommentCard({
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t.comments.cancel}</Button>
+                    <Button size="sm" variant="outline" onClick={saveEdit}>{t.comments.save}</Button>
                   </div>
                 </div>
                 {parentDragOver && <FileDropOverlay />}
@@ -565,7 +569,7 @@ function CommentCard({
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
-              placeholder="Leave a reply..."
+              placeholder={t.comments.leaveReply}
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}

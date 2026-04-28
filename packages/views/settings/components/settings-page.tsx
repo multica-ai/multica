@@ -11,19 +11,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { LabsTab } from "./labs-tab";
-
-const accountTabs = [
-  { value: "profile", label: "Profile", icon: User },
-  { value: "appearance", label: "Appearance", icon: Palette },
-  { value: "tokens", label: "API Tokens", icon: Key },
-];
-
-const workspaceTabs = [
-  { value: "workspace", label: "General", icon: Settings },
-  { value: "repositories", label: "Repositories", icon: FolderGit2 },
-  { value: "labs", label: "Labs", icon: FlaskConical },
-  { value: "members", label: "Members", icon: Users },
-];
+import { useSettingsT } from "../i18n";
 
 export interface ExtraSettingsTab {
   value: string;
@@ -39,16 +27,30 @@ interface SettingsPageProps {
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
+  const t = useSettingsT();
+
+  const accountTabs = [
+    { value: "profile", label: t.page.tabProfile, icon: User },
+    { value: "appearance", label: t.page.tabAppearance, icon: Palette },
+    { value: "tokens", label: t.page.tabTokens, icon: Key },
+  ];
+
+  const workspaceTabs = [
+    { value: "workspace", label: t.page.tabWorkspace, icon: Settings },
+    { value: "repositories", label: t.page.tabRepositories, icon: FolderGit2 },
+    { value: "labs", label: t.page.tabLabs, icon: FlaskConical },
+    { value: "members", label: t.page.tabMembers, icon: Users },
+  ];
 
   return (
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
       {/* Left nav */}
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
+        <h1 className="text-sm font-semibold mb-4 px-2">{t.page.title}</h1>
         <TabsList variant="line" className="flex-col items-stretch">
           {/* My Account group */}
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-            My Account
+            {t.page.accountGroup}
           </span>
           {accountTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
@@ -65,7 +67,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
           {/* Workspace group */}
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
-            {workspaceName ?? "Workspace"}
+            {workspaceName ?? t.page.workspaceFallback}
           </span>
           {workspaceTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>

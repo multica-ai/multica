@@ -9,6 +9,7 @@ import {
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { IssuePickerModal } from "./issue-picker-modal";
+import { useModalsT } from "./i18n";
 
 export function AddChildIssueModal({
   onClose,
@@ -19,6 +20,7 @@ export function AddChildIssueModal({
 }) {
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
+  const t = useModalsT();
   const updateIssue = useUpdateIssue();
 
   const { data: issue = null } = useQuery({
@@ -42,15 +44,15 @@ export function AddChildIssueModal({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      title="Add sub-issue"
-      description="Search for an issue to add as a sub-issue"
+      title={t.addChildIssue.title}
+      description={t.addChildIssue.description}
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
           { id: selected.id, parent_issue_id: issueId },
-          { onError: () => toast.error("Failed to add sub-issue") },
+          { onError: () => toast.error(t.addChildIssue.failed) },
         );
-        toast.success(`Added ${selected.identifier} as sub-issue`);
+        toast.success(t.addChildIssue.success(selected.identifier));
       }}
     />
   );

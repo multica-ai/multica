@@ -38,6 +38,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
+import { useSkillsT, type SkillsDict } from "../i18n";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 
 type Method = "chooser" | "manual" | "url" | "runtime";
@@ -65,7 +66,7 @@ function isNameConflictError(msg: string): boolean {
 // Chooser — initial method picker (3 cards)
 // ---------------------------------------------------------------------------
 
-function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
+function MethodChooser({ onChoose, t }: { onChoose: (m: Method) => void; t: SkillsDict }) {
   const methods: {
     key: Method;
     icon: typeof Plus;
@@ -75,20 +76,20 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
     {
       key: "manual",
       icon: Plus,
-      title: "Create manually",
-      desc: "Start from a blank SKILL.md and write your own instructions.",
+      title: t.createDialog.chooser.manualTitle,
+      desc: t.createDialog.chooser.manualDesc,
     },
     {
       key: "url",
       icon: Download,
-      title: "Import from URL",
-      desc: "Pull a published skill from ClawHub or Skills.sh.",
+      title: t.createDialog.chooser.urlTitle,
+      desc: t.createDialog.chooser.urlDesc,
     },
     {
       key: "runtime",
       icon: HardDrive,
-      title: "Copy from runtime",
-      desc: "Promote a skill already installed on your local runtime.",
+      title: t.createDialog.chooser.runtimeTitle,
+      desc: t.createDialog.chooser.runtimeDesc,
     },
   ];
   return (
@@ -121,9 +122,11 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
 function ManualForm({
   onCreated,
   onCancel,
+  t,
 }: {
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
+  t: SkillsDict;
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -145,10 +148,10 @@ function ManualForm({
         description: description.trim(),
       });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill created");
+      toast.success(t.toasts.skillCreated);
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create skill");
+      setError(err instanceof Error ? err.message : t.toasts.skillCreateFailed);
       setLoading(false);
     }
   };
@@ -165,7 +168,7 @@ function ManualForm({
             htmlFor="create-skill-name"
             className="text-xs text-muted-foreground"
           >
-            Name
+            {t.createDialog.manualForm.nameLabel}
           </Label>
           <Input
             id="create-skill-name"
@@ -175,13 +178,13 @@ function ManualForm({
               setName(e.target.value);
               setError("");
             }}
-            placeholder="e.g. review-helper"
+            placeholder={t.createDialog.manualForm.namePlaceholder}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Must be unique within the workspace.
+            {t.createDialog.manualForm.uniqueHint}
           </p>
         </div>
 
@@ -191,13 +194,13 @@ function ManualForm({
             className="text-xs text-muted-foreground"
           >
             <Pencil className="h-3 w-3" />
-            Description
+            {t.createDialog.manualForm.descriptionLabel}
           </Label>
           <Textarea
             id="create-skill-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="One sentence on when to assign this skill to an agent."
+            placeholder={t.createDialog.manualForm.descriptionPlaceholder}
             rows={3}
             className="resize-none"
           />
@@ -212,7 +215,7 @@ function ManualForm({
             <span>
               {error}
               {isNameConflictError(error) && (
-                <> Try a different name and submit again.</>
+                <>{t.createDialog.manualForm.tryAnotherName}</>
               )}
             </span>
           </div>
@@ -227,7 +230,7 @@ function ManualForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {t.createDialog.manualForm.cancel}
         </Button>
         <Button
           type="button"
@@ -238,10 +241,10 @@ function ManualForm({
           {loading ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Creating…
+              {t.createDialog.manualForm.creating}
             </>
           ) : (
-            "Create skill"
+            t.createDialog.manualForm.create
           )}
         </Button>
       </div>
@@ -296,9 +299,11 @@ function SourceCard({
 function UrlForm({
   onCreated,
   onCancel,
+  t,
 }: {
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
+  t: SkillsDict;
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -317,19 +322,19 @@ function UrlForm({
     try {
       const skill = await api.importSkill({ url: trimmed });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill imported");
+      toast.success(t.toasts.skillImported);
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : t.toasts.skillImportFailed);
       setLoading(false);
     }
   };
 
   const submittingLabel = (() => {
-    if (!loading) return "Import";
-    if (source === "clawhub") return "Importing from ClawHub…";
-    if (source === "skills.sh") return "Importing from Skills.sh…";
-    return "Importing…";
+    if (!loading) return t.createDialog.urlForm.import;
+    if (source === "clawhub") return t.createDialog.urlForm.importingFromClawhub;
+    if (source === "skills.sh") return t.createDialog.urlForm.importingFromSkillsSh;
+    return t.createDialog.urlForm.importing;
   })();
 
   return (
@@ -341,7 +346,7 @@ function UrlForm({
       >
         <div className="space-y-1.5">
           <Label htmlFor="import-url" className="text-xs text-muted-foreground">
-            Skill URL
+            {t.createDialog.urlForm.urlLabel}
           </Label>
           <Input
             id="import-url"
@@ -351,7 +356,7 @@ function UrlForm({
               setUrl(e.target.value);
               setError("");
             }}
-            placeholder="https://clawhub.ai/owner/skill"
+            placeholder={t.createDialog.urlForm.urlPlaceholder}
             className="font-mono text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -361,7 +366,7 @@ function UrlForm({
 
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
-            Supported sources
+            {t.createDialog.urlForm.supportedSources}
           </p>
           <div className="grid grid-cols-2 gap-2">
             <SourceCard
@@ -388,11 +393,7 @@ function UrlForm({
             <span>
               {error}
               {isNameConflictError(error) && (
-                <>
-                  {" "}
-                  The imported skill&rsquo;s name already exists — delete the
-                  existing one before retrying.
-                </>
+                <>{t.createDialog.urlForm.conflictHint}</>
               )}
             </span>
           </div>
@@ -407,7 +408,7 @@ function UrlForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {t.createDialog.urlForm.cancel}
         </Button>
         <Button
           type="button"
@@ -436,21 +437,6 @@ function UrlForm({
 // Root dialog
 // ---------------------------------------------------------------------------
 
-const METHOD_TITLES: Record<Method, string> = {
-  chooser: "New skill",
-  manual: "Create manually",
-  url: "Import from URL",
-  runtime: "Copy from runtime",
-};
-
-const METHOD_DESCS: Record<Method, string> = {
-  chooser: "Choose how you want to add a skill to this workspace.",
-  manual: "Write a new SKILL.md from scratch.",
-  url: "Fetch a published skill by URL. Files are pulled server-side.",
-  runtime:
-    "Scan a local runtime and promote one of its on-disk skills into this workspace.",
-};
-
 export function CreateSkillDialog({
   onClose,
   onCreated,
@@ -458,6 +444,19 @@ export function CreateSkillDialog({
   onClose: () => void;
   onCreated?: (skill: Skill) => void;
 }) {
+  const t = useSkillsT();
+  const methodTitles: Record<Method, string> = {
+    chooser: t.createDialog.titles.chooser,
+    manual: t.createDialog.titles.manual,
+    url: t.createDialog.titles.url,
+    runtime: t.createDialog.titles.runtime,
+  };
+  const methodDescs: Record<Method, string> = {
+    chooser: t.createDialog.descriptions.chooser,
+    manual: t.createDialog.descriptions.manual,
+    url: t.createDialog.descriptions.url,
+    runtime: t.createDialog.descriptions.runtime,
+  };
   const [method, setMethod] = useState<Method>("chooser");
 
   const handleCreated = (skill: Skill) => {
@@ -500,21 +499,21 @@ export function CreateSkillDialog({
                       type="button"
                       onClick={() => setMethod("chooser")}
                       className="-ml-1 rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                      aria-label="Back to method chooser"
+                      aria-label={t.createDialog.backTooltip}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
                     </button>
                   }
                 />
-                <TooltipContent side="bottom">Back</TooltipContent>
+                <TooltipContent side="bottom">{t.createDialog.backTooltip}</TooltipContent>
               </Tooltip>
             )}
             <div className="min-w-0">
               <DialogTitle className="truncate text-base font-medium">
-                {METHOD_TITLES[method]}
+                {methodTitles[method]}
               </DialogTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {METHOD_DESCS[method]}
+                {methodDescs[method]}
               </p>
             </div>
           </div>
@@ -525,28 +524,30 @@ export function CreateSkillDialog({
                   type="button"
                   onClick={onClose}
                   className="rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                  aria-label="Close"
+                  aria-label={t.createDialog.closeAria}
                 >
                   <XIcon className="h-3.5 w-3.5" />
                 </button>
               }
             />
-            <TooltipContent side="bottom">Close</TooltipContent>
+            <TooltipContent side="bottom">{t.createDialog.closeTooltip}</TooltipContent>
           </Tooltip>
         </div>
 
         {/* Method body — each form owns its scroll middle + footer */}
-        {method === "chooser" && <MethodChooser onChoose={setMethod} />}
+        {method === "chooser" && <MethodChooser onChoose={setMethod} t={t} />}
         {method === "manual" && (
           <ManualForm
             onCreated={handleCreated}
             onCancel={() => setMethod("chooser")}
+            t={t}
           />
         )}
         {method === "url" && (
           <UrlForm
             onCreated={handleCreated}
             onCancel={() => setMethod("chooser")}
+            t={t}
           />
         )}
         {method === "runtime" && (

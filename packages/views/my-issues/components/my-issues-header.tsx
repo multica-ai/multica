@@ -48,6 +48,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
+import { useMyIssuesT } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // HoverCheck
@@ -96,20 +97,16 @@ function useIssueCounts(allIssues: Issue[]) {
 }
 
 // ---------------------------------------------------------------------------
-// Scope config
-// ---------------------------------------------------------------------------
-
-const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
-  { value: "assigned", label: "Assigned", description: "Issues assigned to me" },
-  { value: "created", label: "Created", description: "Issues I created" },
-  { value: "agents", label: "My Agents", description: "Issues assigned to my agents" },
-];
-
-// ---------------------------------------------------------------------------
 // MyIssuesHeader
 // ---------------------------------------------------------------------------
 
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
+  const t = useMyIssuesT();
+  const scopes: { value: MyIssuesScope; label: string; description: string }[] = [
+    { value: "assigned", ...t.scopes.assigned },
+    { value: "created", ...t.scopes.created },
+    { value: "agents", ...t.scopes.agents },
+  ];
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
@@ -125,13 +122,13 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
     getActiveFilterCount({ statusFilters, priorityFilters }) > 0;
 
   const sortLabel =
-    SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? "Manual";
+    SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? t.toolbar.sortFallback;
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
       {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
-        {SCOPES.map((s) => (
+        {scopes.map((s) => (
           <Tooltip key={s.value}>
             <TooltipTrigger
               render={
@@ -173,14 +170,14 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                 />
               }
             />
-            <TooltipContent side="bottom">Filter</TooltipContent>
+            <TooltipContent side="bottom">{t.toolbar.filter}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
             {/* Status */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <CircleDot className="size-3.5" />
-                <span className="flex-1">Status</span>
+                <span className="flex-1">{t.toolbar.statusLabel}</span>
                 {statusFilters.length > 0 && (
                   <span className="text-xs text-primary font-medium">
                     {statusFilters.length}
@@ -203,7 +200,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                       {STATUS_CONFIG[s].label}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {count} {count === 1 ? "issue" : "issues"}
+                          {t.toolbar.issueCount(count)}
                         </span>
                       )}
                     </DropdownMenuCheckboxItem>
@@ -216,7 +213,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <SignalHigh className="size-3.5" />
-                <span className="flex-1">Priority</span>
+                <span className="flex-1">{t.toolbar.priorityLabel}</span>
                 {priorityFilters.length > 0 && (
                   <span className="text-xs text-primary font-medium">
                     {priorityFilters.length}
@@ -239,7 +236,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                       {PRIORITY_CONFIG[p].label}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
-                          {count} {count === 1 ? "issue" : "issues"}
+                          {t.toolbar.issueCount(count)}
                         </span>
                       )}
                     </DropdownMenuCheckboxItem>
@@ -253,7 +250,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={act.clearFilters}>
-                  Reset all filters
+                  {t.toolbar.resetFilters}
                 </DropdownMenuItem>
               </>
             )}
@@ -274,12 +271,12 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                 />
               }
             />
-            <TooltipContent side="bottom">Display settings</TooltipContent>
+            <TooltipContent side="bottom">{t.toolbar.displaySettings}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Ordering
+                {t.toolbar.ordering}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
                 <DropdownMenu>
@@ -314,7 +311,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                       sortDirection === "asc" ? "desc" : "asc",
                     )
                   }
-                  title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                  title={sortDirection === "asc" ? t.toolbar.sortAscending : t.toolbar.sortDescending}
                 >
                   {sortDirection === "asc" ? (
                     <ArrowUp className="size-3.5" />
@@ -327,7 +324,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
 
             <div className="px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Card properties
+                {t.toolbar.cardProperties}
               </span>
               <div className="mt-2 space-y-2">
                 {CARD_PROPERTY_OPTIONS.map((opt) => (
@@ -367,19 +364,19 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
               }
             />
             <TooltipContent side="bottom">
-              {viewMode === "board" ? "Board view" : "List view"}
+              {viewMode === "board" ? t.toolbar.boardView : t.toolbar.listView}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>View</DropdownMenuLabel>
+              <DropdownMenuLabel>{t.toolbar.viewLabel}</DropdownMenuLabel>
               <DropdownMenuItem onClick={() => act.setViewMode("board")}>
                 <Columns3 />
-                Board
+                {t.toolbar.boardOption}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => act.setViewMode("list")}>
                 <List />
-                List
+                {t.toolbar.listOption}
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
