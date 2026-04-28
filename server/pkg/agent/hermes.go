@@ -355,6 +355,11 @@ type hermesClient struct {
 
 	usageMu sync.Mutex
 	usage   TokenUsage
+
+	// permissionOptionID is the optionId sent in auto-approval responses
+	// for session/request_permission. Hermes/Kimi use "approve_for_session";
+	// Kiro uses "allow_always". Defaults to "approve_for_session" if empty.
+	permissionOptionID string
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -477,17 +482,21 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		optionID := c.permissionOptionID
+		if optionID == "" {
+			optionID = "approve_for_session"
+		}
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "optionId", optionID)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better

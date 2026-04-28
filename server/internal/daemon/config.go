@@ -152,8 +152,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
 		}
 	}
+	kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
+	if _, err := exec.LookPath(kiroPath); err == nil {
+		agents["kiro"] = AgentEntry{
+			Path:  kiroPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, or kimi and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
 	}
 
 	// Host info

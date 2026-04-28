@@ -38,6 +38,17 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsKiroBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("kiro", Config{ExecutablePath: "/nonexistent/kiro"})
+	if err != nil {
+		t.Fatalf("New(kiro) error: %v", err)
+	}
+	if _, ok := b.(*kiroBackend); !ok {
+		t.Fatalf("expected *kiroBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -72,7 +83,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

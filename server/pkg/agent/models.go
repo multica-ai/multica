@@ -75,6 +75,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKimiModels(ctx, executablePath)
 		})
+	case "kiro":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKiroModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -361,6 +365,17 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+	})
+}
+
+// discoverKiroModels spins up a throwaway `kiro-cli acp` process and
+// drives the standard ACP handshake to surface the model catalog
+// advertised by Kiro's `session/new` response.
+func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kiro-cli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kiro-discovery-",
 	})
 }
 
