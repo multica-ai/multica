@@ -23,7 +23,18 @@ func registerArtifactTools(srv *mcp.Server, client *cli.APIClient) {
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name: "create_artifact",
-		Description: `Create a typed artifact — a durable, addressable, renderable document distinct from comments and file attachments. Use when producing a structured deliverable that humans and other agents will reference: a report, a plan, an architecture decision, a diagram, or a longer-form note.
+		Description: `Create a typed artifact — a durable, addressable, renderable document distinct from comments and file attachments.
+
+WHEN TO USE THIS (vs. replying in chat or as a comment):
+When the user asks you to *produce something* — a report, a plan, a decision log, a diagram, a document, a summary, a list of recommendations — you MUST call create_artifact. Do not paste long markdown back in chat or as a comment. That hides the work in conversation history where it can't be searched, linked, or referred back to.
+
+Rule of thumb: if the output has its own title and is the answer to a "make me X" request, it is an artifact.
+
+Comments are conversation: replies to questions, status updates, observations, "I'm working on it", short factual answers, clarifying questions back to the user.
+
+Artifacts are deliverables: things with a title and a body the user wants to keep, share, or refer back to. They live in /documents and can be filed in folders, linked to issues/projects, and found again.
+
+When in doubt, prefer create_artifact and tell the user where you saved it. If the user explicitly said "just answer in chat" or "summarise briefly", reply normally — but anything substantial they asked you to PRODUCE should be a document.
 
 KIND determines how the artifact renders and where it surfaces in the UI:
 - "report"   — investigation results, analysis, summaries
