@@ -225,10 +225,19 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string     `json:"name"`
-	Description *string     `json:"description"`
-	Context     *string     `json:"context"`
-	Settings    any         `json:"settings"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Context     *string `json:"context"`
+	Settings    any     `json:"settings"`
+	// Repos is intentionally a typed pointer rather than `any`. The previous
+	// JSONB column accepted arbitrary shapes; the structured `repo` /
+	// `repo_binding` tables don't, so an array of `{url, description}` is the
+	// only meaningful payload now and shapes that don't fit get a 400 instead
+	// of being silently corrupted on read. Unknown fields inside each entry
+	// (`extra: true`) are still ignored — the project's `json.Decoder` doesn't
+	// call `DisallowUnknownFields()` — so existing clients keep working.
+	// Pointer-vs-value distinguishes "client omitted repos" (leave bindings
+	// alone) from "client sent []" (clear the binding set).
 	Repos       *[]RepoData `json:"repos"`
 	IssuePrefix *string     `json:"issue_prefix"`
 }

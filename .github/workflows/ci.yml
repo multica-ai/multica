@@ -77,6 +77,20 @@ jobs:
       - name: Build
         run: cd server && go build ./...
 
+      # Catches drift between server/pkg/db/queries/*.sql and the committed
+      # generated code in server/pkg/db/generated/. Without this step a dev
+      # who edits a query but forgets `make sqlc` only fails at runtime, not
+      # in CI. Pinned to the same sqlc version the code was generated with
+      # so the diff is stable.
+      - name: Verify sqlc generated code is up to date
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
+          cd server && sqlc generate
+          if ! git diff --exit-code -- pkg/db/generated; then
+            echo "::error::generated sqlc code is stale — run 'make sqlc' and commit the result"
+            exit 1
+          fi
+
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
 
