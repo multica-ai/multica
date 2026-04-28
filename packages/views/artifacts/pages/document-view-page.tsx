@@ -59,7 +59,7 @@ function formatBytes(n: number): string {
 function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").Artifact }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
-  const { getActorName } = useActorName();
+  const { getActorName, getMemberName } = useActorName();
   // Resolve the issue title / identifier when the doc has any issue link.
   const linkedIssueId = artifact.issue_id ?? artifact.origin_issue_id;
   const { data: linkedIssue } = useQuery({
@@ -68,6 +68,12 @@ function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").A
   });
   const showOriginSeparately =
     artifact.origin_issue_id && artifact.origin_issue_id !== artifact.issue_id;
+  const showRequesterSeparately =
+    artifact.requester_user_id &&
+    !(
+      artifact.author_type === "member" &&
+      artifact.author_id === artifact.requester_user_id
+    );
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -86,6 +92,19 @@ function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").A
           </Badge>
         )}
       </span>
+      {showRequesterSeparately && artifact.requester_user_id && (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          for{" "}
+          <ActorAvatar
+            actorType="member"
+            actorId={artifact.requester_user_id}
+            size={16}
+          />
+          <span className="font-medium text-foreground">
+            {getMemberName(artifact.requester_user_id)}
+          </span>
+        </span>
+      )}
       {artifact.issue_id && (
         <span className="flex items-center gap-1 text-muted-foreground">
           on{" "}

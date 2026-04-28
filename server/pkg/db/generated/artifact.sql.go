@@ -15,7 +15,7 @@ const createArtifact = `-- name: CreateArtifact :one
 INSERT INTO artifact (
     id, workspace_id, project_id, issue_id, folder_id, origin_issue_id,
     kind, format, title, body, file_url, file_size_bytes, metadata,
-    author_type, author_id
+    author_type, author_id, requester_user_id
 )
 VALUES (
     $1, $2,
@@ -23,27 +23,29 @@ VALUES (
     $13,
     $3, $4, $5, $6,
     $14, $15,
-    $7, $8, $9
+    $7, $8, $9,
+    $16
 )
-RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id
+RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id
 `
 
 type CreateArtifactParams struct {
-	ID            pgtype.UUID `json:"id"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Kind          string      `json:"kind"`
-	Format        string      `json:"format"`
-	Title         string      `json:"title"`
-	Body          string      `json:"body"`
-	Metadata      []byte      `json:"metadata"`
-	AuthorType    string      `json:"author_type"`
-	AuthorID      pgtype.UUID `json:"author_id"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	IssueID       pgtype.UUID `json:"issue_id"`
-	FolderID      pgtype.UUID `json:"folder_id"`
-	OriginIssueID pgtype.UUID `json:"origin_issue_id"`
-	FileUrl       pgtype.Text `json:"file_url"`
-	FileSizeBytes pgtype.Int8 `json:"file_size_bytes"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Kind            string      `json:"kind"`
+	Format          string      `json:"format"`
+	Title           string      `json:"title"`
+	Body            string      `json:"body"`
+	Metadata        []byte      `json:"metadata"`
+	AuthorType      string      `json:"author_type"`
+	AuthorID        pgtype.UUID `json:"author_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	FolderID        pgtype.UUID `json:"folder_id"`
+	OriginIssueID   pgtype.UUID `json:"origin_issue_id"`
+	FileUrl         pgtype.Text `json:"file_url"`
+	FileSizeBytes   pgtype.Int8 `json:"file_size_bytes"`
+	RequesterUserID pgtype.UUID `json:"requester_user_id"`
 }
 
 func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error) {
@@ -63,6 +65,7 @@ func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) 
 		arg.OriginIssueID,
 		arg.FileUrl,
 		arg.FileSizeBytes,
+		arg.RequesterUserID,
 	)
 	var i Artifact
 	err := row.Scan(
@@ -83,6 +86,7 @@ func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) 
 		&i.FileUrl,
 		&i.FileSizeBytes,
 		&i.OriginIssueID,
+		&i.RequesterUserID,
 	)
 	return i, err
 }
@@ -102,7 +106,7 @@ func (q *Queries) DeleteArtifact(ctx context.Context, arg DeleteArtifactParams) 
 }
 
 const getArtifact = `-- name: GetArtifact :one
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -132,12 +136,13 @@ func (q *Queries) GetArtifact(ctx context.Context, arg GetArtifactParams) (Artif
 		&i.FileUrl,
 		&i.FileSizeBytes,
 		&i.OriginIssueID,
+		&i.RequesterUserID,
 	)
 	return i, err
 }
 
 const listArtifactsByFolder = `-- name: ListArtifactsByFolder :many
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE workspace_id = $1
   AND (
         ($2::uuid IS NULL AND folder_id IS NULL)
@@ -181,6 +186,7 @@ func (q *Queries) ListArtifactsByFolder(ctx context.Context, arg ListArtifactsBy
 			&i.FileUrl,
 			&i.FileSizeBytes,
 			&i.OriginIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -193,7 +199,7 @@ func (q *Queries) ListArtifactsByFolder(ctx context.Context, arg ListArtifactsBy
 }
 
 const listArtifactsByIssue = `-- name: ListArtifactsByIssue :many
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at DESC
 `
@@ -230,6 +236,7 @@ func (q *Queries) ListArtifactsByIssue(ctx context.Context, arg ListArtifactsByI
 			&i.FileUrl,
 			&i.FileSizeBytes,
 			&i.OriginIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -242,7 +249,7 @@ func (q *Queries) ListArtifactsByIssue(ctx context.Context, arg ListArtifactsByI
 }
 
 const listArtifactsByProject = `-- name: ListArtifactsByProject :many
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE project_id = $1 AND workspace_id = $2
 ORDER BY created_at DESC
 `
@@ -279,6 +286,7 @@ func (q *Queries) ListArtifactsByProject(ctx context.Context, arg ListArtifactsB
 			&i.FileUrl,
 			&i.FileSizeBytes,
 			&i.OriginIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -291,7 +299,7 @@ func (q *Queries) ListArtifactsByProject(ctx context.Context, arg ListArtifactsB
 }
 
 const listArtifactsByWorkspace = `-- name: ListArtifactsByWorkspace :many
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE workspace_id = $1 AND project_id IS NULL AND issue_id IS NULL
 ORDER BY created_at DESC
 `
@@ -323,6 +331,7 @@ func (q *Queries) ListArtifactsByWorkspace(ctx context.Context, workspaceID pgty
 			&i.FileUrl,
 			&i.FileSizeBytes,
 			&i.OriginIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -339,7 +348,7 @@ UPDATE artifact SET
     folder_id  = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id
+RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id
 `
 
 type MoveArtifactToFolderParams struct {
@@ -370,12 +379,13 @@ func (q *Queries) MoveArtifactToFolder(ctx context.Context, arg MoveArtifactToFo
 		&i.FileUrl,
 		&i.FileSizeBytes,
 		&i.OriginIssueID,
+		&i.RequesterUserID,
 	)
 	return i, err
 }
 
 const searchArtifactsInWorkspace = `-- name: SearchArtifactsInWorkspace :many
-SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id FROM artifact
+SELECT id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id FROM artifact
 WHERE workspace_id = $1
   AND ($4::text IS NULL OR kind = $4)
   AND (
@@ -459,6 +469,7 @@ func (q *Queries) SearchArtifactsInWorkspace(ctx context.Context, arg SearchArti
 			&i.FileUrl,
 			&i.FileSizeBytes,
 			&i.OriginIssueID,
+			&i.RequesterUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -479,7 +490,7 @@ UPDATE artifact SET
     file_size_bytes = $7,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $5
-RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id
+RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id
 `
 
 type UpdateArtifactParams struct {
@@ -521,6 +532,7 @@ func (q *Queries) UpdateArtifact(ctx context.Context, arg UpdateArtifactParams) 
 		&i.FileUrl,
 		&i.FileSizeBytes,
 		&i.OriginIssueID,
+		&i.RequesterUserID,
 	)
 	return i, err
 }
@@ -531,7 +543,7 @@ UPDATE artifact SET
     issue_id   = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id
+RETURNING id, workspace_id, project_id, issue_id, kind, title, body, metadata, author_type, author_id, created_at, updated_at, folder_id, format, file_url, file_size_bytes, origin_issue_id, requester_user_id
 `
 
 type UpdateArtifactScopeParams struct {
@@ -569,6 +581,7 @@ func (q *Queries) UpdateArtifactScope(ctx context.Context, arg UpdateArtifactSco
 		&i.FileUrl,
 		&i.FileSizeBytes,
 		&i.OriginIssueID,
+		&i.RequesterUserID,
 	)
 	return i, err
 }

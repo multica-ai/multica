@@ -40,18 +40,19 @@ type ArtifactResponse struct {
 	ProjectID     *string        `json:"project_id"`
 	IssueID       *string        `json:"issue_id"`
 	FolderID      *string        `json:"folder_id"`
-	OriginIssueID *string        `json:"origin_issue_id"`
-	Kind          string         `json:"kind"`
-	Format        string         `json:"format"`
-	Title         string         `json:"title"`
-	Body          string         `json:"body"`
-	FileURL       *string        `json:"file_url"`
-	FileSizeBytes *int64         `json:"file_size_bytes"`
-	Metadata      map[string]any `json:"metadata"`
-	AuthorType    string         `json:"author_type"`
-	AuthorID      string         `json:"author_id"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
+	OriginIssueID   *string        `json:"origin_issue_id"`
+	Kind            string         `json:"kind"`
+	Format          string         `json:"format"`
+	Title           string         `json:"title"`
+	Body            string         `json:"body"`
+	FileURL         *string        `json:"file_url"`
+	FileSizeBytes   *int64         `json:"file_size_bytes"`
+	Metadata        map[string]any `json:"metadata"`
+	AuthorType      string         `json:"author_type"`
+	AuthorID        string         `json:"author_id"`
+	RequesterUserID *string        `json:"requester_user_id"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
 }
 
 func artifactToResponse(a db.Artifact) ArtifactResponse {
@@ -84,6 +85,10 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 		s := uuidToString(a.OriginIssueID)
 		resp.OriginIssueID = &s
 	}
+	if a.RequesterUserID.Valid {
+		s := uuidToString(a.RequesterUserID)
+		resp.RequesterUserID = &s
+	}
 	if a.FileUrl.Valid {
 		s := a.FileUrl.String
 		resp.FileURL = &s
@@ -103,17 +108,18 @@ func artifactToResponse(a db.Artifact) ArtifactResponse {
 // ---------------------------------------------------------------------------
 
 type CreateArtifactRequest struct {
-	Kind          string         `json:"kind"`
-	Format        string         `json:"format"`
-	Title         string         `json:"title"`
-	Body          string         `json:"body"`
-	FileURL       *string        `json:"file_url"`
-	FileSizeBytes *int64         `json:"file_size_bytes"`
-	Metadata      map[string]any `json:"metadata"`
-	ProjectID     *string        `json:"project_id"`
-	IssueID       *string        `json:"issue_id"`
-	FolderID      *string        `json:"folder_id"`
-	OriginIssueID *string        `json:"origin_issue_id"`
+	Kind            string         `json:"kind"`
+	Format          string         `json:"format"`
+	Title           string         `json:"title"`
+	Body            string         `json:"body"`
+	FileURL         *string        `json:"file_url"`
+	FileSizeBytes   *int64         `json:"file_size_bytes"`
+	Metadata        map[string]any `json:"metadata"`
+	ProjectID       *string        `json:"project_id"`
+	IssueID         *string        `json:"issue_id"`
+	FolderID        *string        `json:"folder_id"`
+	OriginIssueID   *string        `json:"origin_issue_id"`
+	RequesterUserID *string        `json:"requester_user_id"`
 }
 
 func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
@@ -208,8 +214,17 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		originIssueID = issue.ID
 	}
-
 	authorType, authorID := h.resolveActor(r, userID, workspaceID)
+
+	// Requester defaults to the authenticated user when an agent acts on
+	// their behalf and omits the field. Members get nil (their own author
+	// link is the requester).
+	var requesterUserID pgtype.UUID
+	if req.RequesterUserID != nil && *req.RequesterUserID != "" {
+		requesterUserID = parseUUID(*req.RequesterUserID)
+	} else if authorType == "agent" {
+		requesterUserID = parseUUID(userID)
+	}
 
 	metadata := []byte("{}")
 	if req.Metadata != nil {
@@ -229,21 +244,22 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := uuid.NewV7()
 	artifact, err := h.Queries.CreateArtifact(r.Context(), db.CreateArtifactParams{
-		ID:            pgtype.UUID{Bytes: id, Valid: true},
-		WorkspaceID:   parseUUID(workspaceID),
-		ProjectID:     projectID,
-		IssueID:       issueID,
-		FolderID:      folderID,
-		OriginIssueID: originIssueID,
-		Kind:          req.Kind,
-		Format:        format,
-		Title:         req.Title,
-		Body:          req.Body,
-		FileUrl:       fileURL,
-		FileSizeBytes: fileSize,
-		Metadata:      metadata,
-		AuthorType:    authorType,
-		AuthorID:      parseUUID(authorID),
+		ID:              pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:     parseUUID(workspaceID),
+		ProjectID:       projectID,
+		IssueID:         issueID,
+		FolderID:        folderID,
+		OriginIssueID:   originIssueID,
+		Kind:            req.Kind,
+		Format:          format,
+		Title:           req.Title,
+		Body:            req.Body,
+		FileUrl:         fileURL,
+		FileSizeBytes:   fileSize,
+		Metadata:        metadata,
+		AuthorType:      authorType,
+		AuthorID:        parseUUID(authorID),
+		RequesterUserID: requesterUserID,
 	})
 	if err != nil {
 		slog.Error("create artifact failed", "error", err)

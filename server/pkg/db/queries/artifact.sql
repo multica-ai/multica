@@ -2,7 +2,7 @@
 INSERT INTO artifact (
     id, workspace_id, project_id, issue_id, folder_id, origin_issue_id,
     kind, format, title, body, file_url, file_size_bytes, metadata,
-    author_type, author_id
+    author_type, author_id, requester_user_id
 )
 VALUES (
     $1, $2,
@@ -10,7 +10,8 @@ VALUES (
     sqlc.narg(origin_issue_id),
     $3, $4, $5, $6,
     sqlc.narg(file_url), sqlc.narg(file_size_bytes),
-    $7, $8, $9
+    $7, $8, $9,
+    sqlc.narg(requester_user_id)
 )
 RETURNING *;
 

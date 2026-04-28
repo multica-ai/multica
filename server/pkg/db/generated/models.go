@@ -87,23 +87,24 @@ type AgentTaskQueue struct {
 }
 
 type Artifact struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	Kind          string             `json:"kind"`
-	Title         string             `json:"title"`
-	Body          string             `json:"body"`
-	Metadata      []byte             `json:"metadata"`
-	AuthorType    string             `json:"author_type"`
-	AuthorID      pgtype.UUID        `json:"author_id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	FolderID      pgtype.UUID        `json:"folder_id"`
-	Format        string             `json:"format"`
-	FileUrl       pgtype.Text        `json:"file_url"`
-	FileSizeBytes pgtype.Int8        `json:"file_size_bytes"`
-	OriginIssueID pgtype.UUID        `json:"origin_issue_id"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	Kind            string             `json:"kind"`
+	Title           string             `json:"title"`
+	Body            string             `json:"body"`
+	Metadata        []byte             `json:"metadata"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	FolderID        pgtype.UUID        `json:"folder_id"`
+	Format          string             `json:"format"`
+	FileUrl         pgtype.Text        `json:"file_url"`
+	FileSizeBytes   pgtype.Int8        `json:"file_size_bytes"`
+	OriginIssueID   pgtype.UUID        `json:"origin_issue_id"`
+	RequesterUserID pgtype.UUID        `json:"requester_user_id"`
 }
 
 type ArtifactFolder struct {

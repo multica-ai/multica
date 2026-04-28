@@ -195,20 +195,38 @@ function ScopeBadge({ artifact }: { artifact: Artifact }) {
 }
 
 function AuthorCell({ artifact }: { artifact: Artifact }) {
-  const { getActorName } = useActorName();
+  const { getActorName, getMemberName } = useActorName();
+  const showRequester =
+    artifact.requester_user_id &&
+    !(
+      artifact.author_type === "member" &&
+      artifact.author_id === artifact.requester_user_id
+    );
   return (
     <div
       className="flex min-w-0 items-center gap-1.5"
       onClick={(e) => e.stopPropagation()}
+      title={
+        showRequester && artifact.requester_user_id
+          ? `Requested by ${getMemberName(artifact.requester_user_id)}`
+          : undefined
+      }
     >
       <ActorAvatar
         actorType={artifact.author_type}
         actorId={artifact.author_id}
         size={18}
       />
-      <span className="truncate text-xs text-muted-foreground">
-        {getActorName(artifact.author_type, artifact.author_id)}
-      </span>
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate text-xs text-muted-foreground">
+          {getActorName(artifact.author_type, artifact.author_id)}
+        </div>
+        {showRequester && artifact.requester_user_id && (
+          <div className="truncate text-[10px] text-muted-foreground/70">
+            for {getMemberName(artifact.requester_user_id)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

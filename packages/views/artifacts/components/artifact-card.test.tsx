@@ -30,6 +30,7 @@ const baseArtifact: Artifact = {
   metadata: {},
   author_type: "member",
   author_id: "user-1",
+  requester_user_id: null,
   created_at: "2026-04-28T10:00:00Z",
   updated_at: "2026-04-28T10:00:00Z",
 };

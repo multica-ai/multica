@@ -20,6 +20,7 @@ export interface Artifact {
   metadata: Record<string, unknown>;
   author_type: ArtifactAuthorType;
   author_id: string;
+  requester_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +37,7 @@ export interface CreateArtifactRequest {
   issue_id?: string;
   folder_id?: string;
   origin_issue_id?: string;
+  requester_user_id?: string;
 }
 
 export interface UpdateArtifactRequest {
