@@ -814,11 +814,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 
 	case "thread/status/changed":
 		statusType := extractNestedString(params, "status", "type")
-		if statusType == "idle" && c.turnStarted {
-			if c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
-		}
+		threadID, _ := params["threadId"].(string)
+		c.cfg.Logger.Info("codex thread/status changed", "thread_id", threadID, "status", statusType, "turn_started", c.turnStarted)
 
 	default:
 		if strings.HasPrefix(method, "item/") {

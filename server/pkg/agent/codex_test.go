@@ -488,18 +488,42 @@ func TestCodexRawThreadStatusIdle(t *testing.T) {
 	c.notificationProtocol = "raw"
 	c.turnStarted = true
 
-	var turnDone bool
+	var doneCount int
 	c.onTurnDone = func(aborted bool) {
-		turnDone = true
-		if aborted {
-			t.Fatal("expected aborted=false for idle")
-		}
+		doneCount++
 	}
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"status":{"type":"idle"}}}`)
 
-	if !turnDone {
-		t.Fatal("expected onTurnDone for idle status")
+	if doneCount != 0 {
+		t.Fatalf("idle thread status must not complete the turn, got %d calls", doneCount)
+	}
+}
+
+func TestCodexRawThreadStatusIdleWaitsForTurnCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr-main"
+	c.turnStarted = true
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+		if aborted {
+			t.Fatal("expected aborted=false")
+		}
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"thr-main","status":{"type":"idle"}}}`)
+	if doneCount != 0 {
+		t.Fatalf("idle thread status must wait for turn/completed, got %d calls", doneCount)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-main","turn":{"id":"turn-main","status":"completed"}}}`)
+	if doneCount != 1 {
+		t.Fatalf("turn/completed should complete exactly once after idle, got %d calls", doneCount)
 	}
 }
 
