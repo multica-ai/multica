@@ -84,7 +84,23 @@ while IFS= read -r line; do
       esac
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_loaded","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"loaded"}}}}\n'
+      case "$line" in
+        *'"content":'*)
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      case "$line" in
+        *'"prompt":'*)
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
       exit 0
       ;;
@@ -257,5 +273,11 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	}
 	if !strings.Contains(requests, `"mcpServers":[]`) {
 		t.Fatalf("session/load must include mcpServers, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"content":[`) {
+		t.Fatalf("session/prompt must send Kiro content field, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"prompt":[`) {
+		t.Fatalf("session/prompt must send standard ACP prompt field for Kiro 2.1.1 compatibility, got:\n%s", requests)
 	}
 }

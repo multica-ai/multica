@@ -217,11 +217,16 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
+		promptBlocks := []map[string]any{
+			{"type": "text", "text": userText},
+		}
+		// Kiro's published docs use `content`, while Kiro CLI 2.1.1 still
+		// requires the standard ACP `prompt` field. Send both so either wire
+		// shape can drive the turn.
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"prompt": []map[string]any{
-				{"type": "text", "text": userText},
-			},
+			"content":   promptBlocks,
+			"prompt":    promptBlocks,
 		})
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
