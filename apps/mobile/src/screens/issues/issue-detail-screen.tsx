@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -41,7 +41,7 @@ import {
   useIssueReactions,
   useIssueTaskRuns,
   useIssueTimelineEntries,
-  useTaskMessages,
+  useTaskMessagesQueries,
 } from "@multica/core/issues/hooks";
 import { ALL_STATUSES, PRIORITY_CONFIG, PRIORITY_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import {
@@ -115,6 +115,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(issueId);
   const { data: issueReactions = [] } = useIssueReactions(issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(issueId);
+  const taskMessageQueries = useTaskMessagesQueries(taskRuns.map((task) => task.id));
   const { data: timeline = [] } = useIssueTimelineEntries(issueId);
   const updateIssue = useUpdateIssue();
   const createComment = useCreateComment(issueId);
@@ -148,6 +149,17 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       .sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
+  const taskMessagesByTaskId = useMemo(() => {
+    const messagesByTaskId = new Map<string, TaskMessagePayload[]>();
+    taskRuns.forEach((task, index) => {
+      messagesByTaskId.set(task.id, taskMessageQueries[index]?.data ?? []);
+    });
+    return messagesByTaskId;
+  }, [taskMessageQueries, taskRuns]);
+  const renderListItem = useCallback(({ item }: { item: DetailListItem }) => item.node, []);
+  const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
+    section.title ? <StickySectionHeader section={section} /> : null
+  ), []);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title="Unable to load issue" />;
@@ -569,21 +581,48 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           ),
         }));
 
-  const transcriptItems: DetailListItem[] = [
-    {
-      key: "agent-transcript",
-      node: (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Agent transcript</Text>
-          {taskRuns.length === 0 ? (
-            <Text style={styles.emptyText}>No agent runs yet</Text>
-          ) : (
-            taskRuns.map((task) => <TaskRunCard key={task.id} task={task} />)
-          )}
-        </View>
-      ),
-    },
-  ];
+  const transcriptItems: DetailListItem[] = taskRuns.length === 0
+    ? [
+        {
+          key: "agent-transcript-empty",
+          node: (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Agent transcript</Text>
+              <Text style={styles.emptyText}>No agent runs yet</Text>
+            </View>
+          ),
+        },
+      ]
+    : taskRuns.flatMap((task, taskIndex) => {
+        const messages = taskMessagesByTaskId.get(task.id) ?? [];
+        const taskItems: DetailListItem[] = [
+          {
+            key: `task-${task.id}`,
+            node: (
+              <TaskRunHeader
+                showTitle={taskIndex === 0}
+                task={task}
+              />
+            ),
+          },
+        ];
+
+        if (messages.length === 0) {
+          taskItems.push({
+            key: `task-${task.id}-empty`,
+            node: <Text style={styles.emptyText}>No transcript messages</Text>,
+          });
+          return taskItems;
+        }
+
+        taskItems.push(
+          ...messages.map((message) => ({
+            key: `task-${task.id}-message-${message.seq}`,
+            node: <TaskMessageRow message={message} />,
+          })),
+        );
+        return taskItems;
+      });
 
   const sections: DetailSection[] = [
     { key: "overview", data: overviewItems },
@@ -622,11 +661,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           ]}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(item) => item.key}
-          renderItem={({ item }) => item.node}
-          renderSectionHeader={({ section }) => (
-            section.title ? <StickySectionHeader section={section} /> : null
-          )}
+          maxToRenderPerBatch={8}
+          removeClippedSubviews={Platform.OS === "android"}
+          renderItem={renderListItem}
+          renderSectionHeader={renderSectionHeader}
           sections={sections}
+          updateCellsBatchingPeriod={50}
+          windowSize={7}
           stickySectionHeadersEnabled
         />
 
@@ -1394,28 +1435,26 @@ function AttachmentPreviewModal({
   );
 }
 
-function TaskRunCard({ task }: { task: AgentTask }) {
-  const { data: messages = [] } = useTaskMessages(task.id);
-
+const TaskRunHeader = memo(function TaskRunHeader({
+  showTitle,
+  task,
+}: {
+  showTitle: boolean;
+  task: AgentTask;
+}) {
   return (
     <View style={styles.taskCard}>
+      {showTitle ? <Text style={styles.sectionTitle}>Agent transcript</Text> : null}
       <View style={styles.timelineHeader}>
         <Text style={styles.timelineActor}>Run {task.id.slice(0, 8)}</Text>
         <Text style={styles.timelineDate}>{task.status}</Text>
       </View>
       {task.error ? <Text style={styles.errorText}>{task.error}</Text> : null}
-      {messages.length === 0 ? (
-        <Text style={styles.emptyText}>No transcript messages</Text>
-      ) : (
-        messages.map((message) => (
-          <TaskMessageRow key={`${message.task_id}-${message.seq}`} message={message} />
-        ))
-      )}
     </View>
   );
-}
+});
 
-function TaskMessageRow({ message }: { message: TaskMessagePayload }) {
+const TaskMessageRow = memo(function TaskMessageRow({ message }: { message: TaskMessagePayload }) {
   const content =
     message.content ??
     message.output ??
@@ -1429,7 +1468,7 @@ function TaskMessageRow({ message }: { message: TaskMessagePayload }) {
       {content ? <Text style={styles.timelineBody}>{content}</Text> : null}
     </View>
   );
-}
+});
 
 function ReactionRow({
   compact,

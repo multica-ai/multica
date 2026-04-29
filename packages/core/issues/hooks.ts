@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   childIssuesOptions,
   childIssueProgressOptions,
@@ -54,4 +54,10 @@ export function useIssueTaskRuns(issueId: string) {
 
 export function useTaskMessages(taskId: string) {
   return useQuery(taskMessagesOptions(taskId));
+}
+
+export function useTaskMessagesQueries(taskIds: string[]) {
+  return useQueries({
+    queries: taskIds.map((taskId) => taskMessagesOptions(taskId)),
+  });
 }
