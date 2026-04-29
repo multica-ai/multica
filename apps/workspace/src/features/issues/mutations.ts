@@ -100,6 +100,49 @@ export function useIssueMutations() {
     },
   });
 
+  const addIssueLabelMutation = useMutation({
+    mutationFn: async ({ issueId, labelId, name, color }: { issueId: string; labelId?: string; name?: string; color?: string }) =>
+      api.addIssueLabel(issueId, {
+        ...(labelId ? { label_id: labelId } : {}),
+        ...(name ? { name } : {}),
+        ...(color ? { color } : {}),
+      }),
+    onSuccess: (issue) => {
+      patchIssueLists(queryClient, workspaceId, (issues) => updateIssueInList(issues, issue.id, issue));
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+      if (workspaceId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.workspace.labels(workspaceId) });
+      }
+    },
+  });
+
+  const removeIssueLabelMutation = useMutation({
+    mutationFn: async ({ issueId, labelId }: { issueId: string; labelId: string }) =>
+      api.removeIssueLabel(issueId, labelId),
+    onSuccess: (issue) => {
+      patchIssueLists(queryClient, workspaceId, (issues) => updateIssueInList(issues, issue.id, issue));
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+    },
+  });
+
+  const addIssueDependencyMutation = useMutation({
+    mutationFn: async ({ issueId, dependencyIssueId, type }: { issueId: string; dependencyIssueId: string; type: string }) =>
+      api.addIssueDependency(issueId, { issue_id: dependencyIssueId, type }),
+    onSuccess: (issue) => {
+      patchIssueLists(queryClient, workspaceId, (issues) => updateIssueInList(issues, issue.id, issue));
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+    },
+  });
+
+  const removeIssueDependencyMutation = useMutation({
+    mutationFn: async ({ issueId, dependencyId }: { issueId: string; dependencyId: string }) =>
+      api.removeIssueDependency(issueId, dependencyId),
+    onSuccess: (issue) => {
+      patchIssueLists(queryClient, workspaceId, (issues) => updateIssueInList(issues, issue.id, issue));
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+    },
+  });
+
   const deleteIssueMutation = useMutation({
     mutationFn: async ({ issueId }: { issueId: string }) => {
       await api.deleteIssue(issueId);
@@ -188,12 +231,24 @@ export function useIssueMutations() {
     batchUpdateIssues: (issueIds: string[], updates: Partial<UpdateIssueRequest>) =>
       batchUpdateMutation.mutateAsync({ issueIds, updates }),
     batchDeleteIssues: (issueIds: string[]) => batchDeleteMutation.mutateAsync({ issueIds }),
+    addIssueLabel: (issueId: string, data: { labelId?: string; name?: string; color?: string }) =>
+      addIssueLabelMutation.mutateAsync({ issueId, ...data }),
+    removeIssueLabel: (issueId: string, labelId: string) =>
+      removeIssueLabelMutation.mutateAsync({ issueId, labelId }),
+    addIssueDependency: (issueId: string, dependencyIssueId: string, type: string) =>
+      addIssueDependencyMutation.mutateAsync({ issueId, dependencyIssueId, type }),
+    removeIssueDependency: (issueId: string, dependencyId: string) =>
+      removeIssueDependencyMutation.mutateAsync({ issueId, dependencyId }),
     isMutating:
       createIssueMutation.isPending ||
       updateIssueMutation.isPending ||
       deleteIssueMutation.isPending ||
       batchUpdateMutation.isPending ||
-      batchDeleteMutation.isPending,
+      batchDeleteMutation.isPending ||
+      addIssueLabelMutation.isPending ||
+      removeIssueLabelMutation.isPending ||
+      addIssueDependencyMutation.isPending ||
+      removeIssueDependencyMutation.isPending,
   };
 }
 

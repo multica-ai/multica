@@ -191,6 +191,17 @@ export class ApiClient {
     return this.fetch(`/api/issues/${id}`);
   }
 
+  async listLabels(): Promise<{ labels: { id: string; workspace_id: string; name: string; color: string }[]; total: number }> {
+    return this.fetch("/api/labels");
+  }
+
+  async createLabel(data: { name: string; color?: string }): Promise<{ id: string; workspace_id: string; name: string; color: string }> {
+    return this.fetch("/api/labels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     const search = new URLSearchParams();
     if (this.workspaceId) search.set("workspace_id", this.workspaceId);
@@ -209,6 +220,32 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async addIssueLabel(id: string, data: { label_id?: string; name?: string; color?: string }): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeIssueLabel(id: string, labelId: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/labels/${labelId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async addIssueDependency(id: string, data: { issue_id: string; type: string }): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/dependencies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeIssueDependency(id: string, dependencyId: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/dependencies/${dependencyId}`, {
+      method: "DELETE",
+    });
   }
 
   // Projects

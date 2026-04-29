@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   AgentTask,
   Issue,
+  IssueLabel,
   IssueReaction,
   IssueSubscriber,
   ListIssuesParams,
@@ -68,6 +69,17 @@ export function issueActiveTaskQueryOptions(issueId: string) {
     queryFn: async () => {
       const response = await api.getActiveTaskForIssue(issueId);
       return response.task;
+    },
+    staleTime: ISSUES_STALE_TIME,
+  };
+}
+
+export function workspaceLabelsQueryOptions(workspaceId: string) {
+  return {
+    queryKey: queryKeys.workspace.labels(workspaceId),
+    queryFn: async () => {
+      const response = await api.listLabels();
+      return response.labels;
     },
     staleTime: ISSUES_STALE_TIME,
   };
@@ -192,5 +204,20 @@ export function useTaskMessagesQuery(taskId?: string | null) {
           staleTime: ISSUES_STALE_TIME,
         }),
     enabled: Boolean(taskId) && hasStoredSessionToken(),
+  });
+}
+
+export function useWorkspaceLabelsQuery() {
+  const workspaceId = useWorkspaceStore((state) => state.workspace?.id);
+
+  return useQuery<IssueLabel[]>({
+    ...(workspaceId
+      ? workspaceLabelsQueryOptions(workspaceId)
+      : {
+          queryKey: queryKeys.workspace.labels("__no_workspace__"),
+          queryFn: async () => [] as IssueLabel[],
+          staleTime: ISSUES_STALE_TIME,
+        }),
+    enabled: Boolean(workspaceId) && hasStoredSessionToken(),
   });
 }

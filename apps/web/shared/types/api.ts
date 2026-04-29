@@ -22,6 +22,7 @@ export interface UpdateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
+  parent_issue_id?: string | null;
   position?: number;
   due_date?: string | null;
   start_date?: string | null;

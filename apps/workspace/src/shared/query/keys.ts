@@ -15,6 +15,7 @@ export const queryKeys = {
     detail: (workspaceId: string) => ["workspace", workspaceId] as const,
     members: (workspaceId: string) => ["workspace", workspaceId, "members"] as const,
     agents: (workspaceId: string) => ["workspace", workspaceId, "agents"] as const,
+    labels: (workspaceId: string) => ["workspace", workspaceId, "labels"] as const,
     skills: (workspaceId: string) => ["workspace", workspaceId, "skills"] as const,
     skillDetail: (workspaceId: string, skillId: string) =>
       ["workspace", workspaceId, "skills", skillId] as const,

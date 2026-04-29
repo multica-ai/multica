@@ -9,6 +9,7 @@ interface IssueDraft {
   priority: IssuePriority;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
+  parentIssueId?: string;
   dueDate: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -21,6 +22,7 @@ const EMPTY_DRAFT: IssueDraft = {
   priority: "none",
   assigneeType: undefined,
   assigneeId: undefined,
+  parentIssueId: undefined,
   dueDate: null,
   startDate: null,
   endDate: null,

@@ -26,7 +26,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button";
 import { ContentEditor, type ContentEditorRef } from "@/features/editor";
 import { TitleEditor } from "@/features/editor";
-import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker } from "@/features/issues/components";
+import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, ParentIssuePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
@@ -93,6 +93,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
+  const [parentIssueId, setParentIssueId] = useState<string | undefined>(draft.parentIssueId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [endDate, setEndDate] = useState<string | null>(draft.endDate);
@@ -125,6 +126,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
   };
+  const updateParentIssue = (value?: string | null) => {
+    const nextValue = value ?? undefined;
+    setParentIssueId(nextValue);
+    setDraft({ parentIssueId: nextValue });
+  };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateEndDate = (v: string | null) => { setEndDate(v); setDraft({ endDate: v }); };
@@ -151,6 +157,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
+        parent_issue_id: parentIssueId,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
         due_date: dueDate || undefined,
@@ -397,6 +404,12 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               </div>
             </PopoverContent>
           </Popover>
+
+          <ParentIssuePicker
+            parentIssueId={parentIssueId ?? null}
+            onUpdate={(updates) => updateParentIssue(updates.parent_issue_id)}
+            align="start"
+          />
 
           <IssueDateTimePicker
             field="start_date"
