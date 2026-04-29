@@ -244,7 +244,7 @@ func TestAuth_PATCacheHit(t *testing.T) {
 
 	const rawToken = "mul_cache_hit_test_token"
 	hash := auth.HashToken(rawToken)
-	cache.Set(context.Background(), hash, "cached-user-id", auth.PATCacheTTL)
+	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
 
 	var gotUserID string
 	mw := Auth(nil, cache) // nil queries — only safe on cache hit

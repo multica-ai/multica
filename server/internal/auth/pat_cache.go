@@ -9,12 +9,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// PATCacheTTL bounds how long a (token_hash → user_id) lookup stays cached
-// before the auth middleware goes back to Postgres. Short enough that
-// revocation lag from a missed invalidation is bounded; long enough that
-// a high-frequency PAT client (CLI, daemon) collapses from one DB
-// round-trip per request to roughly one per minute.
-const PATCacheTTL = 60 * time.Second
+// AuthCacheTTL bounds how long a token-hash lookup stays cached before
+// the auth middleware goes back to Postgres. Shared by PATCache and
+// DaemonTokenCache so both kinds of token follow the same revocation
+// latency contract. Short enough that revocation lag from a missed
+// invalidation is bounded; long enough that a high-frequency client
+// (CLI, daemon) collapses from one DB round-trip per request to one
+// per TTL window.
+const AuthCacheTTL = 10 * time.Minute
 
 // patCachePrefix namespaces auth-cache keys away from the realtime relay
 // (ws:*) and local-skill (mul:local_skill:*) keys.
@@ -25,7 +27,6 @@ const patCachePrefix = "mul:auth:pat:"
 // auth middleware degrades to direct DB lookups.
 type PATCache struct {
 	rdb *redis.Client
-	ttl time.Duration
 }
 
 // NewPATCache returns a cache backed by rdb. Pass nil to disable caching;
@@ -34,7 +35,7 @@ func NewPATCache(rdb *redis.Client) *PATCache {
 	if rdb == nil {
 		return nil
 	}
-	return &PATCache{rdb: rdb, ttl: PATCacheTTL}
+	return &PATCache{rdb: rdb}
 }
 
 func patCacheKey(hash string) string { return patCachePrefix + hash }
@@ -71,28 +72,28 @@ func (c *PATCache) Set(ctx context.Context, hash, userID string, ttl time.Durati
 	}
 }
 
-// TTLForExpiry returns the cache TTL for a PAT given its expires_at.
-//   - Zero expiresAt (token never expires) → full PATCacheTTL.
-//   - expiresAt in the future → min(PATCacheTTL, time until expiry).
+// TTLForExpiry returns the cache TTL for a token given its expires_at.
+//   - Zero expiresAt (token never expires) → full AuthCacheTTL.
+//   - expiresAt in the future → min(AuthCacheTTL, time until expiry).
 //   - expiresAt at or before now → 0 (caller should skip caching; the
 //     middleware shouldn't reach here because the SELECT already
 //     filters expired tokens, but a TOCTOU between SELECT and Set is
 //     possible).
 //
-// Pass time.Time{} when the PAT has no expiry (pgtype.Timestamptz with
+// Pass time.Time{} when the token has no expiry (pgtype.Timestamptz with
 // Valid=false maps to a zero Time).
 func TTLForExpiry(now, expiresAt time.Time) time.Duration {
 	if expiresAt.IsZero() {
-		return PATCacheTTL
+		return AuthCacheTTL
 	}
 	remaining := expiresAt.Sub(now)
 	if remaining <= 0 {
 		return 0
 	}
-	if remaining < PATCacheTTL {
+	if remaining < AuthCacheTTL {
 		return remaining
 	}
-	return PATCacheTTL
+	return AuthCacheTTL
 }
 
 // Invalidate removes the entry for hash. Called on PAT revocation so the

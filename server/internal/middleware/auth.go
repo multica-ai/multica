@@ -24,7 +24,7 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
 //
 // patCache is optional; when non-nil, PAT lookups are cached with a short
-// TTL (auth.PATCacheTTL). On cache hit the middleware skips both the DB
+// TTL (auth.AuthCacheTTL). On cache hit the middleware skips both the DB
 // SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
 // at most once per TTL window per token, not per request.
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
@@ -73,8 +73,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 				r.Header.Set("X-User-ID", userID)
 
 				// Clamp cache TTL to the token's remaining lifetime so a
-				// PAT expiring in <60s can't continue passing auth on a
-				// cache hit after expires_at.
+				// PAT expiring in <AuthCacheTTL can't continue passing
+				// auth on a cache hit after expires_at.
 				var expiresAt time.Time
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time

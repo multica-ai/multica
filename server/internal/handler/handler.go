@@ -67,6 +67,7 @@ type Handler struct {
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
+	DaemonTokenCache      *auth.DaemonTokenCache
 	cfg                   Config
 }
 

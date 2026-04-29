@@ -44,7 +44,7 @@ func TestPATCache_NilSafe(t *testing.T) {
 	if v, ok := c.Get(ctx, "any-hash"); ok || v != "" {
 		t.Fatalf("nil cache must miss; got (%q, %v)", v, ok)
 	}
-	c.Set(ctx, "any-hash", "user-1", PATCacheTTL) // no panic
+	c.Set(ctx, "any-hash", "user-1", AuthCacheTTL) // no panic
 	c.Invalidate(ctx, "any-hash")                 // no panic
 }
 
@@ -66,7 +66,7 @@ func TestPATCache_SetGetInvalidate(t *testing.T) {
 		t.Fatal("expected miss before set")
 	}
 
-	c.Set(ctx, "hash-A", "user-A", PATCacheTTL)
+	c.Set(ctx, "hash-A", "user-A", AuthCacheTTL)
 	if v, ok := c.Get(ctx, "hash-A"); !ok || v != "user-A" {
 		t.Fatalf("expected hit user-A, got (%q, %v)", v, ok)
 	}
@@ -77,10 +77,10 @@ func TestPATCache_SetGetInvalidate(t *testing.T) {
 	}
 }
 
-// TestPATCache_TTL pins the contract that entries expire on PATCacheTTL so
+// TestPATCache_TTL pins the contract that entries expire on AuthCacheTTL so
 // the auth middleware refreshes last_used_at at most once per window.
 //
-// We don't sleep PATCacheTTL (60s); instead we assert the TTL is what the
+// We don't sleep AuthCacheTTL (60s); instead we assert the TTL is what the
 // constructor set, which is the property the middleware actually depends
 // on.
 func TestPATCache_TTL(t *testing.T) {
@@ -91,29 +91,29 @@ func TestPATCache_TTL(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	c.Set(ctx, "hash-T", "user-T", PATCacheTTL)
+	c.Set(ctx, "hash-T", "user-T", AuthCacheTTL)
 	ttl, err := rdb.TTL(ctx, patCacheKey("hash-T")).Result()
 	if err != nil {
 		t.Fatalf("TTL: %v", err)
 	}
 	// Redis returns the remaining TTL; allow a small skew for rounding.
-	if ttl <= 0 || ttl > PATCacheTTL+time.Second {
-		t.Fatalf("unexpected TTL %v (want ~%v)", ttl, PATCacheTTL)
+	if ttl <= 0 || ttl > AuthCacheTTL+time.Second {
+		t.Fatalf("unexpected TTL %v (want ~%v)", ttl, AuthCacheTTL)
 	}
 }
 
 func TestTTLForExpiry(t *testing.T) {
 	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
 
-	// No expiry set → full PATCacheTTL.
-	if got := TTLForExpiry(now, time.Time{}); got != PATCacheTTL {
-		t.Fatalf("zero expires_at: got %v, want %v", got, PATCacheTTL)
+	// No expiry set → full AuthCacheTTL.
+	if got := TTLForExpiry(now, time.Time{}); got != AuthCacheTTL {
+		t.Fatalf("zero expires_at: got %v, want %v", got, AuthCacheTTL)
 	}
 
-	// Far-future expiry → full PATCacheTTL.
+	// Far-future expiry → full AuthCacheTTL.
 	far := now.Add(24 * time.Hour)
-	if got := TTLForExpiry(now, far); got != PATCacheTTL {
-		t.Fatalf("far-future expires_at: got %v, want %v", got, PATCacheTTL)
+	if got := TTLForExpiry(now, far); got != AuthCacheTTL {
+		t.Fatalf("far-future expires_at: got %v, want %v", got, AuthCacheTTL)
 	}
 
 	// Sooner-than-TTL expiry → clamped to remaining lifetime.
@@ -132,8 +132,8 @@ func TestTTLForExpiry(t *testing.T) {
 }
 
 // TestPATCache_Set_RespectsClampedTTL is the regression test for the
-// review finding: a PAT expiring in <PATCacheTTL must NOT be cached for
-// the full PATCacheTTL window, otherwise it would continue passing auth
+// review finding: a PAT expiring in <AuthCacheTTL must NOT be cached for
+// the full AuthCacheTTL window, otherwise it would continue passing auth
 // on cache hit after expires_at.
 func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 	rdb := newRedisTestClient(t)

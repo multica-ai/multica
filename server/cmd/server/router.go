@@ -108,11 +108,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
-	// PAT cache is shared between the auth middleware (read + populate) and
-	// the revoke handler (invalidate). NewPATCache returns nil when rdb is
-	// nil — both consumers handle that case as "no cache, always hit DB".
+	// Auth caches: PAT cache is shared between the regular Auth middleware,
+	// the DaemonAuth fallback (mul_) path, and the revoke handler
+	// (invalidate). DaemonTokenCache backs the DaemonAuth mdt_ path. Both
+	// constructors return nil when rdb is nil — every consumer handles that
+	// as "no cache, always hit DB".
 	patCache := auth.NewPATCache(rdb)
+	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
+	h.DaemonTokenCache = daemonTokenCache
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -188,7 +192,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
