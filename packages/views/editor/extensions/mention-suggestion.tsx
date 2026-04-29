@@ -15,7 +15,7 @@ import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { Issue, ListIssuesCache, MemberWithUser, Agent } from "@multica/core/types";
+import type { Issue, ListIssuesCache, MemberWithUser, Agent, MentionFrequencyEntry } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -233,6 +233,33 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
 
 const MAX_ITEMS = 15;
 
+function sortByMentionFrequency(items: MentionItem[], freq: MentionFrequencyEntry[]): MentionItem[] {
+  if (freq.length === 0) return items;
+  const rank = new Map<string, { idx: number; ts: number; frequency: number }>();
+  for (const [i, f] of freq.entries()) {
+    const key = `${f.actor_type}:${f.actor_id}`;
+    if (rank.has(key)) continue;
+    const ts = Date.parse(f.last_mentioned_at);
+    rank.set(key, {
+      idx: i,
+      ts: Number.isNaN(ts) ? 0 : ts,
+      frequency: f.frequency,
+    });
+  }
+  return [...items].sort((a, b) => {
+    const aRank = rank.get(`${a.type}:${a.id}`);
+    const bRank = rank.get(`${b.type}:${b.id}`);
+    if (aRank && bRank) {
+      if (aRank.ts !== bRank.ts) return bRank.ts - aRank.ts;
+      if (aRank.frequency !== bRank.frequency) return bRank.frequency - aRank.frequency;
+      return aRank.idx - bRank.idx;
+    }
+    if (aRank) return -1;
+    if (bRank) return 1;
+    return 0;
+  });
+}
+
 export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
@@ -254,6 +281,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
+    const mentionFreq: MentionFrequencyEntry[] = qc.getQueryData(workspaceKeys.mentionFrequency(wsId)) ?? [];
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
@@ -286,7 +314,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    return [...allItem, ...memberItems, ...agentItems, ...issueItems];
+    const sortedPeople = sortByMentionFrequency([...allItem, ...memberItems, ...agentItems], mentionFreq);
+    return [...sortedPeople, ...issueItems];
   }
 
   function startServerIssueSearch(query: string, syncItems: MentionItem[]) {

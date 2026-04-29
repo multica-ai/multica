@@ -25,10 +25,12 @@ function fakeQc(data: {
   members?: Array<{ user_id: string; name: string }>;
   agents?: Array<{ id: string; name: string; archived_at: string | null }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
+  mentionFrequency?: Array<{ actor_type: string; actor_id: string; frequency: number; last_mentioned_at: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  map.set(JSON.stringify(workspaceKeys.mentionFrequency("ws-1")), data.mentionFrequency ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
@@ -110,5 +112,39 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
+  });
+
+  it("sorts member/agent items by recent mention frequency ranking", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice" },
+        { user_id: "u2", name: "Bob" },
+      ],
+      agents: [{ id: "a1", name: "Aegis", archived_at: null }],
+      mentionFrequency: [
+        {
+          actor_type: "member",
+          actor_id: "u2",
+          frequency: 5,
+          last_mentioned_at: "2026-04-29T06:00:00Z",
+        },
+        {
+          actor_type: "agent",
+          actor_id: "a1",
+          frequency: 2,
+          last_mentioned_at: "2026-04-29T05:00:00Z",
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const users = result.filter((i) => i.type !== "issue");
+
+    expect(users[0]?.type).toBe("member");
+    expect(users[0]?.id).toBe("u2");
+    expect(users[1]?.type).toBe("agent");
+    expect(users[1]?.id).toBe("a1");
   });
 });
