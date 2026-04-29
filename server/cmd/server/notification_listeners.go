@@ -66,6 +66,50 @@ func parseMentions(content string) []mention {
 	return result
 }
 
+// isNotifEnabled checks whether a notification type is enabled for a specific
+// user in a workspace. It queries the notification_preference table; if no
+// explicit preference exists, it falls back to the default (most types default
+// to enabled; status_changed defaults to disabled).
+func isNotifEnabled(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID string,
+	userID string,
+	notifType string,
+	prefCache map[string]bool,
+) bool {
+	// Check the per-event cache first (populated by preloadNotifPrefs).
+	if enabled, ok := prefCache[userID]; ok {
+		return enabled
+	}
+	// No explicit preference → use default.
+	return !handler.DefaultDisabledTypes[notifType]
+}
+
+// preloadNotifPrefs loads all explicit preferences for a notification type in
+// a workspace into a map[userID]enabled. This avoids per-subscriber queries.
+func preloadNotifPrefs(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID string,
+	notifType string,
+) map[string]bool {
+	rows, err := queries.ListNotificationPreferencesByType(ctx, db.ListNotificationPreferencesByTypeParams{
+		WorkspaceID:      parseUUID(workspaceID),
+		NotificationType: notifType,
+	})
+	if err != nil {
+		slog.Error("failed to load notification preferences",
+			"workspace_id", workspaceID, "type", notifType, "error", err)
+		return nil
+	}
+	m := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		m[util.UUIDToString(r.UserID)] = r.Enabled
+	}
+	return m
+}
+
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
 // bubble up from a sub-issue to subscribers of its parent. Other event types
 // only notify subscribers of the sub-issue itself, to keep parent watchers'
@@ -162,6 +206,9 @@ func notifyIssueSubscribers(
 		return notified
 	}
 
+	// Preload notification preferences for this type (one query for all subscribers).
+	prefCache := preloadNotifPrefs(ctx, queries, workspaceID, notifType)
+
 	for _, sub := range subs {
 		// Only notify member-type subscribers (not agents)
 		if sub.UserType != "member" {
@@ -177,6 +224,11 @@ func notifyIssueSubscribers(
 
 		// Skip any extra excluded IDs
 		if exclude[subID] {
+			continue
+		}
+
+		// Skip if user has disabled this notification type
+		if !isNotifEnabled(ctx, queries, workspaceID, subID, notifType, prefCache) {
 			continue
 		}
 
@@ -235,6 +287,14 @@ func notifyDirect(
 	// Skip if recipient is the actor
 	if recipientID == e.ActorID {
 		return
+	}
+
+	// Skip if recipient has disabled this notification type (members only)
+	if recipientType == "member" {
+		prefCache := preloadNotifPrefs(ctx, queries, workspaceID, notifType)
+		if !isNotifEnabled(ctx, queries, workspaceID, recipientID, notifType, prefCache) {
+			return
+		}
 	}
 
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
@@ -308,8 +368,15 @@ func notifyMentionedMembers(
 		}
 	}
 
+	// Preload mention preferences
+	mentionPrefCache := preloadNotifPrefs(context.Background(), queries, e.WorkspaceID, "mentioned")
+
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
+			continue
+		}
+		// Skip if user has disabled mention notifications
+		if !isNotifEnabled(context.Background(), queries, e.WorkspaceID, id, "mentioned", mentionPrefCache) {
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{

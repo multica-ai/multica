@@ -5,6 +5,7 @@ import type { InboxItem } from "../types";
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
+  preferences: (wsId: string) => [...inboxKeys.all(wsId), "preferences"] as const,
 };
 
 export function inboxListOptions(wsId: string) {
@@ -56,4 +57,11 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
     (a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
+}
+
+export function notificationPreferencesOptions(wsId: string) {
+  return queryOptions({
+    queryKey: inboxKeys.preferences(wsId),
+    queryFn: () => api.listNotificationPreferences(),
+  });
 }

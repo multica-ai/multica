@@ -38,3 +38,8 @@ export interface InboxItem {
   created_at: string;
   details: Record<string, string> | null;
 }
+
+export interface NotificationPreference {
+  notification_type: InboxItemType;
+  enabled: boolean;
+}

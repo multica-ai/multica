@@ -17,6 +17,7 @@ import type {
   AgentRunCount,
   AgentRuntime,
   InboxItem,
+  NotificationPreference,
   IssueSubscriber,
   Comment,
   Reaction,
@@ -781,6 +782,19 @@ export class ApiClient {
 
   async archiveCompletedInbox(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  }
+
+  async listNotificationPreferences(): Promise<NotificationPreference[]> {
+    return this.fetch("/api/inbox/preferences");
+  }
+
+  async updateNotificationPreferences(
+    preferences: NotificationPreference[],
+  ): Promise<NotificationPreference[]> {
+    return this.fetch("/api/inbox/preferences", {
+      method: "PUT",
+      body: JSON.stringify({ preferences }),
+    });
   }
 
   // App Config
