@@ -115,29 +115,6 @@ export function formatTokens(n: number): string {
 // ---------------------------------------------------------------------------
 // Cost estimation
 // ---------------------------------------------------------------------------
-
-// Internal pricing shape used by the cost-estimation functions. The
-// generated `ModelCost` type mirrors `models.dev` exactly (snake_case,
-// optional `cache_read` / `cache_write`); we adapt it to non-optional
-// camelCase fields here so callers stay simple. Where the upstream omits
-// a cache tier we fall back to `input` — conservative (no discount
-// applied) and keeps `estimateCacheSavings` returning 0 naturally.
-interface ResolvedPricing {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-function adapt(p: ModelCost): ResolvedPricing {
-  return {
-    input: p.input,
-    output: p.output,
-    cacheRead: p.cache_read ?? p.input,
-    cacheWrite: p.cache_write ?? p.input,
-  };
-}
-
 // Strip a leading `provider/` segment, e.g. `openai/gpt-4o` → `gpt-4o`.
 function stripProviderPrefix(model: string): string {
   const slash = model.indexOf("/");
@@ -163,21 +140,21 @@ function stripDateSuffix(model: string): string {
 //   3. Second pass — `keyBare.startsWith(withoutDate)`. Catches a
 //      date-suffixed input whose exact dated entry isn't tracked
 //      (`claude-opus-4-1-20260105` falls back to `claude-opus-4-1`).
-function resolvePricing(model: string): ResolvedPricing | undefined {
+function resolvePricing(model: string): ModelCost | undefined {
   if (!model) return undefined;
 
   const exact = PRICING[model];
-  if (exact) return adapt(exact);
+  if (exact) return exact;
 
   const bare = stripProviderPrefix(model);
   const withoutDate = stripDateSuffix(bare);
 
   for (const [key, p] of Object.entries(PRICING)) {
-    if (stripProviderPrefix(key) === bare) return adapt(p);
+    if (stripProviderPrefix(key) === bare) return p;
   }
 
   for (const [key, p] of Object.entries(PRICING)) {
-    if (stripProviderPrefix(key).startsWith(withoutDate)) return adapt(p);
+    if (stripProviderPrefix(key).startsWith(withoutDate)) return p;
   }
   return undefined;
 }

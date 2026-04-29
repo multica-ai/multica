@@ -64,6 +64,13 @@ const COST_FIELD_ORDER = [
   "output_audio",
 ];
 
+const COST_OUTPUT_KEY_MAP = {
+  cache_read: "cacheRead",
+  cache_write: "cacheWrite",
+  input_audio: "inputAudio",
+  output_audio: "outputAudio",
+};
+
 function serializeCost(cost) {
   // We deliberately emit only the enumerated number fields. models.dev
   // sometimes includes context-tier objects (e.g.
@@ -73,7 +80,10 @@ function serializeCost(cost) {
   // COST_FIELD_ORDER and ModelCost together.
   const entries = [];
   for (const k of COST_FIELD_ORDER) {
-    if (typeof cost[k] === "number") entries.push(`${k}: ${cost[k]}`);
+    if (typeof cost[k] === "number") {
+      const outputKey = COST_OUTPUT_KEY_MAP[k] || k;
+      entries.push(`${outputKey}: ${cost[k]}`);
+    }
   }
   return `{ ${entries.join(", ")} }`;
 }
@@ -126,10 +136,10 @@ function serializeCost(cost) {
     "  input: number;",
     "  output: number;",
     "  reasoning?: number;",
-    "  cache_read?: number;",
-    "  cache_write?: number;",
-    "  input_audio?: number;",
-    "  output_audio?: number;",
+    "  cacheRead?: number;",
+    "  cacheWrite?: number;",
+    "  inputAudio?: number;",
+    "  outputAudio?: number;",
     "}",
     "",
     "// Keys are `<provider>/<model>` to match what OpenCode and other",
