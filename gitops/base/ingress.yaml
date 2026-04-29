@@ -7,6 +7,15 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    # WebSocket + long-poll support: keep connections alive for up to
+    # 1 hour.  Without these, nginx defaults to 60s which races against
+    # the server's 54s WS ping interval and severs daemon long-poll
+    # endpoints (/api/daemon/runtimes/*/tasks/pending, etc.).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Match the Go backend's 100 MB upload cap (handler/file.go).
+    # nginx defaults to 1 MB and returns 413 before Go ever sees it.
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/configuration-snippet: |
       if ($http_x_forwarded_proto = 'http') {
         return 301 https://$host$request_uri;
