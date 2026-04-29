@@ -4,7 +4,7 @@ Multica's current product shape already supports issue-driven teamwork and agent
 
 - `issue.parent_issue_id` exists in the canonical issue table, which gives a starting point for parent/sub-issue hierarchy.
 - `issue_label`, `issue_to_label`, and `issue_dependency` tables already exist in the initial schema, but are not yet exposed as a complete product capability.
-- Both `/home/runner/work/multim/multim/apps/workspace/` and `/home/runner/work/multim/multim/apps/web/` already implement mirrored issue flows, so roadmap work must avoid drift.
+- `/home/runner/work/multim/multim/apps/workspace/` already implements the active issue flows that roadmap work should extend.
 - Agent execution, inbox, activity, and realtime systems already depend on issue state, which means new planning structure should enhance the issue model rather than introduce a parallel work-item abstraction.
 
 This design turns the strategic roadmap into an implementation blueprint that can be applied in phases without losing the core Multica differentiator: agents are teammates operating on the same structured work graph as humans.
@@ -16,7 +16,7 @@ This design turns the strategic roadmap into an implementation blueprint that ca
 - Use the existing `issue` model as the foundation for structured planning rather than creating a second canonical work-item type.
 - Sequence roadmap work so Multica first becomes reliable for day-to-day team execution, then for project planning, then for AI-native automation.
 - Reuse existing schema groundwork for hierarchy, labels, and dependencies where possible.
-- Keep the workspace app as the primary product shell while mirroring shared issue behavior in the web app where those product surfaces remain available.
+- Keep the workspace app as the primary product shell for roadmap delivery.
 - Define clear implementation boundaries for data model, backend contracts, frontend surfaces, and agent orchestration.
 
 **Non-Goals:**
@@ -112,7 +112,6 @@ Alternatives considered:
 
 - [Roadmap breadth could create an oversized implementation change] -> Mitigation: treat this change as the source blueprint, then break execution into follow-up changes per phase or capability cluster.
 - [Existing schema groundwork may not match the exact product UX needed] -> Mitigation: reuse current tables and fields where appropriate, but allow additive migrations when product semantics require stronger contracts.
-- [Cross-app drift between workspace and web could increase] -> Mitigation: define shared behavior in the blueprint and mirror productized issue capabilities deliberately.
 - [Agent automation could outrun task structure quality] -> Mitigation: keep orchestration behind the structured execution and planning phases.
 
 ## Migration Plan

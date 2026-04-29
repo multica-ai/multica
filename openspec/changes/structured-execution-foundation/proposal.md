@@ -13,7 +13,7 @@ This change formalizes the product direction that best fits Multica: build the s
 - Establish Phase 2 as planning cadence: milestones, cycles, timeline/roadmap, estimates, and project health signals.
 - Establish Phase 3 as Multica's differentiator: agent-driven triage, decomposition, execution triggers, blocker escalation, and project-level orchestration.
 - Establish Phase 4 as selective expansion: custom fields, automation rules, reporting, permissions, auditability, and ecosystem integrations.
-- Capture the implementation blueprint across data model, backend APIs, realtime/eventing, workspace UX, web UX, and agent orchestration layers.
+- Capture the implementation blueprint across data model, backend APIs, realtime/eventing, workspace UX, and agent orchestration layers.
 
 ## Capabilities
 
@@ -26,5 +26,5 @@ This change formalizes the product direction that best fits Multica: build the s
 
 - `openspec/changes/structured-execution-foundation/specs/structured-execution-foundation/spec.md`
 - Issue and project domain modeling in `/home/runner/work/multim/multim/server/`
-- Mirrored issue and project workflows in `/home/runner/work/multim/multim/apps/workspace/` and `/home/runner/work/multim/multim/apps/web/`
+- Issue and project workflows in `/home/runner/work/multim/multim/apps/workspace/`
 - Realtime, notifications, and agent orchestration flows that depend on structured issue state

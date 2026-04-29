@@ -6,13 +6,12 @@
   "scripts": {
     "dev:web": "pnpm --filter @multica/workspace dev",
     "dev:workspace": "pnpm --filter @multica/workspace dev",
-    "dev:marketing": "bash scripts/dev-marketing.sh",
     "dev:air": "bash scripts/dev-air.sh",
-    "build": "pnpm --filter @multica/web build && pnpm --filter @multica/workspace build",
-    "typecheck": "pnpm --filter @multica/web typecheck && pnpm --filter @multica/workspace typecheck",
-    "test": "pnpm --filter @multica/web test && pnpm --filter @multica/workspace test",
-    "lint": "pnpm --filter @multica/web lint && pnpm --filter @multica/workspace lint",
-    "clean": "rm -rf apps/web/.next apps/workspace/dist node_modules"
+    "build": "pnpm --filter @multica/workspace build",
+    "typecheck": "pnpm --filter @multica/workspace typecheck",
+    "test": "pnpm --filter @multica/workspace test",
+    "lint": "pnpm --filter @multica/workspace lint",
+    "clean": "rm -rf apps/workspace/dist node_modules"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {

@@ -4,7 +4,7 @@
 
 - `issue.parent_issue_id` 已经存在，可作为父子任务关系的主存储字段。
 - `issue_label`、`issue_to_label`、`issue_dependency` 已经存在，可直接复用。
-- `apps/workspace` 与 `apps/web` 都有 issue 创建与详情流，因此本次产品化必须镜像落地，避免行为漂移。
+- `apps/workspace` 已经承载 issue 创建与详情流，因此本次产品化应直接落在当前主产品壳内。
 
 当前缺口不在 schema，而在产品层：缺少可写 API、列表 / 详情 UI、关系校验和测试闭环。
 
@@ -91,7 +91,7 @@
    - issue child issues API
 3. issue create / update 增加父任务校验逻辑。
 4. issue detail 返回标签、依赖分组、子任务摘要。
-5. `apps/workspace` 与 `apps/web` 同步增加：
+5. `apps/workspace` 增加：
    - parent issue picker
    - label picker
    - dependency editor / summary
@@ -103,7 +103,6 @@
 - [父任务形成环] -> 通过服务端递归向上检查祖先链，拒绝非法更新。
 - [标签重复创建导致 workspace 噪音] -> 服务端按 workspace + 名称查重并复用已有标签。
 - [依赖方向语义混乱] -> 统一由后端按“当前 issue 视角”归一化返回。
-- [双前端行为漂移] -> 以 `apps/workspace` 为主实现后，同步镜像到 `apps/web`。
 - [环境缺少 openspec CLI] -> 本次按仓库既有结构手工维护 change 工件，后续可在具备 CLI 的环境中继续标准化校验。
 
 ## 迁移计划
@@ -111,8 +110,7 @@
 1. 先补 OpenSpec change 工件，明确范围与任务分解。
 2. 补后端查询、handler、路由与服务端校验。
 3. 补 `apps/workspace` UI 与数据流。
-4. 镜像 `apps/web`。
-5. 补单测与 E2E，并完成验证。
+4. 补单测与 E2E，并完成验证。
 
 ## 未决问题
 

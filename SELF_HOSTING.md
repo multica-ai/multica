@@ -9,7 +9,7 @@ Multica has three components:
 | Component | Description | Technology |
 |-----------|-------------|------------|
 | **Backend** | REST API + WebSocket server | Go (single binary) |
-| **Frontend** | Web application | Next.js 16 |
+| **Frontend** | Workspace SPA | Vite 8 + React |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
 Additionally, each user who wants to run AI agents locally installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
@@ -35,25 +35,18 @@ Edit `.env` with your production values (see [Configuration](#configuration) bel
 # Start PostgreSQL
 docker compose up -d
 
+# Install JS dependencies and build the workspace frontend
+pnpm install
+pnpm build
+
 # Build the backend
 make build
 
 # Run database migrations
 DATABASE_URL="your-database-url" ./server/bin/migrate up
 
-# Start the backend server
-DATABASE_URL="your-database-url" PORT=8080 ./server/bin/server
-```
-
-For the frontend:
-
-```bash
-pnpm install
-pnpm build
-
-# Start the frontend (production mode)
-cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
+# Start the backend server and serve the built workspace SPA
+DATABASE_URL="your-database-url" WORKSPACE_DIST_DIR=apps/workspace/dist PORT=8080 ./server/bin/server
 ```
 
 ## Configuration
@@ -103,7 +96,8 @@ For file uploads and attachments, configure S3 and CloudFront:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
-| `FRONTEND_PORT` | `3000` | Frontend port |
+| `FRONTEND_PORT` | `3000` | Workspace dev server port |
+| `WORKSPACE_DIST_DIR` | `../apps/workspace/dist` | Path to built workspace assets when the Go server serves the SPA |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
@@ -152,16 +146,12 @@ cd server && go run ./cmd/migrate up
 
 ## Reverse Proxy
 
-In production, put a reverse proxy in front of both the backend and frontend to handle TLS and routing.
+In production, put a reverse proxy in front of the Go server to handle TLS. The server can serve both the built workspace SPA and the API from the same origin.
 
 ### Caddy (Recommended)
 
 ```
 app.example.com {
-    reverse_proxy localhost:3000
-}
-
-api.example.com {
     reverse_proxy localhost:8080
 }
 ```
@@ -169,27 +159,9 @@ api.example.com {
 ### Nginx
 
 ```nginx
-# Frontend
 server {
     listen 443 ssl;
     server_name app.example.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-# Backend API
-server {
-    listen 443 ssl;
-    server_name api.example.com;
 
     ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
@@ -214,17 +186,21 @@ server {
 }
 ```
 
-When using separate domains for frontend and backend, set these environment variables accordingly:
+When the Go server serves the built workspace SPA from `WORKSPACE_DIST_DIR`, you only need the public app origin:
+
+```bash
+FRONTEND_ORIGIN=https://app.example.com
+```
+
+If you host the workspace separately from the API, build the frontend with explicit API endpoints:
 
 ```bash
 # Backend
 FRONTEND_ORIGIN=https://app.example.com
-CORS_ALLOWED_ORIGINS=https://app.example.com
 
-# Frontend
-REMOTE_API_URL=https://api.example.com
-NEXT_PUBLIC_API_URL=https://api.example.com
-NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+# Frontend build-time env
+VITE_API_URL=https://api.example.com
+VITE_WS_URL=wss://api.example.com/ws
 ```
 
 ## Health Check

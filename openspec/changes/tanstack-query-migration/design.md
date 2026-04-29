@@ -14,8 +14,7 @@ This means the app has no single source of truth for server state, no shared que
 At the same time, the repository has changed since the original plan document was written:
 
 - `apps/workspace` is the main product surface.
-- `apps/web` is the marketing/public site.
-- There is no current `packages/core` or `apps/web/core/` structure to migrate toward.
+- There is no current `packages/core` extraction to migrate toward.
 - The active product changes depend on preserving the current `issue`, workspace, auth, and realtime contracts.
 
 So this change should focus on the workspace app's caching architecture, not on premature monorepo extraction.
@@ -32,7 +31,6 @@ So this change should focus on the workspace app's caching architecture, not on 
 
 **Non-Goals:**
 
-- Migrating the marketing site in `apps/web`.
 - Introducing `packages/core`, `packages/views`, or a new monorepo extraction layer.
 - Redesigning backend APIs, issue semantics, or realtime message contracts.
 - Removing Zustand entirely from the workspace app.
@@ -52,7 +50,7 @@ Why this approach:
 
 Alternatives considered:
 
-- Recreate the original `apps/web/core/` extraction plan now: rejected because the product app no longer lives there.
+- Recreate the original cross-app extraction plan now: rejected because this migration should stay scoped to `apps/workspace`.
 - Replace the API client abstraction entirely: rejected because transport is not the problem this change is solving.
 
 ### 2. Use feature-local query/mutation modules plus a shared query client

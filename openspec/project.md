@@ -8,7 +8,7 @@ Multica is an AI-native task management platform for teams that work with both h
 - Users can assign issues to members or agents.
 - Agents can comment, create follow-up issues, report blockers, and change status as work progresses.
 - The product supports both local runtimes via a daemon and cloud runtimes.
-- The primary product experience lives in the workspace app, while the web app is the marketing/public surface.
+- The primary product experience lives in the workspace app.
 
 Core domain concepts:
 
@@ -32,7 +32,6 @@ This repository is a monorepo.
 
 - `server/` — Go backend, CLI, daemon, migrations, SQL queries, generated database code.
 - `apps/workspace/` — primary product app built with Vite + React.
-- `apps/web/` — marketing/public site built with Next.js App Router.
 - `e2e/` — Playwright end-to-end tests.
 - `openspec/` — OpenSpec change proposals, specs, and tasks.
 - `scripts/` and root `Makefile` — setup, verification, local dev, and worktree helpers.
@@ -78,15 +77,6 @@ Workspace app (`apps/workspace`):
 - TipTap for rich text editing
 - dnd-kit for drag-and-drop interactions
 - Vitest + Testing Library for unit/component tests
-
-Web app (`apps/web`):
-
-- Next.js 16 App Router
-- React
-- TypeScript with strict mode
-- Zustand
-- Tailwind CSS + shadcn-style UI primitives
-- Vitest + Testing Library
 
 Common frontend libraries include:
 
@@ -136,17 +126,9 @@ Workspace app (`apps/workspace/src`) uses feature-based organization:
 - `shared/` — cross-feature API, types, router, logger, utilities.
 - `styles/` — global styles and shared CSS.
 
-Web app (`apps/web`) also uses feature-based organization:
-
-- `app/` — thin route shells.
-- `features/` — business logic.
-- `shared/` — cross-feature utilities.
-- `test/` — shared test setup.
-
 ### Import Rules
 
 - In `apps/workspace`, `@/` maps to `apps/workspace/src/`.
-- In `apps/web`, `@/` maps to `apps/web/`.
 - Use relative imports inside a feature.
 - Use `@/` imports when crossing feature boundaries or importing shared code.
 
@@ -173,7 +155,7 @@ Do not reverse these dependencies.
 - Use design tokens such as `bg-primary`, `text-muted-foreground`, and `text-destructive`.
 - Avoid hardcoded utility colors like `text-red-500` or `bg-gray-100` unless there is a strong reason.
 - Pay attention to overflow, truncation, spacing, and alignment.
-- Keep shared UI behavior mirrored across `apps/web` and `apps/workspace` when the same concept exists in both places.
+- Keep shared UI behavior consistent across workspace surfaces when the same concept exists in multiple views.
 
 ### TypeScript Style
 
@@ -240,7 +222,6 @@ Targeted commands:
 
 ```bash
 pnpm --filter @multica/workspace exec vitest run src/path/to/file.test.ts
-pnpm --filter @multica/web exec vitest run path/to/file.test.ts
 cd server && go test ./internal/handler/ -run TestName
 ```
 
@@ -279,7 +260,6 @@ Important environment conventions:
 Examples:
 
 - `feat(workspace): ...`
-- `feat(web): ...`
 - `feat(server): ...`
 - `feat(cli): ...`
 - `fix(workspace): ...`

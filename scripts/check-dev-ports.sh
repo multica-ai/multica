@@ -16,11 +16,10 @@ set +a
 
 PORT="${PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-MARKETING_PORT="${MARKETING_PORT:-3001}"
 SERVICES=("${@:2}")
 
 if [ "${#SERVICES[@]}" -eq 0 ]; then
-  SERVICES=(backend workspace marketing)
+  SERVICES=(backend workspace)
 fi
 
 check_port_available() {
@@ -42,11 +41,8 @@ for service in "${SERVICES[@]}"; do
     workspace)
       check_port_available "$FRONTEND_PORT" "Workspace"
       ;;
-    marketing)
-      check_port_available "$MARKETING_PORT" "Marketing"
-      ;;
     *)
-      echo "Unknown service '$service'. Expected one of: backend, workspace, marketing."
+      echo "Unknown service '$service'. Expected one of: backend, workspace."
       exit 1
       ;;
   esac

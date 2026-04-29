@@ -14,12 +14,8 @@ export default defineConfig(({ mode }) => {
     ...process.env,
   };
   const apiTarget = envOrFallback(
-    env.VITE_API_PROXY_TARGET || env.VITE_API_URL || env.NEXT_PUBLIC_API_URL || env.REMOTE_API_URL,
+    env.VITE_API_PROXY_TARGET || env.VITE_API_URL,
     `http://localhost:${env.PORT || "8080"}`,
-  );
-  const marketingTarget = envOrFallback(
-    env.MARKETING_SITE_ORIGIN,
-    `http://localhost:${env.MARKETING_PORT || "3001"}`,
   );
 
   return {
@@ -45,34 +41,6 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true,
           ws: true,
-        },
-        "^/marketing$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/about$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/changelog$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/homepage$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/robots\\.txt$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/sitemap\\.xml$": {
-          target: marketingTarget,
-          changeOrigin: true,
-        },
-        "^/_next/.*": {
-          target: marketingTarget,
-          changeOrigin: true,
         },
       },
     },

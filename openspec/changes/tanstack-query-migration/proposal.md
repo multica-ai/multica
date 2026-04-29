@@ -17,7 +17,7 @@ This work does not conflict with `gradual-project-management-transition`, `issue
 - Migrate server-backed client data from long-lived Zustand stores and bespoke fetch hooks to query and mutation modules aligned with the current feature structure.
 - Keep Zustand only for client-only state such as modal visibility, navigation/view preferences, drafts, selection state, active IDs, and other persisted UI state.
 - Replace websocket-to-store synchronization with websocket-driven query cache updates or invalidation, plus query-based reconnect recovery.
-- Keep `apps/web`, monorepo package extraction, and any future `packages/core` work out of scope for this change.
+- Keep monorepo package extraction and any future `packages/core` work out of scope for this change.
 
 ## Capabilities
 

@@ -1,6 +1,6 @@
 ## Context
 
-Multica's product surface now lives primarily in `apps/workspace`, while `apps/web` serves the marketing site. Rich issue descriptions and threaded comments already support file uploads through the shared workspace upload hook and the server-side `/api/upload-file` endpoint. Uploaded files are persisted through the `attachment` table and stored in S3-compatible object storage.
+Multica's product surface now lives in `apps/workspace`. Rich issue descriptions and threaded comments already support file uploads through the shared workspace upload hook and the server-side `/api/upload-file` endpoint. Uploaded files are persisted through the `attachment` table and stored in S3-compatible object storage.
 
 The current implementation has three practical mismatches with product expectations:
 
@@ -12,7 +12,7 @@ There is also a list-performance problem: `ListIssues` still selects full issue 
 
 Constraints that shape the design:
 
-- `apps/workspace` is the product app for this change; `apps/web` should not become the target for issue-upload UX work.
+- `apps/workspace` is the product app for this change.
 - The backend already uses the `attachment` model for comment-linked files, CLI download flows, and agent attachment discovery, so comment and reply uploads must keep their linkage behavior.
 - `issue` remains the canonical work item, and the active project-management change already depends on additive, backward-compatible list semantics.
 - This change should harden current behavior, not redesign the editor UI or replace the attachment model entirely.
@@ -32,7 +32,6 @@ Constraints that shape the design:
 - A new upload UI, file-card renderer, lightbox, or drag-and-drop redesign.
 - Removing the `attachment` table or generic upload endpoint.
 - Changing how comment and reply attachments are linked or discovered.
-- Reworking `apps/web` marketing pages.
 - Full attachment garbage collection for unlinked workspace uploads.
 
 ## Decisions
@@ -99,12 +98,12 @@ Alternatives considered:
 
 ### 5. Scope the frontend work to `apps/workspace`
 
-The upload/editor behavior change will be defined for `apps/workspace`, because that is where the current issue editing and threaded discussion product lives. `apps/web` remains out of scope unless a later change adds shared upload behavior back into the marketing site or another product surface.
+The upload/editor behavior change will be defined for `apps/workspace`, because that is where the current issue editing and threaded discussion product lives.
 
 Why this approach:
 
 - It matches the current repository architecture.
-- It avoids reviving outdated assumptions from older plans that treated `apps/web` as the main product client.
+- It avoids reviving outdated assumptions from older plans that treated another frontend as the main product client.
 - It keeps the change small and directly implementable.
 
 ## Risks / Trade-offs

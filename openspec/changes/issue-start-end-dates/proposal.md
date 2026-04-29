@@ -6,7 +6,7 @@ Issues currently support a single `due_date`, which is not enough for teams that
 
 - Add `start_date` and `end_date` as optional issue fields alongside `due_date`.
 - Allow clients to create, update, clear, and read both fields through the issue API.
-- Show and edit the new fields in issue creation and issue detail flows in both frontend apps.
+- Show and edit the new fields in issue creation and issue detail flows in the workspace frontend.
 - Persist the new fields in the database and expose them through generated models, realtime payloads, and related issue views.
 - Keep the change scoped to date-window support for issues, without introducing duration calculations or reporting in this change.
 
@@ -21,5 +21,5 @@ Issues currently support a single `due_date`, which is not enough for teams that
 
 - Database schema and SQL queries for issues.
 - Backend issue request/response types, update events, and generated sqlc artifacts.
-- Frontend issue types, create/edit forms, detail views, and list/card presentation in `apps/web` and `apps/workspace`.
+- Frontend issue types, create/edit forms, detail views, and list/card presentation in `apps/workspace`.
 - Tests covering issue CRUD flows and date field behavior.
