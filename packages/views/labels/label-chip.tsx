@@ -1,7 +1,7 @@
 "use client";
 
 import type { Label } from "@multica/core/types";
-import { X } from "lucide-react";
+import { X, Sparkles } from "lucide-react";
 
 /**
  * Map a label's `#rrggbb` color to a readable text color.
@@ -48,20 +48,36 @@ interface LabelChipProps {
  * Renders a single label as a colored pill. If `onRemove` is provided, shows
  * an × button that calls it. Used in the issue-detail sidebar, the picker,
  * and the management dialog.
+ *
+ * Labels with non-empty `instructions` get a Sparkles icon — a visual
+ * "this label carries agent instructions" cue. Hovering the chip reveals
+ * the instructions in the native title tooltip.
  */
 export function LabelChip({ label, onRemove, className, fullName }: LabelChipProps) {
   const textColor = contrastTextColor(label.color);
   const nameClass = fullName ? "break-all" : "truncate max-w-[12rem]";
+  const hasInstructions = Boolean(label.instructions && label.instructions.trim());
+  // Tooltip + accessible label combine name + instructions so hover reveals
+  // exactly what the agent will receive. Native `title` is used (not a
+  // custom Tooltip component) so chips stay cheap to render anywhere.
+  const tooltipText = hasInstructions
+    ? `${label.name}\n\n📋 Agent instructions:\n${label.instructions}`
+    : label.name;
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${className ?? ""}`}
       style={{ backgroundColor: label.color, color: textColor }}
-      // aria-label exposes the full name to screen readers when the span
-      // visually truncates. title stays for sighted hover-tooltip.
-      aria-label={label.name}
-      title={label.name}
+      aria-label={tooltipText}
+      title={tooltipText}
     >
       <span className={nameClass}>{label.name}</span>
+      {hasInstructions && (
+        <Sparkles
+          className="h-2.5 w-2.5 shrink-0 opacity-90"
+          strokeWidth={2.5}
+          aria-hidden
+        />
+      )}
       {onRemove && (
         <button
           type="button"
@@ -69,9 +85,6 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
             e.stopPropagation();
             onRemove();
           }}
-          // bg-current/20 uses the computed text color so the hover state is
-          // visible on both light and dark chip backgrounds. hover:bg-black/10
-          // was invisible on darker chips (anything requiring light text).
           className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-current/20 focus:outline-none focus:ring-1 focus:ring-current"
           aria-label={`Remove label ${label.name}`}
         >

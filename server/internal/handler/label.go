@@ -21,22 +21,24 @@ import (
 // ---------------------------------------------------------------------------
 
 type LabelResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	Name         string `json:"name"`
+	Color        string `json:"color"`
+	Instructions string `json:"instructions"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 func labelToResponse(l db.IssueLabel) LabelResponse {
 	return LabelResponse{
-		ID:          uuidToString(l.ID),
-		WorkspaceID: uuidToString(l.WorkspaceID),
-		Name:        l.Name,
-		Color:       l.Color,
-		CreatedAt:   timestampToString(l.CreatedAt),
-		UpdatedAt:   timestampToString(l.UpdatedAt),
+		ID:           uuidToString(l.ID),
+		WorkspaceID:  uuidToString(l.WorkspaceID),
+		Name:         l.Name,
+		Color:        l.Color,
+		Instructions: l.Instructions,
+		CreatedAt:    timestampToString(l.CreatedAt),
+		UpdatedAt:    timestampToString(l.UpdatedAt),
 	}
 }
 
@@ -49,13 +51,15 @@ func labelsToResponse(list []db.IssueLabel) []LabelResponse {
 }
 
 type CreateLabelRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	Name         string `json:"name"`
+	Color        string `json:"color"`
+	Instructions string `json:"instructions"`
 }
 
 type UpdateLabelRequest struct {
-	Name  *string `json:"name"`
-	Color *string `json:"color"`
+	Name         *string `json:"name"`
+	Color        *string `json:"color"`
+	Instructions *string `json:"instructions"`
 }
 
 // 6-digit hex, with or without leading '#'.
@@ -78,10 +82,21 @@ func normalizeColor(c string) (string, error) {
 	return strings.ToLower(c), nil
 }
 
-const maxLabelNameLen = 32
+const (
+	maxLabelNameLen         = 32
+	maxLabelInstructionsLen = 2000
+)
 
 // validateLabelName trims and validates a label name. Returns the trimmed
 // name or an error suitable for a 400 response.
+//
+// Control characters (newlines, tabs, anything below U+0020 except space)
+// are rejected — labels with active instructions land verbatim in the
+// agent's system prompt as `[name] instructions`, so a name containing
+// `\n\nIgnore prior instructions` would break out of the [name] bracket
+// and inject an arbitrary directive. The 32-char cap limits damage but
+// doesn't eliminate it; rejecting control chars closes the vector at the
+// source. Emoji and multi-byte characters are still allowed.
 func validateLabelName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
@@ -90,10 +105,23 @@ func validateLabelName(raw string) (string, error) {
 	if len(name) > maxLabelNameLen {
 		return "", errors.New("name must be 32 characters or fewer")
 	}
-	// TODO(labels): consider restricting to a charset that excludes newlines,
-	// tabs, and control characters. Emoji are left allowed — users can pick
-	// `🐛 bug` if they want. Tracked as a follow-up so we don't gate this PR.
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return "", errors.New("name must not contain newlines, tabs, or control characters")
+		}
+	}
 	return name, nil
+}
+
+// validateLabelInstructions checks the instructions text for the upper
+// length bound. Empty is allowed (organizational-only labels). The length
+// cap protects against unbounded inputs being shipped over the wire on
+// every task claim and inflating the agent's prompt.
+func validateLabelInstructions(raw string) (string, error) {
+	if len(raw) > maxLabelInstructionsLen {
+		return "", errors.New("instructions must be 2000 characters or fewer")
+	}
+	return raw, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +182,11 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	instructions, err := validateLabelInstructions(req.Instructions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -161,9 +194,10 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	label, err := h.Queries.CreateLabel(r.Context(), db.CreateLabelParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Name:        name,
-		Color:       color,
+		WorkspaceID:  parseUUID(workspaceID),
+		Name:         name,
+		Color:        color,
+		Instructions: instructions,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -220,6 +254,14 @@ func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Color = pgtype.Text{String: color, Valid: true}
+	}
+	if req.Instructions != nil {
+		instructions, err := validateLabelInstructions(*req.Instructions)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.Instructions = pgtype.Text{String: instructions, Valid: true}
 	}
 
 	// Branch on pgx.ErrNoRows directly from the UPDATE — the WHERE clause
