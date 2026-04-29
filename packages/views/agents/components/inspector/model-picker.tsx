@@ -78,9 +78,7 @@ export function ModelPicker({
     );
   }
 
-  const triggerLabel =
-    value ||
-    (defaultModel ? `Default — ${defaultModel.label}` : "Default");
+  const triggerLabel = value || "Default";
   const triggerTitle = `Model · ${triggerLabel}`;
 
   return (
