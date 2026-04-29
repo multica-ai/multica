@@ -39,6 +39,7 @@ import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
+import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
 import { createBlurShortcutExtension } from "./blur-shortcut";
 import { createFileUploadExtension } from "./file-upload";
@@ -129,6 +130,10 @@ export function createEditorExtensions(
     InlineMathExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
+    // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain.
+    // Registered for both editable and readonly so users can copy from rendered
+    // comments and paste the original Markdown elsewhere.
+    createMarkdownCopyExtension(),
     FileCardExtension,
     ...(options.disableMentions
       ? []
