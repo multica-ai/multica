@@ -41,13 +41,12 @@ export function ModelPicker({
   );
   const supported = modelsQuery.data?.supported ?? true;
   // Memoise the model list so every downstream useMemo gets a stable
-  // reference — `?? []` would mint a fresh array on every render and
-  // invalidate filters / defaultModel needlessly.
+  // reference; `?? []` would mint a fresh array on every render and
+  // invalidate filters needlessly.
   const models = useMemo(
     () => modelsQuery.data?.models ?? [],
     [modelsQuery.data],
   );
-  const defaultModel = useMemo(() => models.find((m) => m.default), [models]);
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
