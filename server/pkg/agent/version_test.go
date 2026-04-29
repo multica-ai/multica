@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -47,6 +48,30 @@ func TestSemverLessThan(t *testing.T) {
 		got := tt.a.lessThan(tt.b)
 		if got != tt.want {
 			t.Errorf("%v.lessThan(%v) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestCheckMinCLIVersion(t *testing.T) {
+	tests := []struct {
+		detected string
+		wantErr  error
+	}{
+		{"0.2.20", nil},
+		{"0.2.21", nil},
+		{"1.0.0", nil},
+		{"dev", nil},              // dev builds always pass
+		{"0.2.19", ErrCLIVersionTooOld},
+		{"0.1.0", ErrCLIVersionTooOld},
+		{"", ErrCLIVersionMissing},
+		{"invalid", ErrCLIVersionMissing},
+	}
+	for _, tt := range tests {
+		err := CheckMinCLIVersion(tt.detected)
+		if tt.wantErr == nil && err != nil {
+			t.Errorf("CheckMinCLIVersion(%q) unexpected error: %v", tt.detected, err)
+		} else if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+			t.Errorf("CheckMinCLIVersion(%q) = %v, want %v", tt.detected, err, tt.wantErr)
 		}
 	}
 }

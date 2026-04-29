@@ -40,9 +40,16 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
  * Check a daemon-reported CLI version string against the minimum. Returns
  * `"missing"` for empty/unparsable input (fail closed — same policy as the
  * server) and `"too_old"` for a parsable version below the threshold.
+ *
+ * `"dev"` (from `go run` / untagged builds) is treated as always-ok: dev
+ * builds are built from HEAD and are at least as new as any released version.
  */
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
   const current = (detected ?? "").trim();
+  // Dev builds (go run, untagged) report "dev" — always pass the gate.
+  if (current === "dev") {
+    return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+  }
   const parsed = current ? parseSemver(current) : null;
   if (!parsed) {
     return { state: "missing", current, min: MIN_QUICK_CREATE_CLI_VERSION };

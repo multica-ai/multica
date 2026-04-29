@@ -41,6 +41,10 @@ func CheckMinCLIVersion(detected string) error {
 	if d == "" {
 		return ErrCLIVersionMissing
 	}
+	// Dev builds (go run, untagged) report "dev" — always pass the gate.
+	if d == "dev" {
+		return nil
+	}
 	parsed, err := parseSemver(d)
 	if err != nil {
 		return ErrCLIVersionMissing
