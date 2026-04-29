@@ -132,6 +132,9 @@ multica daemon status
 1. Open your workspace in the web app at http://localhost:3000
 2. Navigate to **Settings → Runtimes** — you should see your machine listed
 3. Go to **Settings → Agents** and create a new agent
+   - Tip: see [docs/cost-controls.md](docs/cost-controls.md) for how to
+     cap per-task token spend via the agent's `custom_args` (e.g.
+     `--max-turns`, `--max-budget-usd` for Claude Code).
 4. Create an issue and assign it to your agent — it will pick up the task automatically
 
 ## Stopping Services
