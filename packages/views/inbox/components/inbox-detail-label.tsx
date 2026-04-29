@@ -4,6 +4,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
+import { getQuickCreateFailureDetail } from "./inbox-display";
 
 const typeLabels: Record<InboxItemType, string> = {
   issue_assigned: "Assigned",
@@ -20,8 +21,8 @@ const typeLabels: Record<InboxItemType, string> = {
   agent_blocked: "Agent blocked",
   agent_completed: "Agent completed",
   reaction_added: "Reacted",
-  quick_create_done: "Quick create done",
-  quick_create_failed: "Quick create failed",
+  quick_create_done: "Created with agent",
+  quick_create_failed: "Create with agent failed",
 };
 
 export { typeLabels };
@@ -90,7 +91,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "quick_create_done": {
       const identifier = details.identifier;
-      if (identifier) return <span>Created {identifier}</span>;
+      if (identifier) return <span>Created with agent: {identifier}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "quick_create_failed": {
+      const detail = getQuickCreateFailureDetail(item);
+      if (detail) return <span>Failed: {detail}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     default:

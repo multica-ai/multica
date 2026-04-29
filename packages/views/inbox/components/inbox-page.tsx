@@ -51,6 +51,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
+import { getInboxDisplayTitle } from "./inbox-display";
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
@@ -260,7 +261,7 @@ export function InboxPage() {
     />
   ) : selected ? (
     <div className="p-6">
-      <h2 className="text-lg font-semibold">{selected.title}</h2>
+      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>

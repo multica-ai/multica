@@ -1424,10 +1424,11 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	prefix := s.getIssuePrefix(workspaceID)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
-		"task_id":    util.UUIDToString(task.ID),
-		"agent_id":   util.UUIDToString(task.AgentID),
-		"issue_id":   util.UUIDToString(issue.ID),
-		"identifier": identifier,
+		"task_id":         util.UUIDToString(task.ID),
+		"agent_id":        util.UUIDToString(task.AgentID),
+		"issue_id":        util.UUIDToString(issue.ID),
+		"identifier":      identifier,
+		"original_prompt": qc.Prompt,
 	})
 	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		WorkspaceID:   workspaceID,
