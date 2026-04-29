@@ -18,9 +18,9 @@
 #
 # Connection secret: Crossplane writes primary_endpoint_address,
 # reader_endpoint_address, port, and attribute.auth_token into
-# agentfarm-redis-connection once Available. Not consumed directly today —
-# REDIS_URL is pushed to SSM (/agentfarm/tools/REDIS_URL) and surfaced via
-# the existing secret-store.yaml bulk pull.
+# agentfarm-redis-connection once Available. Consumed by
+# deployment-backend.yaml via secretKeyRef + $(VAR) — see the REDIS_URL
+# block there for the composition and TLS-future-compat note.
 #
 # Sync wave 3 — after SG, SubnetGroup.
 apiVersion: elasticache.aws.upbound.io/v1beta2

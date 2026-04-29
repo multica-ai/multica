@@ -94,6 +94,22 @@ spec:
               value: agentfarm
             - name: DATABASE_URL
               value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+            # Redis: same $(VAR) pattern as DATABASE_URL above. Source of truth
+            # is agentfarm-redis-connection — no SSM REDIS_URL (avoids drift).
+            # If transitEncryptionEnabled is enabled, switch to:
+            #   value: "rediss://default:$(REDIS_AUTH_TOKEN)@$(REDIS_HOST):$(REDIS_PORT)"
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-redis-connection
+                  key: primary_endpoint_address
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-redis-connection
+                  key: port
+            - name: REDIS_URL
+              value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
           livenessProbe:
             httpGet:
               path: /health
