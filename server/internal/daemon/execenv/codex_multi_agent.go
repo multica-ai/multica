@@ -29,6 +29,21 @@ import (
 // Users who explicitly want Codex native subagents inside a Multica task
 // (and accept the lifecycle risk) can keep the feature enabled by setting
 // `MULTICA_CODEX_MULTI_AGENT=1` in the daemon environment.
+//
+// Layout note
+//
+// TOML rejects redefining a table that has already been created — including
+// implicitly via a dotted key. So the managed block must adapt to the
+// user's existing config:
+//
+//   - If the user's config contains a top-level `[features]` table, the
+//     managed `multi_agent = false` is injected INSIDE that table (with
+//     marker comments). Writing `features.multi_agent = false` at the
+//     TOML root would implicitly redefine the same `features` table and
+//     the strict TOML parser used by Codex (`toml-rs`) would fail with
+//     `table 'features' already exists`.
+//   - Otherwise, the managed block lives at the top of the file with the
+//     dotted-key form `features.multi_agent = false`.
 
 // MulticaCodexMultiAgentEnv is the env var users can set to keep Codex
 // native multi-agent enabled inside daemon-managed tasks. Anything truthy
@@ -45,7 +60,9 @@ const (
 )
 
 // `\n*` rather than `\n?` so reruns don't accumulate blank lines when this
-// block coexists with the sandbox managed block in the same file.
+// block coexists with the sandbox managed block in the same file. The same
+// regex matches the block whether it sits at the file root (dotted-key
+// form) or inside a `[features]` table — only the body keys differ.
 var multiAgentBlockRe = regexp.MustCompile(
 	`(?ms)^` + regexp.QuoteMeta(multicaMultiAgentBeginMarker) +
 		`.*?^` + regexp.QuoteMeta(multicaMultiAgentEndMarker) + `\n*`)
@@ -70,15 +87,18 @@ func codexMultiAgentEnabled() bool {
 	return false
 }
 
-// renderMulticaMultiAgentBlock returns the daemon-managed multi-agent block.
-// Like the sandbox block, it contains only top-level dotted-key assignments
-// so it can sit at the file root without leaking into or inheriting from
-// any surrounding TOML table scope.
-func renderMulticaMultiAgentBlock() string {
+// renderMulticaMultiAgentBlock returns the daemon-managed multi-agent
+// block. The body uses `multi_agent = false` when injected inside a
+// `[features]` table, and `features.multi_agent = false` otherwise.
+func renderMulticaMultiAgentBlock(inFeaturesTable bool) string {
 	var b strings.Builder
 	b.WriteString(multicaMultiAgentBeginMarker)
 	b.WriteString("\n")
-	b.WriteString("features.multi_agent = false\n")
+	if inFeaturesTable {
+		b.WriteString("multi_agent = false\n")
+	} else {
+		b.WriteString("features.multi_agent = false\n")
+	}
 	b.WriteString(multicaMultiAgentEndMarker)
 	b.WriteString("\n")
 	return b.String()
@@ -87,8 +107,7 @@ func renderMulticaMultiAgentBlock() string {
 // stripUserMultiAgentDirectives removes any `features.multi_agent = ...`
 // line at the TOML root (dotted-key form), plus any `multi_agent = ...`
 // line that sits inside a top-level `[features]` table. Both forms encode
-// the same TOML key and would conflict with the managed block, since TOML
-// rejects duplicate top-level keys.
+// the same TOML key and would conflict with the managed block.
 //
 // Other tables (`[features.experimental]`, `[profiles.foo]`, ...) are
 // preserved untouched: they live under their own scope and don't redefine
@@ -119,17 +138,40 @@ func stripUserMultiAgentDirectives(content string) string {
 	return strings.Join(out, "\n")
 }
 
-// upsertMulticaMultiAgentBlock places the daemon-managed multi-agent block
-// at the top of the file, idempotently. Any previously written managed
-// block is removed in place; user content outside the markers is preserved.
-func upsertMulticaMultiAgentBlock(content string) string {
-	content = multiAgentBlockRe.ReplaceAllString(content, "")
-	content = strings.TrimLeft(content, "\n")
-	block := renderMulticaMultiAgentBlock()
-	if content == "" {
-		return block
+// hasRootFeaturesTable reports whether the file contains a top-level
+// `[features]` table header. Sub-tables like `[features.experimental]` do
+// NOT count: they implicitly create `features` but don't conflict with a
+// root-level `features.multi_agent` dotted key.
+func hasRootFeaturesTable(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == "[features]" {
+			return true
+		}
 	}
-	return block + "\n" + content
+	return false
+}
+
+// injectManagedBlockIntoFeaturesTable inserts the in-table managed block
+// immediately after the first `[features]` header line. Caller must have
+// already stripped any prior managed block and any user-set `multi_agent`
+// directive from inside the table.
+func injectManagedBlockIntoFeaturesTable(content string) string {
+	block := renderMulticaMultiAgentBlock(true)
+	// Drop the trailing `\n` so we don't introduce a stray blank line when
+	// splicing block lines between existing lines.
+	blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "[features]" {
+			continue
+		}
+		out := make([]string, 0, len(lines)+len(blockLines))
+		out = append(out, lines[:i+1]...)
+		out = append(out, blockLines...)
+		out = append(out, lines[i+1:]...)
+		return strings.Join(out, "\n")
+	}
+	return content
 }
 
 // ensureCodexMultiAgentConfig writes the daemon-managed multi-agent block
@@ -157,15 +199,26 @@ func ensureCodexMultiAgentConfig(configPath string, logger *slog.Logger) error {
 	}
 	existing := string(data)
 
-	// Strip user-set directives only when our managed block isn't already
-	// present. Once the managed block exists, repeat runs just rewrite the
-	// block in place; the user's directives have already been removed in
-	// the original write.
-	if existing != "" && !multiAgentBlockRe.MatchString(existing) {
-		existing = stripUserMultiAgentDirectives(existing)
+	// Always strip any previously written managed block (root or in-table
+	// form) so reruns and layout transitions stay clean.
+	existing = multiAgentBlockRe.ReplaceAllString(existing, "")
+	// Strip user-set directives in both encodings; the managed block re-adds
+	// the canonical form below.
+	existing = stripUserMultiAgentDirectives(existing)
+
+	var updated string
+	if hasRootFeaturesTable(existing) {
+		updated = injectManagedBlockIntoFeaturesTable(existing)
+	} else {
+		existing = strings.TrimLeft(existing, "\n")
+		block := renderMulticaMultiAgentBlock(false)
+		if existing == "" {
+			updated = block
+		} else {
+			updated = block + "\n" + existing
+		}
 	}
 
-	updated := upsertMulticaMultiAgentBlock(existing)
 	if updated == string(data) {
 		return nil
 	}
