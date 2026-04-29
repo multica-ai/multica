@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -289,6 +290,11 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	// Rate limit: max 1 code per 60 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
 	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
+		remaining := 60 - int(math.Ceil(time.Since(latest.CreatedAt.Time).Seconds()))
+		if remaining < 1 {
+			remaining = 1
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", remaining))
 		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
 		return
 	}
