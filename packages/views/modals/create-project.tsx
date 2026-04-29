@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCreateProject } from "@multica/core/projects/mutations";
+import { useProjectDraftStore } from "@multica/core/projects";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
@@ -63,16 +64,30 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
 
-  const [title, setTitle] = useState("");
+  const draft = useProjectDraftStore((s) => s.draft);
+  const setDraft = useProjectDraftStore((s) => s.setDraft);
+  const clearDraft = useProjectDraftStore((s) => s.clearDraft);
+
+  const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const [status, setStatus] = useState<ProjectStatus>("planned");
-  const [priority, setPriority] = useState<ProjectPriority>("none");
-  const [leadType, setLeadType] = useState<"member" | "agent" | undefined>();
-  const [leadId, setLeadId] = useState<string | undefined>();
-  const [icon, setIcon] = useState<string | undefined>();
+  const [status, setStatus] = useState<ProjectStatus>(draft.status);
+  const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
+  const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
+  const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
+  const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Sync field changes to draft store
+  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
+  const updateStatus = (v: ProjectStatus) => { setStatus(v); setDraft({ status: v }); };
+  const updatePriority = (v: ProjectPriority) => { setPriority(v); setDraft({ priority: v }); };
+  const updateLead = (type?: "member" | "agent", id?: string) => {
+    setLeadType(type); setLeadId(id);
+    setDraft({ leadType: type, leadId: id });
+  };
+  const updateIcon = (v: string | undefined) => { setIcon(v); setDraft({ icon: v }); };
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -100,6 +115,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_type: leadType,
         lead_id: leadId,
       });
+      clearDraft();
       onClose();
       toast.success("Project created");
       router.push(wsPaths.projectDetail(project.id));
@@ -177,7 +193,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             <PopoverContent align="start" className="w-auto p-0">
               <EmojiPicker
                 onSelect={(emoji) => {
-                  setIcon(emoji);
+                  updateIcon(emoji);
                   setIconPickerOpen(false);
                 }}
               />
@@ -185,10 +201,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </Popover>
           <TitleEditor
             autoFocus
-            defaultValue=""
+            defaultValue={draft.title}
             placeholder="Project title"
             className="text-lg font-semibold"
-            onChange={(v) => setTitle(v)}
+            onChange={(v) => updateTitle(v)}
             onSubmit={handleSubmit}
           />
         </div>
@@ -196,8 +212,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <div className="flex-1 min-h-0 overflow-y-auto px-5">
           <ContentEditor
             ref={descEditorRef}
-            defaultValue=""
+            defaultValue={draft.description}
             placeholder="Add description..."
+            onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
         </div>
@@ -214,7 +231,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             />
             <DropdownMenuContent align="start" className="w-44">
               {PROJECT_STATUS_ORDER.map((s) => (
-                <DropdownMenuItem key={s} onClick={() => setStatus(s)}>
+                <DropdownMenuItem key={s} onClick={() => updateStatus(s)}>
                   <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
                   <span>{PROJECT_STATUS_CONFIG[s].label}</span>
                 </DropdownMenuItem>
@@ -233,7 +250,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             />
             <DropdownMenuContent align="start" className="w-44">
               {PROJECT_PRIORITY_ORDER.map((pr) => (
-                <DropdownMenuItem key={pr} onClick={() => setPriority(pr)}>
+                <DropdownMenuItem key={pr} onClick={() => updatePriority(pr)}>
                   <PriorityIcon priority={pr} />
                   <span>{PROJECT_PRIORITY_CONFIG[pr].label}</span>
                 </DropdownMenuItem>
@@ -276,8 +293,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => {
-                    setLeadType(undefined);
-                    setLeadId(undefined);
+                    updateLead(undefined, undefined);
                     setLeadOpen(false);
                   }}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -295,8 +311,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         type="button"
                         key={m.user_id}
                         onClick={() => {
-                          setLeadType("member");
-                          setLeadId(m.user_id);
+                          updateLead("member", m.user_id);
                           setLeadOpen(false);
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -317,8 +332,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         type="button"
                         key={a.id}
                         onClick={() => {
-                          setLeadType("agent");
-                          setLeadId(a.id);
+                          updateLead("agent", a.id);
                           setLeadOpen(false);
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
