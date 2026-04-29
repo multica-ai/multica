@@ -6,7 +6,7 @@ import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config/statu
 import { useIssueList } from "@multica/core/issues/hooks";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
-import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
+import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { WorkspaceHeader } from "../../components/ui/workspace-header";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
@@ -25,13 +25,6 @@ export function IssuesScreen() {
     <Screen>
       <View style={styles.headerRow}>
         <WorkspaceHeader centered />
-        <Button
-          onPress={() => navigation.navigate("CreateIssue")}
-          style={styles.newButton}
-          variant="secondary"
-        >
-          New
-        </Button>
       </View>
       <View style={styles.statusTabs}>
         {BOARD_STATUSES.map((item) => (
@@ -64,6 +57,14 @@ export function IssuesScreen() {
           )}
         />
       ) : null}
+      <Pressable
+        accessibilityLabel="Create issue"
+        accessibilityRole="button"
+        onPress={() => navigation.navigate("CreateIssue")}
+        style={({ pressed }) => [styles.floatingButton, pressed && styles.floatingButtonPressed]}
+      >
+        <Text style={styles.floatingButtonText}>+</Text>
+      </Pressable>
     </Screen>
   );
 }
@@ -92,9 +93,31 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 20,
   },
-  newButton: {
+  floatingButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 28,
+    bottom: spacing.xl,
+    elevation: 8,
+    height: 56,
+    justifyContent: "center",
     position: "absolute",
-    right: 0,
+    right: spacing.xl,
+    shadowColor: "#000000",
+    shadowOffset: { height: 4, width: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    width: 56,
+    zIndex: 40,
+  },
+  floatingButtonPressed: {
+    opacity: 0.82,
+  },
+  floatingButtonText: {
+    color: colors.primaryForeground,
+    fontSize: 32,
+    fontWeight: "400",
+    lineHeight: 36,
   },
   statusTabs: {
     flexDirection: "row",
