@@ -22,6 +22,10 @@ const apiMocks = vi.hoisted(() => ({
   removeIssueReaction: vi.fn(),
   addIssueReaction: vi.fn(),
   cancelTask: vi.fn(),
+  addIssueLabel: vi.fn(),
+  removeIssueLabel: vi.fn(),
+  addIssueDependency: vi.fn(),
+  removeIssueDependency: vi.fn(),
 }));
 
 vi.mock("@/shared/api", () => ({
@@ -141,5 +145,34 @@ describe("useIssueMutations", () => {
       queryClient.getQueryData<{ issues: Issue[]; total: number }>(queryKeys.issues.list("ws-1", { limit: 200 }))?.issues,
     ).toEqual([existingIssue, nextIssue]);
     expect(queryClient.getQueryData<Issue>(queryKeys.issues.detail(nextIssue.id))).toEqual(nextIssue);
+  });
+
+  it("updates issue detail cache after adding a label", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const issue = createIssue();
+    const labeledIssue = createIssue({
+      labels: [{ id: "label-1", workspace_id: "ws-1", name: "Backend", color: "#2563eb" }],
+    });
+
+    queryClient.setQueryData(queryKeys.issues.list("ws-1", { limit: 200 }), {
+      issues: [issue],
+      total: 1,
+    });
+    queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+    apiMocks.addIssueLabel.mockResolvedValue(labeledIssue);
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useIssueMutations(), { wrapper });
+
+    await act(async () => {
+      await result.current.addIssueLabel(issue.id, { labelId: "label-1" });
+    });
+
+    expect(queryClient.getQueryData<Issue>(queryKeys.issues.detail(issue.id))?.labels).toEqual(labeledIssue.labels);
   });
 });

@@ -212,6 +212,53 @@ test.describe("Issues", () => {
     });
   });
 
+  test("can create child issues and manage labels and dependencies", async ({ page }) => {
+    const parent = await api.createIssue("E2E Parent " + Date.now());
+    const blocker = await api.createIssue("E2E Blocker " + Date.now());
+
+    await page.reload();
+    await page.getByRole("button", { name: "New issue" }).click();
+    const childTitle = "E2E Child " + Date.now();
+    await page.getByLabel("Issue title").fill(childTitle);
+    await page.getByRole("button", { name: "No parent" }).click();
+    await page.getByPlaceholder("Search parent issue...").fill(parent.title);
+    await page.getByRole("button", { name: new RegExp(parent.title) }).click();
+    await page.getByRole("button", { name: "Create Issue" }).click();
+
+    const childLink = page.getByRole("link", { name: new RegExp(childTitle) }).first();
+    await expect(childLink).toBeVisible({ timeout: 10000 });
+    await childLink.click();
+    await page.waitForURL(/\/issues\/[\w-]+/);
+
+    await page.getByRole("button", { name: "No labels" }).click();
+    await page.getByPlaceholder("Search or create label...").fill("Backend");
+    await page.getByRole("button", { name: /Create “Backend”/ }).click();
+    await expect(page.getByText("Backend").first()).toBeVisible();
+
+    await page.getByRole("button", { name: "Blocked by" }).click();
+    await page.getByPlaceholder("Add blocked by issue...").fill(blocker.title);
+    await page.getByRole("button", { name: new RegExp(blocker.title) }).click();
+    await expect(page.getByText(blocker.identifier).first()).toBeVisible();
+
+    const issueId = page.url().split("/").pop();
+    if (!issueId) {
+      throw new Error("Missing issue id from detail URL");
+    }
+
+    await expect.poll(async () => {
+      const issue = await api.getIssue(issueId);
+      return {
+        parent_issue_id: issue.parent_issue_id,
+        labels: issue.labels?.map((label: { name: string }) => label.name) ?? [],
+        blocked_by: issue.dependencies?.blocked_by?.map((entry: { issue: { id: string } }) => entry.issue.id) ?? [],
+      };
+    }).toEqual({
+      parent_issue_id: parent.id,
+      labels: ["Backend"],
+      blocked_by: [blocker.id],
+    });
+  });
+
   test("can navigate to issue detail page", async ({ page }) => {
     const title = "E2E Detail Test " + Date.now();
     const issue = await api.createIssue(title);

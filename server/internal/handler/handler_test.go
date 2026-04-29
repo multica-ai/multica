@@ -273,6 +273,90 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestIssueHierarchyLabelsAndDependencies(t *testing.T) {
+	parentRecorder := httptest.NewRecorder()
+	parentReq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Hierarchy Parent",
+	})
+	testHandler.CreateIssue(parentRecorder, parentReq)
+	if parentRecorder.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", parentRecorder.Code, parentRecorder.Body.String())
+	}
+
+	var parent IssueResponse
+	json.NewDecoder(parentRecorder.Body).Decode(&parent)
+
+	childRecorder := httptest.NewRecorder()
+	childReq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "Hierarchy Child",
+		"parent_issue_id": parent.ID,
+	})
+	testHandler.CreateIssue(childRecorder, childReq)
+	if childRecorder.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue child: expected 201, got %d: %s", childRecorder.Code, childRecorder.Body.String())
+	}
+
+	var child IssueResponse
+	json.NewDecoder(childRecorder.Body).Decode(&child)
+	if child.ParentIssueID == nil || *child.ParentIssueID != parent.ID {
+		t.Fatalf("CreateIssue child: expected parent_issue_id %q, got %#v", parent.ID, child.ParentIssueID)
+	}
+
+	parentDetailRecorder := httptest.NewRecorder()
+	parentDetailReq := withURLParam(newRequest("GET", "/api/issues/"+parent.ID, nil), "id", parent.ID)
+	testHandler.GetIssue(parentDetailRecorder, parentDetailReq)
+	if parentDetailRecorder.Code != http.StatusOK {
+		t.Fatalf("GetIssue parent detail: expected 200, got %d: %s", parentDetailRecorder.Code, parentDetailRecorder.Body.String())
+	}
+
+	var parentDetail IssueResponse
+	json.NewDecoder(parentDetailRecorder.Body).Decode(&parentDetail)
+	if len(parentDetail.ChildIssues) != 1 || parentDetail.ChildIssues[0].ID != child.ID {
+		t.Fatalf("GetIssue parent detail: expected child issue %q, got %#v", child.ID, parentDetail.ChildIssues)
+	}
+
+	cycleRecorder := httptest.NewRecorder()
+	cycleReq := withURLParam(newRequest("PUT", "/api/issues/"+parent.ID, map[string]any{
+		"parent_issue_id": child.ID,
+	}), "id", parent.ID)
+	testHandler.UpdateIssue(cycleRecorder, cycleReq)
+	if cycleRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateIssue cycle: expected 400, got %d: %s", cycleRecorder.Code, cycleRecorder.Body.String())
+	}
+
+	labelRecorder := httptest.NewRecorder()
+	labelReq := withURLParam(newRequest("POST", "/api/issues/"+child.ID+"/labels", map[string]any{
+		"name":  "Backend",
+		"color": "#2563eb",
+	}), "id", child.ID)
+	testHandler.AddIssueLabel(labelRecorder, labelReq)
+	if labelRecorder.Code != http.StatusOK {
+		t.Fatalf("AddIssueLabel: expected 200, got %d: %s", labelRecorder.Code, labelRecorder.Body.String())
+	}
+
+	var labeled IssueResponse
+	json.NewDecoder(labelRecorder.Body).Decode(&labeled)
+	if len(labeled.Labels) != 1 || labeled.Labels[0].Name != "Backend" {
+		t.Fatalf("AddIssueLabel: expected Backend label, got %#v", labeled.Labels)
+	}
+
+	dependencyRecorder := httptest.NewRecorder()
+	dependencyReq := withURLParam(newRequest("POST", "/api/issues/"+child.ID+"/dependencies", map[string]any{
+		"issue_id": parent.ID,
+		"type":     "blocked_by",
+	}), "id", child.ID)
+	testHandler.AddIssueDependency(dependencyRecorder, dependencyReq)
+	if dependencyRecorder.Code != http.StatusOK {
+		t.Fatalf("AddIssueDependency: expected 200, got %d: %s", dependencyRecorder.Code, dependencyRecorder.Body.String())
+	}
+
+	var dependencyIssue IssueResponse
+	json.NewDecoder(dependencyRecorder.Body).Decode(&dependencyIssue)
+	if dependencyIssue.Dependencies == nil || len(dependencyIssue.Dependencies.BlockedBy) != 1 || dependencyIssue.Dependencies.BlockedBy[0].Issue.ID != parent.ID {
+		t.Fatalf("AddIssueDependency: expected blocked_by parent issue, got %#v", dependencyIssue.Dependencies)
+	}
+}
+
 func TestProjectCRUDAndIssueLinking(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{

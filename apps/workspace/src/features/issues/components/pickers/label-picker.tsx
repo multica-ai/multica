@@ -25,7 +25,7 @@ function colorForLabelName(name: string): string {
     hash = ((hash << 5) - hash) + name.charCodeAt(index);
     hash |= 0;
   }
-  return DEFAULT_LABEL_COLORS[Math.abs(hash) % DEFAULT_LABEL_COLORS.length] ?? DEFAULT_LABEL_COLORS[0];
+  return DEFAULT_LABEL_COLORS[Math.abs(hash) % DEFAULT_LABEL_COLORS.length] || DEFAULT_LABEL_COLORS[0] || "#6b7280";
 }
 
 export function LabelPicker({

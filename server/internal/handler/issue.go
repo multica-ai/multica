@@ -483,6 +483,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var parentIssueID pgtype.UUID
+	var err error
 	if req.ParentIssueID != nil {
 		parentIssueID, err = h.validateParentIssue(r.Context(), workspaceID, nil, req.ParentIssueID)
 		if err != nil {

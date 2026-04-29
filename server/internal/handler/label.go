@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -61,7 +62,7 @@ func (h *Handler) findOrCreateLabel(ctx context.Context, workspaceID string, nam
 
 	existingLabels, err := h.Queries.GetLabelByNameInWorkspace(ctx, db.GetLabelByNameInWorkspaceParams{
 		WorkspaceID: parseUUID(workspaceID),
-		Name:        labelName,
+		Lower:       labelName,
 	})
 	if err != nil {
 		return db.IssueLabel{}, 0, err
