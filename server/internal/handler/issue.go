@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -510,7 +511,10 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
 
-	wsUUID := parseUUID(workspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 
@@ -597,32 +601,53 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	workspaceID := h.resolveWorkspaceID(r)
-	wsUUID := parseUUID(workspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 
-	// Parse optional filter params
+	// Parse optional filter params. Malformed UUIDs in filters return 400 —
+	// silently coercing them to a zero UUID would mask a client bug and let
+	// the query return an empty result set (or worse, match a NULL row).
 	var priorityFilter pgtype.Text
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
-		assigneeFilter = parseUUID(a)
+		id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
+		if !ok {
+			return
+		}
+		assigneeFilter = id
 	}
 	var assigneeIdsFilter []pgtype.UUID
 	if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
 		for _, raw := range strings.Split(ids, ",") {
 			if s := strings.TrimSpace(raw); s != "" {
-				assigneeIdsFilter = append(assigneeIdsFilter, parseUUID(s))
+				id, ok := parseUUIDOrBadRequest(w, s, "assignee_ids")
+				if !ok {
+					return
+				}
+				assigneeIdsFilter = append(assigneeIdsFilter, id)
 			}
 		}
 	}
 	var creatorFilter pgtype.UUID
 	if c := r.URL.Query().Get("creator_id"); c != "" {
-		creatorFilter = parseUUID(c)
+		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
+		if !ok {
+			return
+		}
+		creatorFilter = id
 	}
 	var projectFilter pgtype.UUID
 	if p := r.URL.Query().Get("project_id"); p != "" {
-		projectFilter = parseUUID(p)
+		id, ok := parseUUIDOrBadRequest(w, p, "project_id")
+		if !ok {
+			return
+		}
+		projectFilter = id
 	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
@@ -794,7 +819,10 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	wsID := h.resolveWorkspaceID(r)
-	wsUUID := parseUUID(wsID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace_id")
+	if !ok {
+		return
+	}
 
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
 	if err != nil {
@@ -846,6 +874,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 
 	// Get creator from context (set by auth middleware)
 	creatorID, ok := requireUserID(w, r)
@@ -868,14 +900,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		assigneeType = pgtype.Text{String: *req.AssigneeType, Valid: true}
 	}
 	if req.AssigneeID != nil {
-		assigneeID = parseUUID(*req.AssigneeID)
-		// parseUUID silently returns an invalid pgtype.UUID for malformed input.
-		// Reject explicitly so the validator below cannot mistake "type unset
-		// + id unparseable" for "no assignee" and accept the request.
-		if !assigneeID.Valid {
-			writeError(w, http.StatusBadRequest, "assignee_id is not a valid UUID")
+		id, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
+		if !ok {
 			return
 		}
+		assigneeID = id
 	}
 
 	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
@@ -886,14 +915,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
 	if req.ProjectID != nil {
-		projectID = parseUUID(*req.ProjectID)
+		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		projectID = id
 	}
 	if req.ParentIssueID != nil {
-		parentIssueID = parseUUID(*req.ParentIssueID)
+		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
+		if !ok {
+			return
+		}
+		parentIssueID = id
 		// Validate parent exists in the same workspace.
 		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID:          parentIssueID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 		})
 		if err != nil || !parent.ID.Valid {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
@@ -902,6 +939,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if req.ProjectID == nil {
 			projectID = parent.ProjectID
 		}
+	}
+
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
 	}
 
 	var dueDate pgtype.Timestamptz
@@ -924,7 +966,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
-	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 	if err != nil {
 		slog.Warn("increment issue counter failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -935,7 +977,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
+		WorkspaceID:        wsUUID,
 		Title:              req.Title,
 		Description:        ptrToText(req.Description),
 		Status:             status,
@@ -962,15 +1004,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Link any pre-uploaded attachments to this issue.
-	if len(req.AttachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, req.AttachmentIDs)
+	if len(attachmentIDs) > 0 {
+		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 
 	// Fetch linked attachments so they appear in the response.
-	if len(req.AttachmentIDs) > 0 {
+	if len(attachmentIDs) > 0 {
 		attachments, err := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
@@ -1071,11 +1113,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["assignee_id"]; ok {
 		if req.AssigneeID != nil {
-			params.AssigneeID = parseUUID(*req.AssigneeID)
-			if !params.AssigneeID.Valid {
-				writeError(w, http.StatusBadRequest, "assignee_id is not a valid UUID")
+			id, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
+			if !ok {
 				return
 			}
+			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
 		}
@@ -1094,9 +1136,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
 		if req.ParentIssueID != nil {
-			newParentID := parseUUID(*req.ParentIssueID)
-			// Cannot set self as parent.
-			if uuidToString(newParentID) == id {
+			newParentID, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
+			if !ok {
+				return
+			}
+			// Cannot set self as parent. Compare against prevIssue.ID (the
+			// resolved entity), not the raw URL string — `id` may be an
+			// identifier like "MUL-7".
+			if newParentID == prevIssue.ID {
 				writeError(w, http.StatusBadRequest, "an issue cannot be its own parent")
 				return
 			}
@@ -1115,7 +1162,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				if err != nil || !ancestor.ParentIssueID.Valid {
 					break
 				}
-				if uuidToString(ancestor.ParentIssueID) == id {
+				if ancestor.ParentIssueID == prevIssue.ID {
 					writeError(w, http.StatusBadRequest, "circular parent relationship detected")
 					return
 				}
@@ -1128,7 +1175,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["project_id"]; ok {
 		if req.ProjectID != nil {
-			params.ProjectID = parseUUID(*req.ProjectID)
+			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+			if !ok {
+				return
+			}
+			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
@@ -1235,11 +1286,15 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	if assigneeType.Valid != assigneeID.Valid {
 		return http.StatusBadRequest, "assignee_type and assignee_id must be provided together"
 	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return http.StatusBadRequest, "invalid workspace_id"
+	}
 	switch assigneeType.String {
 	case "member":
 		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID:      assigneeID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 		}); err != nil {
 			return http.StatusBadRequest, "assignee_id does not refer to a member of this workspace"
 		}
@@ -1247,7 +1302,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	case "agent":
 		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 			ID:          assigneeID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			return http.StatusBadRequest, "assignee_id does not refer to an agent of this workspace"
@@ -1341,8 +1396,12 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id})
-	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
+	// Always emit the resolved UUID — frontend caches key by UUID, so an
+	// identifier-style payload ("MUL-123") would leave stale entries on
+	// other clients after an identifier-path delete.
+	resolvedID := uuidToString(issue.ID)
+	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
+	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1387,11 +1446,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	updated := 0
 	for _, issueID := range req.IssueIDs {
+		issueUUID, err := util.ParseUUID(issueID)
+		if err != nil {
+			continue
+		}
 		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          parseUUID(issueID),
-			WorkspaceID: parseUUID(workspaceID),
+			ID:          issueUUID,
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			continue
@@ -1430,10 +1497,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := rawUpdates["assignee_id"]; ok {
 			if req.Updates.AssigneeID != nil {
-				params.AssigneeID = parseUUID(*req.Updates.AssigneeID)
-				if !params.AssigneeID.Valid {
+				assigneeUUID, err := util.ParseUUID(*req.Updates.AssigneeID)
+				if err != nil {
 					continue
 				}
+				params.AssigneeID = assigneeUUID
 			} else {
 				params.AssigneeID = pgtype.UUID{Valid: false}
 			}
@@ -1452,9 +1520,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		if _, ok := rawUpdates["parent_issue_id"]; ok {
 			if req.Updates.ParentIssueID != nil {
-				newParentID := parseUUID(*req.Updates.ParentIssueID)
+				newParentID, err := util.ParseUUID(*req.Updates.ParentIssueID)
+				if err != nil {
+					continue
+				}
 				// Cannot set self as parent.
-				if uuidToString(newParentID) == issueID {
+				if newParentID == prevIssue.ID {
 					continue
 				}
 				// Validate parent exists in the same workspace.
@@ -1472,7 +1543,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					if err != nil || !ancestor.ParentIssueID.Valid {
 						break
 					}
-					if uuidToString(ancestor.ParentIssueID) == issueID {
+					if ancestor.ParentIssueID == prevIssue.ID {
 						cycleDetected = true
 						break
 					}
@@ -1488,7 +1559,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := rawUpdates["project_id"]; ok {
 			if req.Updates.ProjectID != nil {
-				params.ProjectID = parseUUID(*req.Updates.ProjectID)
+				projectUUID, err := util.ParseUUID(*req.Updates.ProjectID)
+				if err != nil {
+					continue
+				}
+				params.ProjectID = projectUUID
 			} else {
 				params.ProjectID = pgtype.UUID{Valid: false}
 			}
@@ -1575,11 +1650,19 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
+		issueUUID, err := util.ParseUUID(issueID)
+		if err != nil {
+			continue
+		}
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          parseUUID(issueID),
-			WorkspaceID: parseUUID(workspaceID),
+			ID:          issueUUID,
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			continue
@@ -1598,8 +1681,9 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 		h.deleteS3Objects(r.Context(), attachmentURLs)
 
+		// Always emit the resolved UUID — frontend caches key by UUID.
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": issueID})
+		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
 		deleted++
 	}
 

@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow } from "electron";
+import { app, ipcMain, BrowserWindow, shell } from "electron";
 import { execFile } from "child_process";
 import {
   readFile,
@@ -912,6 +912,20 @@ export function setupDaemonManager(
 
   ipcMain.on("daemon:stop-log-stream", () => {
     stopLogTail();
+  });
+
+  // Reveal the daemon's log file in the user's default editor / Console
+  // app. Acts as the escape hatch when the in-app log viewer isn't enough
+  // (full history, complex search, copy-to-clipboard at scale).
+  ipcMain.handle("daemon:open-log-file", async () => {
+    const active = await ensureActiveProfile();
+    const logPath = profileLogPath(active.name);
+    if (!existsSync(logPath)) {
+      return { success: false, error: "Log file not found yet" };
+    }
+    // shell.openPath returns "" on success, error string on failure.
+    const error = await shell.openPath(logPath);
+    return error === "" ? { success: true } : { success: false, error };
   });
 
   // First-run CLI install kicks off here. Status bar shows "Setting up…"

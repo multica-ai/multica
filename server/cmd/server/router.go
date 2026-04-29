@@ -15,8 +15,10 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -62,8 +64,22 @@ func allowedOrigins() []string {
 // keeps the default in-memory stores which are fine for single-node dev and
 // tests.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
+	return NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
+}
+
+type RouterOptions struct {
+	HTTPMetrics  *obsmetrics.HTTPMetrics
+	DaemonHub    *daemonws.Hub
+	DaemonWakeup service.TaskWakeupNotifier
+}
+
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
+	daemonHub := opts.DaemonHub
+	if daemonHub == nil {
+		daemonHub = daemonws.NewHub()
+	}
 
 	// Initialize storage with S3 as primary, fallback to local
 	var store storage.Storage
@@ -84,7 +100,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 	}
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig)
+	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	if opts.DaemonWakeup != nil {
+		h.TaskService.Wakeup = opts.DaemonWakeup
+	}
 	if rdb != nil {
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
@@ -97,6 +116,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	r.Use(chimw.RequestID)
 	r.Use(middleware.ClientMetadata)
 	r.Use(middleware.RequestLogger)
+	if opts.HTTPMetrics != nil {
+		r.Use(opts.HTTPMetrics.Middleware)
+	}
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.ContentSecurityPolicy)
 	origins := allowedOrigins()
@@ -166,6 +188,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)
+		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
@@ -361,6 +384,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
+					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
@@ -393,6 +417,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 				r.Get("/", h.ListAgentRuntimes)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Get("/usage", h.GetRuntimeUsage)
+					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)
+					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
@@ -408,6 +434,18 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
+
+			// Workspace-wide agent task snapshot for presence derivation:
+			// every active task + each agent's most recent terminal task.
+			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
+
+			// Workspace-wide daily agent activity (last 30d, anchored on
+			// completed_at). Backs the Agents-list sparkline (trailing 7d
+			// slice) AND the agent detail "Last 30 days" panel.
+			r.Get("/api/agent-activity-30d", h.GetWorkspaceAgentActivity30d)
+
+			// Workspace-wide 30-day run counts per agent for the Agents-list RUNS column.
+			r.Get("/api/agent-run-counts", h.GetWorkspaceAgentRunCounts)
 
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
@@ -425,15 +463,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
-				r.Get("/", h.ListInbox)
-				r.Get("/unread-count", h.CountUnreadInbox)
-				r.Post("/mark-all-read", h.MarkAllInboxRead)
-				r.Post("/archive-all", h.ArchiveAllInbox)
-				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
-				r.Post("/archive-completed", h.ArchiveCompletedInbox)
-				r.Post("/{id}/read", h.MarkInboxRead)
-				r.Post("/{id}/archive", h.ArchiveInboxItem)
-			})
+			r.Get("/", h.ListInbox)
+			r.Get("/unread-count", h.CountUnreadInbox)
+			r.Post("/mark-all-read", h.MarkAllInboxRead)
+			r.Post("/archive-all", h.ArchiveAllInbox)
+			r.Post("/archive-all-read", h.ArchiveAllReadInbox)
+			r.Post("/archive-completed", h.ArchiveCompletedInbox)
+			r.Post("/{id}/read", h.MarkInboxRead)
+			r.Post("/{id}/unread", h.MarkInboxUnread)
+			r.Post("/{id}/archive", h.ArchiveInboxItem)
+		})
 		})
 	})
 
@@ -469,12 +508,11 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 	return util.UUIDToString(pat.UserID), true
 }
 
+// parseUUID is a thin alias for util.MustParseUUID. Call sites here are all
+// internal round-trips of DB-sourced UUIDs (e.g. issue.ID, e.ActorID), so an
+// invalid value indicates a programming error and should panic loudly.
 func parseUUID(s string) pgtype.UUID {
-	var u pgtype.UUID
-	if err := u.Scan(s); err != nil {
-		return pgtype.UUID{}
-	}
-	return u
+	return util.MustParseUUID(s)
 }
 
 func splitAndTrim(s string) []string {

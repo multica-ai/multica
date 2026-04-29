@@ -17,6 +17,10 @@ func TestBuildCommentReplyInstructionsIncludesTriggerID(t *testing.T) {
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID,
+		"short single-line reply",
+		"--content-stdin",
+		"<<'COMMENT'",
+		"do NOT write `\\n` escapes",
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(got, want) {

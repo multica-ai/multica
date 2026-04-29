@@ -8,9 +8,11 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   inboxListOptions,
   deduplicateInboxItems,
+  useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
+  useMarkInboxUnread,
   useArchiveInbox,
   useMarkAllInboxRead,
   useArchiveAllInbox,
@@ -28,6 +30,7 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  Mail,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -105,23 +108,33 @@ export function InboxPage() {
   });
 
   const isMobile = useIsMobile();
-  const unreadCount = items.filter((i) => !i.read).length;
+  const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
 
-  // Click-to-read: select + auto-mark-read
+  // Auto-mark-read whenever a selected item is unread — covers both click-
+  // to-select and URL-param-select (e.g. OS notification click on desktop).
+  // The mutation flips `read: true` optimistically, so this effect settles
+  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
+  // in handleSelect so URL-driven selection triggers it too.
+  const markReadMutate = markReadMutation.mutate;
+  const selectedId = selected?.id;
+  const selectedRead = selected?.read;
+  useEffect(() => {
+    if (!selectedId || selectedRead) return;
+    markReadMutate(selectedId, {
+      onError: () => toast.error("Failed to mark as read"),
+    });
+  }, [selectedId, selectedRead, markReadMutate]);
+
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
-    if (!item.read) {
-      markReadMutation.mutate(item.id, {
-        onError: () => toast.error("Failed to mark as read"),
-      });
-    }
   };
 
   const handleArchive = (id: string) => {
@@ -129,6 +142,12 @@ export function InboxPage() {
     if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
     archiveMutation.mutate(id, {
       onError: () => toast.error("Failed to archive"),
+    });
+  };
+
+  const handleMarkUnread = (id: string) => {
+    markUnreadMutation.mutate(id, {
+      onError: () => toast.error("Failed to mark as unread"),
     });
   };
 
@@ -222,6 +241,7 @@ export function InboxPage() {
           isSelected={(item.issue_id ?? item.id) === selectedKey}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
+          onMarkUnread={() => handleMarkUnread(item.id)}
         />
       ))}
     </div>

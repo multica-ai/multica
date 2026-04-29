@@ -186,9 +186,19 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				return
 			}
 
+			userUUID, err := util.ParseUUID(userID)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "user not authenticated")
+				return
+			}
+			wsUUID, err := util.ParseUUID(workspaceID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid workspace_id")
+				return
+			}
 			member, err := queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-				UserID:      util.ParseUUID(userID),
-				WorkspaceID: util.ParseUUID(workspaceID),
+				UserID:      userUUID,
+				WorkspaceID: wsUUID,
 			})
 			if err != nil {
 				writeError(w, http.StatusNotFound, "workspace not found")

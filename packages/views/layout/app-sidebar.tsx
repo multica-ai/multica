@@ -29,8 +29,6 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
-  MessageSquare,
-  Loader2,
   X,
   Zap,
 } from "lucide-react";
@@ -67,8 +65,6 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
-import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
-import { useAnchorTracker } from "../chat/components/context-anchor";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
@@ -97,14 +93,12 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
-const EMPTY_CHAT_SESSIONS: Awaited<ReturnType<typeof api.listChatSessions>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
 type NavKey =
   | "inbox"
-  | "chat"
   | "myIssues"
   | "issues"
   | "projects"
@@ -116,7 +110,6 @@ type NavKey =
 
 const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
-  { key: "chat", label: "Chat", icon: MessageSquare },
   { key: "myIssues", label: "My Issues", icon: CircleUser },
 ];
 
@@ -333,22 +326,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
-  const { data: chatSessions = EMPTY_CHAT_SESSIONS } = useQuery({
-    ...chatSessionsOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  const hasChatUnread = React.useMemo(
-    () => chatSessions.some((s) => s.has_unread),
-    [chatSessions],
-  );
-  const { data: pendingChatTasks } = useQuery({
-    ...pendingChatTasksOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  const hasChatRunning = (pendingChatTasks?.tasks.length ?? 0) > 0;
-  // Track last anchor-eligible route so the Chat page (which is its own route)
-  // can still resolve focus-mode context from the page the user was just on.
-  useAnchorTracker();
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
@@ -607,12 +584,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
-                        )}
-                        {item.label === "Chat" && hasChatRunning && (
-                          <Loader2 className="ml-auto !size-3 animate-spin text-muted-foreground" />
-                        )}
-                        {item.label === "Chat" && !hasChatRunning && hasChatUnread && (
-                          <span className="ml-auto size-1.5 rounded-full bg-brand" />
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>

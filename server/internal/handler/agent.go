@@ -354,9 +354,18 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		req.MaxConcurrentTasks = 6
 	}
 
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          parseUUID(req.RuntimeID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          runtimeUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
@@ -369,7 +378,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// list fails we fall through with isFirstAgent=false rather than
 	// blocking creation, since the primary DB operation is the insert.
 	isFirstAgent := false
-	if existing, listErr := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID)); listErr == nil {
+	if existing, listErr := h.Queries.ListAgents(r.Context(), wsUUID); listErr == nil {
 		isFirstAgent = len(existing) == 0
 	}
 
@@ -394,7 +403,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        parseUUID(workspaceID),
+		WorkspaceID:        wsUUID,
 		Name:               req.Name,
 		Description:        req.Description,
 		Instructions:       req.Instructions,
@@ -529,7 +538,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateAgentParams{
-		ID: parseUUID(id),
+		ID: agent.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}
@@ -561,8 +570,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	if req.RuntimeID != nil {
+		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-			ID:          parseUUID(*req.RuntimeID),
+			ID:          runtimeUUID,
 			WorkspaceID: agent.WorkspaceID,
 		})
 		if err != nil {
@@ -595,7 +608,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// mcp_config: null in the request means explicitly clear the field.
 	// COALESCE in UpdateAgent cannot set a column to NULL, so we use a dedicated query.
 	if shouldClearMcpConfig {
-		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), parseUUID(id))
+		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), agent.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
@@ -627,7 +640,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	archived, err := h.Queries.ArchiveAgent(r.Context(), db.ArchiveAgentParams{
-		ID:         parseUUID(id),
+		ID:         agent.ID,
 		ArchivedBy: parseUUID(userID),
 	})
 	if err != nil {
@@ -636,8 +649,11 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel all pending/active tasks for this agent.
-	if err := h.Queries.CancelAgentTasksByAgent(r.Context(), parseUUID(id)); err != nil {
+	// Cancel all pending/active tasks for this agent. Discard the returned
+	// rows here — the agent:archived event below already triggers a full
+	// active-tasks invalidation on every connected client, so per-task
+	// task:cancelled events would be redundant noise.
+	if _, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 	}
 
@@ -663,7 +679,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	restored, err := h.Queries.RestoreAgent(r.Context(), parseUUID(id))
+	restored, err := h.Queries.RestoreAgent(r.Context(), agent.ID)
 	if err != nil {
 		slog.Warn("restore agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to restore agent")
@@ -679,15 +695,156 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
+// CancelAgentTasks bulk-cancels every active task (queued/dispatched/running)
+// belonging to an agent. Powers the agents-list "Cancel all tasks" row
+// action. Same permission gate as archive (canManageAgent — owner or
+// workspace admin/owner). Each cancelled row triggers a task:cancelled WS
+// event so connected clients clear their live cards immediately.
+//
+// Note: a `running` task on the daemon side won't actually halt for up to
+// ~5 seconds (daemon polls GetTaskStatus on that interval). The DB row is
+// marked cancelled instantly, but the child process keeps going briefly;
+// see daemon/daemon.go:919-942 for the polling loop. Surface this in the
+// confirm-dialog copy so users aren't surprised by trailing transcript
+// lines.
+type cancelAgentTasksResponse struct {
+	Cancelled int `json:"cancelled"`
+}
+
+func (h *Handler) CancelAgentTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.loadAgentForUser(w, r, id); !ok {
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), parseUUID(id))
+	cancelled, err := h.TaskService.CancelTasksForAgent(r.Context(), parseUUID(id))
+	if err != nil {
+		slog.Warn("cancel agent tasks failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to cancel tasks")
+		return
+	}
+
+	slog.Info("agent tasks cancelled",
+		append(logger.RequestAttrs(r), "agent_id", id, "count", len(cancelled))...)
+	writeJSON(w, http.StatusOK, cancelAgentTasksResponse{Cancelled: len(cancelled)})
+}
+
+func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, len(tasks))
+	for i, t := range tasks {
+		resp[i] = taskToResponse(t)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AgentActivityBucket is one day-bucketed throughput sample for the
+// Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
+type AgentActivityBucket struct {
+	AgentID     string `json:"agent_id"`
+	BucketAt    string `json:"bucket_at"`
+	TaskCount   int32  `json:"task_count"`
+	FailedCount int32  `json:"failed_count"`
+}
+
+// AgentRunCount is the trailing-30-day total task run count per agent,
+// powering the Agents-list RUNS column.
+type AgentRunCount struct {
+	AgentID  string `json:"agent_id"`
+	RunCount int32  `json:"run_count"`
+}
+
+// GetWorkspaceAgentRunCounts returns 30-day total run counts for every
+// agent in the workspace. Same single-fetch pattern as live-tasks /
+// activity to keep the Agents list cheap regardless of agent count.
+func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	rows, err := h.Queries.GetWorkspaceAgentRunCounts(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get agent run counts")
+		return
+	}
+
+	resp := make([]AgentRunCount, len(rows))
+	for i, row := range rows {
+		resp[i] = AgentRunCount{
+			AgentID:  uuidToString(row.AgentID),
+			RunCount: row.RunCount,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetWorkspaceAgentActivity30d returns per-agent daily task counts for the
+// last 30 days, anchored on completed_at. Single workspace-wide read backs
+// both the Agents list sparkline (uses the trailing 7 buckets) and the
+// agent detail "Last 30 days" panel (uses all 30) — one fetch is cheaper
+// than two. Front-end fills missing days with zero; the back-end omits
+// empty buckets to keep the response small.
+func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get agent activity")
+		return
+	}
+
+	resp := make([]AgentActivityBucket, len(rows))
+	for i, row := range rows {
+		resp[i] = AgentActivityBucket{
+			AgentID:     uuidToString(row.AgentID),
+			BucketAt:    timestampToString(row.Bucket),
+			TaskCount:   row.TaskCount,
+			FailedCount: row.FailedCount,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListWorkspaceAgentTaskSnapshot returns the task data the front-end needs to
+// derive each agent's presence: every active task (queued/dispatched/running)
+// plus each agent's most recent OUTCOME task (completed/failed only). Cancelled
+// tasks are excluded from the outcome half by design — cancel is a procedural
+// signal ("attempt aborted"), not an outcome, so it must not mask a prior
+// failure. The front-end picks "active wins, else latest outcome"; a failed
+// outcome stays sticky until the user starts a new task or one succeeds.
+// Per-agent filtering happens in the front-end against this workspace-wide
+// snapshot.
+func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	tasks, err := h.Queries.ListWorkspaceAgentTaskSnapshot(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
 		return
 	}
 

@@ -191,7 +191,7 @@ func TestBuildPromptCommentTriggeredByAgent(t *testing.T) {
 	for _, want := range []string{
 		"Another agent (Atlas)",
 		"do not @mention the other agent as a sign-off",
-		"silence is the preferred way",
+		"Silence is the preferred way",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n---\n%s", want, prompt)

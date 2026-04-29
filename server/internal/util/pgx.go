@@ -2,14 +2,39 @@ package util
 
 import (
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func ParseUUID(s string) pgtype.UUID {
+// ParseUUID parses s into a pgtype.UUID. Invalid input returns an error
+// instead of a zero-valued UUID — silently dropping bad input has caused
+// data-loss bugs (e.g. DELETE matching no rows, returning 204 success).
+//
+// Use this at any boundary where s comes from user input (URL params,
+// request bodies, headers) and pair it with a 4xx response on error.
+// For trusted, already-validated UUID strings (sqlc round-trips, fixtures),
+// use MustParseUUID instead.
+func ParseUUID(s string) (pgtype.UUID, error) {
 	var u pgtype.UUID
-	_ = u.Scan(s)
+	if err := u.Scan(s); err != nil {
+		return u, fmt.Errorf("invalid UUID %q: %w", s, err)
+	}
+	if !u.Valid {
+		return u, fmt.Errorf("invalid UUID: %q", s)
+	}
+	return u, nil
+}
+
+// MustParseUUID parses s into a pgtype.UUID and panics on invalid input.
+// Reserve for trusted callers (already-validated round-trips, test fixtures).
+// At a request boundary, use ParseUUID and surface a 4xx instead.
+func MustParseUUID(s string) pgtype.UUID {
+	u, err := ParseUUID(s)
+	if err != nil {
+		panic(err)
+	}
 	return u
 }
 

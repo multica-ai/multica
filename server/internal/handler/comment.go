@@ -203,13 +203,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
-		parentID = parseUUID(*req.ParentID)
+		var parsed pgtype.UUID
+		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
+		if !ok {
+			return
+		}
+		parentID = parsed
 		parent, err := h.Queries.GetComment(r.Context(), parentID)
-		if err != nil || uuidToString(parent.IssueID) != issueID {
+		if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
 			writeError(w, http.StatusBadRequest, "invalid parent comment")
 			return
 		}
 		parentComment = &parent
+	}
+
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
 	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
@@ -227,12 +237,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// tasks (no TriggerCommentID) are also unaffected.
 	if authorType == "agent" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
-			task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskIDHeader))
-			if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-				if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
-					writeError(w, http.StatusConflict,
-						"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
-					return
+			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
+			if parseErr == nil {
+				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+				if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+					if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+						writeError(w, http.StatusConflict,
+							"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+						return
+					}
 				}
 			}
 		}
@@ -263,8 +276,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Link uploaded attachments to this comment.
-	if len(req.AttachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, req.AttachmentIDs)
+	if len(attachmentIDs) > 0 {
+		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
 	}
 
 	// Fetch linked attachments so the response includes them.
@@ -411,7 +424,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	// but only when the reply contains no mentions at all (a plain follow-up).
 	// If the reply explicitly @mentions anyone (agents or members), the user
 	// is making a deliberate choice about who to involve; don't auto-inherit.
-	if parentComment != nil && len(mentions) == 0 {
+	//
+	// CRITICAL: agent-authored replies must NOT inherit parent mentions.
+	// Otherwise an agent posting "No reply needed" in a thread whose root
+	// mentioned another agent would re-trigger that agent, creating a loop.
+	// Explicit @mentions in the agent's own comment still work for delegation.
+	if parentComment != nil && len(mentions) == 0 && authorType != "agent" {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
@@ -461,12 +479,20 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
 
 	// Load comment scoped to current workspace.
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	existing, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -501,7 +527,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
-		ID:      parseUUID(commentId),
+		ID:      commentUUID,
 		Content: req.Content,
 	})
 	if err != nil {
@@ -528,11 +554,20 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+
 	// Load comment scoped to current workspace.
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -553,17 +588,17 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), parseUUID(commentId))
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
 
 	// Cancel any active tasks triggered by this comment so the agent does not
 	// run with the now-deleted content already embedded in its prompt. Must
 	// run before DeleteComment because the FK ON DELETE SET NULL would
 	// otherwise nullify trigger_comment_id and orphan those tasks in queued.
-	if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), parseUUID(commentId)); err != nil {
+	if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID); err != nil {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 	}
 
-	if err := h.Queries.DeleteComment(r.Context(), parseUUID(commentId)); err != nil {
+	if err := h.Queries.DeleteComment(r.Context(), comment.ID); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
@@ -572,7 +607,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
 	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
-		"comment_id": commentId,
+		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
 	})
 	w.WriteHeader(http.StatusNoContent)
