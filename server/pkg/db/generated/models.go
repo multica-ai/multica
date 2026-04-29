@@ -422,6 +422,24 @@ type TaskUsage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type TimeEntry struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	UserID              pgtype.UUID        `json:"user_id"`
+	DurationMinutes     int32              `json:"duration_minutes"`
+	ActivityName        pgtype.Text        `json:"activity_name"`
+	RedmineActivityID   pgtype.Int4        `json:"redmine_activity_id"`
+	Comment             string             `json:"comment"`
+	SpentOn             pgtype.Date        `json:"spent_on"`
+	ExternalTimeEntryID pgtype.Text        `json:"external_time_entry_id"`
+	SyncStatus          string             `json:"sync_status"`
+	TimerStartedAt      pgtype.Timestamptz `json:"timer_started_at"`
+	TimerStoppedAt      pgtype.Timestamptz `json:"timer_stopped_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type User struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`

@@ -99,4 +99,8 @@ const (
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"
+
+	// Time entry events
+	EventTimeEntryCreated = "time_entry:created"
+	EventTimeEntryDeleted = "time_entry:deleted"
 )

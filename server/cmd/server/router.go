@@ -289,8 +289,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/integration-links", h.ListIssueIntegrationLinks)
 					r.Post("/integration-links", h.UpsertIssueIntegrationLink)
 					r.Delete("/integration-links/{provider}", h.DeleteIssueIntegrationLink)
+					// Time entries
+					r.Get("/time-entries", h.ListTimeEntries)
+					r.Post("/time-entries", h.CreateTimeEntry)
 				})
 			})
+
+			// Time entry delete (standalone route so we don't need issueId in URL)
+			r.Delete("/api/time-entries/{id}", h.DeleteTimeEntry)
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
@@ -337,6 +343,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Post("/projects", h.CreateRedmineProject)
 					r.Get("/projects/{projectId}/issues", h.ListRedmineIssues)
 					r.Post("/issues", h.CreateRedmineIssue)
+					r.Get("/activities", h.ListRedmineActivities)
 				})
 			})
 

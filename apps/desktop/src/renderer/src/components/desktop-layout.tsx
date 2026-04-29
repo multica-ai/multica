@@ -13,6 +13,7 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { StarterContentPrompt } from "@multica/views/onboarding";
+import { FloatingTimer } from "@multica/views/time-tracking/floating-timer";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { DesktopNavigationProvider } from "@/platform/navigation";
@@ -104,7 +105,11 @@ export function DesktopShell() {
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab
   // router) sets it. Once set, the sidebar and other shell-level components
   // can resolve workspace-scoped paths via useWorkspacePaths().
-  const slug = useSyncExternalStore(subscribeToCurrentSlug, getCurrentSlug, () => null);
+  const slug = useSyncExternalStore(
+    subscribeToCurrentSlug,
+    getCurrentSlug,
+    () => null,
+  );
 
   return (
     <DesktopNavigationProvider>
@@ -119,7 +124,12 @@ export function DesktopShell() {
       <WorkspaceSlugProvider slug={slug}>
         <div className="flex h-screen">
           <SidebarProvider className="flex-1">
-            {slug && <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />}
+            {slug && (
+              <AppSidebar
+                topSlot={<SidebarTopBar />}
+                searchSlot={<SearchTrigger />}
+              />
+            )}
             {/* Right side: header + content container */}
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
@@ -133,6 +143,7 @@ export function DesktopShell() {
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
         {slug && <StarterContentPrompt />}
+        {slug && <FloatingTimer />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

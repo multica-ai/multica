@@ -55,6 +55,28 @@ type CreateRedmineIssueReq struct {
 	Description string `json:"description"`
 }
 
+type RedmineActivity struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
+}
+
+type RedmineTimeEntry struct {
+	ID         int     `json:"id"`
+	Hours      float64 `json:"hours"`
+	ActivityID int     `json:"activity_id"`
+	Comments   string  `json:"comments"`
+	SpentOn    string  `json:"spent_on"`
+}
+
+type CreateRedmineTimeEntryReq struct {
+	IssueID    int     `json:"issue_id"`
+	Hours      float64 `json:"hours"`
+	ActivityID int     `json:"activity_id"`
+	Comments   string  `json:"comments"`
+	SpentOn    string  `json:"spent_on"`
+}
+
 // ---- API methods ----
 
 func (c *RedmineClient) ListProjects(instanceURL, apiKey string) ([]RedmineProject, error) {
@@ -183,4 +205,95 @@ func (c *RedmineClient) CreateIssue(instanceURL, apiKey string, req CreateRedmin
 		return RedmineIssue{}, fmt.Errorf("decoding redmine response: %w", err)
 	}
 	return body.Issue, nil
+}
+
+// ListTimeEntryActivities returns the configured time-entry activity types
+// from the Redmine instance.
+func (c *RedmineClient) ListTimeEntryActivities(instanceURL, apiKey string) ([]RedmineActivity, error) {
+	url := strings.TrimRight(instanceURL, "/") + "/enumerations/time_entry_activities.json"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Redmine-API-Key", apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("redmine request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("redmine returned status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Activities []RedmineActivity `json:"time_entry_activities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decoding redmine response: %w", err)
+	}
+	return body.Activities, nil
+}
+
+// CreateTimeEntry creates a new time entry in Redmine.
+func (c *RedmineClient) CreateTimeEntry(instanceURL, apiKey string, req CreateRedmineTimeEntryReq) (RedmineTimeEntry, error) {
+	entry := map[string]any{
+		"issue_id": req.IssueID,
+		"hours":    req.Hours,
+		"comments": req.Comments,
+		"spent_on": req.SpentOn,
+	}
+	if req.ActivityID > 0 {
+		entry["activity_id"] = req.ActivityID
+	}
+	payload := map[string]any{"time_entry": entry}
+	b, _ := json.Marshal(payload)
+
+	url := strings.TrimRight(instanceURL, "/") + "/time_entries.json"
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return RedmineTimeEntry{}, err
+	}
+	httpReq.Header.Set("X-Redmine-API-Key", apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return RedmineTimeEntry{}, fmt.Errorf("redmine request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return RedmineTimeEntry{}, fmt.Errorf("redmine returned status %d", resp.StatusCode)
+	}
+
+	var respBody struct {
+		TimeEntry RedmineTimeEntry `json:"time_entry"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		return RedmineTimeEntry{}, fmt.Errorf("decoding redmine response: %w", err)
+	}
+	return respBody.TimeEntry, nil
+}
+
+// DeleteTimeEntry deletes a time entry from Redmine.
+func (c *RedmineClient) DeleteTimeEntry(instanceURL, apiKey string, entryID int) error {
+	url := fmt.Sprintf("%s/time_entries/%d.json", strings.TrimRight(instanceURL, "/"), entryID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Redmine-API-Key", apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("redmine request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("redmine returned status %d", resp.StatusCode)
+	}
+	return nil
 }

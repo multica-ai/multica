@@ -73,7 +73,11 @@
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
     "./platform": "./platform/index.ts",
-    "./analytics": "./analytics/index.ts"
+    "./analytics": "./analytics/index.ts",
+    "./time-entries": "./time-entries/index.ts",
+    "./time-entries/queries": "./time-entries/queries.ts",
+    "./time-entries/mutations": "./time-entries/mutations.ts",
+    "./time-entries/timer-store": "./time-entries/timer-store.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",

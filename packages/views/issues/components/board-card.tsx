@@ -23,6 +23,7 @@ import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { TimerPlayButton } from "../../time-tracking/timer-play-button";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -60,7 +61,9 @@ export const BoardCardContent = memo(function BoardCardContent({
     ...projectListOptions(wsId),
     enabled: storeProperties.project && !!issue.project_id,
   });
-  const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
+  const project = issue.project_id
+    ? projects.find((p) => p.id === issue.project_id)
+    : undefined;
   const labels = issue.labels ?? [];
 
   const updateIssueMutation = useUpdateIssue();
@@ -76,14 +79,23 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
-  const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showAssignee =
+    storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
+    <div className="relative rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
+      {/* Timer play button — visible on hover */}
+      <div className="absolute top-2 right-2 opacity-0 group-hover/card:opacity-100 transition-opacity">
+        <TimerPlayButton
+          issueId={issue.id}
+          issueIdentifier={issue.identifier}
+          issueTitle={issue.title}
+        />
+      </div>
       {/* Row 1: Identifier */}
       <p className="text-xs text-muted-foreground">{issue.identifier}</p>
 
@@ -97,7 +109,11 @@ export const BoardCardContent = memo(function BoardCardContent({
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showChildProgress && (
             <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-              <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+              <ProgressRing
+                done={childProgress!.done}
+                total={childProgress!.total}
+                size={14}
+              />
               <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
                 {childProgress!.done}/{childProgress!.total}
               </span>
@@ -109,9 +125,8 @@ export const BoardCardContent = memo(function BoardCardContent({
               <span className="truncate">{project!.title}</span>
             </span>
           )}
-          {showLabels && labels.map((label) => (
-            <LabelChip key={label.id} label={label} />
-          ))}
+          {showLabels &&
+            labels.map((label) => <LabelChip key={label.id} label={label} />)}
         </div>
       )}
 
@@ -155,16 +170,28 @@ export const BoardCardContent = memo(function BoardCardContent({
                   priority={issue.priority}
                   onUpdate={handleUpdate}
                   trigger={
-                    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}>
-                      <PriorityIcon priority={issue.priority} className="h-3 w-3" inheritColor />
+                    <span
+                      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}
+                    >
+                      <PriorityIcon
+                        priority={issue.priority}
+                        className="h-3 w-3"
+                        inheritColor
+                      />
                       {priorityCfg.label}
                     </span>
                   }
                 />
               </PickerWrapper>
             ) : (
-              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}>
-                <PriorityIcon priority={issue.priority} className="h-3 w-3" inheritColor />
+              <span
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}
+              >
+                <PriorityIcon
+                  priority={issue.priority}
+                  className="h-3 w-3"
+                  inheritColor
+                />
                 {priorityCfg.label}
               </span>
             ))}
@@ -215,7 +242,13 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({
+  issue,
+  childProgress,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+}) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -248,7 +281,11 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent
+            issue={issue}
+            editable
+            childProgress={childProgress}
+          />
         </AppLink>
       </div>
     </IssueActionsContextMenu>

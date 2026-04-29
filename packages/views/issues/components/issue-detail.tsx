@@ -19,24 +19,60 @@ import {
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import {
+  ContentEditor,
+  type ContentEditorRef,
+  TitleEditor,
+  useFileDropZone,
+  FileDropOverlay,
+} from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@multica/ui/components/ui/popover";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
-import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@multica/ui/components/ui/command";
+import {
+  AvatarGroup,
+  AvatarGroupCount,
+} from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
+import type {
+  IssueStatus,
+  IssuePriority,
+  TimelineEntry,
+} from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import {
+  StatusIcon,
+  PriorityIcon,
+  StatusPicker,
+  PriorityPicker,
+  DueDatePicker,
+  AssigneePicker,
+  LabelPicker,
+} from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
@@ -47,8 +83,16 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import {
+  issueListOptions,
+  issueDetailOptions,
+  childIssuesOptions,
+  issueUsageOptions,
+} from "@multica/core/issues/queries";
+import {
+  memberListOptions,
+  agentListOptions,
+} from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
@@ -62,6 +106,7 @@ import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
 import { IssueRedmineSection } from "./issue-redmine-section";
+import { IssueTimeSection } from "./issue-time-section";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -92,18 +137,24 @@ function formatActivity(
     case "priority_changed":
       return `changed priority from ${priorityLabel(details.from ?? "?")} to ${priorityLabel(details.to ?? "?")}`;
     case "assignee_changed": {
-      const isSelfAssign = details.to_type === entry.actor_type && details.to_id === entry.actor_id;
+      const isSelfAssign =
+        details.to_type === entry.actor_type &&
+        details.to_id === entry.actor_id;
       if (isSelfAssign) return "self-assigned this issue";
-      const toName = details.to_id && details.to_type && resolveActorName
-        ? resolveActorName(details.to_type, details.to_id)
-        : null;
+      const toName =
+        details.to_id && details.to_type && resolveActorName
+          ? resolveActorName(details.to_type, details.to_id)
+          : null;
       if (toName) return `assigned to ${toName}`;
       if (details.from_id && !details.to_id) return "removed assignee";
       return "changed assignee";
     }
     case "due_date_changed": {
       if (!details.to) return "removed due date";
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = new Date(details.to).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
       return `set due date to ${formatted}`;
     }
     case "title_changed":
@@ -115,7 +166,8 @@ function formatActivity(
       const toId = details.to ?? "?";
       const toTitle = details.to_title;
       const label = toTitle ? `#${toId} – ${toTitle}` : `#${toId}`;
-      if (fromId) return `changed linked Redmine issue from #${fromId} to ${label}`;
+      if (fromId)
+        return `changed linked Redmine issue from #${fromId} to ${label}`;
       return `linked Redmine issue ${label}`;
     }
     case "redmine_unlinked": {
@@ -127,11 +179,21 @@ function formatActivity(
       return "completed the task";
     case "task_failed":
       return "task failed";
+    case "time_logged": {
+      const mins = Number(details.duration_minutes ?? 0);
+      const activity = details.activity_name;
+      const comment = details.comment;
+      let msg = `logged ${mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ""}`}`;
+      if (activity) msg += ` (${activity})`;
+      if (comment) msg += ` — "${comment}"`;
+      return msg;
+    }
+    case "time_entry_deleted":
+      return "deleted a time entry";
     default:
       return entry.action ?? "";
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,14 +218,15 @@ function PropRow({
 }) {
   return (
     <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="w-16 shrink-0 text-xs text-muted-foreground">
+        {label}
+      </span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs truncate">
         {children}
       </div>
     </div>
   );
 }
-
 
 // ---------------------------------------------------------------------------
 // Props
@@ -182,7 +245,13 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({
+  issueId,
+  onDelete,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  highlightCommentId,
+}: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -262,8 +331,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, submitComment, submitReply,
-    editComment, deleteComment, toggleReaction: handleToggleReaction,
+    timeline,
+    submitComment,
+    submitReply,
+    editComment,
+    deleteComment,
+    toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
 
   const {
@@ -272,7 +345,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    subscribers,
+    isSubscribed,
+    toggleSubscribe: handleToggleSubscribe,
+    toggleSubscriber,
   } = useIssueSubscribers(id, user?.id);
 
   // Token usage
@@ -316,9 +392,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   }, [highlightCommentId, timeline.length]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
-  });
+  const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } =
+    useFileDropZone({
+      onDrop: (files) =>
+        files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    });
   // Description uploads don't pass issueId — the URL lives in the markdown.
   // This avoids stale attachment records when users delete images from the editor.
   const handleDescriptionUpload = useCallback(
@@ -386,7 +464,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <p>This issue does not exist or has been deleted in this workspace.</p>
         {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(paths.issues())}
+          >
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
             Back to Issues
           </Button>
@@ -404,28 +486,51 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
           Properties
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`}
+          />
         </button>
-        {propertiesOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Status">
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Priority">
-            <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Assignee">
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Due date">
-            <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label="Project">
-            <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label="Labels">
-            <LabelPicker issueId={issue.id} align="start" />
-          </PropRow>
-        </div>}
+        {propertiesOpen && (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Status">
+              <StatusPicker
+                status={issue.status}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Priority">
+              <PriorityPicker
+                priority={issue.priority}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Assignee">
+              <AssigneePicker
+                assigneeType={issue.assignee_type}
+                assigneeId={issue.assignee_id}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Due date">
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={handleUpdateField}
+              />
+            </PropRow>
+            <PropRow label="Project">
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+              />
+            </PropRow>
+            <PropRow label="Labels">
+              <LabelPicker issueId={issue.id} align="start" />
+            </PropRow>
+          </div>
+        )}
       </div>
 
       {/* Parent issue */}
@@ -436,18 +541,29 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
             Parent issue
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
+            <ChevronRight
+              className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`}
+            />
           </button>
-          {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
-          </div>}
+          {parentIssueOpen && (
+            <div className="pl-2">
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
+              >
+                <StatusIcon
+                  status={parentIssue.status}
+                  className="h-3.5 w-3.5 shrink-0"
+                />
+                <span className="text-muted-foreground shrink-0">
+                  {parentIssue.identifier}
+                </span>
+                <span className="truncate group-hover:text-foreground">
+                  {parentIssue.title}
+                </span>
+              </AppLink>
+            </div>
+          )}
         </div>
       )}
 
@@ -458,20 +574,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
           Details
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`}
+          />
         </button>
-        {detailsOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label="Created by">
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} />
-            <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-          </PropRow>
-          <PropRow label="Created">
-            <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-          </PropRow>
-          <PropRow label="Updated">
-            <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-          </PropRow>
-        </div>}
+        {detailsOpen && (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Created by">
+              <ActorAvatar
+                actorType={issue.creator_type}
+                actorId={issue.creator_id}
+                size={18}
+              />
+              <span className="truncate">
+                {getActorName(issue.creator_type, issue.creator_id)}
+              </span>
+            </PropRow>
+            <PropRow label="Created">
+              <span className="text-muted-foreground">
+                {shortDate(issue.created_at)}
+              </span>
+            </PropRow>
+            <PropRow label="Updated">
+              <span className="text-muted-foreground">
+                {shortDate(issue.updated_at)}
+              </span>
+            </PropRow>
+          </div>
+        )}
       </div>
 
       {/* Token usage */}
@@ -482,28 +612,48 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
             Token usage
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
+            <ChevronRight
+              className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`}
+            />
           </button>
-          {tokenUsageOpen && <div className="space-y-0.5 pl-2">
-            <PropRow label="Input">
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
-            </PropRow>
-            <PropRow label="Output">
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
-            </PropRow>
-            {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label="Cache">
+          {tokenUsageOpen && (
+            <div className="space-y-0.5 pl-2">
+              <PropRow label="Input">
                 <span className="text-muted-foreground">
-                  {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
+                  {formatTokenCount(usage.total_input_tokens)}
                 </span>
               </PropRow>
-            )}
-            <PropRow label="Runs">
-              <span className="text-muted-foreground">{usage.task_count}</span>
-            </PropRow>
-          </div>}
+              <PropRow label="Output">
+                <span className="text-muted-foreground">
+                  {formatTokenCount(usage.total_output_tokens)}
+                </span>
+              </PropRow>
+              {(usage.total_cache_read_tokens > 0 ||
+                usage.total_cache_write_tokens > 0) && (
+                <PropRow label="Cache">
+                  <span className="text-muted-foreground">
+                    {formatTokenCount(usage.total_cache_read_tokens)} read /{" "}
+                    {formatTokenCount(usage.total_cache_write_tokens)} write
+                  </span>
+                </PropRow>
+              )}
+              <PropRow label="Runs">
+                <span className="text-muted-foreground">
+                  {usage.task_count}
+                </span>
+              </PropRow>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Time tracking */}
+      <IssueTimeSection
+        wsId={wsId}
+        issueId={id}
+        issueIdentifier={issue.identifier}
+        issueTitle={issue.title}
+      />
 
       {/* Redmine integration */}
       <IssueRedmineSection
@@ -517,7 +667,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   );
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup
+      orientation="horizontal"
+      className="flex-1 min-h-0"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
       <ResizablePanel id="content" minSize="50%">
         <div className="flex h-full flex-col">
           <PageHeader className="gap-2 bg-background text-sm">
@@ -558,14 +713,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
+                      className={cn(
+                        "text-muted-foreground",
+                        actions.isPinned && "text-foreground",
+                      )}
                       onClick={actions.togglePin}
                     >
                       {actions.isPinned ? <PinOff /> : <Pin />}
                     </Button>
                   }
                 />
-                <TooltipContent side="bottom">{actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+                <TooltipContent side="bottom">
+                  {actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                </TooltipContent>
               </Tooltip>
               <IssueActionsDropdown
                 issue={issue}
@@ -574,7 +734,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 // above and skip navigation. Otherwise the modal navigates for us.
                 onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
                 trigger={
-                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                  >
                     <MoreHorizontal />
                   </Button>
                 }
@@ -607,7 +771,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PageHeader>
 
           {/* Content — scrollable */}
-          <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+          <div
+            ref={scrollContainerRef}
+            className="relative flex-1 overflow-y-auto"
+          >
             <div className="mx-auto w-full max-w-4xl px-8 py-8">
               <TitleEditor
                 key={`title-${id}`}
@@ -616,7 +783,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 className="w-full text-2xl font-bold leading-snug tracking-tight"
                 onBlur={(value) => {
                   const trimmed = value.trim();
-                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                  if (trimmed && trimmed !== issue.title)
+                    handleUpdateField({ title: trimmed });
                 }}
               />
 
@@ -626,22 +794,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
                 >
                   <span className="font-medium shrink-0">Sub-issue of</span>
-                  <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-                  <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
+                  <StatusIcon
+                    status={parentIssue.status}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
+                  <span className="tabular-nums shrink-0">
+                    {parentIssue.identifier}
+                  </span>
                   <span className="truncate group-hover/parent:text-foreground">
                     {parentIssue.title}
                   </span>
-                  {parentChildIssues.length > 0 && (() => {
-                    const done = parentChildIssues.filter((c) => c.status === "done").length;
-                    return (
-                      <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
-                        <ProgressRing done={done} total={parentChildIssues.length} size={11} />
-                        <span className="tabular-nums text-[10.5px] font-medium">
-                          {done}/{parentChildIssues.length}
+                  {parentChildIssues.length > 0 &&
+                    (() => {
+                      const done = parentChildIssues.filter(
+                        (c) => c.status === "done",
+                      ).length;
+                      return (
+                        <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                          <ProgressRing
+                            done={done}
+                            total={parentChildIssues.length}
+                            size={11}
+                          />
+                          <span className="tabular-nums text-[10.5px] font-medium">
+                            {done}/{parentChildIssues.length}
+                          </span>
                         </span>
-                      </span>
-                    );
-                  })()}
+                      );
+                    })()}
                 </AppLink>
               )}
 
@@ -690,103 +870,115 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   </button>
                 </div>
               )}
-              {childIssues.length > 0 && (() => {
-                const doneCount = childIssues.filter((c) => c.status === "done").length;
-                return (
-                  <div className="mt-10">
-                    {/* Header */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => setSubIssuesCollapsed((v) => !v)}
-                        className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors"
-                      >
-                        <ChevronDown
-                          className={cn(
-                            "h-3.5 w-3.5 text-muted-foreground transition-transform",
-                            subIssuesCollapsed && "-rotate-90",
-                          )}
-                        />
-                        <span>Sub-issues</span>
-                      </button>
-                      <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
-                        <ProgressRing done={doneCount} total={childIssues.length} size={11} />
-                        <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                          {doneCount}/{childIssues.length}
-                        </span>
-                      </div>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                              onClick={() =>
-                                useModalStore.getState().open("create-issue", {
-                                  parent_issue_id: issue.id,
-                                  parent_issue_identifier: issue.identifier,
-                                })
-                              }
-                              aria-label="Add sub-issue"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          }
-                        />
-                        <TooltipContent side="bottom">Add sub-issue</TooltipContent>
-                      </Tooltip>
-                    </div>
-
-                    {/* List */}
-                    {!subIssuesCollapsed && (
-                      <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
-                        {childIssues.map((child) => {
-                          const isDone =
-                            child.status === "done" || child.status === "cancelled";
-                          return (
-                            <AppLink
-                              key={child.id}
-                              href={paths.issueDetail(child.id)}
-                              className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
-                            >
-                              <StatusIcon
-                                status={child.status}
-                                className="h-[15px] w-[15px] shrink-0"
-                              />
-                              <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-                                {child.identifier}
-                              </span>
-                              <span
-                                className={cn(
-                                  "text-sm truncate flex-1",
-                                  isDone
-                                    ? "text-muted-foreground"
-                                    : "group-hover/row:text-foreground",
-                                )}
+              {childIssues.length > 0 &&
+                (() => {
+                  const doneCount = childIssues.filter(
+                    (c) => c.status === "done",
+                  ).length;
+                  return (
+                    <div className="mt-10">
+                      {/* Header */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setSubIssuesCollapsed((v) => !v)}
+                          className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors"
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-3.5 w-3.5 text-muted-foreground transition-transform",
+                              subIssuesCollapsed && "-rotate-90",
+                            )}
+                          />
+                          <span>Sub-issues</span>
+                        </button>
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
+                          <ProgressRing
+                            done={doneCount}
+                            total={childIssues.length}
+                            size={11}
+                          />
+                          <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                            {doneCount}/{childIssues.length}
+                          </span>
+                        </div>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                                onClick={() =>
+                                  useModalStore
+                                    .getState()
+                                    .open("create-issue", {
+                                      parent_issue_id: issue.id,
+                                      parent_issue_identifier: issue.identifier,
+                                    })
+                                }
+                                aria-label="Add sub-issue"
                               >
-                                {child.title}
-                              </span>
-                              {child.assignee_type && child.assignee_id ? (
-                                <ActorAvatar
-                                  actorType={child.assignee_type}
-                                  actorId={child.assignee_id}
-                                  size={20}
-                                  className="shrink-0"
-                                />
-                              ) : (
-                                <span
-                                  aria-hidden
-                                  className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-                                />
-                              )}
-                            </AppLink>
-                          );
-                        })}
+                                <Plus className="h-4 w-4" />
+                              </button>
+                            }
+                          />
+                          <TooltipContent side="bottom">
+                            Add sub-issue
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
+
+                      {/* List */}
+                      {!subIssuesCollapsed && (
+                        <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
+                          {childIssues.map((child) => {
+                            const isDone =
+                              child.status === "done" ||
+                              child.status === "cancelled";
+                            return (
+                              <AppLink
+                                key={child.id}
+                                href={paths.issueDetail(child.id)}
+                                className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
+                              >
+                                <StatusIcon
+                                  status={child.status}
+                                  className="h-[15px] w-[15px] shrink-0"
+                                />
+                                <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+                                  {child.identifier}
+                                </span>
+                                <span
+                                  className={cn(
+                                    "text-sm truncate flex-1",
+                                    isDone
+                                      ? "text-muted-foreground"
+                                      : "group-hover/row:text-foreground",
+                                  )}
+                                >
+                                  {child.title}
+                                </span>
+                                {child.assignee_type && child.assignee_id ? (
+                                  <ActorAvatar
+                                    actorType={child.assignee_type}
+                                    actorId={child.assignee_id}
+                                    size={20}
+                                    className="shrink-0"
+                                  />
+                                ) : (
+                                  <span
+                                    aria-hidden
+                                    className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+                                  />
+                                )}
+                              </AppLink>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
               <div className="my-8 border-t" />
 
@@ -816,7 +1008,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                               />
                             ))}
                             {subscribers.length > 4 && (
-                              <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
+                              <AvatarGroupCount>
+                                +{subscribers.length - 4}
+                              </AvatarGroupCount>
                             )}
                           </AvatarGroup>
                         ) : (
@@ -832,42 +1026,88 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                             <CommandEmpty>No results found</CommandEmpty>
                             {members.length > 0 && (
                               <CommandGroup heading="Members">
-                                {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
-                                  const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                                  const isSubbed = !!sub;
-                                  return (
-                                    <CommandItem
-                                      key={`member-${m.user_id}`}
-                                      onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                                      className="flex items-center gap-2.5"
-                                    >
-                                      <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                      <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                                      <span className="truncate flex-1">{m.name}</span>
-
-                                    </CommandItem>
-                                  );
-                                })}
+                                {members
+                                  .filter(
+                                    (m, i, arr) =>
+                                      arr.findIndex(
+                                        (x) => x.user_id === m.user_id,
+                                      ) === i,
+                                  )
+                                  .map((m) => {
+                                    const sub = subscribers.find(
+                                      (s) =>
+                                        s.user_type === "member" &&
+                                        s.user_id === m.user_id,
+                                    );
+                                    const isSubbed = !!sub;
+                                    return (
+                                      <CommandItem
+                                        key={`member-${m.user_id}`}
+                                        onSelect={() =>
+                                          toggleSubscriber(
+                                            m.user_id,
+                                            "member",
+                                            isSubbed,
+                                          )
+                                        }
+                                        className="flex items-center gap-2.5"
+                                      >
+                                        <Checkbox
+                                          checked={isSubbed}
+                                          className="pointer-events-none"
+                                        />
+                                        <ActorAvatar
+                                          actorType="member"
+                                          actorId={m.user_id}
+                                          size={22}
+                                        />
+                                        <span className="truncate flex-1">
+                                          {m.name}
+                                        </span>
+                                      </CommandItem>
+                                    );
+                                  })}
                               </CommandGroup>
                             )}
-                            {agents.filter((a) => !a.archived_at).length > 0 && (
+                            {agents.filter((a) => !a.archived_at).length >
+                              0 && (
                               <CommandGroup heading="Agents">
-                                {agents.filter((a) => !a.archived_at).map((a) => {
-                                  const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                                  const isSubbed = !!sub;
-                                  return (
-                                    <CommandItem
-                                      key={`agent-${a.id}`}
-                                      onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                                      className="flex items-center gap-2.5"
-                                    >
-                                      <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                      <ActorAvatar actorType="agent" actorId={a.id} size={22} />
-                                      <span className="truncate flex-1">{a.name}</span>
-
-                                    </CommandItem>
-                                  );
-                                })}
+                                {agents
+                                  .filter((a) => !a.archived_at)
+                                  .map((a) => {
+                                    const sub = subscribers.find(
+                                      (s) =>
+                                        s.user_type === "agent" &&
+                                        s.user_id === a.id,
+                                    );
+                                    const isSubbed = !!sub;
+                                    return (
+                                      <CommandItem
+                                        key={`agent-${a.id}`}
+                                        onSelect={() =>
+                                          toggleSubscriber(
+                                            a.id,
+                                            "agent",
+                                            isSubbed,
+                                          )
+                                        }
+                                        className="flex items-center gap-2.5"
+                                      >
+                                        <Checkbox
+                                          checked={isSubbed}
+                                          className="pointer-events-none"
+                                        />
+                                        <ActorAvatar
+                                          actorType="agent"
+                                          actorId={a.id}
+                                          size={22}
+                                        />
+                                        <span className="truncate flex-1">
+                                          {a.name}
+                                        </span>
+                                      </CommandItem>
+                                    );
+                                  })}
                               </CommandGroup>
                             )}
                           </CommandList>
@@ -891,7 +1131,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 {/* Timeline entries */}
                 <div className="mt-4 flex flex-col gap-3">
                   {(() => {
-                    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
+                    const topLevel = timeline.filter(
+                      (e) => e.type === "activity" || !e.parent_id,
+                    );
                     const repliesByParent = new Map<string, TimelineEntry[]>();
                     for (const e of timeline) {
                       if (e.type === "comment" && e.parent_id) {
@@ -912,7 +1154,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           prev.action === entry.action &&
                           prev.actor_type === entry.actor_type &&
                           prev.actor_id === entry.actor_id &&
-                          Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS
+                          Math.abs(
+                            new Date(entry.created_at).getTime() -
+                              new Date(prev.created_at).getTime(),
+                          ) <= COALESCE_MS
                         ) {
                           // Replace previous with this one (keep the later result)
                           coalesced[coalesced.length - 1] = entry;
@@ -923,7 +1168,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     }
 
                     // Group consecutive activities together so the connector line works
-                    const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
+                    const groups: {
+                      type: "activities" | "comment";
+                      entries: TimelineEntry[];
+                    }[] = [];
                     for (const entry of coalesced) {
                       if (entry.type === "activity") {
                         const last = groups[groups.length - 1];
@@ -958,32 +1206,69 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                       }
 
                       return (
-                        <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
+                        <div
+                          key={group.entries[0]!.id}
+                          className="px-4 flex flex-col gap-3"
+                        >
                           {group.entries.map((entry, _idx) => {
-                            const details = (entry.details ?? {}) as Record<string, string>;
-                            const isStatusChange = entry.action === "status_changed";
-                            const isPriorityChange = entry.action === "priority_changed";
-                            const isDueDateChange = entry.action === "due_date_changed";
+                            const details = (entry.details ?? {}) as Record<
+                              string,
+                              string
+                            >;
+                            const isStatusChange =
+                              entry.action === "status_changed";
+                            const isPriorityChange =
+                              entry.action === "priority_changed";
+                            const isDueDateChange =
+                              entry.action === "due_date_changed";
 
                             let leadIcon: React.ReactNode;
                             if (isStatusChange && details.to) {
-                              leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+                              leadIcon = (
+                                <StatusIcon
+                                  status={details.to as IssueStatus}
+                                  className="h-4 w-4 shrink-0"
+                                />
+                              );
                             } else if (isPriorityChange && details.to) {
-                              leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+                              leadIcon = (
+                                <PriorityIcon
+                                  priority={details.to as IssuePriority}
+                                  className="h-4 w-4 shrink-0"
+                                />
+                              );
                             } else if (isDueDateChange) {
-                              leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+                              leadIcon = (
+                                <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              );
                             } else {
-                              leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+                              leadIcon = (
+                                <ActorAvatar
+                                  actorType={entry.actor_type}
+                                  actorId={entry.actor_id}
+                                  size={16}
+                                />
+                              );
                             }
 
                             return (
-                              <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+                              <div
+                                key={entry.id}
+                                className="flex items-center text-xs text-muted-foreground"
+                              >
                                 <div className="mr-2 flex w-4 shrink-0 justify-center">
                                   {leadIcon}
                                 </div>
                                 <div className="flex min-w-0 flex-1 items-center gap-1">
-                                  <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                                  <span className="truncate">{formatActivity(entry, getActorName)}</span>
+                                  <span className="shrink-0 font-medium">
+                                    {getActorName(
+                                      entry.actor_type,
+                                      entry.actor_id,
+                                    )}
+                                  </span>
+                                  <span className="truncate">
+                                    {formatActivity(entry, getActorName)}
+                                  </span>
                                   <Tooltip>
                                     <TooltipTrigger
                                       render={
@@ -993,7 +1278,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                                       }
                                     />
                                     <TooltipContent side="top">
-                                      {new Date(entry.created_at).toLocaleString()}
+                                      {new Date(
+                                        entry.created_at,
+                                      ).toLocaleString()}
                                     </TooltipContent>
                                   </Tooltip>
                                 </div>
@@ -1028,15 +1315,17 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           onResize={(size) => setSidebarOpen(size.inPixels > 0)}
         >
           <div className="overflow-y-auto border-l h-full">
-            <div className="p-4">
-              {sidebarContent}
-            </div>
+            <div className="p-4">{sidebarContent}</div>
           </div>
         </ResizablePanel>
       )}
       {isMobile && (
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            className="w-[320px] overflow-y-auto p-4"
+          >
             {sidebarContent}
           </SheetContent>
         </Sheet>

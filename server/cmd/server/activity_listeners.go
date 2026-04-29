@@ -290,6 +290,72 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		handleTaskActivity(ctx, bus, queries, e, "task_failed")
 	})
+
+	// time_entry:created — record "time_logged" activity
+	bus.Subscribe(protocol.EventTimeEntryCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+		te, _ := payload["time_entry"].(handler.TimeEntryResponse)
+		detailsMap := map[string]any{
+			"duration_minutes": te.DurationMinutes,
+			"comment":          te.Comment,
+			"sync_status":      te.SyncStatus,
+		}
+		if te.ActivityName != nil {
+			detailsMap["activity_name"] = *te.ActivityName
+		}
+		details, _ := json.Marshal(detailsMap)
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			WorkspaceID: parseUUID(e.WorkspaceID),
+			IssueID:     parseUUID(issueID),
+			ActorType:   util.StrToText(e.ActorType),
+			ActorID:     parseUUID(e.ActorID),
+			Action:      "time_logged",
+			Details:     details,
+		})
+		if err != nil {
+			slog.Error("activity: failed to record time_logged",
+				"issue_id", issueID, "error", err)
+			return
+		}
+		publishActivityEvent(bus, e, activity)
+	})
+
+	// time_entry:deleted — record "time_entry_deleted" activity
+	bus.Subscribe(protocol.EventTimeEntryDeleted, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+		timeEntryID, _ := payload["time_entry_id"].(string)
+		details, _ := json.Marshal(map[string]string{
+			"time_entry_id": timeEntryID,
+		})
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			WorkspaceID: parseUUID(e.WorkspaceID),
+			IssueID:     parseUUID(issueID),
+			ActorType:   util.StrToText(e.ActorType),
+			ActorID:     parseUUID(e.ActorID),
+			Action:      "time_entry_deleted",
+			Details:     details,
+		})
+		if err != nil {
+			slog.Error("activity: failed to record time_entry_deleted",
+				"issue_id", issueID, "error", err)
+			return
+		}
+		publishActivityEvent(bus, e, activity)
+	})
 }
 
 // handleTaskActivity records an activity for task:completed or task:failed events.

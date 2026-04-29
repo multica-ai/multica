@@ -15,6 +15,7 @@ import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { TimerPlayButton } from "../../time-tracking/timer-play-button";
 
 export interface ChildProgress {
   done: number;
@@ -44,12 +45,15 @@ export const ListRow = memo(function ListRow({
     ...projectListOptions(wsId),
     enabled: storeProperties.project && !!issue.project_id,
   });
-  const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const project = issue.project_id
+    ? projects.find((pr) => pr.id === issue.project_id)
+    : undefined;
   const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
-  const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showAssignee =
+    storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
 
@@ -85,7 +89,11 @@ export const ListRow = memo(function ListRow({
             <span className="truncate">{issue.title}</span>
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-                <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+                <ProgressRing
+                  done={childProgress!.done}
+                  total={childProgress!.total}
+                  size={14}
+                />
                 <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
@@ -122,6 +130,12 @@ export const ListRow = memo(function ListRow({
               size={20}
             />
           )}
+          <TimerPlayButton
+            issueId={issue.id}
+            issueIdentifier={issue.identifier}
+            issueTitle={issue.title}
+            className="opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0"
+          />
         </AppLink>
       </div>
     </IssueActionsContextMenu>
