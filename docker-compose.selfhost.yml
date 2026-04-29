@@ -3,7 +3,7 @@
 # Usage:
 #   cp .env.example .env
 #   # Edit .env — change JWT_SECRET at minimum
-#   # Optional: put local bot / DingTalk secrets in .env.bot
+#   # Optional: put local OAuth / bot secrets in .env.bot
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
 # Frontend: http://localhost:3000
@@ -46,23 +46,12 @@ services:
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
+      # Keep only container-topology defaults here. OAuth/secrets/app URL
+      # settings come from env_file above; explicit environment entries override
+      # .env.bot and can accidentally replace configured values with blanks.
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_REGION: ${S3_REGION:-us-west-2}
-      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
-      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
-      CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
-      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
     restart: unless-stopped
 
   frontend:

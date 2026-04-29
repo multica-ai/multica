@@ -24,6 +24,21 @@ func validClaims() jwt.MapClaims {
 	}
 }
 
+func addAuthCookies(t *testing.T, req *http.Request, token string, includeCSRFHeader bool) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	if err := auth.SetAuthCookies(w, token); err != nil {
+		t.Fatalf("SetAuthCookies: %v", err)
+	}
+	for _, cookie := range w.Result().Cookies() {
+		req.AddCookie(cookie)
+		if includeCSRFHeader && cookie.Name == auth.CSRFCookieName {
+			req.Header.Set("X-CSRF-Token", cookie.Value)
+		}
+	}
+}
+
 // authMiddleware returns the Auth middleware with nil queries (JWT-only tests).
 func authMiddleware(next http.Handler) http.Handler {
 	return Auth(nil)(next)
@@ -77,6 +92,56 @@ func TestAuth_InvalidToken(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestAuth_InvalidBearerFallsBackToValidCookie(t *testing.T) {
+	var gotUserID, gotEmail string
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = r.Header.Get("X-User-ID")
+		gotEmail = r.Header.Get("X-User-Email")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	claims := validClaims()
+	claims["sub"] = "cookie-user-id"
+	claims["email"] = "cookie@multica.ai"
+	cookieToken := generateToken(claims, auth.JWTSecret())
+
+	req := httptest.NewRequest("POST", "/api/me/notification-bindings/google/callback", nil)
+	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
+	addAuthCookies(t, req, cookieToken, true)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotUserID != "cookie-user-id" {
+		t.Fatalf("expected X-User-ID %q, got %q", "cookie-user-id", gotUserID)
+	}
+	if gotEmail != "cookie@multica.ai" {
+		t.Fatalf("expected X-User-Email %q, got %q", "cookie@multica.ai", gotEmail)
+	}
+}
+
+func TestAuth_InvalidBearerDoesNotBypassCookieCSRF(t *testing.T) {
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	}))
+
+	cookieToken := generateToken(validClaims(), auth.JWTSecret())
+	req := httptest.NewRequest("POST", "/api/me/notification-bindings/google/callback", nil)
+	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
+	addAuthCookies(t, req, cookieToken, false)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if body := w.Body.String(); body != `{"error":"CSRF validation failed"}`+"\n" {
+		t.Fatalf("unexpected body: %s", body)
 	}
 }
 

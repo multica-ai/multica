@@ -45,6 +45,9 @@ export type {
   StartEmailBindingResponse,
   VerifyEmailBindingRequest,
   VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";

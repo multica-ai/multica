@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +26,8 @@ const (
 	emailDeliveryMaxAttempts      = 3
 )
 
+var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
+
 type dingtalkDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
 	Provider          string          `json:"provider"`
@@ -32,10 +36,11 @@ type dingtalkDeliveryPayload struct {
 }
 
 type notificationEventPayload struct {
-	Type  string `json:"type"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Link  string `json:"link"`
+	Type            string `json:"type"`
+	Title           string `json:"title"`
+	Body            string `json:"body"`
+	Link            string `json:"link"`
+	IssueIdentifier string `json:"issue_identifier"`
 }
 
 type dingTalkBindingMetadata struct {
@@ -153,7 +158,7 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 		}
 	}
 
-	if _, err := cfg.SendTextMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryText(eventPayload)); err != nil {
+	if _, err := cfg.SendMarkdownMessage(ctx, corpID, targetUserID, buildDingTalkDeliveryMarkdown(eventPayload)); err != nil {
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -411,6 +416,74 @@ func buildDingTalkDeliveryText(event notificationEventPayload) string {
 		parts = append(parts, "Link: "+link)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.DingTalkMarkdownMessage {
+	title := buildDingTalkIssueLabel(event)
+	body := sanitizeDingTalkMessageText(event.Body)
+	link := strings.TrimSpace(event.Link)
+	parts := []string{"### Multica Notification"}
+	if title != "" {
+		parts = append(parts, "**Issue**\n"+title)
+	}
+	if body != "" {
+		parts = append(parts, "**Message**\n"+body)
+	}
+	if link != "" {
+		parts = append(parts, "[Open In Multica]("+dingtalkExternalBrowserURL(link)+")")
+	}
+
+	cardTitle := title
+	if cardTitle == "" {
+		cardTitle = "Multica Notification"
+	}
+
+	return notifyutil.DingTalkMarkdownMessage{
+		Title: truncateDingTalkCardText(cardTitle, 80),
+		Text:  truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
+	}
+}
+
+func buildDingTalkIssueLabel(event notificationEventPayload) string {
+	title := strings.TrimSpace(event.Title)
+	identifier := strings.TrimSpace(event.IssueIdentifier)
+	if title == "" {
+		return identifier
+	}
+	if identifier == "" || title == identifier || strings.HasPrefix(title, identifier+" ") || strings.HasPrefix(title, identifier+" ·") {
+		return title
+	}
+	return identifier + " · " + title
+}
+
+func dingtalkExternalBrowserURL(raw string) string {
+	link := strings.TrimSpace(raw)
+	if link == "" {
+		return ""
+	}
+	return "dingtalk://dingtalkclient/page/link?url=" + url.QueryEscape(link) + "&pc_slide=false"
+}
+
+func sanitizeDingTalkMessageText(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	return strings.TrimSpace(dingtalkMentionLinkPattern.ReplaceAllString(text, "@$1"))
+}
+
+func truncateDingTalkCardText(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func truncateError(err error) string {

@@ -54,7 +54,7 @@ describe("NotificationsTab", () => {
     render(<NotificationsTab />);
 
     expect(await screen.findByText("When you are mentioned")).toBeInTheDocument();
-    expect(screen.getByText(/Profile → Linked Accounts/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Profile → Linked Accounts/).length).toBeGreaterThan(0);
 
     const switches = screen.getAllByRole("switch");
     expect(switches).toHaveLength(2);

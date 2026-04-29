@@ -82,6 +82,18 @@ type DingTalkSendResult struct {
 	ProcessQueryKey string
 }
 
+type DingTalkActionCardMessage struct {
+	Title       string
+	Text        string
+	SingleTitle string
+	SingleURL   string
+}
+
+type DingTalkMarkdownMessage struct {
+	Title string
+	Text  string
+}
+
 type dingTalkCachedAppToken struct {
 	AccessToken string
 	ExpiresAt   time.Time
@@ -145,9 +157,18 @@ func (c DingTalkConfig) RedirectURL() string {
 }
 
 func (c DingTalkConfig) AuthorizationURL(state string) string {
+	return c.AuthorizationURLWithRedirectURI(state, c.RedirectURL())
+}
+
+func (c DingTalkConfig) AuthorizationURLWithRedirectURI(state, redirectURI string) string {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		redirectURI = c.RedirectURL()
+	}
+
 	values := url.Values{}
 	values.Set("client_id", c.ClientID)
-	values.Set("redirect_uri", c.RedirectURL())
+	values.Set("redirect_uri", redirectURI)
 	values.Set("state", state)
 	values.Set("response_type", "code")
 	values.Set("prompt", "consent")
@@ -567,6 +588,168 @@ func (c DingTalkConfig) SendTextMessage(ctx context.Context, corpID, userID, con
 		"robotCode": c.RobotCode,
 		"userIds":   []string{userID},
 		"msgKey":    "sampleText",
+		"msgParam":  string(msgParamRaw),
+	})
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.MessageURL, strings.NewReader(string(body)))
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	req.Header.Set(dingTalkAccessTokenHeader, strings.TrimSpace(accessToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	if resp.StatusCode >= 400 {
+		return DingTalkSendResult{}, &DingTalkAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("dingtalk send failed: %s", strings.TrimSpace(string(raw))),
+		}
+	}
+
+	var decoded dingTalkSendResponse
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return DingTalkSendResult{}, err
+		}
+	}
+	return DingTalkSendResult{
+		ProcessQueryKey: decoded.ProcessQueryKey,
+	}, nil
+}
+
+func (c DingTalkConfig) SendActionCardMessage(ctx context.Context, corpID, userID string, message DingTalkActionCardMessage) (DingTalkSendResult, error) {
+	if err := c.ValidateDeliveryConfig(); err != nil {
+		return DingTalkSendResult{}, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return DingTalkSendResult{}, errors.New("missing dingtalk user id")
+	}
+
+	accessToken, err := c.AppAccessToken(ctx, corpID)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	title := strings.TrimSpace(message.Title)
+	if title == "" {
+		title = "Multica Notification"
+	}
+	text := strings.TrimSpace(message.Text)
+	if text == "" {
+		text = title
+	}
+	singleTitle := strings.TrimSpace(message.SingleTitle)
+	if singleTitle == "" {
+		singleTitle = "Open in Multica"
+	}
+	singleURL := strings.TrimSpace(message.SingleURL)
+	if singleURL == "" {
+		singleURL = AppURL()
+	}
+
+	msgParamRaw, err := json.Marshal(map[string]string{
+		"title":       title,
+		"text":        text,
+		"singleTitle": singleTitle,
+		"singleURL":   singleURL,
+	})
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"robotCode": c.RobotCode,
+		"userIds":   []string{userID},
+		"msgKey":    "sampleActionCard",
+		"msgParam":  string(msgParamRaw),
+	})
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.MessageURL, strings.NewReader(string(body)))
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	req.Header.Set(dingTalkAccessTokenHeader, strings.TrimSpace(accessToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+	if resp.StatusCode >= 400 {
+		return DingTalkSendResult{}, &DingTalkAPIError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("dingtalk send failed: %s", strings.TrimSpace(string(raw))),
+		}
+	}
+
+	var decoded dingTalkSendResponse
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return DingTalkSendResult{}, err
+		}
+	}
+	return DingTalkSendResult{
+		ProcessQueryKey: decoded.ProcessQueryKey,
+	}, nil
+}
+
+func (c DingTalkConfig) SendMarkdownMessage(ctx context.Context, corpID, userID string, message DingTalkMarkdownMessage) (DingTalkSendResult, error) {
+	if err := c.ValidateDeliveryConfig(); err != nil {
+		return DingTalkSendResult{}, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return DingTalkSendResult{}, errors.New("missing dingtalk user id")
+	}
+
+	accessToken, err := c.AppAccessToken(ctx, corpID)
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	title := strings.TrimSpace(message.Title)
+	if title == "" {
+		title = "Multica Notification"
+	}
+	text := strings.TrimSpace(message.Text)
+	if text == "" {
+		text = title
+	}
+
+	msgParamRaw, err := json.Marshal(map[string]string{
+		"title": title,
+		"text":  text,
+	})
+	if err != nil {
+		return DingTalkSendResult{}, err
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"robotCode": c.RobotCode,
+		"userIds":   []string{userID},
+		"msgKey":    "sampleMarkdown",
 		"msgParam":  string(msgParamRaw),
 	})
 	if err != nil {
