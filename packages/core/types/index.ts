@@ -16,6 +16,8 @@ export type {
   SkillFile,
   CreateSkillRequest,
   UpdateSkillRequest,
+  ImportSkillRequest,
+  SkillImportSkippedFilesError,
   SetAgentSkillsRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,

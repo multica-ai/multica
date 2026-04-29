@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
-import type { Skill } from "@multica/core/types";
+import { api, ApiError } from "@multica/core/api";
+import type { Skill, SkillImportSkippedFilesError } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   skillDetailOptions,
@@ -262,6 +262,31 @@ function detectUrlSource(url: string): DetectedSource {
   return null;
 }
 
+function getSkippedFilesError(
+  err: unknown,
+): SkillImportSkippedFilesError | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const details = err.details;
+  if (!details || typeof details !== "object") return null;
+  const payload = details as Partial<SkillImportSkippedFilesError>;
+  if (
+    payload.code !== "skill_import_skipped_files" ||
+    !Array.isArray(payload.skipped_files)
+  ) {
+    return null;
+  }
+  return {
+    error:
+      typeof payload.error === "string"
+        ? payload.error
+        : "Some files cannot be imported.",
+    code: payload.code,
+    skipped_files: payload.skipped_files.filter(
+      (path): path is string => typeof path === "string",
+    ),
+  };
+}
+
 function SourceCard({
   label,
   exampleHost,
@@ -309,20 +334,97 @@ function UrlForm({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
 
-  const submit = async () => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
+  const importUrl = async (trimmed: string, allowSkippedFiles = false) => {
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
+      const skill = await api.importSkill({
+        url: trimmed,
+        allow_skipped_files: allowSkippedFiles || undefined,
+      });
       seedAfterCreate(qc, wsId, skill);
       toast.success("Skill imported");
       onCreated(skill);
     } catch (err) {
+      const skippedFilesError = getSkippedFilesError(err);
+      if (skippedFilesError && !allowSkippedFiles) {
+        showSkippedFilesToast(trimmed, skippedFilesError.skipped_files);
+        setLoading(false);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Import failed");
       setLoading(false);
     }
+  };
+
+  const showSkippedFilesToast = (trimmed: string, skippedFiles: string[]) => {
+    const visibleFiles = skippedFiles.slice(0, 3);
+    const remaining = skippedFiles.length - visibleFiles.length;
+
+    toast.custom(
+      (t) => (
+        <div
+          role="alert"
+          className="w-[380px] max-w-[calc(100vw-2rem)] rounded-lg border bg-popover p-4 text-popover-foreground shadow-lg"
+        >
+          <div className="flex items-center gap-2">
+            <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600">
+              <AlertCircle className="size-3" />
+            </div>
+            <span className="text-sm font-medium">
+              Some files cannot be imported
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {skippedFiles.length === 1
+              ? "This file is binary or not valid UTF-8 and will be skipped."
+              : `${skippedFiles.length} files are binary or not valid UTF-8 and will be skipped.`}
+          </p>
+          <div className="mt-2 space-y-1">
+            {visibleFiles.map((path) => (
+              <div
+                key={path}
+                className="truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground"
+              >
+                {path}
+              </div>
+            ))}
+            {remaining > 0 && (
+              <div className="px-2 text-xs text-muted-foreground">
+                +{remaining} more
+              </div>
+            )}
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => toast.dismiss(t)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                toast.dismiss(t);
+                void importUrl(trimmed, true);
+              }}
+            >
+              Continue
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity },
+    );
+  };
+
+  const submit = async () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    await importUrl(trimmed);
   };
 
   const submittingLabel = (() => {
