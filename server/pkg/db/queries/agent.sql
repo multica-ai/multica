@@ -142,11 +142,22 @@ WHERE id = $1;
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+--
+-- Also enforces parent-child issue dependencies (#970): a task whose issue
+-- has a parent in todo/in_progress/in_review/blocked is skipped so children
+-- don't start until the parent is done or cancelled.
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
+    LEFT JOIN issue i ON atq.issue_id = i.id
+    LEFT JOIN issue parent ON i.parent_issue_id = parent.id
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND (
+        atq.issue_id IS NULL
+        OR i.parent_issue_id IS NULL
+        OR parent.status IN ('done', 'cancelled')
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -274,9 +285,23 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
 -- name: ListPendingTasksByRuntime :many
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
-ORDER BY priority DESC, created_at ASC;
+-- Returns queued/dispatched tasks for a runtime that are ready to run.
+-- Parent-child dependencies are enforced here (#970): a task whose issue has
+-- a parent in todo/in_progress/in_review/blocked is excluded, so children
+-- don't execute in parallel with an incomplete parent. Chat tasks (no
+-- issue_id) and top-level issues (no parent_issue_id) are always eligible.
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.last_heartbeat_at
+FROM agent_task_queue atq
+LEFT JOIN issue i ON atq.issue_id = i.id
+LEFT JOIN issue parent ON i.parent_issue_id = parent.id
+WHERE atq.runtime_id = $1
+  AND atq.status IN ('queued', 'dispatched')
+  AND (
+    atq.issue_id IS NULL
+    OR i.parent_issue_id IS NULL
+    OR parent.status IN ('done', 'cancelled')
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
 SELECT * FROM agent_task_queue
