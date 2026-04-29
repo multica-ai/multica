@@ -25,8 +25,14 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	if err := os.MkdirAll(contextDir, 0o755); err != nil {
 		return fmt.Errorf("create .agent_context dir: %w", err)
 	}
+	if err := validateIssueBoundContext(ctx); err != nil {
+		return err
+	}
 
 	content := renderIssueContext(provider, ctx)
+	if err := validateRenderedIssueContext(ctx, content); err != nil {
+		return err
+	}
 	path := filepath.Join(contextDir, "issue_context.md")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write issue_context.md: %w", err)
@@ -47,6 +53,39 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 
 	return nil
 }
+
+func validateIssueBoundContext(ctx TaskContextForEnv) error {
+	if !isIssueBoundContext(ctx) {
+		return nil
+	}
+	if strings.TrimSpace(ctx.IssueID) == "" {
+		return fmt.Errorf("issue-bound task requires issue_id before rendering context")
+	}
+	return nil
+}
+
+func validateRenderedIssueContext(ctx TaskContextForEnv, content string) error {
+	if !isIssueBoundContext(ctx) {
+		return nil
+	}
+	issueID := strings.TrimSpace(ctx.IssueID)
+	if issueID == "" || !strings.Contains(content, issueID) {
+		return fmt.Errorf("issue-bound task rendered without validated issue_id")
+	}
+	if blankIssueCommandPattern.MatchString(content) || blankIssueLabelPattern.MatchString(content) {
+		return fmt.Errorf("issue-bound task rendered blank issue_id command or label")
+	}
+	return nil
+}
+
+func isIssueBoundContext(ctx TaskContextForEnv) bool {
+	return ctx.ChatSessionID == "" && ctx.AutopilotRunID == ""
+}
+
+var (
+	blankIssueCommandPattern = regexp.MustCompile(`multica issue get\s+--output json`)
+	blankIssueLabelPattern   = regexp.MustCompile(`\*\*Issue ID:\*\*\s*(?:\n|$)`)
+)
 
 // resolveSkillsDir returns the directory where skills should be written
 // based on the agent provider.

@@ -150,6 +150,7 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 	// Refresh context files (issue_context.md, skills).
 	if err := writeContextFiles(workDir, provider, task); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
+		return nil
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory

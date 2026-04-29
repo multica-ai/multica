@@ -176,44 +176,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 // dispatchRunOnly enqueues a direct agent task without creating an issue.
 func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
-	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
-	if err != nil {
-		return fmt.Errorf("load agent: %w", err)
-	}
-	if agent.ArchivedAt.Valid {
-		return fmt.Errorf("agent is archived")
-	}
-	if !agent.RuntimeID.Valid {
-		return fmt.Errorf("agent has no runtime")
-	}
-
-	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
-		AgentID:        ap.AssigneeID,
-		RuntimeID:      agent.RuntimeID,
-		Priority:       0,
-		AutopilotRunID: run.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("create autopilot task: %w", err)
-	}
-
-	// Update run with task reference.
-	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-		ID:     run.ID,
-		TaskID: task.ID,
-	})
-	if err != nil {
-		slog.Warn("failed to update run with task_id", "run_id", util.UUIDToString(run.ID), "error", err)
-	} else {
-		*run = updatedRun
-	}
-
-	slog.Info("autopilot dispatched (run_only)",
-		"autopilot_id", util.UUIDToString(ap.ID),
-		"task_id", util.UUIDToString(task.ID),
-		"run_id", util.UUIDToString(run.ID),
+	return fmt.Errorf("issue-bound dispatch requires issue_id: autopilot run_only mode has no validated issue_id (autopilot_id=%s run_id=%s source=%s)",
+		util.UUIDToString(ap.ID),
+		util.UUIDToString(run.ID),
+		run.Source,
 	)
-	return nil
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
@@ -293,7 +260,6 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.publishRunDone(wsID, run, "failed")
 	}
 }
-
 
 func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
 	if _, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{

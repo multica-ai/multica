@@ -1177,10 +1177,7 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 	}
 }
 
-// Regression test for #1224: tasks linked only via AutopilotRunID (run_only
-// autopilots) must resolve to the autopilot's workspace. Before the fix,
-// resolveTaskWorkspaceID fell through and every StartTask call returned 404.
-func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
+func TestStartTask_AutopilotRunOnlyTaskWithoutIssueIDFailsExplicitly(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -1242,32 +1239,37 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 		t.Fatalf("StartTask with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Same-workspace daemon token must succeed — this is the bug in #1224.
+	// Same-workspace daemon token reaches the task, then must hard-fail
+	// because autopilot_run_id without issue_id is not a safe issue-bound
+	// execution context.
 	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
 		testWorkspaceID, "legit-daemon")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	testHandler.StartTask(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("StartTask for run_only autopilot task: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("StartTask for run_only autopilot task: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "issue-bound dispatch requires issue_id") {
+		t.Fatalf("expected explicit issue_id error, got %s", w.Body.String())
 	}
 
-	var status string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+	var status, failureReason string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status, &failureReason); err != nil {
 		t.Fatalf("post-check: read task status: %v", err)
 	}
-	if status != "running" {
-		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
+	if status != "failed" {
+		t.Fatalf("expected task status 'failed' after StartTask, got %q", status)
+	}
+	if failureReason != "missing_issue_id" {
+		t.Fatalf("expected failure_reason=missing_issue_id, got %q", failureReason)
 	}
 }
 
-// Regression test for #1276: ClaimTaskByRuntime must populate workspace_id in
-// the response for run_only autopilot tasks. Before the fix, resp.WorkspaceID
-// stayed empty because ClaimTaskByRuntime only handled IssueID and
-// ChatSessionID branches, causing the daemon's execenv to fail with
-// "workspace ID is required".
-func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
+func TestClaimTask_AutopilotRunOnlyWithoutIssueIDFailsExplicitly(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -1324,26 +1326,24 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "issue-bound dispatch requires issue_id") {
+		t.Fatalf("expected explicit issue_id error, got %s", w.Body.String())
 	}
 
-	var resp struct {
-		Task *struct {
-			WorkspaceID string `json:"workspace_id"`
-		} `json:"task"`
+	var status, failureReason string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status, &failureReason); err != nil {
+		t.Fatalf("read task status: %v", err)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if status != "failed" {
+		t.Fatalf("expected task status=failed, got %q", status)
 	}
-	if resp.Task == nil {
-		t.Fatal("expected a task in response, got nil")
-	}
-	if resp.Task.WorkspaceID == "" {
-		t.Fatal("ClaimTaskByRuntime for run_only autopilot: workspace_id is empty in response")
-	}
-	if resp.Task.WorkspaceID != testWorkspaceID {
-		t.Fatalf("expected workspace_id %q, got %q", testWorkspaceID, resp.Task.WorkspaceID)
+	if failureReason != "missing_issue_id" {
+		t.Fatalf("expected failure_reason=missing_issue_id, got %q", failureReason)
 	}
 }
 
@@ -1426,6 +1426,60 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	}
 	if status != "cancelled" {
 		t.Fatalf("ClaimTaskByRuntime (mismatch): expected task status=cancelled, got %q", status)
+	}
+}
+
+func TestClaimTaskByRuntime_IssueBoundTaskWithoutIssueIDFailsExplicitly(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, NULL, 'queued', 2)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create malformed issue-bound task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "issue-bound dispatch requires issue_id") {
+		t.Fatalf("expected explicit issue_id error, got %s", w.Body.String())
+	}
+
+	var status, failureReason string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status, &failureReason); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("expected malformed issue-bound task status=failed, got %q", status)
+	}
+	if failureReason != "missing_issue_id" {
+		t.Fatalf("expected failure_reason=missing_issue_id, got %q", failureReason)
 	}
 }
 

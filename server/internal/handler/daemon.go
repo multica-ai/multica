@@ -724,6 +724,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isMissingIssueIDGuardrailTask(*task) {
+		outcome = "error_missing_issue_id"
+		errMsg := h.failMissingIssueIDTask(r, *task, "claim", runtimeID)
+		writeError(w, http.StatusInternalServerError, errMsg)
+		return
+	}
+
 	outcome = "claimed"
 	buildStart = time.Now()
 
@@ -918,6 +925,27 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 
+func isMissingIssueIDGuardrailTask(task db.AgentTaskQueue) bool {
+	return !task.IssueID.Valid && !task.ChatSessionID.Valid
+}
+
+func (h *Handler) failMissingIssueIDTask(r *http.Request, task db.AgentTaskQueue, phase, runtimeID string) string {
+	errMsg := fmt.Sprintf("issue-bound dispatch requires issue_id: task_id=%s runtime_id=%s phase=%s", uuidToString(task.ID), runtimeID, phase)
+	slog.Error("task guardrail: issue-bound task missing issue_id, failing task",
+		"task_id", uuidToString(task.ID),
+		"runtime_id", runtimeID,
+		"phase", phase,
+		"has_chat", task.ChatSessionID.Valid,
+		"has_autopilot_run", task.AutopilotRunID.Valid,
+		"autopilot_run_id", uuidToString(task.AutopilotRunID),
+	)
+	if _, ferr := h.TaskService.FailTask(r.Context(), task.ID, errMsg, "", "", "missing_issue_id"); ferr != nil {
+		slog.Error("task guardrail: fail after missing issue_id check failed",
+			"task_id", uuidToString(task.ID), "phase", phase, "error", ferr)
+	}
+	return errMsg
+}
+
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
 func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -950,7 +978,13 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	taskForAccess, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	if isMissingIssueIDGuardrailTask(taskForAccess) {
+		errMsg := h.failMissingIssueIDTask(r, taskForAccess, "start", uuidToString(taskForAccess.RuntimeID))
+		writeError(w, http.StatusInternalServerError, errMsg)
 		return
 	}
 

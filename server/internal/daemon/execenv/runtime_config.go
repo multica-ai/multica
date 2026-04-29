@@ -22,19 +22,28 @@ import (
 // For Kimi:     writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Kiro:     writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error {
-	content := buildMetaSkillContent(provider, ctx)
-
 	switch provider {
 	case "claude":
-		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
+		return injectRuntimeConfigFile(filepath.Join(workDir, "CLAUDE.md"), provider, ctx)
 	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
-		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
+		return injectRuntimeConfigFile(filepath.Join(workDir, "AGENTS.md"), provider, ctx)
 	case "gemini":
-		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
+		return injectRuntimeConfigFile(filepath.Join(workDir, "GEMINI.md"), provider, ctx)
 	default:
 		// Unknown provider — skip config injection, prompt-only mode.
 		return nil
 	}
+}
+
+func injectRuntimeConfigFile(path, provider string, ctx TaskContextForEnv) error {
+	if err := validateIssueBoundContext(ctx); err != nil {
+		return err
+	}
+	content := buildMetaSkillContent(provider, ctx)
+	if err := validateRenderedIssueContext(ctx, content); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent

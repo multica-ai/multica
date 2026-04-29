@@ -268,6 +268,42 @@ func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesRejectsBlankIssueBoundContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{
+			name: "assignment",
+			ctx:  TaskContextForEnv{},
+		},
+		{
+			name: "comment-triggered",
+			ctx:  TaskContextForEnv{IssueID: " ", TriggerCommentID: "comment-1"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+
+			err := writeContextFiles(dir, "", tc.ctx)
+			if err == nil {
+				t.Fatal("expected blank issue-bound context to be rejected")
+			}
+			if !strings.Contains(err.Error(), "issue-bound task requires issue_id") {
+				t.Fatalf("expected explicit issue_id error, got %v", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); !os.IsNotExist(statErr) {
+				t.Fatalf("issue_context.md should not be rendered, stat err=%v", statErr)
+			}
+		})
+	}
+}
+
 func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
