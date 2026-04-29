@@ -561,7 +561,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"status": "ok"}
 
 	// Check for pending update requests for this runtime.
-	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
+	if pending, err := h.UpdateStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("update PopPending failed", "runtime_id", req.RuntimeID, "error", err)
+	} else if pending != nil {
 		resp["pending_update"] = map[string]string{
 			"id":             pending.ID,
 			"target_version": pending.TargetVersion,
