@@ -15,6 +15,7 @@ import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { agentTaskSnapshotKeys, agentActivityKeys, agentRunCountsKeys } from "../agents/queries";
+import { githubKeys } from "../github/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -143,6 +144,15 @@ export function useRealtimeSync(
       autopilot: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      },
+      github_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
+      },
+      pull_request: () => {
+        // PR list is keyed by issue id, not workspace, so we invalidate all
+        // PR queries — the open issue detail page will refetch its own list.
+        qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
       },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
