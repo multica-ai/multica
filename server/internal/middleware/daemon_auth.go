@@ -17,6 +17,14 @@ type daemonContextKey int
 const (
 	ctxKeyDaemonWorkspaceID daemonContextKey = iota
 	ctxKeyDaemonID
+	ctxKeyDaemonAuthPath
+)
+
+// Daemon auth path labels exposed via context for slow-log attribution.
+const (
+	DaemonAuthPathDaemonToken = "daemon_token"
+	DaemonAuthPathPAT         = "pat"
+	DaemonAuthPathJWT         = "jwt"
 )
 
 // DaemonWorkspaceIDFromContext returns the workspace ID set by DaemonAuth middleware.
@@ -31,11 +39,20 @@ func DaemonIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// DaemonAuthPathFromContext returns which token kind authenticated this
+// request — "daemon_token", "pat", or "jwt" — for telemetry. Empty when the
+// request did not pass through DaemonAuth.
+func DaemonAuthPathFromContext(ctx context.Context) string {
+	p, _ := ctx.Value(ctxKeyDaemonAuthPath).(string)
+	return p
+}
+
 // WithDaemonContext returns a new context with the daemon workspace ID and daemon ID set.
 // This is used by tests to simulate daemon token authentication.
 func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyDaemonWorkspaceID, workspaceID)
 	ctx = context.WithValue(ctx, ctxKeyDaemonID, daemonID)
+	ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
 	return ctx
 }
 
@@ -71,6 +88,7 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, uuidToString(dt.WorkspaceID))
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, dt.DaemonID)
+				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -86,7 +104,8 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 				}
 				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
-				next.ServeHTTP(w, r)
+				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -114,7 +133,8 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

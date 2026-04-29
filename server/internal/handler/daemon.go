@@ -517,18 +517,23 @@ const heartbeatHasPendingTimeout = 1 * time.Second
 
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	authPath := middleware.DaemonAuthPathFromContext(r.Context())
 	var (
 		outcome                                                                  = "unauth"
 		runtimeID                                                                string
+		decodeMs, runtimeLookupMs, workspaceCheckMs                              int64
 		authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64
 		probeSkillsTimedOut, probeImportTimedOut                                 bool
 	)
 	defer func() {
-		logHeartbeatEndpointSlow(runtimeID, outcome, start, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs, probeSkillsTimedOut, probeImportTimedOut)
+		logHeartbeatEndpointSlow(runtimeID, outcome, authPath, start, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs, probeSkillsTimedOut, probeImportTimedOut)
 	}()
 
+	decodeStart := time.Now()
 	var req DaemonHeartbeatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decodeErr := json.NewDecoder(r.Body).Decode(&req)
+	decodeMs = time.Since(decodeStart).Milliseconds()
+	if decodeErr != nil {
 		outcome = "bad_body"
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -541,17 +546,38 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	runtimeID = req.RuntimeID
 
-	// Verify the caller owns this runtime's workspace.
-	rt, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID)
+	// Inlined and instrumented version of requireDaemonRuntimeAccess so we
+	// can attribute the runtime-lookup and workspace-check sub-stages
+	// independently in slow-logs. Together with the auth_path label set by
+	// DaemonAuth middleware, this lets us tell whether prod heartbeat tail
+	// latency is in pgx pool acquisition (runtime_lookup_ms), in the PAT
+	// fallback workspace-membership query (workspace_check_ms), or upstream.
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 	if !ok {
+		outcome = "bad_runtime_id"
+		return
+	}
+	lookupStart := time.Now()
+	rt, lookupErr := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
+	if lookupErr != nil {
+		outcome = "runtime_not_found"
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	wsCheckStart := time.Now()
+	wsOK := h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID))
+	workspaceCheckMs = time.Since(wsCheckStart).Milliseconds()
+	if !wsOK {
+		outcome = "workspace_denied"
 		return
 	}
 	authMs = time.Since(start).Milliseconds()
 
 	updateStart := time.Now()
-	_, err := h.Queries.UpdateAgentRuntimeHeartbeat(r.Context(), rt.ID)
+	_, updateErr := h.Queries.UpdateAgentRuntimeHeartbeat(r.Context(), rt.ID)
 	updateMs = time.Since(updateStart).Milliseconds()
-	if err != nil {
+	if updateErr != nil {
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
@@ -637,8 +663,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // logHeartbeatEndpointSlow emits one structured log when /api/daemon/heartbeat
 // exceeds 500ms, splitting auth / update / probe / pop phases for both queues
 // so the prod tail can be attributed without flooding logs at normal rates.
-// Mirrors logClaimEndpointSlow for consistency.
-func logHeartbeatEndpointSlow(runtimeID, outcome string, start time.Time, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64, probeSkillsTimedOut, probeImportTimedOut bool) {
+// auth_ms is further decomposed into decode_ms, runtime_lookup_ms, and
+// workspace_check_ms; auth_path labels which token kind authenticated the
+// request ("daemon_token", "pat", or "jwt"). Mirrors logClaimEndpointSlow.
+func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Time, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64, probeSkillsTimedOut, probeImportTimedOut bool) {
 	totalMs := time.Since(start).Milliseconds()
 	if totalMs < 500 && !probeSkillsTimedOut && !probeImportTimedOut {
 		return
@@ -646,8 +674,12 @@ func logHeartbeatEndpointSlow(runtimeID, outcome string, start time.Time, authMs
 	slog.Info("heartbeat_endpoint slow",
 		"runtime_id", runtimeID,
 		"outcome", outcome,
+		"auth_path", authPath,
 		"total_ms", totalMs,
 		"auth_ms", authMs,
+		"decode_ms", decodeMs,
+		"runtime_lookup_ms", runtimeLookupMs,
+		"workspace_check_ms", workspaceCheckMs,
 		"update_ms", updateMs,
 		"probe_skills_ms", probeSkillsMs,
 		"pop_skills_ms", popSkillsMs,
