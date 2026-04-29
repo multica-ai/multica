@@ -183,7 +183,12 @@ agent used, with stdin/stdout/stderr wired through. The agent picks up
 the same session, so prior context is preserved.
 
 Use --print to emit the equivalent shell command for use with eval, or
---copy to drop it on the system clipboard.`,
+--copy to drop it on the system clipboard.
+
+Local runtimes only. Cloud-runtime tasks do not persist a local
+session_id + work_dir, so the latest run is skipped and the command
+exits with "no completed run found". A future remote-takeover feature
+would need its own attach/exec transport — see the issue tracker.`,
 	Args: exactArgs(1),
 	RunE: runIssueTake,
 }
