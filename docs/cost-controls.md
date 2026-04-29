@@ -53,10 +53,12 @@ claude -p \
     [--mcp-config <path>]
 ```
 
-`custom_args` lands between the per-task flags and `--mcp-config`. If
-the user-supplied args include any of the protocol-critical flags
-(see [Blocked flags](#blocked-flags) below) the daemon drops them and
-logs a warning — everything else passes through untouched.
+`custom_args` lands after the per-task flags (`--model` /
+`--max-turns` / `--append-system-prompt` / `--resume`) and before the
+daemon-appended `--mcp-config`. If any user-supplied arg matches a
+protocol-critical flag (see [Blocked flags](#blocked-flags)), the
+daemon drops it and logs a warning; everything else passes through
+untouched.
 
 ## Setting `custom_args`
 
@@ -114,6 +116,13 @@ The Codex runtime does not expose a per-run dollar ceiling today; the
 equivalent is `MULTICA_AGENT_TIMEOUT` at the daemon level plus any
 per-workspace billing quota at your provider.
 
+`codexBlockedArgs` only blocks `--listen` (the daemon's own listener
+flag), so the `custom_args` surface for Codex is in fact wider than
+for Claude — any other `codex app-server` flag can be passed through
+untouched. See
+[`server/pkg/agent/codex.go`](../server/pkg/agent/codex.go) for the
+current blocklist.
+
 ## Blocked flags
 
 Per-backend blocklists live next to each backend (e.g.
@@ -145,11 +154,13 @@ After updating `custom_args`, trigger the agent (or wait for its next
 scheduled task) and check the daemon log:
 
 ```bash
-# The daemon logs the full exec argv for each task:
-grep 'agent command' ~/.multica/daemon.log | tail -1
+# The daemon logs the full exec argv for each task (all backends emit
+# the same "agent command" key, so this works for claude, codex, and
+# every other runtime):
+grep 'agent command' ~/.multica/daemon.log | tail -1 | jq .args
 ```
 
-You should see your flags in the `args=` slice. If they're missing,
+You should see your flags in the `args` array. If they're missing,
 check the warn-level log for `custom_args: blocked protocol-critical
 flag, skipping` — you probably tried to override a member of the
 blocklist.
