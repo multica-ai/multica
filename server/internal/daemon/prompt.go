@@ -32,26 +32,19 @@ func BuildPrompt(task Task) string {
 
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
 // user typed a single natural-language sentence in the create-issue modal;
-// the agent's job is to enrich the input with context from any referenced
-// URLs (e.g. GitHub PRs, issues) and translate it into one
-// `multica issue create` CLI invocation. No issue exists yet, so the agent
-// must NOT call `multica issue get` or attempt to comment — there's nothing
-// to read or reply to.
+// the agent's job is to translate it into one `multica issue create` CLI
+// invocation, using its judgment to decide whether fetching referenced URLs
+// would produce a better issue. No issue exists yet, so the agent must NOT
+// call `multica issue get` or attempt to comment — there's nothing to read
+// or reply to.
 func buildQuickCreatePrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a quick-create assistant for a Multica workspace.\n\n")
-	b.WriteString("A user pressed the quick-create shortcut and typed a one-line description. There is NO existing issue. Your job is to enrich the description with context from any referenced URLs (PRs, issues, pages), then create the issue with a single `multica issue create` command.\n\n")
+	b.WriteString("A user pressed the quick-create shortcut and typed a one-line description. There is NO existing issue. Your job is to create a well-formed issue from the user's input with a single `multica issue create` command.\n\n")
 	fmt.Fprintf(&b, "User input:\n> %s\n\n", task.QuickCreatePrompt)
-	b.WriteString("URL context enrichment (do this BEFORE creating the issue):\n")
-	b.WriteString("- If the user input contains URLs (especially GitHub PR/issue links), you MUST fetch those URLs to extract context before creating the issue.\n")
-	b.WriteString("- For GitHub PR URLs: run `gh pr view <url> --json title,body,additions,deletions,changedFiles,labels` to get structured data.\n")
-	b.WriteString("- For GitHub issue URLs: run `gh issue view <url> --json title,body,labels` to get structured data.\n")
-	b.WriteString("- For other URLs: use available tools (e.g. WebFetch) to retrieve the page content.\n")
-	b.WriteString("- Incorporate the fetched context into both the title and description to make the issue self-contained.\n")
-	b.WriteString("- If fetching fails (e.g. private repo, auth error, network error), fall back to the user's original text. Never let a fetch failure prevent issue creation.\n\n")
 	b.WriteString("Field rules:\n")
-	b.WriteString("- title: required. A concise but semantically rich summary. When the user input references external resources (PRs, issues, pages), incorporate the actual content/purpose from those resources into the title — not just the link identifier. For example, if the user says \"review this PR: https://github.com/org/repo/pull/123\" and the PR title is \"Refactor auth module to OAuth2\", produce \"Review PR #123: Refactor auth module to OAuth2\" instead of just \"review PR #123\". Strip filler words but preserve key semantic information.\n")
-	b.WriteString("- description: include a rich, self-contained description whenever context is available. If URLs are present, summarize the linked content (e.g. PR description, key changes, scope of modifications, number of files changed). The goal is for a reader to understand the full context without clicking any external links. Only omit the description if the user input is truly a simple one-liner with no additional context to extract. Never echo the title here.\n")
+	b.WriteString("- title: required. A concise but semantically rich summary that lets a reader understand what the issue is about at a glance. If the user input references external resources (PRs, issues, URLs, etc.), use your judgment to decide whether fetching the resource would produce a meaningfully better title — if so, fetch it and incorporate the relevant context. For example, \"review PR #123\" is much less useful than \"Review PR #123: Refactor auth module to OAuth2\". Strip filler words but preserve key semantic information.\n")
+	b.WriteString("- description: aim for a self-contained description that gives readers enough context to act without chasing down external links. Use your judgment: if the user input contains URLs or references that would benefit from additional context, fetch them and summarize the relevant parts (e.g. PR description, key changes, scope). If the user input is a simple, self-explanatory request, a description may not be needed — omit it rather than padding. Never echo the title here.\n")
 	b.WriteString("- priority: one of `urgent`, `high`, `medium`, `low`, or omit. Map P0/P1 → urgent/high; \"asap\"/\"紧急\" → urgent; \"低优先级\" → low. If unspecified, omit.\n")
 	b.WriteString("- assignee:\n")
 	b.WriteString("    - When the user names someone (\"分给 X\" / \"assign to X\" / \"@X\"), call `multica workspace members --output json` and find the matching member by display name (case-insensitive substring match is fine). On a clean match, pass `--assignee <name>`. On no match or ambiguous match, do NOT pass `--assignee` — instead append a final line to the description: `未识别 assignee: X`.\n")
