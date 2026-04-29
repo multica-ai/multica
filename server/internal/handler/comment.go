@@ -400,12 +400,11 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
 // Skips self-mentions, agents with on_mention trigger disabled, and private
-// agents mentioned by non-owner members (only the agent owner or workspace
-// admin/owner can mention a private agent).
+// agents mentioned by non-owner members (only the agent owner can trigger
+// a private agent via @mention).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
-	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	// When replying in a thread, inherit mentions from the parent comment
 	// so that agents mentioned in the thread root are triggered by replies —
@@ -429,14 +428,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
+		// Private agents can only be mentioned by the agent owner.
+		// Workspace admin/owner roles grant governance rights (archive, delete)
+		// but not invocation rights — only the agent's owner can trigger it.
 		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
-			if !isOwner {
-				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					continue
-				}
+			if uuidToString(agent.OwnerID) != authorID {
+				continue
 			}
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
