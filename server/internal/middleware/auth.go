@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -70,7 +71,15 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 
 				userID := uuidToString(pat.UserID)
 				r.Header.Set("X-User-ID", userID)
-				patCache.Set(r.Context(), hash, userID)
+
+				// Clamp cache TTL to the token's remaining lifetime so a
+				// PAT expiring in <60s can't continue passing auth on a
+				// cache hit after expires_at.
+				var expiresAt time.Time
+				if pat.ExpiresAt.Valid {
+					expiresAt = pat.ExpiresAt.Time
+				}
+				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
 				// Cache miss = TTL expired (or first use after revoke /
 				// process restart). Refresh last_used_at; subsequent hits

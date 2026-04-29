@@ -44,8 +44,8 @@ func TestPATCache_NilSafe(t *testing.T) {
 	if v, ok := c.Get(ctx, "any-hash"); ok || v != "" {
 		t.Fatalf("nil cache must miss; got (%q, %v)", v, ok)
 	}
-	c.Set(ctx, "any-hash", "user-1")     // no panic
-	c.Invalidate(ctx, "any-hash")        // no panic
+	c.Set(ctx, "any-hash", "user-1", PATCacheTTL) // no panic
+	c.Invalidate(ctx, "any-hash")                 // no panic
 }
 
 func TestNewPATCache_NilRedisReturnsNil(t *testing.T) {
@@ -66,7 +66,7 @@ func TestPATCache_SetGetInvalidate(t *testing.T) {
 		t.Fatal("expected miss before set")
 	}
 
-	c.Set(ctx, "hash-A", "user-A")
+	c.Set(ctx, "hash-A", "user-A", PATCacheTTL)
 	if v, ok := c.Get(ctx, "hash-A"); !ok || v != "user-A" {
 		t.Fatalf("expected hit user-A, got (%q, %v)", v, ok)
 	}
@@ -91,7 +91,7 @@ func TestPATCache_TTL(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	c.Set(ctx, "hash-T", "user-T")
+	c.Set(ctx, "hash-T", "user-T", PATCacheTTL)
 	ttl, err := rdb.TTL(ctx, patCacheKey("hash-T")).Result()
 	if err != nil {
 		t.Fatalf("TTL: %v", err)
@@ -99,5 +99,69 @@ func TestPATCache_TTL(t *testing.T) {
 	// Redis returns the remaining TTL; allow a small skew for rounding.
 	if ttl <= 0 || ttl > PATCacheTTL+time.Second {
 		t.Fatalf("unexpected TTL %v (want ~%v)", ttl, PATCacheTTL)
+	}
+}
+
+func TestTTLForExpiry(t *testing.T) {
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+
+	// No expiry set → full PATCacheTTL.
+	if got := TTLForExpiry(now, time.Time{}); got != PATCacheTTL {
+		t.Fatalf("zero expires_at: got %v, want %v", got, PATCacheTTL)
+	}
+
+	// Far-future expiry → full PATCacheTTL.
+	far := now.Add(24 * time.Hour)
+	if got := TTLForExpiry(now, far); got != PATCacheTTL {
+		t.Fatalf("far-future expires_at: got %v, want %v", got, PATCacheTTL)
+	}
+
+	// Sooner-than-TTL expiry → clamped to remaining lifetime.
+	soon := now.Add(10 * time.Second)
+	if got := TTLForExpiry(now, soon); got != 10*time.Second {
+		t.Fatalf("sooner expires_at: got %v, want 10s", got)
+	}
+
+	// Already expired (or exactly now) → 0, caller skips caching.
+	if got := TTLForExpiry(now, now); got != 0 {
+		t.Fatalf("expires_at == now: got %v, want 0", got)
+	}
+	if got := TTLForExpiry(now, now.Add(-time.Second)); got != 0 {
+		t.Fatalf("past expires_at: got %v, want 0", got)
+	}
+}
+
+// TestPATCache_Set_RespectsClampedTTL is the regression test for the
+// review finding: a PAT expiring in <PATCacheTTL must NOT be cached for
+// the full PATCacheTTL window, otherwise it would continue passing auth
+// on cache hit after expires_at.
+func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	c := NewPATCache(rdb)
+	if c == nil {
+		t.Fatal("NewPATCache returned nil")
+	}
+	ctx := context.Background()
+
+	// Cache with a 5s TTL — what TTLForExpiry would return for a token
+	// expiring 5s from now.
+	c.Set(ctx, "hash-short", "user-short", 5*time.Second)
+	ttl, err := rdb.TTL(ctx, patCacheKey("hash-short")).Result()
+	if err != nil {
+		t.Fatalf("TTL: %v", err)
+	}
+	if ttl <= 0 || ttl > 5*time.Second+time.Second {
+		t.Fatalf("expected clamped TTL ~5s, got %v", ttl)
+	}
+
+	// Zero / negative TTL must skip caching entirely (already-expired
+	// token's TOCTOU-safe path).
+	c.Set(ctx, "hash-zero", "user-zero", 0)
+	if _, ok := c.Get(ctx, "hash-zero"); ok {
+		t.Fatal("zero-TTL Set must not cache")
+	}
+	c.Set(ctx, "hash-neg", "user-neg", -time.Second)
+	if _, ok := c.Get(ctx, "hash-neg"); ok {
+		t.Fatal("negative-TTL Set must not cache")
 	}
 }

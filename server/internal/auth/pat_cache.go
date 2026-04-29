@@ -55,15 +55,44 @@ func (c *PATCache) Get(ctx context.Context, hash string) (userID string, ok bool
 	return v, true
 }
 
-// Set populates the cache with TTL = PATCacheTTL. Errors are logged and
-// swallowed — a cache write failure is not a request failure.
-func (c *PATCache) Set(ctx context.Context, hash, userID string) {
-	if c == nil {
+// Set populates the cache with the given TTL. Callers MUST pass a TTL no
+// longer than the token's remaining lifetime — otherwise an entry could
+// outlive the PAT's expires_at and let an expired token pass auth on
+// cache hit. Use TTLForExpiry to compute it from a token's expires_at.
+//
+// Errors are logged and swallowed — a cache write failure is not a
+// request failure.
+func (c *PATCache) Set(ctx context.Context, hash, userID string, ttl time.Duration) {
+	if c == nil || ttl <= 0 {
 		return
 	}
-	if err := c.rdb.Set(ctx, patCacheKey(hash), userID, c.ttl).Err(); err != nil {
+	if err := c.rdb.Set(ctx, patCacheKey(hash), userID, ttl).Err(); err != nil {
 		slog.Warn("pat_cache: set failed", "error", err)
 	}
+}
+
+// TTLForExpiry returns the cache TTL for a PAT given its expires_at.
+//   - Zero expiresAt (token never expires) → full PATCacheTTL.
+//   - expiresAt in the future → min(PATCacheTTL, time until expiry).
+//   - expiresAt at or before now → 0 (caller should skip caching; the
+//     middleware shouldn't reach here because the SELECT already
+//     filters expired tokens, but a TOCTOU between SELECT and Set is
+//     possible).
+//
+// Pass time.Time{} when the PAT has no expiry (pgtype.Timestamptz with
+// Valid=false maps to a zero Time).
+func TTLForExpiry(now, expiresAt time.Time) time.Duration {
+	if expiresAt.IsZero() {
+		return PATCacheTTL
+	}
+	remaining := expiresAt.Sub(now)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining < PATCacheTTL {
+		return remaining
+	}
+	return PATCacheTTL
 }
 
 // Invalidate removes the entry for hash. Called on PAT revocation so the
