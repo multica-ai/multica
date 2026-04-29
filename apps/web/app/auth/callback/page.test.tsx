@@ -61,7 +61,8 @@ import CallbackPage from "./page";
 describe("CallbackPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
+    const keys = [...mockSearchParams.keys()];
+    keys.forEach((k) => mockSearchParams.delete(k));
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
