@@ -548,6 +548,94 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 	}
 }
 
+// TestIssueStatusBothForms verifies that `multica issue status <id> <status>`
+// (positional, original form) and `multica issue status <id> --to <status>`
+// (flag form, consistent with `issue assign --to`) both produce the same
+// PUT /api/issues/<id> body and that positional takes precedence when both are
+// supplied. Also covers the error case (status missing entirely).
+func TestIssueStatusBothForms(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStatus string
+		wantErr    bool
+	}{
+		{
+			name:       "positional only (original form)",
+			args:       []string{"issue-abc", "done"},
+			wantStatus: "done",
+		},
+		{
+			name:       "--to flag only (new form)",
+			args:       []string{"issue-abc", "--to", "in_review"},
+			wantStatus: "in_review",
+		},
+		{
+			name:       "both supplied — positional wins",
+			args:       []string{"issue-abc", "done", "--to", "in_review"},
+			wantStatus: "done",
+		},
+		{
+			name:    "neither supplied — error",
+			args:    []string{"issue-abc"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid status — error",
+			args:    []string{"issue-abc", "--to", "not-a-status"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-abc", "status": gotBody["status"]})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			// Build a fresh command tree per test to avoid stale flag state
+			// between test cases.
+			cmd := &cobra.Command{
+				Use:  "status <id> [<status>]",
+				Args: cobra.RangeArgs(1, 2),
+				RunE: runIssueStatus,
+			}
+			cmd.Flags().String("to", "", "New status (alternative to positional argument)")
+			cmd.Flags().String("output", "table", "Output format")
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(new(strings.Builder))
+			cmd.SetErr(new(strings.Builder))
+
+			err := cmd.Execute()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil; gotBody=%+v", gotBody)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotPath != "/api/issues/issue-abc" {
+				t.Errorf("path = %q, want /api/issues/issue-abc", gotPath)
+			}
+			if gotBody["status"] != tt.wantStatus {
+				t.Errorf("body.status = %v, want %v", gotBody["status"], tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,
