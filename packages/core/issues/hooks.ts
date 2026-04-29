@@ -21,6 +21,13 @@ export function useIssueDetail(workspaceId: string, issueId: string) {
   return useQuery(issueDetailOptions(workspaceId, issueId));
 }
 
+export function useOptionalIssueDetail(workspaceId: string, issueId: string | null | undefined) {
+  return useQuery({
+    ...issueDetailOptions(workspaceId, issueId ?? ""),
+    enabled: Boolean(issueId),
+  });
+}
+
 export function useIssueTimelineEntries(issueId: string) {
   return useQuery(issueTimelineOptions(issueId));
 }

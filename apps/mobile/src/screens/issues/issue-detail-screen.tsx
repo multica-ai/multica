@@ -37,6 +37,7 @@ import {
   useChildIssues,
   useIssueAttachments,
   useIssueDetail,
+  useOptionalIssueDetail,
   useIssueReactions,
   useIssueTaskRuns,
   useIssueTimelineEntries,
@@ -64,6 +65,10 @@ import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
+import {
+  createDraftCommentAttachment,
+  type DraftCommentAttachment,
+} from "./comment-attachment-drafts";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
 type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
@@ -100,6 +105,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { getActorName } = useActorName();
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
+  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
+    workspace.id,
+    issue?.parent_issue_id,
+  );
   const { data: children = [] } = useChildIssues(workspace.id, issueId);
   const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(issueId);
@@ -113,7 +122,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const toggleIssueReaction = useToggleIssueReaction(issueId);
   const toggleCommentReaction = useToggleCommentReaction(issueId);
   const [comment, setComment] = useState("");
-  const [commentAttachments, setCommentAttachments] = useState<Attachment[]>([]);
+  const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -154,14 +163,30 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
   async function submitComment() {
     const content = comment.trim();
-    if (!content || createComment.isPending) return;
-    await createComment.mutateAsync({
-      content,
-      attachmentIds: commentAttachments.map((attachment) => attachment.id),
-    });
-    setComment("");
-    setCommentAttachments([]);
-    setCommentSheetOpen(false);
+    if (!content || createComment.isPending || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    const uploadedAttachments: Attachment[] = [];
+    try {
+      for (const draft of commentAttachments) {
+        const attachment = await uploadMobileAsset(api, draft, { issueId });
+        uploadedAttachments.push(attachment);
+      }
+      await createComment.mutateAsync({
+        content,
+        attachmentIds: uploadedAttachments.map((attachment) => attachment.id),
+      });
+      setComment("");
+      setCommentAttachments([]);
+      await refetchAttachments();
+      setCommentSheetOpen(false);
+    } catch (err) {
+      await Promise.allSettled(uploadedAttachments.map((attachment) => api.deleteAttachment(attachment.id)));
+      setUploadError(err instanceof Error ? err.message : "Unable to send comment");
+      await refetchAttachments();
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function submitReply(parentId: string) {
@@ -185,14 +210,33 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     await deleteComment.mutateAsync(commentId);
   }
 
+  function closeCommentSheet() {
+    setCommentSheetOpen(false);
+    setCommentAttachments([]);
+    setUploadError(null);
+  }
+
+  function addCommentAttachment(asset: MobileUploadAsset) {
+    setCommentAttachments((items) => [
+      ...items,
+      createDraftCommentAttachment(asset, items.length),
+    ]);
+  }
+
+  function removeCommentAttachment(attachmentId: string) {
+    setCommentAttachments((items) => items.filter((attachment) => attachment.id !== attachmentId));
+  }
+
   async function uploadAttachment(asset: MobileUploadAsset, target: "issue" | "comment") {
+    if (target === "comment") {
+      addCommentAttachment(asset);
+      return;
+    }
+
     setUploading(true);
     setUploadError(null);
     try {
-      const attachment = await uploadMobileAsset(api, asset, { issueId });
-      if (target === "comment") {
-        setCommentAttachments((items) => [...items, attachment]);
-      }
+      await uploadMobileAsset(api, asset, { issueId });
       await refetchAttachments();
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
@@ -392,6 +436,32 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         </View>
       ),
     },
+    ...(issue.parent_issue_id
+      ? [{
+          key: "parent",
+          node: (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Parent issue</Text>
+              <Pressable
+                disabled={!parentIssue}
+                onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
+                style={styles.childRow}
+              >
+                {parentIssue ? (
+                  <>
+                    <Text style={styles.childIdentifier}>{parentIssue.identifier}</Text>
+                    <Text style={styles.childTitle}>{parentIssue.title}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.attachmentMeta}>
+                    {parentIssueLoading ? "Loading parent issue..." : "Unable to load parent issue"}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ),
+        }]
+      : []),
     ...(children.length > 0
       ? [{
           key: "children",
@@ -603,11 +673,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         comment={comment}
         createPending={createComment.isPending}
         onChangeComment={setComment}
-        onClose={() => setCommentSheetOpen(false)}
+        onClose={closeCommentSheet}
         onPickDocument={() => void pickDocument("comment")}
         onPickImage={() => void pickImage("comment")}
+        onRemoveAttachment={removeCommentAttachment}
         onSubmit={() => void submitComment()}
-        onOpenAttachment={openAttachmentPreview}
         open={commentSheetOpen}
         uploadError={uploadError}
         uploading={uploading}
@@ -633,13 +703,13 @@ function CommentSheet({
   onClose,
   onPickDocument,
   onPickImage,
-  onOpenAttachment,
+  onRemoveAttachment,
   onSubmit,
   open,
   uploadError,
   uploading,
 }: {
-  attachments: Attachment[];
+  attachments: DraftCommentAttachment[];
   bottomInset: number;
   comment: string;
   createPending: boolean;
@@ -648,13 +718,13 @@ function CommentSheet({
   onClose: () => void;
   onPickDocument: () => void;
   onPickImage: () => void;
-  onOpenAttachment: (attachment: Attachment) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onSubmit: () => void;
   open: boolean;
   uploadError: string | null;
   uploading: boolean;
 }) {
-  const canSubmit = comment.trim().length > 0 && !createPending;
+  const canSubmit = comment.trim().length > 0 && !createPending && !uploading;
 
   return (
     <Modal
@@ -688,7 +758,7 @@ function CommentSheet({
             value={comment}
           />
           {attachments.length > 0 ? (
-            <AttachmentList attachments={attachments} compact onOpen={onOpenAttachment} />
+            <DraftAttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
           ) : null}
           {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
           <View style={styles.sheetActions}>
@@ -1164,10 +1234,14 @@ function AttachmentList({
   attachments,
   compact,
   onOpen,
+  onRemove,
+  removingAttachmentId,
 }: {
   attachments: Attachment[];
   compact?: boolean;
   onOpen: (attachment: Attachment) => void;
+  onRemove?: (attachmentId: string) => void;
+  removingAttachmentId?: string | null;
 }) {
   if (attachments.length === 0) {
     if (compact) return null;
@@ -1185,11 +1259,69 @@ function AttachmentList({
             pressed && styles.buttonPressed,
           ]}
         >
-          <Text style={styles.attachmentName}>{attachment.filename}</Text>
-          <Text style={styles.attachmentMeta}>
-            {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"} / {attachmentPreviewLabel(attachment)}
-          </Text>
+          <View style={styles.attachmentContent}>
+            <Text style={styles.attachmentName}>{attachment.filename}</Text>
+            <Text style={styles.attachmentMeta}>
+              {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"} / {attachmentPreviewLabel(attachment)}
+            </Text>
+          </View>
+          {onRemove ? (
+            <Pressable
+              accessibilityLabel={`Remove ${attachment.filename}`}
+              accessibilityRole="button"
+              disabled={removingAttachmentId === attachment.id}
+              hitSlop={8}
+              onPress={(event) => {
+                event.stopPropagation();
+                onRemove(attachment.id);
+              }}
+              style={({ pressed }) => [
+                styles.attachmentRemoveButton,
+                removingAttachmentId === attachment.id && styles.headerIconButtonDisabled,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.attachmentRemoveText}>
+                {removingAttachmentId === attachment.id ? "..." : "Remove"}
+              </Text>
+            </Pressable>
+          ) : null}
         </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function DraftAttachmentList({
+  attachments,
+  onRemove,
+}: {
+  attachments: DraftCommentAttachment[];
+  onRemove: (attachmentId: string) => void;
+}) {
+  return (
+    <View style={styles.attachmentList}>
+      {attachments.map((attachment) => (
+        <View key={attachment.id} style={styles.attachmentRow}>
+          <View style={styles.attachmentContent}>
+            <Text style={styles.attachmentName}>{attachment.name}</Text>
+            <Text style={styles.attachmentMeta}>
+              {formatBytes(attachment.size ?? 0)} / {attachment.mimeType || "file"}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityLabel={`Remove ${attachment.name}`}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => onRemove(attachment.id)}
+            style={({ pressed }) => [
+              styles.attachmentRemoveButton,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.attachmentRemoveText}>Remove</Text>
+          </Pressable>
+        </View>
       ))}
     </View>
   );
@@ -1834,12 +1966,20 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   attachmentRow: {
+    alignItems: "center",
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
-    gap: spacing.xs,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
     padding: spacing.md,
+  },
+  attachmentContent: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
   },
   attachmentName: {
     color: colors.foreground,
@@ -1849,6 +1989,17 @@ const styles = StyleSheet.create({
   attachmentMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+  },
+  attachmentRemoveButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+  },
+  attachmentRemoveText: {
+    color: colors.destructive,
+    fontSize: 12,
+    fontWeight: "500",
   },
   previewModal: {
     backgroundColor: colors.background,
