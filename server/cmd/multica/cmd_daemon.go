@@ -541,6 +541,13 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	if ws, ok := health["workspaces"].([]any); ok {
 		fmt.Fprintf(os.Stdout, "Workspaces:  %d\n", len(ws))
 	}
+	// Surface backend connectivity if the daemon reports it. Older daemons
+	// (or daemons in a "unknown" state because no ServerBaseURL is configured)
+	// won't include this field — emit nothing in that case so the existing
+	// output stays unchanged for them.
+	if conn, ok := health["backend_connectivity"].(string); ok && conn != "" && conn != "unknown" {
+		fmt.Fprintf(os.Stdout, "Backend:     %s\n", conn)
+	}
 	return nil
 }
 
