@@ -1,15 +1,20 @@
 import { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
+  type GestureResponderEvent,
   type NativeSyntheticEvent,
   type TextInputProps,
   type TextInputSelectionChangeEventData,
@@ -76,9 +81,16 @@ type DetailSection = {
   onToggle?: () => void;
   data: DetailListItem[];
 };
+type AttachmentPreviewState = {
+  attachment: Attachment;
+  textContent?: string;
+  error?: string;
+  loading?: boolean;
+};
 
 const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 8;
+const TEXT_PREVIEW_MAX_BYTES = 1_000_000;
 
 export function IssueDetailScreen({ navigation, route }: Props) {
   const { issueId } = route.params;
@@ -112,6 +124,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
 
   const comments = useMemo(
     () => timeline
@@ -258,11 +271,52 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     toggleCommentReaction.mutate({ commentId: entry.id, emoji, existing });
   }
 
+  function startCommentEdit(commentId: string, content: string) {
+    setEditingCommentId(commentId);
+    setEditingContent(content);
+  }
+
+  async function openAttachmentPreview(attachment: Attachment) {
+    if (isImageAttachment(attachment)) {
+      setAttachmentPreview({ attachment });
+      return;
+    }
+
+    if (!isTextPreviewAttachment(attachment)) {
+      setAttachmentPreview({ attachment });
+      return;
+    }
+
+    if (attachment.size_bytes > TEXT_PREVIEW_MAX_BYTES) {
+      setAttachmentPreview({
+        attachment,
+        error: "This file is too large to preview in the app.",
+      });
+      return;
+    }
+
+    setAttachmentPreview({ attachment, loading: true });
+    try {
+      const response = await fetch(attachment.download_url || attachment.url);
+      if (!response.ok) {
+        throw new Error(`Unable to load preview (${response.status})`);
+      }
+      const textContent = await response.text();
+      setAttachmentPreview({ attachment, textContent });
+    } catch (err) {
+      setAttachmentPreview({
+        attachment,
+        error: err instanceof Error ? err.message : "Unable to load preview",
+      });
+    }
+  }
+
   const overviewItems: DetailListItem[] = [
     {
       key: "issue-summary",
       node: (
         <View style={styles.section}>
+          <Text style={styles.issueBodyTitle}>{issue.title}</Text>
           {issue.description ? (
             <Text style={styles.description}>{issue.description}</Text>
           ) : (
@@ -387,7 +441,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             </View>
           </View>
           {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
-          <AttachmentList attachments={attachments} />
+          <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
         </View>
       ),
     },
@@ -405,6 +459,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               editingCommentId={editingCommentId}
               editingContent={editingContent}
               onToggleReaction={handleCommentReaction}
+              onOpenAttachment={openAttachmentPreview}
               onCancelEdit={() => {
                 setEditingCommentId(null);
                 setEditingContent("");
@@ -413,10 +468,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               onDelete={(commentId) => void removeComment(commentId)}
               onReply={(commentId) => setReplyTargetId(commentId)}
               onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
-              onStartEdit={(commentId, content) => {
-                setEditingCommentId(commentId);
-                setEditingContent(content);
-              }}
+              onStartEdit={startCommentEdit}
               resolveActorName={getActorName}
               replyContent={replyContent}
               replyTargetId={replyTargetId}
@@ -500,38 +552,51 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           </Pressable>
           <View pointerEvents="none" style={styles.titleBarTitleWrap}>
             <Text numberOfLines={1} style={styles.titleBarTitle}>
-              {issue.identifier} {issue.title}
+              {issue.identifier}
             </Text>
           </View>
           <View style={styles.titleBarSideSpacer} />
         </View>
       </View>
-      <SectionList
-        contentContainerStyle={styles.content}
-        keyExtractor={(item) => item.key}
-        renderItem={({ item }) => item.node}
-        renderSectionHeader={({ section }) => (
-          section.title ? <StickySectionHeader section={section} /> : null
-        )}
-        sections={sections}
-        stickySectionHeadersEnabled
-      />
-
-      <Pressable
-        accessibilityLabel="Add a comment"
-        accessibilityRole="button"
-        onPress={() => setCommentSheetOpen(true)}
-        style={({ pressed }) => [
-          styles.floatingButton,
-          {
-            bottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
-            right: Math.max(insets.right, spacing.lg),
-          },
-          pressed && styles.buttonPressed,
-        ]}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+        style={styles.keyboardAvoidingContent}
       >
-        <Text style={styles.floatingButtonText}>+</Text>
-      </Pressable>
+        <SectionList
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          contentContainerStyle={[
+            styles.content,
+            editingCommentId && styles.contentEditingComment,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => item.node}
+          renderSectionHeader={({ section }) => (
+            section.title ? <StickySectionHeader section={section} /> : null
+          )}
+          sections={sections}
+          stickySectionHeadersEnabled
+        />
+
+        {!editingCommentId ? (
+          <Pressable
+            accessibilityLabel="Add a comment"
+            accessibilityRole="button"
+            onPress={() => setCommentSheetOpen(true)}
+            style={({ pressed }) => [
+              styles.floatingButton,
+              {
+                bottom: Math.max(insets.bottom, spacing.lg) + spacing.lg,
+                right: Math.max(insets.right, spacing.lg),
+              },
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.floatingButtonText}>+</Text>
+          </Pressable>
+        ) : null}
+      </KeyboardAvoidingView>
 
       <CommentSheet
         bottomInset={insets.bottom}
@@ -542,11 +607,17 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         onPickDocument={() => void pickDocument("comment")}
         onPickImage={() => void pickImage("comment")}
         onSubmit={() => void submitComment()}
+        onOpenAttachment={openAttachmentPreview}
         open={commentSheetOpen}
         uploadError={uploadError}
         uploading={uploading}
         attachments={commentAttachments}
         mentionTargets={mentionTargets}
+      />
+      <AttachmentPreviewModal
+        onClose={() => setAttachmentPreview(null)}
+        open={Boolean(attachmentPreview)}
+        preview={attachmentPreview}
       />
     </Screen>
   );
@@ -562,6 +633,7 @@ function CommentSheet({
   onClose,
   onPickDocument,
   onPickImage,
+  onOpenAttachment,
   onSubmit,
   open,
   uploadError,
@@ -576,6 +648,7 @@ function CommentSheet({
   onClose: () => void;
   onPickDocument: () => void;
   onPickImage: () => void;
+  onOpenAttachment: (attachment: Attachment) => void;
   onSubmit: () => void;
   open: boolean;
   uploadError: string | null;
@@ -615,7 +688,7 @@ function CommentSheet({
             value={comment}
           />
           {attachments.length > 0 ? (
-            <AttachmentList attachments={attachments} compact />
+            <AttachmentList attachments={attachments} compact onOpen={onOpenAttachment} />
           ) : null}
           {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
           <View style={styles.sheetActions}>
@@ -804,6 +877,7 @@ function TimelineItem({
   onChangeEdit,
   onChangeReply,
   onDelete,
+  onOpenAttachment,
   onReply,
   onSaveEdit,
   onStartEdit,
@@ -823,6 +897,7 @@ function TimelineItem({
   onChangeEdit?: (content: string) => void;
   onChangeReply?: (content: string) => void;
   onDelete?: (commentId: string) => void;
+  onOpenAttachment?: (attachment: Attachment) => void;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
@@ -839,14 +914,91 @@ function TimelineItem({
   const isEditing = editingCommentId === entry.id;
   const isReplying = replyTargetId === entry.id;
   const [openMenu, setOpenMenu] = useState<"reactions" | "actions" | null>(null);
+  const [actionsMenuAnchor, setActionsMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const body = entry.type === "comment"
     ? entry.content
     : formatActivity(entry, resolveActorName);
   const isComment = entry.type === "comment";
   const reactionOptions = Array.from(new Set([...DEFAULT_REACTIONS, ...(entry.reactions ?? []).map((r) => r.emoji)]));
 
+  function openActionsMenuAtPress(event: GestureResponderEvent) {
+    if (!isComment || isEditing) return;
+    setActionsMenuAnchor({
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY,
+    });
+    setOpenMenu("actions");
+  }
+
+  function closeActionsMenu() {
+    setOpenMenu(null);
+    setActionsMenuAnchor(null);
+  }
+
+  function renderActionsDropdownContent() {
+    return (
+      <>
+        <DropdownItem
+          label="Reply"
+          onPress={() => {
+            onReply?.(entry.id);
+            closeActionsMenu();
+          }}
+        />
+        {isOwnComment ? (
+          <>
+            <DropdownItem
+              label="Edit"
+              onPress={() => {
+                onStartEdit?.(entry.id, entry.content ?? "");
+                closeActionsMenu();
+              }}
+            />
+            <DropdownItem
+              destructive
+              label="Delete"
+              onPress={() => {
+                onDelete?.(entry.id);
+                closeActionsMenu();
+              }}
+            />
+          </>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderActionsMenuModal() {
+    if (openMenu !== "actions" || !actionsMenuAnchor) return null;
+    const menuWidth = 132;
+    const menuHeight = isOwnComment ? 116 : 44;
+    const left = Math.max(spacing.md, Math.min(actionsMenuAnchor.x - menuWidth / 2, windowWidth - menuWidth - spacing.md));
+    const top = Math.max(spacing.md, Math.min(actionsMenuAnchor.y + spacing.xs, windowHeight - menuHeight - spacing.md));
+
+    return (
+      <Modal animationType="fade" onRequestClose={closeActionsMenu} transparent visible>
+        <View style={styles.menuModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeActionsMenu} />
+          <View style={[
+            styles.commentDropdown,
+            styles.commentDropdownFloating,
+            { left, top, width: menuWidth },
+          ]}>
+            {renderActionsDropdownContent()}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
   return (
-    <View style={styles.timelineItem}>
+    <Pressable
+      delayLongPress={320}
+      onLongPress={isComment && !isEditing ? openActionsMenuAtPress : undefined}
+      style={styles.timelineItem}
+    >
+      {renderActionsMenuModal()}
       <View style={isComment ? styles.commentHeader : styles.timelineHeader}>
         <View style={styles.timelineActorGroup}>
           <Text style={styles.timelineActor}>{actor}</Text>
@@ -858,13 +1010,26 @@ function TimelineItem({
               <HeaderIconButton
                 disabled={!userId}
                 label="React"
-                onPress={() => setOpenMenu((menu) => menu === "reactions" ? null : "reactions")}
+                onPress={() => {
+                  setActionsMenuAnchor(null);
+                  setOpenMenu((menu) => menu === "reactions" ? null : "reactions");
+                }}
               >
                 ☺
               </HeaderIconButton>
               <HeaderIconButton
                 label="Comment actions"
-                onPress={() => setOpenMenu((menu) => menu === "actions" ? null : "actions")}
+                onPress={(event) => {
+                  if (openMenu === "actions") {
+                    closeActionsMenu();
+                    return;
+                  }
+                  setActionsMenuAnchor({
+                    x: event.nativeEvent.pageX,
+                    y: event.nativeEvent.pageY,
+                  });
+                  setOpenMenu("actions");
+                }}
               >
                 ⋯
               </HeaderIconButton>
@@ -882,40 +1047,11 @@ function TimelineItem({
                       onPress={() => {
                         onToggleReaction?.(entry, emoji);
                         setOpenMenu(null);
+                        setActionsMenuAnchor(null);
                       }}
                     />
                   );
                 })}
-              </View>
-            ) : null}
-            {openMenu === "actions" ? (
-              <View style={styles.commentDropdown}>
-                <DropdownItem
-                  label="Reply"
-                  onPress={() => {
-                    onReply?.(entry.id);
-                    setOpenMenu(null);
-                  }}
-                />
-                {isOwnComment ? (
-                  <>
-                    <DropdownItem
-                      label="Edit"
-                      onPress={() => {
-                        onStartEdit?.(entry.id, entry.content ?? "");
-                        setOpenMenu(null);
-                      }}
-                    />
-                    <DropdownItem
-                      destructive
-                      label="Delete"
-                      onPress={() => {
-                        onDelete?.(entry.id);
-                        setOpenMenu(null);
-                      }}
-                    />
-                  </>
-                ) : null}
               </View>
             ) : null}
           </View>
@@ -924,6 +1060,7 @@ function TimelineItem({
       {isEditing ? (
         <View style={styles.editBox}>
           <MentionTextInput
+            autoFocus
             mentionTargets={mentionTargets ?? []}
             multiline
             onChangeText={onChangeEdit ?? (() => {})}
@@ -932,7 +1069,11 @@ function TimelineItem({
           />
           <View style={styles.inlineActions}>
             <Button onPress={() => onSaveEdit?.(entry.id)}>Save</Button>
-            <Button onPress={onCancelEdit} variant="secondary">
+            <Button onPress={() => {
+              setOpenMenu(null);
+              setActionsMenuAnchor(null);
+              onCancelEdit?.();
+            }} variant="secondary">
               Cancel
             </Button>
           </View>
@@ -943,7 +1084,11 @@ function TimelineItem({
         <Text style={styles.timelineBody}>{body}</Text>
       )}
       {entry.type === "comment" ? (
-        <AttachmentList attachments={entry.attachments ?? []} compact />
+        <AttachmentList
+          attachments={entry.attachments ?? []}
+          compact
+          onOpen={onOpenAttachment ?? ((attachment) => void Linking.openURL(attachment.download_url || attachment.url))}
+        />
       ) : null}
       {isReplying ? (
         <View style={styles.replyBox}>
@@ -964,7 +1109,7 @@ function TimelineItem({
           </View>
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -976,7 +1121,7 @@ function HeaderIconButton({
 }: React.PropsWithChildren<{
   disabled?: boolean;
   label: string;
-  onPress: () => void;
+  onPress: (event: GestureResponderEvent) => void;
 }>) {
   return (
     <Pressable
@@ -1018,9 +1163,11 @@ function DropdownItem({
 function AttachmentList({
   attachments,
   compact,
+  onOpen,
 }: {
   attachments: Attachment[];
   compact?: boolean;
+  onOpen: (attachment: Attachment) => void;
 }) {
   if (attachments.length === 0) {
     if (compact) return null;
@@ -1032,16 +1179,105 @@ function AttachmentList({
       {attachments.map((attachment) => (
         <Pressable
           key={attachment.id}
-          onPress={() => void Linking.openURL(attachment.download_url || attachment.url)}
-          style={styles.attachmentRow}
+          onPress={() => onOpen(attachment)}
+          style={({ pressed }) => [
+            styles.attachmentRow,
+            pressed && styles.buttonPressed,
+          ]}
         >
           <Text style={styles.attachmentName}>{attachment.filename}</Text>
           <Text style={styles.attachmentMeta}>
-            {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"}
+            {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"} / {attachmentPreviewLabel(attachment)}
           </Text>
         </Pressable>
       ))}
     </View>
+  );
+}
+
+function AttachmentPreviewModal({
+  onClose,
+  open,
+  preview,
+}: {
+  onClose: () => void;
+  open: boolean;
+  preview: AttachmentPreviewState | null;
+}) {
+  const attachment = preview?.attachment;
+  const url = attachment ? attachment.download_url || attachment.url : "";
+  const canPreviewImage = Boolean(attachment && isImageAttachment(attachment));
+  const canPreviewText = Boolean(attachment && isTextPreviewAttachment(attachment));
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
+      <View style={styles.previewModal}>
+        <View style={styles.previewHeader}>
+          <View style={styles.previewTitleGroup}>
+            <Text numberOfLines={1} style={styles.previewTitle}>
+              {attachment?.filename ?? "Attachment"}
+            </Text>
+            {attachment ? (
+              <Text style={styles.previewMeta}>
+                {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"}
+              </Text>
+            ) : null}
+          </View>
+          {attachment ? (
+            <View style={styles.previewActions}>
+              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                Open
+              </Button>
+              <Button onPress={onClose} variant="ghost">
+                Close
+              </Button>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.previewBody}>
+          {attachment && canPreviewImage ? (
+            <Image resizeMode="contain" source={{ uri: url }} style={styles.previewImage} />
+          ) : null}
+
+          {attachment && canPreviewText ? (
+            preview?.loading ? (
+              <View style={styles.previewCentered}>
+                <ActivityIndicator />
+                <Text style={styles.attachmentMeta}>Loading preview...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={styles.previewTextContent}>
+                <Text selectable style={styles.previewText}>
+                  {preview?.error ?? preview?.textContent ?? "No preview available."}
+                </Text>
+              </ScrollView>
+            )
+          ) : null}
+
+          {attachment && !canPreviewImage && !canPreviewText ? (
+            <View style={styles.previewCentered}>
+              <Text style={styles.previewUnsupportedTitle}>Preview unavailable</Text>
+              <Text style={styles.previewUnsupportedBody}>
+                This file type cannot be displayed in the app yet.
+              </Text>
+              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                Open externally
+              </Button>
+            </View>
+          ) : null}
+
+          {attachment && preview?.error && !canPreviewText ? (
+            <View style={styles.previewCentered}>
+              <Text style={styles.errorText}>{preview.error}</Text>
+              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                Open externally
+              </Button>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1140,6 +1376,37 @@ function formatBytes(bytes: number) {
   return `${bytes} B`;
 }
 
+function isImageAttachment(attachment: Attachment) {
+  const contentType = attachment.content_type.toLowerCase();
+  return contentType.startsWith("image/") || /\.(avif|gif|heic|heif|jpe?g|png|webp)$/i.test(attachment.filename);
+}
+
+function isTextPreviewAttachment(attachment: Attachment) {
+  const contentType = attachment.content_type.toLowerCase();
+  const filename = attachment.filename.toLowerCase();
+  if (contentType.startsWith("text/")) return true;
+  if (
+    [
+      "application/json",
+      "application/javascript",
+      "application/typescript",
+      "application/xml",
+      "application/x-javascript",
+      "application/x-ndjson",
+      "application/yaml",
+    ].includes(contentType)
+  ) {
+    return true;
+  }
+  return /\.(c|conf|cpp|css|csv|go|h|html|java|js|json|jsonl|log|md|py|rb|rs|sh|sql|ts|tsx|txt|xml|ya?ml)$/i.test(filename);
+}
+
+function attachmentPreviewLabel(attachment: Attachment) {
+  if (isImageAttachment(attachment)) return "tap to view";
+  if (isTextPreviewAttachment(attachment)) return "tap to preview";
+  return "tap to open";
+}
+
 function formatDocumentPickerError(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("ExpoDocumentPicker")) {
@@ -1196,6 +1463,12 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
     paddingBottom: 96,
+  },
+  contentEditingComment: {
+    paddingBottom: 240,
+  },
+  keyboardAvoidingContent: {
+    flex: 1,
   },
   titleBar: {
     backgroundColor: colors.background,
@@ -1282,6 +1555,12 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     opacity: 0.8,
+  },
+  issueBodyTitle: {
+    color: colors.foreground,
+    fontSize: 17,
+    fontWeight: "700",
+    lineHeight: 24,
   },
   description: {
     color: colors.foreground,
@@ -1395,6 +1674,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     padding: spacing.md,
+    position: "relative",
   },
   timelineHeader: {
     alignItems: "flex-start",
@@ -1464,6 +1744,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 10,
     elevation: 10,
+  },
+  commentDropdownFloating: {
+    right: "auto",
+    top: "auto",
+    zIndex: 20,
+  },
+  menuModalOverlay: {
+    flex: 1,
   },
   dropdownItem: {
     minHeight: 36,
@@ -1561,6 +1849,75 @@ const styles = StyleSheet.create({
   attachmentMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+  },
+  previewModal: {
+    backgroundColor: colors.background,
+    flex: 1,
+    paddingTop: Platform.OS === "ios" ? 56 : spacing.lg,
+  },
+  previewHeader: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  previewTitleGroup: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  previewTitle: {
+    color: colors.foreground,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  previewMeta: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+  },
+  previewActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  previewBody: {
+    flex: 1,
+  },
+  previewImage: {
+    flex: 1,
+    height: "100%",
+    width: "100%",
+  },
+  previewCentered: {
+    alignItems: "center",
+    flex: 1,
+    gap: spacing.md,
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  previewTextContent: {
+    padding: spacing.lg,
+  },
+  previewText: {
+    color: colors.foreground,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: undefined }),
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  previewUnsupportedTitle: {
+    color: colors.foreground,
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  previewUnsupportedBody: {
+    color: colors.mutedForeground,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
   },
   taskCard: {
     backgroundColor: colors.card,
