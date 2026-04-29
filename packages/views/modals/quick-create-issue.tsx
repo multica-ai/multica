@@ -165,7 +165,11 @@ export function AgentCreatePanel({
       toast.success("Sent to agent — you'll get an inbox notification when it's done", {
         duration: 4000,
       });
-      onClose();
+      // Stay open for continuous creation — clear the editor so the user
+      // can immediately type the next prompt without reopening the dialog.
+      editorRef.current?.clearContent();
+      setHasContent(false);
+      requestAnimationFrame(() => editorRef.current?.focus());
     } catch (e) {
       // Server returns 422 with { code, ... } for the structured rejection
       // paths the modal cares about. Surface the reason in-modal so the
