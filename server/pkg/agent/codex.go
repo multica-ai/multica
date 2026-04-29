@@ -625,6 +625,10 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/fileChange/requestApproval", "applyPatchApproval":
 		c.respond(id, map[string]any{"decision": "accept"})
+	case "mcpServer/elicitation/request":
+		// Return a valid McpServerElicitationRequestResponse with accept action
+		// This fixes the deserialization error in Codex: "missing field `action`"
+		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
 		c.respond(id, map[string]any{})
 	}
