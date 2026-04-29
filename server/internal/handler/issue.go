@@ -22,7 +22,7 @@ import (
 
 // Strict status-change lockdown (2026-04-29).
 //
-// Status transitions on issues are now centrally gated by
+// Status transitions on issues are centrally gated by
 // `checkStatusFlipPolicy`. The contract is:
 //
 //   * Member callers (humans on the web/desktop UI) may only flip status
@@ -31,11 +31,13 @@ import (
 //   * The BMAD sidecar (agent name `bmad-sidecar`) is the privileged actor —
 //     it parses contract markers and routes cards on agents' behalf, so it
 //     is fully exempt and may flip any status to any status.
-//   * All other agents (Murat, Quinn, Winston, Amelia, plus any future or
-//     non-BMAD agents) are blocked from direct status flips, with a single
-//     documented exemption: `bmad-agent-dev` (Amelia) may flip into
-//     `staged` from anywhere — that path is preserved for
-//     `bmad-dev-story` Step 1.1.0 post-merge no-op short-circuit.
+//   * All other agents (Amelia, Murat, Quinn, Winston, Felix, the PR
+//     Manager, plus any future or non-BMAD agents) are blocked from direct
+//     status flips with NO exemptions. Every agent transition flows through
+//     a marker comment that the sidecar parses (including the post-merge
+//     no-op short-circuit, which now uses `<!-- post-merge-noop v1 -->`
+//     instead of the legacy `bmad-agent-dev → staged` direct-flip
+//     exemption that was retired in this commit).
 //   * `CreateIssue` always lands new cards in `backlog`, regardless of the
 //     `status` field on the request. Movement out of `backlog` happens via
 //     the rules above.
@@ -56,14 +58,6 @@ var memberAllowedStatusTransitions = map[string]map[string]struct{}{
 	"todo":    {"planning": {}},
 }
 
-// agentDirectFlipExemptions maps an agent name to the set of `to` statuses
-// the agent is permitted to flip into directly (regardless of `from`). All
-// other agents (and all other statuses) are blocked. The sidecar is handled
-// separately and is fully unrestricted.
-var agentDirectFlipExemptions = map[string]map[string]struct{}{
-	"bmad-agent-dev": {"staged": {}}, // Amelia — bmad-dev-story Step 1.1.0 staged short-circuit
-}
-
 // memberMayFlipStatus reports whether a member caller is permitted to flip
 // an issue from `prev` to `next`. A no-op flip (prev == next) is always
 // allowed. Inputs are matched case-insensitively after trimming whitespace.
@@ -82,25 +76,20 @@ func memberMayFlipStatus(prev, next string) bool {
 }
 
 // agentMayFlipStatus reports whether the given agent is permitted to flip
-// an issue from `prev` to `next`. The sidecar is fully exempt; any other
-// agent must have an entry in `agentDirectFlipExemptions` covering `next`.
-// A no-op flip (prev == next) is always allowed.
+// an issue from `prev` to `next`. Only the BMAD sidecar may flip status
+// on agents' behalf — all other agents are blocked, with no exemptions.
+// A no-op flip (prev == next) is always allowed (callers occasionally
+// emit unchanged-status PATCHes on unrelated field updates and we don't
+// want those to 403).
 func agentMayFlipStatus(agentName, prev, next string) bool {
 	name := strings.ToLower(strings.TrimSpace(agentName))
 	if name == sidecarAgentName {
 		return true
 	}
-	prev = strings.ToLower(strings.TrimSpace(prev))
-	next = strings.ToLower(strings.TrimSpace(next))
-	if prev == next {
+	if strings.ToLower(strings.TrimSpace(prev)) == strings.ToLower(strings.TrimSpace(next)) {
 		return true
 	}
-	allowed, ok := agentDirectFlipExemptions[name]
-	if !ok {
-		return false
-	}
-	_, ok = allowed[next]
-	return ok
+	return false
 }
 
 // statusFlipForbiddenMessage builds the user-facing 403 error string. The
@@ -123,9 +112,9 @@ func statusFlipForbiddenMessage(actorType, actorName, prev, next string) string 
 				"contract markers in your comments (`<!-- claim v1 -->`, "+
 				"`<!-- impl-plan v1 -->`, `<!-- completion-note v1 -->`, "+
 				"`<!-- review-findings v1 -->`, `<!-- fix-note v1 -->`, "+
-				"`<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`) and routes "+
-				"the card. Drop the `multica issue status` call and post your "+
-				"marker comment instead.",
+				"`<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`, "+
+				"`<!-- post-merge-noop v1 -->`) and routes the card. Drop the "+
+				"`multica issue status` call and post your marker comment instead.",
 			actorName, prev, next)
 	default:
 		return fmt.Sprintf("status flip `%s -> %s` is not permitted", prev, next)
