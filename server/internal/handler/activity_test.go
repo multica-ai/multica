@@ -390,3 +390,196 @@ func TestCommentWithParentID_AppearsInTimeline(t *testing.T) {
 		t.Fatal("expected to find reply with parent_id in timeline")
 	}
 }
+
+func TestUpdateCommentPermission_NonAuthorForbidden(t *testing.T) {
+	ctx := context.Background()
+
+	otherEmail := "update-comment-nonauthor@multica.ai"
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Update Comment NonAuthor", otherEmail).Scan(&otherUserID); err != nil {
+		t.Fatalf("create non-author user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, otherUserID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("add non-author membership: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission non-author"})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": "author comment"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var comment CommentResponse
+	json.NewDecoder(w.Body).Decode(&comment)
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/comments/"+comment.ID, map[string]any{"content": "hijack edit"})
+	req = withURLParam(req, "commentId", comment.ID)
+	req.Header.Set("X-User-ID", otherUserID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-author update, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCommentPermission_AdminAllowed(t *testing.T) {
+	ctx := context.Background()
+
+	adminEmail := "update-comment-admin@multica.ai"
+	var adminUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Update Comment Admin", adminEmail).Scan(&adminUserID); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, adminUserID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, adminUserID); err != nil {
+		t.Fatalf("add admin membership: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission admin"})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": "member authored"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var comment CommentResponse
+	json.NewDecoder(w.Body).Decode(&comment)
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/comments/"+comment.ID, map[string]any{"content": "admin edit"})
+	req = withURLParam(req, "commentId", comment.ID)
+	req.Header.Set("X-User-ID", adminUserID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for admin update, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
+	ctx := context.Background()
+
+	ownerEmail := "update-comment-agent-owner@multica.ai"
+	var ownerUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Update Comment Agent Owner", ownerEmail).Scan(&ownerUserID); err != nil {
+		t.Fatalf("create agent-owner user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, ownerUserID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, ownerUserID); err != nil {
+		t.Fatalf("add agent-owner membership: %v", err)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, testWorkspaceID, "Update Comment Runtime", "update_comment_runtime", "Update comment runtime", ownerUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "Update Comment Agent", runtimeID, ownerUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission agent owner"})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'agent', $3, $4, 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID, "agent authored").Scan(&commentID); err != nil {
+		t.Fatalf("insert agent comment: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/comments/"+commentID, map[string]any{"content": "owner edit agent comment"})
+	req = withURLParam(req, "commentId", commentID)
+	req.Header.Set("X-User-ID", ownerUserID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for agent-owner update, got %d: %s", w.Code, w.Body.String())
+	}
+}
