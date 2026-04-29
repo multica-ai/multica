@@ -43,7 +43,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	// Neutral framing — Multica increasingly hosts non-coding agents (CEO
+	// orchestrators, marketing, analysts, etc.) whose configured identity
+	// shouldn't be overridden by a hardcoded "coding agent" header (#1216).
+	// Coding agents still get their specifics from their own instructions
+	// and from the code-oriented workflow sections below.
+	b.WriteString("You are an agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
