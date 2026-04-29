@@ -506,9 +506,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0 text-muted-foreground">
-              {issue.identifier}
-            </span>
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>

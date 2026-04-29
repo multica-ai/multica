@@ -399,14 +399,6 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders issue identifier in the breadcrumb", async () => {
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("TES-1")).toBeInTheDocument();
-    });
-  });
-
   it("renders workspace name as breadcrumb link", async () => {
     renderIssueDetail();
 

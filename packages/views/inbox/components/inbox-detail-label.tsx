@@ -88,6 +88,11 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (emoji) return <span>Reacted {emoji} to your comment</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
+    case "quick_create_done": {
+      const identifier = details.identifier;
+      if (identifier) return <span>Created {identifier}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }
