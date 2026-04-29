@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, ChevronRight, Sparkles, X as XIcon } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -253,7 +253,6 @@ export function AgentCreatePanel({
                   type="button"
                   className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm px-1.5 py-1 -ml-1.5 hover:bg-accent/60"
                 >
-                  <Sparkles className="size-3.5" />
                   <span>Created by</span>
                   {selectedAgent ? (
                     <span className="flex items-center gap-1.5 text-foreground">
