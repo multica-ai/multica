@@ -238,19 +238,40 @@ export function useBatchUpdateIssues() {
     onMutate: async ({ ids, updates }) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const parentIssueIds = new Set<string>();
+      if (prevList) {
+        for (const id of ids) {
+          const loc = findIssueLocation(prevList, id);
+          if (loc?.issue.parent_issue_id) parentIssueIds.add(loc.issue.parent_issue_id);
+        }
+      }
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
         let next = old;
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         return next;
       });
-      return { prevList };
+      return { prevList, parentIssueIds };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      for (const id of vars.ids) {
+        qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
+      }
+      if (
+        ctx?.parentIssueIds &&
+        ctx.parentIssueIds.size > 0 &&
+        (vars.updates.status !== undefined || vars.updates.parent_issue_id !== undefined)
+      ) {
+        for (const parentId of ctx.parentIssueIds) {
+          qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
+        }
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }

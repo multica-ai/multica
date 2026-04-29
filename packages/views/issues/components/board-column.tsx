@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { EyeOff, MoreHorizontal, Plus } from "lucide-react";
+import { CheckCircle2, EyeOff, MoreHorizontal, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
@@ -27,6 +28,8 @@ export function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
+  movingToDone = false,
+  onMoveVisibleToDone,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -34,6 +37,8 @@ export function BoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
+  movingToDone?: boolean;
+  onMoveVisibleToDone?: (status: IssueStatus, issueIds: string[]) => void;
 }) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -65,6 +70,18 @@ export function BoardColumn({
               }
             />
             <DropdownMenuContent align="end">
+              {status !== "done" && (
+                <>
+                  <DropdownMenuItem
+                    disabled={issueIds.length === 0 || movingToDone}
+                    onClick={() => onMoveVisibleToDone?.(status, issueIds)}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Move visible to Done
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
                 Hide column

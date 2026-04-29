@@ -16,9 +16,10 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
+import { toast } from "sonner";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
+import { useBatchUpdateIssues, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
@@ -124,6 +125,7 @@ export function BoardView({
   const myIssuesOpts = myIssuesScope
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
+  const moveVisibleToDone = useBatchUpdateIssues();
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -271,6 +273,25 @@ export function BoardView({
     [issues, visibleStatuses, sortBy, sortDirection, onMoveIssue],
   );
 
+  const handleMoveVisibleToDone = useCallback(
+    async (status: IssueStatus, issueIds: string[]) => {
+      if (status === "done" || issueIds.length === 0 || moveVisibleToDone.isPending) return;
+
+      try {
+        await moveVisibleToDone.mutateAsync({
+          ids: issueIds,
+          updates: { status: "done" },
+        });
+        toast.success(
+          `Moved ${issueIds.length} visible issue${issueIds.length === 1 ? "" : "s"} to Done`,
+        );
+      } catch {
+        toast.error("Failed to move issues to Done");
+      }
+    },
+    [moveVisibleToDone],
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -288,6 +309,8 @@ export function BoardView({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
+            movingToDone={moveVisibleToDone.isPending}
+            onMoveVisibleToDone={handleMoveVisibleToDone}
           />
         ))}
 
@@ -316,12 +339,16 @@ function PaginatedBoardColumn({
   issueMap,
   childProgressMap,
   myIssuesOpts,
+  movingToDone,
+  onMoveVisibleToDone,
 }: {
   status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  movingToDone?: boolean;
+  onMoveVisibleToDone?: (status: IssueStatus, issueIds: string[]) => void;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
@@ -334,6 +361,8 @@ function PaginatedBoardColumn({
       issueMap={issueMap}
       childProgressMap={childProgressMap}
       totalCount={total}
+      movingToDone={movingToDone}
+      onMoveVisibleToDone={onMoveVisibleToDone}
       footer={
         hasMore ? (
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
