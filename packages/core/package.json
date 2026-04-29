@@ -25,6 +25,7 @@
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
+    "./issues/take-over": "./issues/take-over.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",
     "./issues/config/priority": "./issues/config/priority.ts",

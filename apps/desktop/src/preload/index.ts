@@ -94,6 +94,25 @@ const desktopAPI = {
       ipcRenderer.removeListener("inbox:open", handler);
     };
   },
+  /**
+   * Resolve the local resume command for an issue's most recent agent run
+   * and copy it to the system clipboard. Main runs `multica issue take
+   * <id> --print --workspace-id <ws>`, then writes the stdout into the
+   * clipboard. Returns the raw command (and parsed workdir, if the prefix
+   * was present) so the renderer can drop it into a confirmation toast.
+   *
+   * `workspaceId` is required because the desktop CLI profile doesn't pin
+   * a workspace — the renderer is the source of truth.
+   */
+  takeOverIssue: (
+    issueId: string,
+    workspaceId: string,
+  ): Promise<{
+    ok: boolean;
+    command?: string;
+    workDir?: string;
+    error?: string;
+  }> => ipcRenderer.invoke("issue:takeOver", issueId, workspaceId),
 };
 
 interface DaemonStatus {

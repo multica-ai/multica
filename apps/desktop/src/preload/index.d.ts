@@ -32,6 +32,21 @@ interface DesktopAPI {
       issueKey: string;
     }) => void,
   ) => () => void;
+  /**
+   * Resolve and copy the local resume command for an issue. Main runs
+   * `multica issue take <id> --print --workspace-id <ws>`, copies stdout
+   * to the clipboard, and returns the command + parsed workdir for the
+   * confirmation toast.
+   */
+  takeOverIssue: (
+    issueId: string,
+    workspaceId: string,
+  ) => Promise<{
+    ok: boolean;
+    command?: string;
+    workDir?: string;
+    error?: string;
+  }>;
 }
 
 interface DaemonStatus {
