@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -161,7 +162,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
-	pr := &patResolver{queries: queries}
+	pr := &patResolver{queries: queries, cache: patCache}
 	slugResolver := realtime.SlugResolver(func(ctx context.Context, slug string) (string, error) {
 		ws, err := queries.GetWorkspaceBySlug(ctx, slug)
 		if err != nil {
@@ -502,19 +503,39 @@ func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID s
 }
 
 // patResolver implements realtime.PATResolver using database queries.
+// patCache is shared with the Auth and DaemonAuth middlewares so a token
+// revoke through any path invalidates the cache for all of them. Nil
+// cache is supported and degrades to direct DB lookups.
 type patResolver struct {
 	queries *db.Queries
+	cache   *auth.PATCache
 }
 
 func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, bool) {
 	hash := auth.HashToken(token)
+
+	if userID, ok := pr.cache.Get(ctx, hash); ok {
+		return userID, true
+	}
+
 	pat, err := pr.queries.GetPersonalAccessTokenByHash(ctx, hash)
 	if err != nil {
 		return "", false
 	}
-	// Best-effort: update last_used_at
+
+	userID := util.UUIDToString(pat.UserID)
+
+	var expiresAt time.Time
+	if pat.ExpiresAt.Valid {
+		expiresAt = pat.ExpiresAt.Time
+	}
+	pr.cache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+
+	// Cache miss = first WS auth in this TTL window. Refresh last_used_at;
+	// subsequent connects within the window skip the write.
 	go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
-	return util.UUIDToString(pat.UserID), true
+
+	return userID, true
 }
 
 // parseUUID is a thin alias for util.MustParseUUID. Call sites here are all
