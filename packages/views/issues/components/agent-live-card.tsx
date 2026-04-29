@@ -89,6 +89,14 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
+  // Mirror taskStates into a ref so the task:message handler can check
+  // membership synchronously without racing against React's async updater.
+  const taskStatesRef = useRef(taskStates);
+  useEffect(() => { taskStatesRef.current = taskStates; }, [taskStates]);
+  // Tasks for which a self-heal fetch is in flight, and the WS items that
+  // arrived while the fetch was running (merged in at completion).
+  const pendingFetch = useRef(new Set<string>());
+  const pendingItems = useRef(new Map<string, TimelineItem[]>());
 
   // Fetch active tasks on mount
   useEffect(() => {
@@ -153,15 +161,70 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
         output: msg.output,
       };
 
-      setTaskStates((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(msg.task_id);
-        if (existing) {
-          const items = [...existing.items, item].sort((a, b) => a.seq - b.seq);
-          next.set(msg.task_id, { ...existing, items });
+      // Known task — append and return. Check the ref synchronously; mutating
+      // a closure-captured flag inside the setState updater races against
+      // React's batched render and misses the self-heal branch below.
+      if (taskStatesRef.current.has(msg.task_id)) {
+        setTaskStates((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(msg.task_id);
+          if (existing) {
+            const items = [...existing.items, item].sort((a, b) => a.seq - b.seq);
+            next.set(msg.task_id, { ...existing, items });
+          }
+          return next;
+        });
+        return;
+      }
+
+      // Unknown task — self-heal: fetch active tasks + backfill messages.
+      // Covers the case where task:dispatch was missed (e.g. sibling tasks
+      // inserted directly into agent_task_queue bypass broadcastTaskDispatch).
+      const taskId = msg.task_id;
+      if (pendingFetch.current.has(taskId)) {
+        // Fetch already running; buffer this item and let the completion merge it in.
+        const bucket = pendingItems.current.get(taskId) ?? [];
+        bucket.push(item);
+        pendingItems.current.set(taskId, bucket);
+        return;
+      }
+      pendingFetch.current.add(taskId);
+      pendingItems.current.set(taskId, [item]);
+
+      api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
+        const newTask = tasks.find((t) => t.id === taskId);
+        if (!newTask) {
+          pendingFetch.current.delete(taskId);
+          pendingItems.current.delete(taskId);
+          return;
         }
-        // If we don't have this task yet, the dispatch handler will pick it up
-        return next;
+        api.listTaskMessages(newTask.id).then((msgs) => {
+          const timeline = buildTimeline(msgs);
+          for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
+          const loadedSeqs = new Set(timeline.map((i) => i.seq));
+          const buffered = pendingItems.current.get(taskId) ?? [];
+          const extras = buffered.filter((i) => !loadedSeqs.has(i.seq));
+          const merged = extras.length === 0
+            ? timeline
+            : [...timeline, ...extras].sort((a, b) => a.seq - b.seq);
+          setTaskStates((prev) => {
+            const next = new Map(prev);
+            if (!next.has(newTask.id)) {
+              next.set(newTask.id, { task: newTask, items: merged });
+            }
+            return next;
+          });
+          pendingFetch.current.delete(taskId);
+          pendingItems.current.delete(taskId);
+        }).catch((err) => {
+          console.error(err);
+          pendingFetch.current.delete(taskId);
+          pendingItems.current.delete(taskId);
+        });
+      }).catch((err) => {
+        console.error(err);
+        pendingFetch.current.delete(taskId);
+        pendingItems.current.delete(taskId);
       });
     }, [issueId]),
   );
