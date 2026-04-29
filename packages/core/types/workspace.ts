@@ -50,6 +50,8 @@ export interface User {
    * 'retry_after_error') can be added without churning this type.
    */
   starter_content_state: string | null;
+  /** `active` or `suspended` — suspended users cannot authenticate (see self-host docs). */
+  account_status: string;
   created_at: string;
   updated_at: string;
 }

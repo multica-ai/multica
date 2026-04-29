@@ -90,7 +90,7 @@ graph TD
     D -- No --> Block
 `} />
 
-**Existing users can always sign in again** — the signup allowlist only applies to **first-time signup**, not returning users.
+**Active existing users can sign in again** — the signup allowlist only applies to **first-time signup**, not returning users. Accounts with `account_status = 'suspended'` cannot sign in or use the API (see [Suspending users](#suspending-users-self-host)).
 
 - **`ALLOWED_EMAILS`** (highest priority) — explicit email allowlist, comma-separated. **When non-empty, only listed emails can sign up.**
 - **`ALLOWED_EMAIL_DOMAINS`** — domain allowlist, comma-separated (for example `company.io,partner.com`).
@@ -120,6 +120,39 @@ To actually "allow everyone," leave all three variables empty (or keep `ALLOW_SI
 To invite an external collaborator who hasn't signed up yet: temporarily add their email to `ALLOWED_EMAILS`, wait for them to sign up and accept the invite, then remove the entry.
 
 For how to create and use invites, see [Members and roles](/members-roles).
+
+## Suspending users (self-host)
+
+Signup allowlists and `ALLOW_SIGNUP` only control **new** registration. To **revoke access for an account that already exists** (offboarding, compromised credentials, policy changes) without deleting the `user` row, set `account_status` to `suspended` in PostgreSQL.
+
+**Behavior when suspended**
+
+- **Cannot** request a verification code, complete Google sign-in, use `/api/me`, refresh a CLI token, or call authenticated HTTP APIs with a JWT or PAT.
+- **WebSocket**: new connections are rejected. Existing connections continue to receive events until the client reconnects — at which point the connect-time check rejects them. HTTP requests fail immediately on the next call.
+- Existing JWTs stop working on the **next** API request after you suspend the row (the server reloads the user record on each authenticated request).
+- **Not invalidated by suspending**: if you self-host with S3 + CloudFront (`CF_*` env vars), CloudFront signed cookies issued at login (~30 days TTL) and any presigned URLs already handed out remain valid until they expire. Suspend blocks the API, JWT, and new CLI tokens, but does not revoke previously signed CDN credentials. For high-risk offboarding (compromised credentials), rotate the CloudFront key-pair in addition to suspending the row.
+
+**HTTP response**: `403 Forbidden` with JSON:
+
+```json
+{"error":"this account has been suspended","code":"ACCOUNT_SUSPENDED"}
+```
+
+The `code` field is stable for programmatic handling in clients.
+
+**SQL examples** (run against your app database as a superuser or migration role):
+
+```sql
+-- Suspend by email (lowercase must match stored email)
+UPDATE "user" SET account_status = 'suspended', updated_at = now()
+WHERE lower(email) = lower('user@company.com');
+
+-- Reactivate
+UPDATE "user" SET account_status = 'active', updated_at = now()
+WHERE lower(email) = lower('user@company.com');
+```
+
+Allowed values are `active` and `suspended` (enforced by a database `CHECK` constraint).
 
 ## Next
 

@@ -17,6 +17,8 @@ const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => (
   avatar_url: null,
   onboarded_at: null,
   onboarding_questionnaire: {},
+  starter_content_state: null as string | null,
+  account_status: "active",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   ...overrides,
