@@ -411,6 +411,11 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 // re-triggered by subsequent replies in the same thread — unless the reply
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
+// When the parent (thread root) itself was authored by an agent, that agent
+// is treated as an implicit mention so "replying under an agent's comment"
+// re-triggers that agent — matching the intuition that replies address the
+// author being replied to. Same gate: only when the reply has no explicit
+// mentions.
 // Skips self-mentions, agents with on_mention trigger disabled, and private
 // agents mentioned by non-owner members (only the agent owner or workspace
 // admin/owner can mention a private agent).
@@ -431,6 +436,23 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	// Explicit @mentions in the agent's own comment still work for delegation.
 	if parentComment != nil && len(mentions) == 0 && authorType != "agent" {
 		mentions = util.ParseMentions(parentComment.Content)
+		// Implicit mention: if the thread root was posted by an agent, treat
+		// this plain reply as addressing that agent. Dedup against parent's
+		// own mentions so we don't double-count when the parent @-mentioned
+		// itself somehow.
+		if parentComment.AuthorType == "agent" {
+			parentAuthorID := uuidToString(parentComment.AuthorID)
+			already := false
+			for _, m := range mentions {
+				if m.Type == "agent" && m.ID == parentAuthorID {
+					already = true
+					break
+				}
+			}
+			if !already {
+				mentions = append(mentions, util.Mention{Type: "agent", ID: parentAuthorID})
+			}
+		}
 	}
 	for _, m := range mentions {
 		if m.Type != "agent" {

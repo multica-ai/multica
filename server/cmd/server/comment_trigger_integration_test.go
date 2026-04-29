@@ -510,6 +510,31 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 			t.Errorf("expected 1 pending task (reply mentions agent explicitly), got %d", n)
 		}
 	})
+
+	t.Run("reply to non-assignee agent's thread triggers that agent (implicit author mention)", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Agent (not the issue's assignee) starts a top-level thread with plain content.
+		threadID := postCommentAsAgent(t, issueID, "Here is what I found.", agentID, nil)
+		// Member replies without any explicit mention — expected: the thread's
+		// author agent is triggered via implicit parent-author mention.
+		postComment(t, issueID, "Thanks, please continue", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (implicit author mention), got %d", n)
+		}
+	})
+
+	t.Run("reply to non-assignee agent's thread does not inherit when reply mentions others", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Agent starts a top-level thread.
+		threadID := postCommentAsAgent(t, issueID, "Initial analysis.", agentID, nil)
+		// Member replies mentioning only another member — implicit author mention
+		// is suppressed because the reply already has explicit mentions.
+		reply := fmt.Sprintf("cc [@Someone](mention://member/%s)", testUserID)
+		postComment(t, issueID, reply, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (explicit non-agent mention overrides author mention), got %d", n)
+		}
+	})
 }
 
 // TestDeleteCommentCancelsTriggeredTasks verifies that deleting a comment
