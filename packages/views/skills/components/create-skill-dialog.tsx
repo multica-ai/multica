@@ -177,7 +177,8 @@ function ManualForm({
             }}
             placeholder="e.g. review-helper"
             onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              submit();
             }}
           />
           <p className="text-xs text-muted-foreground">
@@ -354,7 +355,8 @@ function UrlForm({
             placeholder="https://clawhub.ai/owner/skill"
             className="font-mono text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              submit();
             }}
           />
         </div>
