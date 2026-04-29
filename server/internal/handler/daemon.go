@@ -569,7 +569,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for pending model-list requests for this runtime.
-	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
+	if pending, err := h.ModelListStore.PopPending(r.Context(), req.RuntimeID); err != nil {
+		slog.Warn("model list PopPending failed", "runtime_id", req.RuntimeID, "error", err)
+	} else if pending != nil {
 		resp["pending_model_list"] = map[string]string{"id": pending.ID}
 	}
 

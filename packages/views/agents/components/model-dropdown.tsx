@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus, Check, Info, RotateCcw } from "lucide-react";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import type { RuntimeModel } from "@multica/core/types";
 import {
@@ -117,7 +117,23 @@ export function ModelDropdown({
       <div className="flex items-center justify-between">
         <Label className="text-xs text-muted-foreground">Model</Label>
         {modelsQuery.isError && (
-          <span className="text-xs text-muted-foreground">discovery failed</span>
+          <button
+            type="button"
+            onClick={() => modelsQuery.refetch()}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title={modelsQuery.error?.message || "model discovery failed"}
+          >
+            <RotateCcw className="h-3 w-3" />
+            <span>
+              {modelsQuery.error?.message === "model discovery timed out"
+                ? "discovery timed out — retry"
+                : modelsQuery.error?.message?.startsWith("no agent configured")
+                  ? "provider not configured — retry"
+                  : modelsQuery.error?.message?.includes("daemon did not respond")
+                    ? "daemon unavailable — retry"
+                    : "discovery failed — retry"}
+            </span>
+          </button>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
