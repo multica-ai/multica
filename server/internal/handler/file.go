@@ -218,7 +218,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
 			slog.Error("file upload failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "upload failed")
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upload failed: %v", err))
 			return
 		}
 		params.Url = link
