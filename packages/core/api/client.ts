@@ -75,6 +75,9 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  GitHubPullRequest,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1183,5 +1186,24 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // GitHub integration
+  async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  }
+
+  async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+  }
+
+  async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/github/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }
