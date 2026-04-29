@@ -19,21 +19,20 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("not onboarded → /onboarding regardless of workspaces", () => {
-    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
+  it("has workspace → /<first.slug>/issues regardless of onboarding", () => {
     expect(resolvePostAuthDestination([makeWs("acme")], false)).toBe(
-      paths.onboarding(),
+      paths.workspace("acme").issues(),
+    );
+    expect(resolvePostAuthDestination([makeWs("acme")], true)).toBe(
+      paths.workspace("acme").issues(),
     );
     expect(
       resolvePostAuthDestination([makeWs("acme"), makeWs("beta")], false),
-    ).toBe(paths.onboarding());
+    ).toBe(paths.workspace("acme").issues());
   });
 
-  it("onboarded + has workspace → /<first.slug>/issues", () => {
-    const ws = [makeWs("acme"), makeWs("beta")];
-    expect(resolvePostAuthDestination(ws, true)).toBe(
-      paths.workspace("acme").issues(),
-    );
+  it("not onboarded + zero workspaces → /onboarding", () => {
+    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
   });
 
   it("onboarded + zero workspaces → /workspaces/new", () => {

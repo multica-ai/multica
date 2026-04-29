@@ -66,10 +66,6 @@ function CallbackContent() {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
           const onboarded = loggedInUser.onboarded_at != null;
-          if (!onboarded) {
-            router.push(paths.onboarding());
-            return;
-          }
           router.push(
             nextUrl || resolvePostAuthDestination(wsList, onboarded),
           );

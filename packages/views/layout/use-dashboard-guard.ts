@@ -47,10 +47,6 @@ export function useDashboardGuard() {
       return;
     }
     if (!workspaceListFetched) return;
-    if (!hasOnboarded) {
-      replace(paths.onboarding());
-      return;
-    }
     if (!workspace) {
       replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }

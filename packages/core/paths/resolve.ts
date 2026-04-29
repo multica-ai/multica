@@ -4,19 +4,22 @@ import { paths } from "./paths";
 
 /**
  * Priority:
- *   !hasOnboarded                         → /onboarding
- *   hasOnboarded && has workspace         → /<first.slug>/issues
+ *   has workspace                         → /<first.slug>/issues
+ *   !hasOnboarded && zero workspaces      → /onboarding
  *   hasOnboarded && zero workspaces       → /workspaces/new
  */
 export function resolvePostAuthDestination(
   workspaces: Workspace[],
   hasOnboarded: boolean,
 ): string {
+  const first = workspaces[0];
+  if (first) {
+    return paths.workspace(first.slug).issues();
+  }
   if (!hasOnboarded) {
     return paths.onboarding();
   }
-  const first = workspaces[0];
-  return first ? paths.workspace(first.slug).issues() : paths.newWorkspace();
+  return paths.newWorkspace();
 }
 
 /**
