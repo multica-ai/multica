@@ -1796,3 +1796,390 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
 }
+
+type claimRuntimeGuardTask struct {
+	PriorSessionID string `json:"prior_session_id"`
+	PriorWorkDir   string `json:"prior_work_dir"`
+}
+
+func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, daemonID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *claimRuntimeGuardTask `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected a task in response, got nil")
+	}
+	return resp.Task
+}
+
+func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtimeID, daemonID string) {
+	t.Helper()
+
+	daemonID = "runtime-guard-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "runtime-guard-test",
+		"runtimes": []map[string]any{
+			{"name": "runtime-guard-current", "type": "opencode", "version": "test", "status": "online"},
+		},
+	}, testWorkspaceID, daemonID)
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup: DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("setup: decode DaemonRegister response: %v", err)
+	}
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) == 0 {
+		t.Fatalf("setup: expected registered runtime, got %v", resp)
+	}
+	runtimeID = runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		RETURNING id
+	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create runtime guard agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	return agentID, runtimeID, daemonID
+}
+
+func createRuntimeGuardRuntime(t *testing.T, ctx context.Context, provider string) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, 'runtime-guard-' || gen_random_uuid()::text, 'Runtime Guard Fixture',
+		        'local', $2, 'offline', '{}'::jsonb, '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, provider, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	return runtimeID
+}
+
+func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE chat_session (
+			id uuid PRIMARY KEY,
+			session_id text,
+			runtime_id uuid
+		) ON COMMIT DROP;
+	`); err != nil {
+		t.Fatalf("setup temp chat_session table: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE agent_task_queue (
+			chat_session_id uuid,
+			runtime_id uuid,
+			session_id text,
+			status text,
+			completed_at timestamptz,
+			started_at timestamptz,
+			dispatched_at timestamptz,
+			created_at timestamptz
+		) ON COMMIT DROP;
+	`); err != nil {
+		t.Fatalf("setup temp agent_task_queue table: %v", err)
+	}
+
+	const (
+		poisonedChatID = "00000000-0000-0000-0000-000000000101"
+		matchedChatID  = "00000000-0000-0000-0000-000000000102"
+		oldRuntimeID   = "00000000-0000-0000-0000-000000000201"
+		newRuntimeID   = "00000000-0000-0000-0000-000000000202"
+	)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO chat_session (id, session_id, runtime_id)
+		VALUES
+			($1, 'old-runtime-session', NULL),
+			($2, 'matched-runtime-session', NULL);
+	`, poisonedChatID, matchedChatID); err != nil {
+		t.Fatalf("seed temp chat sessions: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			chat_session_id, runtime_id, session_id, status,
+			completed_at, started_at, dispatched_at, created_at
+		)
+		VALUES
+			($1, $3, 'old-runtime-session', 'completed',
+			 now() - interval '2 hours', now() - interval '2 hours', now() - interval '2 hours', now() - interval '2 hours'),
+			($1, $4, 'new-runtime-session', 'completed',
+			 now() - interval '1 hour', now() - interval '1 hour', now() - interval '1 hour', now() - interval '1 hour'),
+			($2, $4, 'matched-runtime-session', 'completed',
+			 now() - interval '30 minutes', now() - interval '30 minutes', now() - interval '30 minutes', now() - interval '30 minutes');
+	`, poisonedChatID, matchedChatID, oldRuntimeID, newRuntimeID); err != nil {
+		t.Fatalf("seed temp task sessions: %v", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE chat_session cs
+		SET runtime_id = latest.runtime_id
+		FROM (
+			SELECT DISTINCT ON (chat_session_id)
+				chat_session_id,
+				runtime_id,
+				session_id
+			FROM agent_task_queue
+			WHERE chat_session_id IS NOT NULL
+			  AND session_id IS NOT NULL
+			  AND status IN ('completed', 'failed')
+			ORDER BY chat_session_id, COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+		) latest
+		WHERE latest.chat_session_id = cs.id
+		  AND latest.session_id = cs.session_id
+	`); err != nil {
+		t.Fatalf("run runtime backfill: %v", err)
+	}
+
+	var poisonedRuntimeID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT runtime_id::text FROM chat_session WHERE id = $1
+	`, poisonedChatID).Scan(&poisonedRuntimeID); err != nil {
+		t.Fatalf("query poisoned chat runtime: %v", err)
+	}
+	if poisonedRuntimeID != nil {
+		t.Fatalf("expected stale session mismatch to remain NULL, got %s", *poisonedRuntimeID)
+	}
+
+	var matchedRuntimeID string
+	if err := tx.QueryRow(ctx, `
+		SELECT runtime_id::text FROM chat_session WHERE id = $1
+	`, matchedChatID).Scan(&matchedRuntimeID); err != nil {
+		t.Fatalf("query matched chat runtime: %v", err)
+	}
+	if matchedRuntimeID != newRuntimeID {
+		t.Fatalf("expected matched session to backfill runtime %s, got %s", newRuntimeID, matchedRuntimeID)
+	}
+}
+
+func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
+
+	var skipIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'runtime-session-skip fixture', 'in_progress', 'none', $2, 'member', 81203, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&skipIssueID); err != nil {
+		t.Fatalf("setup: create skip issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, skipIssueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-runtime-session', '/tmp/old-runtime-workdir')
+	`, agentID, oldRuntimeID, skipIssueID); err != nil {
+		t.Fatalf("setup: create old-runtime prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, skipIssueID); err != nil {
+		t.Fatalf("setup: create current-runtime task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("runtime mismatch: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
+		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, skipIssueID); err != nil {
+		t.Fatalf("setup: complete claimed skip task: %v", err)
+	}
+
+	var resumeIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'runtime-session-resume fixture', 'in_progress', 'none', $2, 'member', 81204, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&resumeIssueID); err != nil {
+		t.Fatalf("setup: create resume issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, resumeIssueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir')
+	`, agentID, runtimeID, resumeIssueID); err != nil {
+		t.Fatalf("setup: create same-runtime prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, resumeIssueID); err != nil {
+		t.Fatalf("setup: create same-runtime task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "same-runtime-session" {
+		t.Fatalf("runtime match: expected PriorSessionID='same-runtime-session', got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/same-runtime-workdir" {
+		t.Fatalf("runtime match: expected PriorWorkDir='/tmp/same-runtime-workdir', got %q", task.PriorWorkDir)
+	}
+}
+
+func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
+
+	var skipSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title,
+			session_id, work_dir, runtime_id
+		)
+		VALUES ($1, $2, $3, 'runtime guard skip chat', 'old-chat-session', '/tmp/old-chat-workdir', $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, oldRuntimeID).Scan(&skipSessionID); err != nil {
+		t.Fatalf("setup: create skip chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, skipSessionID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-chat-session', '/tmp/old-chat-workdir')
+	`, agentID, oldRuntimeID, skipSessionID); err != nil {
+		t.Fatalf("setup: create old-runtime chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, skipSessionID); err != nil {
+		t.Fatalf("setup: create current-runtime chat task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("chat runtime mismatch: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/old-chat-workdir" {
+		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
+	`, skipSessionID); err != nil {
+		t.Fatalf("setup: complete claimed skip chat task: %v", err)
+	}
+
+	var resumeSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title,
+			session_id, work_dir, runtime_id
+		)
+		VALUES ($1, $2, $3, 'runtime guard resume chat', 'same-chat-session', '/tmp/same-chat-workdir', $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&resumeSessionID); err != nil {
+		t.Fatalf("setup: create resume chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, resumeSessionID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, resumeSessionID); err != nil {
+		t.Fatalf("setup: create same-runtime chat task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "same-chat-session" {
+		t.Fatalf("chat runtime match: expected PriorSessionID='same-chat-session', got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
+		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
+	}
+}

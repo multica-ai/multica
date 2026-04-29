@@ -970,7 +970,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				resp.PriorSessionID = prior.SessionID.String
+				if prior.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = prior.SessionID.String
+				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
@@ -989,24 +991,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume from the chat session's persistent session, falling back
-			// to the most recent task that recorded a session_id when the
-			// chat_session pointer is missing or stale (e.g. a previous task
-			// failed before reporting completion). Without this fallback a
-			// single failed turn would silently drop the entire conversation
-			// memory on the next message.
-			if cs.SessionID.Valid {
+			// Resume chat sessions only when the stored pointer was produced
+			// by the same runtime as the claiming task. Legacy rows with no
+			// chat_session.runtime_id fall back to the task-row lookup below.
+			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
 				resp.PriorSessionID = cs.SessionID.String
 			}
 			if cs.WorkDir.Valid {
 				resp.PriorWorkDir = cs.WorkDir.String
 			}
-			if resp.PriorSessionID == "" {
-				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
-					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-						resp.PriorWorkDir = prior.WorkDir.String
-					}
+				}
+				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
 			// Load the latest user message for the chat prompt.

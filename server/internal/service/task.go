@@ -605,12 +605,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		task = t
 
 		if t.ChatSessionID.Valid {
+			sessionRuntimeID := t.RuntimeID
+			sessionRuntimeID.Valid = sessionID != ""
 			// COALESCE in SQL guarantees empty inputs don't wipe the
 			// existing resume pointer; we still surface DB errors.
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
 				ID:        t.ChatSessionID,
 				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
 				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+				RuntimeID: sessionRuntimeID,
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
@@ -754,10 +757,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		task = t
 
 		if t.ChatSessionID.Valid {
+			sessionRuntimeID := t.RuntimeID
+			sessionRuntimeID.Valid = sessionID != ""
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
 				ID:        t.ChatSessionID,
 				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
 				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+				RuntimeID: sessionRuntimeID,
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
