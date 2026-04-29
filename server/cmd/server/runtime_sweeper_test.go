@@ -528,3 +528,31 @@ func unhex(c byte) byte {
 	}
 	return 0
 }
+
+func TestGetEnvFloat_UsesDefault(t *testing.T) {
+	t.Setenv("MULTICA_TEST_FLOAT_UNSET", "")
+	if got := getEnvFloat("MULTICA_TEST_FLOAT_UNSET", 300.0); got != 300.0 {
+		t.Fatalf("expected default 300.0, got %f", got)
+	}
+}
+
+func TestGetEnvFloat_ReadsEnvVar(t *testing.T) {
+	t.Setenv("MULTICA_TEST_FLOAT_SET", "60.5")
+	if got := getEnvFloat("MULTICA_TEST_FLOAT_SET", 300.0); got != 60.5 {
+		t.Fatalf("expected 60.5, got %f", got)
+	}
+}
+
+func TestGetEnvFloat_RejectsInvalidValue(t *testing.T) {
+	t.Setenv("MULTICA_TEST_FLOAT_INVALID", "not-a-number")
+	if got := getEnvFloat("MULTICA_TEST_FLOAT_INVALID", 300.0); got != 300.0 {
+		t.Fatalf("expected default 300.0 for invalid value, got %f", got)
+	}
+}
+
+func TestGetEnvFloat_RejectsNonPositive(t *testing.T) {
+	t.Setenv("MULTICA_TEST_FLOAT_ZERO", "0")
+	if got := getEnvFloat("MULTICA_TEST_FLOAT_ZERO", 300.0); got != 300.0 {
+		t.Fatalf("expected default 300.0 for zero value, got %f", got)
+	}
+}
