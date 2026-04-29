@@ -25,6 +25,7 @@ MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
 export
 
 MULTICA_ARGS ?= $(ARGS)
+CLI_VERSION_FILE ?= release/cli-version.txt
 
 COMPOSE := docker compose
 
@@ -211,7 +212,7 @@ cli:
 multica:
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell tr -d '\r\n' < $(CLI_VERSION_FILE) 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
