@@ -487,6 +487,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 			})
+
+			// Notification preferences
+			r.Route("/api/notification-preferences", func(r chi.Router) {
+				r.Get("/", h.GetNotificationPreferences)
+				r.Put("/", h.UpdateNotificationPreferences)
+			})
 		})
 	})
 

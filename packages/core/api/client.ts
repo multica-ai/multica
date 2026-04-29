@@ -75,6 +75,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  NotificationPreferenceResponse,
+  NotificationPreferences,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -781,6 +783,18 @@ export class ApiClient {
 
   async archiveCompletedInbox(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  }
+
+  // Notification preferences
+  async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences");
+  }
+
+  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences", {
+      method: "PUT",
+      body: JSON.stringify({ preferences }),
+    });
   }
 
   // App Config
