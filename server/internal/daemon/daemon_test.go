@@ -52,6 +52,43 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
+	t.Parallel()
+
+	sem := newTaskSlotSemaphore(4)
+	seen := make(map[int]bool)
+	for i := 0; i < 4; i++ {
+		select {
+		case slot := <-sem:
+			if slot < 0 || slot > 3 {
+				t.Fatalf("slot out of range: %d", slot)
+			}
+			if seen[slot] {
+				t.Fatalf("duplicate slot: %d", slot)
+			}
+			seen[slot] = true
+		default:
+			t.Fatalf("expected slot %d to be available", i)
+		}
+	}
+
+	select {
+	case slot := <-sem:
+		t.Fatalf("expected semaphore to be empty, got slot %d", slot)
+	default:
+	}
+
+	sem <- 2
+	select {
+	case slot := <-sem:
+		if slot != 2 {
+			t.Fatalf("expected released slot 2, got %d", slot)
+		}
+	default:
+		t.Fatal("expected released slot to be available")
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
