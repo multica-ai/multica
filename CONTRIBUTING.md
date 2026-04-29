@@ -499,7 +499,7 @@ Nothing in this flow touches the system-installed `multica` or the default
 | Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<hash>/config.json` |
 | Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<hash>/daemon.pid` |
 | Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
-| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
+| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces/` (shared; set `MULTICA_WORKSPACES_ROOT` to isolate per worktree) |
 | Database | remote / production | local Docker: `multica_<slug>_<hash>` |
 | Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
 
