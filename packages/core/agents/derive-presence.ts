@@ -4,18 +4,19 @@
 // dimensions:
 //
 //   1. AgentAvailability — derived from runtime reachability only.
-//   2. LastTaskState     — derived from the task snapshot only.
+//   2. Workload          — derived from the task counts only.
 //
 // They are computed independently and assembled into AgentPresenceDetail.
-// No cross-dimension override logic — that was the source of the previous
-// model's "sticky red dot" confusion.
+// Workload is strictly "what's on the plate right now" — no historical
+// terminal state. Past failures / completions live on the detail page
+// (Recent Work, failure_reason) and Inbox.
 
 import { deriveRuntimeHealth } from "../runtimes/derive-health";
-import type { Agent, AgentRuntime, AgentTask, TaskFailureReason } from "../types";
+import type { Agent, AgentRuntime, AgentTask } from "../types";
 import type {
   AgentAvailability,
   AgentPresenceDetail,
-  LastTaskState,
+  Workload,
 } from "./types";
 
 // AgentAvailability mirrors RuntimeHealth's reachability buckets but folds
@@ -33,76 +34,44 @@ export function deriveAgentAvailability(
   return "offline"; // offline | about_to_gc collapse here
 }
 
-interface LastTaskResult {
-  state: LastTaskState;
+// Atomic workload derivation: pure 3-way classification of running/queued
+// counts. Exported so Runtime-level views (which already aggregate counts
+// per-runtime in their own indices) can plug into the same vocabulary
+// without re-deriving from raw task arrays.
+export function deriveWorkload(counts: {
   runningCount: number;
   queuedCount: number;
-  failureReason?: TaskFailureReason;
-  lastTaskCompletedAt?: string;
+}): Workload {
+  if (counts.runningCount > 0) return "working";
+  if (counts.queuedCount > 0) return "queued";
+  return "idle";
 }
 
-// Single pass: count actives + track latest terminal by completed_at. A
-// running OR queued task means the agent is currently busy ("running"
-// state); only when nothing is in flight do we fall through to the latest
-// terminal (which can be completed / failed / cancelled). With no terminal
-// history at all, we report `idle`.
-//
-// Cancelled is no longer filtered out — under the new model the dot is
-// availability-driven so honestly surfacing "cancelled" doesn't risk
-// lying about whether the agent works. The previous "exclude cancelled
-// to keep red sticky" hack is gone.
-export function deriveLastTaskState(tasks: readonly AgentTask[]): LastTaskResult {
+interface WorkloadDetail {
+  workload: Workload;
+  runningCount: number;
+  queuedCount: number;
+}
+
+// Aggregates a task list into running/queued counts, then classifies via
+// deriveWorkload. Caller pre-filters to the relevant scope (per-agent or
+// per-runtime) — we don't filter again here.
+export function deriveWorkloadDetail(tasks: readonly AgentTask[]): WorkloadDetail {
   let runningCount = 0;
   let queuedCount = 0;
-  let latestTerminal: AgentTask | null = null;
-  let latestTerminalAt = -Infinity;
-
   for (const t of tasks) {
     if (t.status === "running") {
       runningCount += 1;
     } else if (t.status === "queued" || t.status === "dispatched") {
       queuedCount += 1;
-    } else if (t.completed_at) {
-      const ts = new Date(t.completed_at).getTime();
-      if (!Number.isNaN(ts) && ts > latestTerminalAt) {
-        latestTerminalAt = ts;
-        latestTerminal = t;
-      }
     }
+    // Terminal statuses (completed / failed / cancelled) intentionally
+    // ignored — workload is "what's on the plate right now", not history.
   }
-
-  if (runningCount + queuedCount > 0) {
-    return { state: "running", runningCount, queuedCount };
-  }
-
-  if (!latestTerminal) {
-    return { state: "idle", runningCount: 0, queuedCount: 0 };
-  }
-
-  const completedAt = latestTerminal.completed_at ?? undefined;
-  if (latestTerminal.status === "failed") {
-    return {
-      state: "failed",
-      runningCount: 0,
-      queuedCount: 0,
-      failureReason: latestTerminal.failure_reason || undefined,
-      lastTaskCompletedAt: completedAt,
-    };
-  }
-  if (latestTerminal.status === "cancelled") {
-    return {
-      state: "cancelled",
-      runningCount: 0,
-      queuedCount: 0,
-      lastTaskCompletedAt: completedAt,
-    };
-  }
-  // completed
   return {
-    state: "completed",
-    runningCount: 0,
-    queuedCount: 0,
-    lastTaskCompletedAt: completedAt,
+    workload: deriveWorkload({ runningCount, queuedCount }),
+    runningCount,
+    queuedCount,
   };
 }
 
@@ -119,16 +88,14 @@ interface DerivePresenceInput {
 
 export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPresenceDetail {
   const availability = deriveAgentAvailability(input.runtime, input.now);
-  const last = deriveLastTaskState(input.tasks);
+  const detail = deriveWorkloadDetail(input.tasks);
 
   return {
     availability,
-    lastTask: last.state,
-    runningCount: last.runningCount,
-    queuedCount: last.queuedCount,
+    workload: detail.workload,
+    runningCount: detail.runningCount,
+    queuedCount: detail.queuedCount,
     capacity: input.agent.max_concurrent_tasks,
-    failureReason: last.failureReason,
-    lastTaskCompletedAt: last.lastTaskCompletedAt,
   };
 }
 
@@ -138,9 +105,10 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
 export function buildPresenceMap(args: {
   agents: readonly Agent[];
   runtimes: readonly AgentRuntime[];
-  // The workspace agent task snapshot: every active task + each agent's
+  // The workspace agent task snapshot: every active task plus each agent's
   // most recent terminal task. Comes straight from getAgentTaskSnapshot()
-  // — no pre-filtering needed.
+  // — no pre-filtering needed. Terminal rows are silently ignored by
+  // deriveWorkloadDetail (workload is current-state only).
   snapshot: readonly AgentTask[];
   now: number;
 }): Map<string, AgentPresenceDetail> {

@@ -27,6 +27,11 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { IssueStatus } from "@multica/core/types";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import {
+  getRecencyMap,
+  recordMentionUsage,
+  sortUserItemsByRecency,
+} from "./mention-recency";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -185,7 +190,10 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     const selectItem = useCallback(
       (index: number) => {
         const item = displayItems[index];
-        if (item) command(item);
+        if (!item) return;
+        const wsId = getCurrentWsId();
+        if (wsId) recordMentionUsage(wsId, item);
+        command(item);
       },
       [displayItems, command],
     );
@@ -374,6 +382,15 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
+    // Members and agents share a single ranked list — recently mentioned
+    // targets come first regardless of type, with an alphabetical fallback
+    // for everyone the user hasn't mentioned yet on this device.
+    const recency = getRecencyMap(wsId);
+    const userItems = sortUserItemsByRecency(
+      [...memberItems, ...agentItems],
+      recency,
+    );
+
     // Cached issues give an instant first paint; MentionList adds server
     // matches for done/cancelled and any other issues not in this cache.
     const issueItems: MentionItem[] = cachedIssues
@@ -384,7 +401,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    return [...allItem, ...memberItems, ...agentItems, ...issueItems];
+    return [...allItem, ...userItems, ...issueItems];
   }
 
   return {

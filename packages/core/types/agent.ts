@@ -74,6 +74,27 @@ export interface AgentTask {
   chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
+  /** Set when this task was created as an auto-retry of a parent task. */
+  parent_task_id?: string;
+  /** 1-based attempt counter; >1 means this is a retry. */
+  attempt?: number;
+  /** Set when an issue comment triggered this task (@mention or assignee comment). */
+  trigger_comment_id?: string;
+  /**
+   * Canonical short description of what triggered this task — snapshot
+   * taken at creation time. For comment-triggered tasks it's the
+   * comment text (truncated to ~200 chars); for autopilot it's the
+   * autopilot title; NULL for direct assignments and chat tasks.
+   * Persists even if the source comment / autopilot is later edited
+   * or deleted.
+   */
+  trigger_summary?: string;
+  /**
+   * Server-computed source discriminator used by the activity row to label
+   * tasks that have no linked issue (so e.g. quick-create tasks render
+   * with a meaningful title instead of falling through to "Untracked").
+   */
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
 }
 
 export interface Agent {

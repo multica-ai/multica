@@ -45,6 +45,7 @@ type TaskContextForEnv struct {
 	AutopilotDescription    string
 	AutopilotSource         string
 	AutopilotTriggerPayload string
+	QuickCreatePrompt       string // non-empty for quick-create tasks
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

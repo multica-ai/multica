@@ -42,7 +42,8 @@ import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
-import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { AgentLiveCard } from "./agent-live-card";
+import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -438,6 +439,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           </PropRow>
         </div>}
       </div>
+
+      {/* Execution log — active runs + collapsed past runs. Self-contained;
+          owns its own collapse state and WS subscriptions. Hides itself
+          when there are no runs to show. */}
+      <ExecutionLogSection issueId={id} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -835,16 +841,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </div>
             </div>
 
-            {/* Agent live output — sticky inside the Activity section so it
-                stays pinned while scrolling through TaskRunHistory + comments.
-                Keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue. */}
+            {/* Agent live output — sticky banner in the activity section,
+                keyed by issue id so switching issues remounts the card and
+                clears any in-flight task state from the previous issue.
+                The execution log itself (per-task timeline + past runs)
+                lives in the right panel via ExecutionLogSection — this
+                card is just a header-style "agent is working" anchor. */}
             <AgentLiveCard key={id} issueId={id} />
-
-            {/* Agent execution history */}
-            <div className="mt-3">
-              <TaskRunHistory key={id} issueId={id} />
-            </div>
 
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">

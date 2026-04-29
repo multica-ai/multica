@@ -141,10 +141,12 @@ func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
 }
 
 // managedBlockRe captures the daemon-owned block (including the surrounding
-// markers) so it can be replaced idempotently.
+// markers and any trailing blank lines) so it can be replaced idempotently.
+// `\n*` rather than `\n?` so reruns don't accumulate blank lines when the
+// block coexists with another managed block (e.g. multi-agent) in the file.
 var managedBlockRe = regexp.MustCompile(
 	`(?ms)^` + regexp.QuoteMeta(multicaManagedBeginMarker) +
-		`.*?^` + regexp.QuoteMeta(multicaManagedEndMarker) + `\n?`)
+		`.*?^` + regexp.QuoteMeta(multicaManagedEndMarker) + `\n*`)
 
 // upsertMulticaManagedBlock returns the config content with the multica-managed
 // block placed at the very top of the file. Any previously written managed

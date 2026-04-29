@@ -14,7 +14,12 @@ import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
-import { agentTaskSnapshotKeys, agentActivityKeys, agentRunCountsKeys } from "../agents/queries";
+import {
+  agentTaskSnapshotKeys,
+  agentActivityKeys,
+  agentRunCountsKeys,
+  agentTasksKeys,
+} from "../agents/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -163,6 +168,15 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
         // 30-day run count likewise increments per task lifecycle event.
         qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+        // Per-agent task list (Activity tab "Recent work"). Prefix match
+        // catches every agent's list — the per-agent detail key sits
+        // under agentTasks/<wsId>/<agentId>.
+        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+        // Per-issue task list (issue-detail Execution log). Prefix match
+        // across all issues — keeps the contract "any task: event makes
+        // every list-of-tasks query stale" so cache stays fresh even
+        // when the relevant component isn't currently mounted.
+        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
       },
     };
 

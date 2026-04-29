@@ -29,6 +29,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
+import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
+import { CharCounter } from "./char-counter";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -175,8 +177,15 @@ export function CreateAgentDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What does this agent do?"
+              maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
               className="mt-1"
             />
+            <div className="mt-1">
+              <CharCounter
+                length={[...description].length}
+                max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
           </div>
 
           <div>

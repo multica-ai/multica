@@ -19,6 +19,7 @@ export type WSEventType =
   | "agent:created"
   | "agent:archived"
   | "agent:restored"
+  | "task:queued"
   | "task:dispatch"
   | "task:progress"
   | "task:completed"

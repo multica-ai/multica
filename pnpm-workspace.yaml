@@ -16,6 +16,7 @@ catalog:
   # State Management
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
+  "@tanstack/react-table": "^8.21.3"
 
   # UI & Styling
   tailwindcss: "^4"

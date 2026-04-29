@@ -65,9 +65,27 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, trigger_summary)
+VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), sqlc.narg(trigger_summary))
 RETURNING *;
+
+-- name: CreateQuickCreateTask :one
+-- Quick-create tasks have no issue / chat / autopilot link; the entire job
+-- description (prompt, requester, workspace) lives in context JSONB. The
+-- daemon detects this variant via context.type == "quick_create".
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING *;
+
+-- name: LinkTaskToIssue :exec
+-- Attaches the issue a quick-create task produced back to the task row, once
+-- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
+-- so this never overwrites an issue id that was set at task creation (only
+-- quick-create tasks land here unset). Fixes the activity row staying on
+-- "Creating issue" forever after completion.
+UPDATE agent_task_queue
+SET issue_id = $2
+WHERE id = $1 AND issue_id IS NULL;
 
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
@@ -76,13 +94,13 @@ RETURNING *;
 -- max_attempts and trigger_comment_id are inherited.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
-    status, priority, trigger_comment_id, context,
+    status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued', p.priority, p.trigger_comment_id, p.context,
+    'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
     p.attempt + 1, p.max_attempts, p.id
 FROM agent_task_queue p
@@ -142,6 +160,10 @@ WHERE id = $1;
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+-- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
+-- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
+-- otherwise a user mashing the create button could fire concurrent quick-creates
+-- whose completion lookup would race over "most recent issue by this agent".
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
@@ -154,6 +176,14 @@ WHERE id = (
             AND (
               (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
               OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
             )
       )
     ORDER BY atq.priority DESC, atq.created_at ASC

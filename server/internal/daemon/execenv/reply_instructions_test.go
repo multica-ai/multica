@@ -17,15 +17,20 @@ func TestBuildCommentReplyInstructionsIncludesTriggerID(t *testing.T) {
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID,
-		"short single-line reply",
+		"Always use `--content-stdin`",
+		"even when the reply is a single line",
 		"--content-stdin",
 		"<<'COMMENT'",
-		"do NOT write `\\n` escapes",
+		"Do NOT write literal `\\n` escapes to simulate line breaks",
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reply instructions missing %q\n---\n%s", want, got)
 		}
+	}
+
+	if strings.Contains(got, "--content \"...\"") {
+		t.Fatalf("reply instructions should not offer inline --content form\n---\n%s", got)
 	}
 }
 

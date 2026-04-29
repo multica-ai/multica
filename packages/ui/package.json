@@ -16,12 +16,14 @@
     "./markdown/mentions": "./markdown/mentions.ts",
     "./hooks/*": "./hooks/*.ts",
     "./lib/utils": "./lib/utils.ts",
+    "./lib/data-table": "./lib/data-table.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
     "@emoji-mart/data": "^1.2.1",
+    "@tanstack/react-table": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",

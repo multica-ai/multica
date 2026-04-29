@@ -155,12 +155,17 @@ export interface ImportStarterContentResponse {
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
+  // Raw decoded JSON body (when the server returned one). Carries structured
+  // error fields like `code` so callers can branch on machine-readable
+  // identifiers instead of pattern-matching the human-readable message.
+  readonly body?: unknown;
 
-  constructor(message: string, status: number, statusText: string) {
+  constructor(message: string, status: number, statusText: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.statusText = statusText;
+    this.body = body;
   }
 }
 
@@ -225,6 +230,19 @@ export class ApiClient {
     return fallback;
   }
 
+  // Reads the response body once for both human-readable error message and
+  // structured fields. The Response stream can only be consumed once, so
+  // both pieces have to come from a single read.
+  private async parseErrorBody(res: Response, fallback: string): Promise<{ message: string; body: unknown }> {
+    try {
+      const data = await res.json() as { error?: string };
+      const message = typeof data.error === "string" && data.error ? data.error : fallback;
+      return { message, body: data };
+    } catch {
+      return { message: fallback, body: undefined };
+    }
+  }
+
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
@@ -247,10 +265,10 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new ApiError(message, res.status, res.statusText);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -398,6 +416,13 @@ export class ApiClient {
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
+    return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
     });

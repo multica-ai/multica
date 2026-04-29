@@ -7,7 +7,7 @@ import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { Toaster } from "sonner";
+import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { PageviewTracker } from "./components/pageview-tracker";

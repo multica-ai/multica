@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -124,10 +126,19 @@ func (h *Handler) RevokePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if err := h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
+	hash, err := h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
 		ID:     idUUID,
 		UserID: parseUUID(userID),
-	}); err != nil {
+	})
+	switch {
+	case err == nil:
+		// Drop the cache entry immediately so the revocation takes effect
+		// before the TTL would otherwise expire the cached lookup.
+		h.PATCache.Invalidate(r.Context(), hash)
+	case errors.Is(err, pgx.ErrNoRows):
+		// Token doesn't exist or doesn't belong to this user. Preserve the
+		// pre-existing idempotent 204 behavior — no cache entry to clear.
+	default:
 		writeError(w, http.StatusInternalServerError, "failed to revoke token")
 		return
 	}

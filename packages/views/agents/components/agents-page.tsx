@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -10,10 +10,10 @@ import {
   Search,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
 import {
   type AgentAvailability,
-  type LastTaskState,
   agentRunCounts30dOptions,
   summarizeActivityWindow,
   useWorkspaceActivityMap,
@@ -38,56 +38,27 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import {
-  availabilityConfig,
-  availabilityOrder,
-  lastTaskOrder,
-  taskStateConfig,
-} from "../presence";
+import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
-import { AGENT_LIST_GRID, AgentListItem } from "./agent-list-item";
+import { type AgentRow, createAgentColumns } from "./agent-columns";
 
-// Filter axes layered top → bottom by frequency:
+// Filter axes:
 //
-//   View         = which dataset are we looking at (Active vs Archived).
-//                  Archived is low-frequency, so it is NOT a top-level
-//                  segment — it is a ghost link in the toolbar.
+//   View         = active vs archived dataset. Archived is low-frequency,
+//                  accessed through a ghost link in the toolbar.
 //   Scope        = ownership lens (All vs Mine). Layer-1 segment.
-//   Availability = "Can it take work?" — 3-state chip group.
-//   Last task    = "What was the last thing it did?" — 5-state chip group.
-//
-// Availability and Last task are independent axes (Option B). Filter is
-// the intersection: "online + last failed" is a meaningful combination
-// (find broken-but-alive agents). Counts on each chip reflect "if I
-// selected this chip on this axis (with the other axis's current
-// selection), this many agents would match".
+//   Availability = "Can the agent take work right now?" — 3-state chip
+//                  group (online / unstable / offline) sourced from
+//                  AgentAvailability. The only chip filter we keep —
+//                  the previous Workload axis was dropped because its
+//                  "queued / failed / cancelled" buckets became
+//                  meaningless once Failed left the workload model.
 type View = "active" | "archived";
 type Scope = "all" | "mine";
 type AvailabilityFilter = "all" | AgentAvailability;
-type LastTaskFilter = "all" | LastTaskState;
-
-const AVAILABILITY_DESCRIPTION: Record<AgentAvailability, string> = {
-  online: "Runtime online — agent ready to take work",
-  unstable:
-    "Runtime just dropped (< 5 min) — queued work is paused, system is auto-retrying",
-  offline: "Runtime unreachable",
-};
-
-const LAST_TASK_DESCRIPTION: Record<LastTaskState, string> = {
-  running: "At least one task running or queued right now",
-  completed: "Most recent task completed successfully",
-  failed: "Most recent task failed — needs attention",
-  cancelled: "Most recent task was cancelled",
-  idle: "No task history yet",
-};
 
 type SortKey = "recent" | "name" | "runs" | "created";
 const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
@@ -131,7 +102,6 @@ export function AgentsPage() {
   const [scope, setScope] = useState<Scope>("mine");
   const [availabilityFilter, setAvailabilityFilter] =
     useState<AvailabilityFilter>("all");
-  const [lastTaskFilter, setLastTaskFilter] = useState<LastTaskFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -142,9 +112,6 @@ export function AgentsPage() {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const fadeStyle = useScrollFade(scrollRef);
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -190,88 +157,53 @@ export function AgentsPage() {
   }, [inView, currentUser]);
 
   const inScope = useMemo(() => {
+    // Archived view ignores Mine / All — its toolbar has no scope
+    // segment, so silently filtering by `scope` would hide other
+    // people's archived agents without any UI to explain why.
+    if (view === "archived") return inView;
     if (scope === "all" || !currentUser) return inView;
     return inView.filter((a) => a.owner_id === currentUser.id);
-  }, [inView, scope, currentUser]);
+  }, [inView, scope, currentUser, view]);
 
-  // Layer 2 — chip counts on each axis. Counts cross-filter against the
-  // OTHER axis so the displayed number is "if I clicked this chip with
-  // the other axis as-is, this many agents would match". Stable mental
-  // model: numbers don't dance unless the user actually changes scope.
+  // Final cut — availability chip + search.
+  const filteredAgents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return inScope.filter((a) => {
+      // Availability chip filter only applies to the Active view —
+      // archived agents have no presence to match against.
+      if (view === "active" && availabilityFilter !== "all") {
+        const detail = presenceMap.get(a.id);
+        if (detail?.availability !== availabilityFilter) return false;
+      }
+      if (q) {
+        if (
+          !a.name.toLowerCase().includes(q) &&
+          !(a.description ?? "").toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [inScope, view, availabilityFilter, presenceMap, search]);
+
+  // Per-availability counts for the chip badges. Computed against
+  // `inScope` (ignoring the availability filter itself) so the numbers
+  // reflect "if I clicked this chip, this many agents would match"
+  // rather than collapsing to 0 for the unselected chips.
   const availabilityCounts = useMemo(() => {
     const counts: Record<AgentAvailability, number> = {
       online: 0,
       unstable: 0,
       offline: 0,
     };
-    let total = 0;
     for (const a of inScope) {
       const detail = presenceMap.get(a.id);
       if (!detail) continue;
-      if (lastTaskFilter !== "all" && detail.lastTask !== lastTaskFilter) {
-        continue;
-      }
       counts[detail.availability] += 1;
-      total += 1;
     }
-    return { counts, total };
-  }, [inScope, presenceMap, lastTaskFilter]);
-
-  const lastTaskCounts = useMemo(() => {
-    const counts: Record<LastTaskState, number> = {
-      running: 0,
-      completed: 0,
-      failed: 0,
-      cancelled: 0,
-      idle: 0,
-    };
-    let total = 0;
-    for (const a of inScope) {
-      const detail = presenceMap.get(a.id);
-      if (!detail) continue;
-      if (
-        availabilityFilter !== "all" &&
-        detail.availability !== availabilityFilter
-      ) {
-        continue;
-      }
-      counts[detail.lastTask] += 1;
-      total += 1;
-    }
-    return { counts, total };
-  }, [inScope, presenceMap, availabilityFilter]);
-
-  // Final cut — apply both axes + search.
-  const filteredAgents = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return inScope.filter((a) => {
-      // Filter chips only apply to the Active view; Archived hides the
-      // chip rows entirely (presence is undefined for archived agents).
-      if (view === "active") {
-        const detail = presenceMap.get(a.id);
-        if (
-          availabilityFilter !== "all" &&
-          detail?.availability !== availabilityFilter
-        ) {
-          return false;
-        }
-        if (
-          lastTaskFilter !== "all" &&
-          detail?.lastTask !== lastTaskFilter
-        ) {
-          return false;
-        }
-      }
-      if (q) {
-        if (
-          !a.name.toLowerCase().includes(q) &&
-          !(a.description ?? "").toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    });
-  }, [inScope, availabilityFilter, lastTaskFilter, view, search, presenceMap]);
+    return counts;
+  }, [inScope, presenceMap]);
 
   const sortedAgents = useMemo(() => {
     const xs = [...filteredAgents];
@@ -353,10 +285,59 @@ export function AgentsPage() {
     navigation.push(paths.agentDetail(agent.id));
   };
 
-  const handleDuplicate = (agent: Agent) => {
+  const handleDuplicate = useCallback((agent: Agent) => {
     setDuplicateTemplate(agent);
     setShowCreate(true);
-  };
+  }, []);
+
+  // Assemble per-row data once per render — agent + runtime + presence +
+  // activity + role flags. The columns reach into `row.original` and never
+  // pull their own queries, which keeps each cell a pure function.
+  const agentRows = useMemo<AgentRow[]>(() => {
+    return sortedAgents.map((agent) => {
+      const isOwner =
+        !!currentUser?.id && agent.owner_id === currentUser.id;
+      const canManage = isWorkspaceAdmin || isOwner;
+      const ownerIdToShow =
+        scope === "all" &&
+        agent.owner_id &&
+        agent.owner_id !== currentUser?.id
+          ? agent.owner_id
+          : null;
+      return {
+        agent,
+        runtime: runtimesById.get(agent.runtime_id) ?? null,
+        presence: presenceMap.get(agent.id) ?? null,
+        activity: activityMap.get(agent.id) ?? null,
+        runCount: runCountsById.get(agent.id) ?? 0,
+        ownerIdToShow,
+        canManage,
+      };
+    });
+  }, [
+    sortedAgents,
+    currentUser,
+    isWorkspaceAdmin,
+    scope,
+    runtimesById,
+    presenceMap,
+    activityMap,
+    runCountsById,
+  ]);
+
+  const columns = useMemo(
+    () => createAgentColumns({ onDuplicate: handleDuplicate }),
+    [handleDuplicate],
+  );
+
+  const table = useReactTable({
+    data: agentRows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    // Pin the kebab column right so it stays accessible during horizontal
+    // scroll — matches the pattern in Linear / Notion / GitHub.
+    initialState: { columnPinning: { right: ["actions"] } },
+  });
 
   // ---- Loading ----
   if (isLoading) {
@@ -439,20 +420,16 @@ export function AgentsPage() {
                   setSort={setSort}
                   search={search}
                   setSearch={setSearch}
-                />
-                <PresenceFilterRows
-                  availabilityFilter={availabilityFilter}
-                  setAvailabilityFilter={setAvailabilityFilter}
-                  availabilityCounts={availabilityCounts.counts}
-                  availabilityTotal={availabilityCounts.total}
-                  lastTaskFilter={lastTaskFilter}
-                  setLastTaskFilter={setLastTaskFilter}
-                  lastTaskCounts={lastTaskCounts.counts}
-                  lastTaskTotal={lastTaskCounts.total}
                   visibleCount={sortedAgents.length}
                   totalCount={inScope.length}
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
+                />
+                <AvailabilityFilterRow
+                  value={availabilityFilter}
+                  onChange={setAvailabilityFilter}
+                  counts={availabilityCounts}
+                  totalCount={inScope.length}
                 />
               </>
             ) : (
@@ -465,76 +442,14 @@ export function AgentsPage() {
             )}
 
             {sortedAgents.length === 0 ? (
-              <NoMatches
-                view={view}
-                search={search}
-                hasFilter={
-                  availabilityFilter !== "all" || lastTaskFilter !== "all"
-                }
-                scope={scope}
-              />
+              <NoMatches view={view} search={search} scope={scope} />
             ) : (
-              <div
-                ref={scrollRef}
-                style={fadeStyle}
-                className="flex-1 min-h-0 overflow-y-auto"
-              >
-                {/*
-                  Layout strategy — CSS Grid + `max-content` on Status, ratio
-                  fr's elsewhere. The Status column shrinks to fit when no
-                  agent is in a high-load Working state, and only widens
-                  when the data demands it; the freed space flows into the
-                  Agent (1.6fr) primary column. See AGENT_LIST_GRID for the
-                  full breakpoint ladder. Sticky header reuses the same grid
-                  template so column edges align with rows pixel-for-pixel.
-                */}
-                <div
-                  role="row"
-                  className={`${AGENT_LIST_GRID} sticky top-0 z-10 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground backdrop-blur`}
-                >
-                  {/* Avatar leading slot — empty header cell so the "Agent"
-                      label below aligns with the row's name text, not the
-                      avatar's left edge. */}
-                  <span aria-hidden />
-                  <span>Agent</span>
-                  <span>Status</span>
-                  <span className="hidden md:block">Last run</span>
-                  <span className="hidden md:block">Runtime</span>
-                  <span className="hidden lg:block">Activity (7d)</span>
-                  <span className="hidden text-right md:block">Runs</span>
-                  {/* Operations column header — kept silent; the kebab
-                      cell speaks for itself. */}
-                  <span aria-label="Actions" />
-                </div>
-                {sortedAgents.map((agent) => {
-                  const isOwner =
-                    !!currentUser?.id && agent.owner_id === currentUser.id;
-                  const canManage = isWorkspaceAdmin || isOwner;
-                  // Inline owner avatar only in All scope on a teammate's
-                  // agent — Mine scope means owner is always you, so a
-                  // self-avatar everywhere would be visual noise.
-                  const ownerIdToShow =
-                    scope === "all" &&
-                    agent.owner_id &&
-                    agent.owner_id !== currentUser?.id
-                      ? agent.owner_id
-                      : null;
-                  return (
-                    <AgentListItem
-                      key={agent.id}
-                      agent={agent}
-                      runtime={runtimesById.get(agent.runtime_id) ?? null}
-                      presence={presenceMap.get(agent.id) ?? null}
-                      activity={activityMap.get(agent.id) ?? null}
-                      runCount={runCountsById.get(agent.id) ?? 0}
-                      ownerIdToShow={ownerIdToShow}
-                      canManage={canManage}
-                      onDuplicate={handleDuplicate}
-                      href={paths.agentDetail(agent.id)}
-                    />
-                  );
-                })}
-              </div>
+              <DataTable
+                table={table}
+                onRowClick={(row) =>
+                  navigation.push(paths.agentDetail(row.original.agent.id))
+                }
+              />
             )}
           </div>
         )}
@@ -616,6 +531,10 @@ function ActiveToolbarRow({
   setSort,
   search,
   setSearch,
+  visibleCount,
+  totalCount,
+  archivedCount,
+  onShowArchived,
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
@@ -624,13 +543,18 @@ function ActiveToolbarRow({
   setSort: (v: SortKey) => void;
   search: string;
   setSearch: (v: string) => void;
+  visibleCount: number;
+  totalCount: number;
+  archivedCount: number;
+  onShowArchived: () => void;
 }) {
-  // Layout follows Skills: [Search] [Mine|All]              [Sort ▼]
-  // Search and the scope segment cluster on the left (Skills puts its
-  // filter buttons immediately after the search the same way). Sort
-  // gets pushed to the far right via ml-auto.
+  // Layout: [Search] [Mine|All] ......... [Show archived] [N of M] [Sort ▼]
+  // Filter chips were removed (status / workload chips on a small team
+  // gain less than they cost), so the toolbar collapses to a single row.
+  // Visible/total count and the archived link inherit their old position
+  // from the deleted PresenceFilterRows.
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+    <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -641,7 +565,19 @@ function ActiveToolbarRow({
         />
       </div>
       <ScopeSegment scope={scope} setScope={setScope} counts={scopeCounts} />
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-3">
+        {archivedCount > 0 && (
+          <button
+            type="button"
+            onClick={onShowArchived}
+            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Show archived ({archivedCount}) →
+          </button>
+        )}
+        <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+          {visibleCount} of {totalCount}
+        </span>
         <SortDropdown sort={sort} setSort={setSort} />
       </div>
     </div>
@@ -747,161 +683,76 @@ function SortDropdown({
 }
 
 // ---------------------------------------------------------------------------
-// Active view — Layer 2: two independent filter axes (availability + last
-// task) + visible/total count. The right edge hosts the low-frequency
-// "Show archived" link, kept out of Layer 1 so the primary toolbar stays
-// uncluttered.
-//
-// Two rows because cramming both axes into a single row makes the chip
-// labels feel ambiguous ("Online" and "Failed" side by side reads as a
-// single stack of facets, but they're on different axes). Two rows with
-// a leading label make the axis split obvious.
+// Availability chip row — All / Online / Unstable / Offline. Only shown
+// in the Active view; archived agents have no presence.
 // ---------------------------------------------------------------------------
 
-function PresenceFilterRows({
-  availabilityFilter,
-  setAvailabilityFilter,
-  availabilityCounts,
-  availabilityTotal,
-  lastTaskFilter,
-  setLastTaskFilter,
-  lastTaskCounts,
-  lastTaskTotal,
-  visibleCount,
+function AvailabilityFilterRow({
+  value,
+  onChange,
+  counts,
   totalCount,
-  archivedCount,
-  onShowArchived,
 }: {
-  availabilityFilter: AvailabilityFilter;
-  setAvailabilityFilter: (v: AvailabilityFilter) => void;
-  availabilityCounts: Record<AgentAvailability, number>;
-  availabilityTotal: number;
-  lastTaskFilter: LastTaskFilter;
-  setLastTaskFilter: (v: LastTaskFilter) => void;
-  lastTaskCounts: Record<LastTaskState, number>;
-  lastTaskTotal: number;
-  visibleCount: number;
+  value: AvailabilityFilter;
+  onChange: (v: AvailabilityFilter) => void;
+  counts: Record<AgentAvailability, number>;
   totalCount: number;
-  archivedCount: number;
-  onShowArchived: () => void;
 }) {
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 border-b px-4 py-2.5">
-      {/* Row 1: Availability — 3 chips. */}
-      <div className="flex items-center gap-2">
-        <span className="w-16 shrink-0 text-xs text-muted-foreground">
-          Status
-        </span>
-        <PresenceChip
-          active={availabilityFilter === "all"}
-          onClick={() => setAvailabilityFilter("all")}
-          label="All"
-          count={availabilityTotal}
-          description="No availability filter"
-        />
-        {availabilityOrder.map((a) => {
-          const cfg = availabilityConfig[a];
-          return (
-            <PresenceChip
-              key={a}
-              active={availabilityFilter === a}
-              onClick={() => setAvailabilityFilter(a)}
-              label={cfg.label}
-              count={availabilityCounts[a]}
-              dotClass={cfg.dotClass}
-              description={AVAILABILITY_DESCRIPTION[a]}
-            />
-          );
-        })}
-        <div className="ml-auto flex items-center gap-3">
-          {archivedCount > 0 && (
-            <button
-              type="button"
-              onClick={onShowArchived}
-              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Show archived ({archivedCount}) →
-            </button>
-          )}
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {visibleCount} of {totalCount}
-          </span>
-        </div>
-      </div>
-      {/* Row 2: Last task — 5 chips. */}
-      <div className="flex items-center gap-2">
-        <span className="w-16 shrink-0 text-xs text-muted-foreground">
-          Last run
-        </span>
-        <PresenceChip
-          active={lastTaskFilter === "all"}
-          onClick={() => setLastTaskFilter("all")}
-          label="All"
-          count={lastTaskTotal}
-          description="No last-run filter"
-        />
-        {lastTaskOrder.map((t) => {
-          const cfg = taskStateConfig[t];
-          return (
-            <PresenceChip
-              key={t}
-              active={lastTaskFilter === t}
-              onClick={() => setLastTaskFilter(t)}
-              label={cfg.label}
-              count={lastTaskCounts[t]}
-              description={LAST_TASK_DESCRIPTION[t]}
-            />
-          );
-        })}
-      </div>
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
+      <AvailabilityChip
+        active={value === "all"}
+        onClick={() => onChange("all")}
+        label="All"
+        count={totalCount}
+      />
+      {availabilityOrder.map((a) => {
+        const cfg = availabilityConfig[a];
+        return (
+          <AvailabilityChip
+            key={a}
+            active={value === a}
+            onClick={() => onChange(a)}
+            label={cfg.label}
+            count={counts[a]}
+            dotClass={cfg.dotClass}
+          />
+        );
+      })}
     </div>
   );
 }
 
-// Same Button + Tooltip pattern Skills uses for its scope filters. Selected
-// state mirrors Skills' `bg-accent text-accent-foreground hover:bg-accent/80`,
-// so any future global tweak to that token cascades here for free.
-function PresenceChip({
+function AvailabilityChip({
   active,
   onClick,
   label,
   count,
   dotClass,
-  description,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   count: number;
   dotClass?: string;
-  description: string;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onClick}
-            className={
-              active
-                ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                : "text-muted-foreground"
-            }
-          >
-            {dotClass && (
-              <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
-            )}
-            <span>{label}</span>
-            <span className="font-mono tabular-nums text-muted-foreground/70">
-              {count}
-            </span>
-          </Button>
-        }
-      />
-      <TooltipContent side="top">{description}</TooltipContent>
-    </Tooltip>
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className={
+        active
+          ? "bg-accent text-accent-foreground hover:bg-accent/80"
+          : "text-muted-foreground"
+      }
+    >
+      {dotClass && <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />}
+      <span>{label}</span>
+      <span className="font-mono tabular-nums text-muted-foreground/70">
+        {count}
+      </span>
+    </Button>
   );
 }
 
@@ -969,16 +820,17 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 function NoMatches({
   view,
   search,
-  hasFilter: filterActive,
   scope,
 }: {
   view: View;
   search: string;
-  hasFilter: boolean;
   scope: Scope;
 }) {
   const hasSearch = search.length > 0;
-  const hasFilter = filterActive || scope === "mine";
+  // "mine" is the only remaining narrowing dimension after chip filters
+  // were dropped — keep the wording aware of it so an empty Mine view
+  // doesn't suggest the workspace itself is empty.
+  const hasFilter = scope === "mine";
 
   let body: string;
   if (view === "archived") {
