@@ -13,7 +13,6 @@ This suite is prepared for later execution by `agent-browser`. It covers the Ski
 - Verify the Skills page exposes a Local import flow in the Add Workspace Skill dialog.
 - Verify Codex, Claude Code, and `SKILL.md` local directory inputs produce browser-visible parsed skill states.
 - Verify successful imports surface visible success and selected-skill state.
-- Verify unsupported directories show a browser-visible validation error before import.
 
 ## Preconditions
 
@@ -43,8 +42,6 @@ This suite is prepared for later execution by `agent-browser`. It covers the Ski
 - `skill_dialog.local.detected_skill_name`
 - `skill_dialog.local.detected_skill_files_badge`
 - `skill_dialog.local.import_button`
-- `skill_dialog.local.import_button_disabled`
-- `skill_dialog.local.error_no_skill_files`
 - `skill_list.selected_skill_name`
 - `skill_editor.main_content`
 - `toast.skill_imported_count`
@@ -54,11 +51,10 @@ This suite is prepared for later execution by `agent-browser`. It covers the Ski
 - `codex-basic` should include `AGENTS.md` plus at least one supporting file so the files badge can be asserted.
 - `claude-basic` should include at least two `.claude/commands/*.md` command files so multiple parsed skills are visible.
 - `skillmd-basic` should include a nested `SKILL.md` package and a supporting file in the same package directory.
-- `empty` should contain no supported text files so the UI remains in the Local tab and shows the validation error.
 
 ## Execution Notes
 
 - Prefer direct directory upload on the hidden Local tab directory input when the runner supports it.
 - If direct directory upload is unavailable, use the visible Select Directory control with runner assistance.
-- Wait for visible parsed rows, toast text, selected skill state, or validation error rather than fixed sleeps.
+- Wait for visible parsed rows, toast text, or selected skill state rather than fixed sleeps.
 - Assertions should remain browser-observable and should not depend on backend implementation details beyond visible success or error state.

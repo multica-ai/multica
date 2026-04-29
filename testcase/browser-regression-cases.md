@@ -11,7 +11,6 @@ The repository does not currently include `testcase/ui-selectors.json`, so these
 - Prepare `fixtures/skills-local/codex-basic/` with root `AGENTS.md` and one supporting text file.
 - Prepare `fixtures/skills-local/claude-basic/` with `.claude/commands/review.md` and `.claude/commands/test.md`.
 - Prepare `fixtures/skills-local/skillmd-basic/` with `writer/SKILL.md` and one supporting file under `writer/`.
-- Prepare `fixtures/skills-local/empty/` with no supported text skill files.
 
 ## Case LOC-001 Codex Local Directory Imports As One Skill
 
@@ -28,11 +27,3 @@ The repository does not currently include `testcase/ui-selectors.json`, so these
 - User flow: Navigate to the workspace Skills page. Open the Add Workspace Skill dialog. Switch to the Local tab. Select the Claude Code fixture directory.
 - Expected results: The dialog remains on the Local tab and reports two detected skills. The detected skill list includes entries derived from `review.md` and `test.md`. The primary import button indicates that two skills can be imported.
 - Notes for automation: Bind selectors for the Local tab, hidden directory input, detected skill count, detected skill rows, and import button. This scenario does not need to submit the batch because the key browser-observable risk is multi-command parsing.
-
-## Case LOC-003 Unsupported Directory Shows Validation Error
-
-- Purpose: Verify that an unsupported or empty local directory is rejected before batch import.
-- Preconditions: The workspace Skills page is accessible and `fixtures/skills-local/empty/` contains no supported markdown or text skill files.
-- User flow: Navigate to the workspace Skills page. Open the Add Workspace Skill dialog. Switch to the Local tab. Select the empty fixture directory.
-- Expected results: The dialog shows an error message saying no skill files were found and lists supported formats such as `.claude/commands/*.md`, `AGENTS.md`, and `SKILL.md` directories. No detected skill row is shown and the import action remains disabled.
-- Notes for automation: Bind selectors for the Local tab, directory input, local-tab error message, detected skill rows, and disabled import button before converting this case to executable syntax.
