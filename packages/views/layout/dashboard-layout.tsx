@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "../modals/registry";
-import { QuickCreateToasts } from "../modals/quick-create-toasts";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
@@ -34,7 +33,6 @@ export function DashboardLayout({
     >
       <SidebarProvider className="h-svh">
         <WorkspacePresencePrefetch />
-        <QuickCreateToasts />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
           {children}

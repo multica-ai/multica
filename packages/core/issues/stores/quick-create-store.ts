@@ -16,6 +16,7 @@ import { defaultStorage } from "../../platform/storage";
 export interface QuickCreatePendingTask {
   taskId: string;
   prompt: string;
+  agentId: string;
   agentName: string;
 }
 

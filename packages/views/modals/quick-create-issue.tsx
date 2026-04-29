@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
+
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import {
   DropdownMenu,
@@ -170,12 +170,9 @@ export function AgentCreatePanel({
       useQuickCreateStore.getState().addPendingTask({
         taskId: task_id,
         prompt: md,
+        agentId: agentId,
         agentName: selectedAgent?.name ?? "Agent",
       });
-      toast.loading(
-        `${selectedAgent?.name ?? "Agent"} is creating your issue…`,
-        { id: task_id },
-      );
       if (keepOpen) {
         // Stay open for continuous creation — clear the editor so the
         // user can immediately type the next prompt.
