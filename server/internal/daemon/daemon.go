@@ -30,6 +30,7 @@ type workspaceState struct {
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
+	settings        json.RawMessage // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 }
@@ -321,12 +322,13 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	return resp, nil
 }
 
-func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData) *workspaceState {
+func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
 	return &workspaceState{
 		workspaceID:     workspaceID,
 		runtimeIDs:      runtimeIDs,
 		reposVersion:    reposVersion,
 		allowedRepoURLs: repoAllowlist(repos),
+		settings:        settings,
 	}
 }
 
@@ -368,6 +370,25 @@ func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 		return ""
 	}
 	return ws.lastRepoSyncErr
+}
+
+// workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
+// be installed for the given workspace. Defaults to true when the setting is
+// absent (new workspaces, older servers that don't send settings).
+func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || len(ws.settings) == 0 {
+		return true // default: enabled
+	}
+	var s struct {
+		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
+	}
+	if err := json.Unmarshal(ws.settings, &s); err != nil || s.CoAuthoredByEnabled == nil {
+		return true // default: enabled
+	}
+	return *s.CoAuthoredByEnabled
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
@@ -510,7 +531,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
 		d.mu.Lock()
-		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos)
+		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}

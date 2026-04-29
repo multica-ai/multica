@@ -327,11 +327,12 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
-	WorkDir     string // parent directory for the worktree (e.g. task workdir)
-	AgentName   string // for branch naming
-	TaskID      string // for branch naming uniqueness
+	WorkspaceID        string // workspace that owns the repo
+	RepoURL            string // remote URL to look up in the cache
+	WorkDir            string // parent directory for the worktree (e.g. task workdir)
+	AgentName          string // for branch naming
+	TaskID             string // for branch naming uniqueness
+	CoAuthoredByEnabled bool  // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -401,9 +402,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			_ = excludeFromGit(worktreePath, pattern)
 		}
 
-		// Install Co-authored-by hook for Multica Agent attribution.
-		if err := installCoAuthoredByHook(worktreePath); err != nil {
-			c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+		// Install Co-authored-by hook for Multica Agent attribution (if enabled).
+		if params.CoAuthoredByEnabled {
+			if err := installCoAuthoredByHook(worktreePath); err != nil {
+				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+			}
 		}
 
 		c.logger.Info("repo checkout: existing worktree updated",
@@ -431,9 +434,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		_ = excludeFromGit(worktreePath, pattern)
 	}
 
-	// Install Co-authored-by hook for Multica Agent attribution.
-	if err := installCoAuthoredByHook(worktreePath); err != nil {
-		c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+	// Install Co-authored-by hook for Multica Agent attribution (if enabled).
+	if params.CoAuthoredByEnabled {
+		if err := installCoAuthoredByHook(worktreePath); err != nil {
+			c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+		}
 	}
 
 	c.logger.Info("repo checkout: worktree created",

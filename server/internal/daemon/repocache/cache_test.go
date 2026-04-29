@@ -898,11 +898,12 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID: "ws-1",
-		RepoURL:     sourceRepo,
-		WorkDir:     workDir,
-		AgentName:   "Test Agent",
-		TaskID:      "a1b2c3d4-0000-0000-0000-000000000000",
+		WorkspaceID:        "ws-1",
+		RepoURL:            sourceRepo,
+		WorkDir:            workDir,
+		AgentName:          "Test Agent",
+		TaskID:             "a1b2c3d4-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWorktree failed: %v", err)
@@ -941,11 +942,12 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID: "ws-1",
-		RepoURL:     sourceRepo,
-		WorkDir:     workDir,
-		AgentName:   "Test Agent",
-		TaskID:      "b2c3d4e5-0000-0000-0000-000000000000",
+		WorkspaceID:        "ws-1",
+		RepoURL:            sourceRepo,
+		WorkDir:            workDir,
+		AgentName:          "Test Agent",
+		TaskID:             "b2c3d4e5-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWorktree failed: %v", err)
