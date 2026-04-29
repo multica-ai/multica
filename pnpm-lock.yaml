@@ -739,6 +739,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.0.1(react@19.2.3)
+      mermaid:
+        specifier: ^11.14.0
+        version: 11.14.0
       react:
         specifier: 'catalog:'
         version: 19.2.3

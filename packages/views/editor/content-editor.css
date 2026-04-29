@@ -200,6 +200,34 @@
   line-height: 1.6;
 }
 
+/* Mermaid diagrams */
+.rich-text-editor .mermaid-diagram {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+.rich-text-editor .mermaid-diagram svg {
+  display: block;
+  height: auto;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.rich-text-editor .mermaid-diagram-loading,
+.rich-text-editor .mermaid-diagram-error p {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.rich-text-editor .mermaid-diagram-error pre {
+  margin-bottom: 0;
+}
+
 /* Syntax highlighting — lowlight (hljs) */
 .rich-text-editor .hljs-keyword,
 .rich-text-editor .hljs-selector-tag,
@@ -529,4 +557,3 @@
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
 }
-

@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { useMemo, useRef, useState } from "react";
+import { isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -158,6 +158,73 @@ function ReadonlyLink({
   );
 }
 
+function MermaidDiagram({ chart }: { chart: string }) {
+  const reactId = useId();
+  const diagramId = useMemo(
+    () => `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
+    [reactId],
+  );
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderDiagram() {
+      try {
+        setError(null);
+        setSvg(null);
+        const { default: mermaid } = await import("mermaid");
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: "base",
+          themeVariables: {
+            primaryColor: "#f5f3ff",
+            primaryBorderColor: "#7c3aed",
+            primaryTextColor: "#111827",
+            lineColor: "#6b7280",
+            fontFamily: "inherit",
+          },
+        });
+        const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
+        if (!cancelled) setSvg(renderedSvg);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram");
+        }
+      }
+    }
+
+    void renderDiagram();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chart, diagramId]);
+
+  if (error) {
+    return (
+      <div className="mermaid-diagram mermaid-diagram-error">
+        <p>Unable to render Mermaid diagram.</p>
+        <pre>
+          <code>{chart}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mermaid-diagram" aria-label="Mermaid diagram">
+      {svg ? (
+        <div dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <div className="mermaid-diagram-loading">Rendering diagram…</div>
+      )}
+    </div>
+  );
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
@@ -251,6 +318,10 @@ const components: Partial<Components> = {
       node?.position &&
       node.position.start.line !== node.position.end.line;
 
+    if (isBlock && lang === "mermaid") {
+      return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+    }
+
     if (!isBlock && !lang) {
       // Inline code — CSS handles styling via .rich-text-editor code
       return <code {...props}>{children}</code>;
@@ -279,7 +350,12 @@ const components: Partial<Components> = {
   },
 
   // Pre — pass through (CSS handles styling via .rich-text-editor pre)
-  pre: ({ children }) => <pre>{children}</pre>,
+  pre: ({ children }) => {
+    if (isValidElement(children) && children.type === MermaidDiagram) {
+      return <>{children}</>;
+    }
+    return <pre>{children}</pre>;
+  },
 };
 
 // ---------------------------------------------------------------------------

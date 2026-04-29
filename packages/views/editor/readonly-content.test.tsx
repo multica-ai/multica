@@ -72,3 +72,16 @@ describe("ReadonlyContent line breaks", () => {
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("ReadonlyContent Mermaid rendering", () => {
+  it("renders mermaid code fences as diagram containers instead of code blocks", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector(".mermaid-diagram")).not.toBeNull();
+    expect(container.querySelector("pre code.language-mermaid")).toBeNull();
+  });
+});
