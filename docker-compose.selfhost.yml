@@ -37,10 +37,18 @@ services:
       - "${PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      # PKM bridge — bind-mount the host directory holding workspace
+      # markdown notes into the container. The Documents API joins each
+      # workspace's pkm_path under MULTICA_PKM_ROOT, so MOUNT_TARGET must
+      # be a path inside (or equal to) MULTICA_PKM_ROOT. Leave HOST_DIR
+      # empty to mount /dev/null and keep the documents feature dormant.
+      # See .env.example for two configuration recipes.
+      - ${MULTICA_PKM_HOST_DIR:-/dev/null}:${MULTICA_PKM_MOUNT_TARGET:-/pkm}
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      MULTICA_PKM_ROOT: ${MULTICA_PKM_ROOT:-}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}

@@ -222,6 +222,29 @@ multica login
 multica daemon start
 ```
 
+## PKM Bridge (Documents tab)
+
+The Documents tab serves markdown notes from a directory on the host. It
+is dormant until you wire three environment variables in `.env` and
+restart the backend.
+
+```bash
+# Recommended: expose only the top PKM folder
+MULTICA_PKM_HOST_DIR=/path/on/host/to/your/PKM-folder
+MULTICA_PKM_MOUNT_TARGET=/pkm/PKM-folder
+MULTICA_PKM_ROOT=/pkm
+```
+
+Then in **Settings → Workspace**, set the workspace's `PKM path` to the
+folder you want to expose, relative to `MULTICA_PKM_ROOT`. With the recipe
+above, valid values look like `/PKM-folder/notes` or
+`/PKM-folder/projects/my-project`.
+
+Restart the backend (`docker compose -f docker-compose.selfhost.yml up -d backend`)
+and reload the Documents tab. The startup log line `documents: api enabled`
+confirms the feature is on. See `.env.example` for an alternative recipe
+that exposes a broader parent directory.
+
 ## Advanced Configuration
 
 For environment variables, manual setup (without Docker), reverse proxy configuration, database setup, and more, see the [Advanced Configuration Guide](SELF_HOSTING_ADVANCED.md).
