@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -35,23 +35,30 @@ export function ChatMessageList({
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
 
-  // Once the assistant message for this pending task has landed in the
-  // messages list, AssistantMessage owns its rendering — suppress the live
-  // timeline to avoid rendering the same content in two places during the
-  // invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
 
-  // Live timeline for the in-flight task. useRealtimeSync keeps this cache
-  // current via setQueryData on task:message events.
-  const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
-  const { data: liveTaskMessages } = useQuery({
-    ...taskMessagesOptions(pendingTaskId ?? ""),
-    enabled: showLiveTimeline,
-  });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
-  const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  // Synthesize a virtual assistant message for the in-flight task so it flows
+  // through the same MessageBubble path as persisted messages. Keying by
+  // `task-<id>` means the persisted message that replaces it reconciles into
+  // the same DOM subtree instead of unmounting + remounting — which caused a
+  // visible jump + re-render when streaming finished.
+  const items = useMemo<ChatMessage[]>(() => {
+    if (!pendingTaskId || pendingAlreadyPersisted) return messages;
+    const pending: ChatMessage = {
+      id: `pending-${pendingTaskId}`,
+      chat_session_id: "",
+      role: "assistant",
+      content: "",
+      task_id: pendingTaskId,
+      created_at: new Date().toISOString(),
+    };
+    return [...messages, pending];
+  }, [messages, pendingTaskId, pendingAlreadyPersisted]);
+
+  const showWaitingSpinner =
+    isWaiting && !pendingTaskId && !pendingAlreadyPersisted;
 
   return (
     <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
@@ -60,20 +67,22 @@ export function ChatMessageList({
        *  views doesn't jolt the reading width. px-5 is a touch tighter
        *  than issue-detail's px-8 because the chat window can be narrow. */}
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+        {items.map((msg) => (
+          <MessageBubble key={bubbleKey(msg)} message={msg} />
         ))}
-        {hasLive && (
-          <div className="w-full space-y-1.5">
-            <TimelineView items={liveTimeline} />
-          </div>
-        )}
-        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
+        {showWaitingSpinner && (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         )}
       </div>
     </div>
   );
+}
+
+function bubbleKey(msg: ChatMessage): string {
+  // Keying assistant messages by task_id lets a virtual "pending" entry and
+  // the persisted message that replaces it share React identity.
+  if (msg.role === "assistant" && msg.task_id) return `task-${msg.task_id}`;
+  return msg.id;
 }
 
 /**
