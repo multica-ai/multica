@@ -5,7 +5,7 @@ import { EyeOff, MoreHorizontal, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueExecutionSummary, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -25,6 +25,8 @@ export function BoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
+  executionSummaryMap,
+  onOpenIssue,
   totalCount,
   footer,
 }: {
@@ -32,6 +34,8 @@ export function BoardColumn({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
+  executionSummaryMap?: Map<string, IssueExecutionSummary>;
+  onOpenIssue?: (issue: Issue) => void;
   totalCount?: number;
   footer?: ReactNode;
 }) {
@@ -96,7 +100,13 @@ export function BoardColumn({
       >
         <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
           {resolvedIssues.map((issue) => (
-            <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} />
+            <DraggableBoardCard
+              key={issue.id}
+              issue={issue}
+              childProgress={childProgressMap?.get(issue.id)}
+              executionSummary={executionSummaryMap?.get(issue.id)}
+              onOpenIssue={onOpenIssue}
+            />
           ))}
         </SortableContext>
         {issueIds.length === 0 && (

@@ -23,33 +23,59 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels             *[]LabelResponse        `json:"labels,omitempty"`
+	Labels *[]LabelResponse `json:"labels,omitempty"`
+}
+
+type IssueExecutionSummaryResponse struct {
+	IssueID                string  `json:"issue_id"`
+	State                  string  `json:"state"`
+	QueuedCount            int32   `json:"queued_count"`
+	RunningCount           int32   `json:"running_count"`
+	LatestTaskID           *string `json:"latest_task_id"`
+	LatestAgentID          *string `json:"latest_agent_id"`
+	LatestCompletedAt      *string `json:"latest_completed_at"`
+	LatestError            *string `json:"latest_error"`
+	LatestTriggerCommentID *string `json:"latest_trigger_comment_id"`
+	LatestTriggerExcerpt   *string `json:"latest_trigger_excerpt"`
+}
+
+type issueExecutionSummaryRow struct {
+	IssueID                pgtype.UUID
+	State                  string
+	QueuedCount            int32
+	RunningCount           int32
+	LatestTaskID           pgtype.UUID
+	LatestAgentID          pgtype.UUID
+	LatestCompletedAt      pgtype.Timestamptz
+	LatestError            pgtype.Text
+	LatestTriggerCommentID pgtype.UUID
+	LatestTriggerExcerpt   pgtype.Text
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -283,7 +309,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -758,6 +784,172 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) GetIssueExecutionSummaries(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	issueIDFilter := pgtype.UUID{}
+	issueIDParam := r.URL.Query().Get("issue_id")
+	if issueIDParam != "" {
+		issueIDFilter = parseUUID(issueIDParam)
+		if !issueIDFilter.Valid {
+			writeError(w, http.StatusBadRequest, "invalid issue_id parameter")
+			return
+		}
+	}
+
+	limit := 100
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		v, err := strconv.Atoi(l)
+		if err != nil || v < 1 {
+			writeError(w, http.StatusBadRequest, "invalid limit parameter")
+			return
+		}
+		limit = v
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		v, err := strconv.Atoi(o)
+		if err != nil || v < 0 {
+			writeError(w, http.StatusBadRequest, "invalid offset parameter")
+			return
+		}
+		offset = v
+	}
+	if issueIDFilter.Valid {
+		limit = 1
+		offset = 0
+	}
+
+	rows, err := h.DB.Query(r.Context(), `
+WITH paged_issues AS (
+	SELECT i.id, i.created_at
+	FROM issue i
+	WHERE i.workspace_id = $1
+		AND ($4::uuid IS NULL OR i.id = $4)
+	ORDER BY i.created_at DESC
+	LIMIT $2 OFFSET $3
+),
+task_base AS (
+	SELECT
+		atq.issue_id,
+		atq.id,
+		atq.agent_id,
+		atq.status,
+		atq.completed_at,
+		atq.error,
+		atq.created_at,
+		atq.trigger_comment_id
+	FROM agent_task_queue atq
+	JOIN paged_issues pi ON pi.id = atq.issue_id
+),
+active_counts AS (
+	SELECT
+		issue_id,
+		COUNT(*) FILTER (WHERE status = 'queued')::int4 AS queued_count,
+		COUNT(*) FILTER (WHERE status IN ('dispatched', 'running'))::int4 AS running_count
+	FROM task_base
+	WHERE status IN ('queued', 'dispatched', 'running')
+	GROUP BY issue_id
+),
+latest_task AS (
+	SELECT
+		tb.*,
+		ROW_NUMBER() OVER (
+			PARTITION BY tb.issue_id
+			ORDER BY
+				CASE
+					WHEN tb.status IN ('dispatched', 'running') THEN 0
+					WHEN tb.status = 'queued' THEN 1
+					ELSE 2
+				END,
+				COALESCE(tb.completed_at, tb.created_at) DESC,
+				tb.created_at DESC,
+				tb.id DESC
+		) AS row_num
+	FROM task_base tb
+)
+SELECT
+	i.id,
+	CASE
+		WHEN COALESCE(ac.running_count, 0) > 0 THEN 'running'
+		WHEN COALESCE(ac.queued_count, 0) > 0 THEN 'queued'
+		WHEN lt.status = 'failed' THEN 'failed'
+		WHEN lt.status = 'completed' THEN 'completed'
+		ELSE 'idle'
+	END AS state,
+	COALESCE(ac.queued_count, 0) AS queued_count,
+	COALESCE(ac.running_count, 0) AS running_count,
+	lt.id AS latest_task_id,
+	lt.agent_id AS latest_agent_id,
+	lt.completed_at AS latest_completed_at,
+	lt.error AS latest_error,
+	lt.trigger_comment_id AS latest_trigger_comment_id,
+	c.content AS latest_trigger_excerpt
+FROM paged_issues pi
+JOIN issue i ON i.id = pi.id
+LEFT JOIN active_counts ac ON ac.issue_id = i.id
+LEFT JOIN latest_task lt ON lt.issue_id = i.id AND lt.row_num = 1
+LEFT JOIN comment c ON c.id = lt.trigger_comment_id
+ORDER BY pi.created_at DESC
+`, parseUUID(workspaceID), limit, offset, issueIDFilter)
+	if err != nil {
+		slog.Error("execution summary query failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "limit", limit, "offset", offset, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+		return
+	}
+	defer rows.Close()
+
+	summaries := make([]IssueExecutionSummaryResponse, 0)
+	for rows.Next() {
+		var row issueExecutionSummaryRow
+		if err := rows.Scan(
+			&row.IssueID,
+			&row.State,
+			&row.QueuedCount,
+			&row.RunningCount,
+			&row.LatestTaskID,
+			&row.LatestAgentID,
+			&row.LatestCompletedAt,
+			&row.LatestError,
+			&row.LatestTriggerCommentID,
+			&row.LatestTriggerExcerpt,
+		); err != nil {
+			slog.Error("execution summary scan failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+			return
+		}
+		summaries = append(summaries, IssueExecutionSummaryResponse{
+			IssueID:                uuidToString(row.IssueID),
+			State:                  row.State,
+			QueuedCount:            row.QueuedCount,
+			RunningCount:           row.RunningCount,
+			LatestTaskID:           uuidToPtr(row.LatestTaskID),
+			LatestAgentID:          uuidToPtr(row.LatestAgentID),
+			LatestCompletedAt:      timestampToPtr(row.LatestCompletedAt),
+			LatestError:            textToPtr(row.LatestError),
+			LatestTriggerCommentID: uuidToPtr(row.LatestTriggerCommentID),
+			LatestTriggerExcerpt:   textToPtr(row.LatestTriggerExcerpt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("execution summary rows failed", "workspace_id", workspaceID, "issue_id", issueIDParam, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load execution summary")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"summaries": summaries})
+}
+
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -849,16 +1041,16 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -977,20 +1169,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        wsUUID,
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
-		ProjectID:          projectID,
+		WorkspaceID:   wsUUID,
+		Title:         req.Title,
+		Description:   ptrToText(req.Description),
+		Status:        status,
+		Priority:      priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   creatorType,
+		CreatorID:     parseUUID(actualCreatorID),
+		ParentIssueID: parentIssueID,
+		Position:      0,
+		DueDate:       dueDate,
+		Number:        issueNumber,
+		ProjectID:     projectID,
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -1039,16 +1231,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {

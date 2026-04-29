@@ -1,9 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+// @vitest-environment jsdom
+
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueStatus } from "@multica/core/types";
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/realtime", () => ({
+  useWSEvent: vi.fn(),
+  useWSReconnect: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -39,13 +47,26 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 // Mock @multica/views/navigation (AppLink + useNavigation)
+const navigationState = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  openInNewTab: vi.fn(),
+  search: "",
+}));
+
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({
+    push: navigationState.push,
+    replace: navigationState.replace,
+    openInNewTab: navigationState.openInNewTab,
+    pathname: "/issues",
+    searchParams: new URLSearchParams(navigationState.search),
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -56,21 +77,50 @@ vi.mock("../../workspace/workspace-avatar", () => ({
 
 // Mock api (queries use api internally)
 const mockListIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ issues: [], total: 0 }));
-vi.mock("@multica/core/api", () => ({
-  api: {
-    listIssues: (...args: any[]) => mockListIssues(...args),
-    updateIssue: vi.fn(),
-    listMembers: () => Promise.resolve([]),
-    listAgents: () => Promise.resolve([]),
-  },
-  getApi: () => ({
-    listIssues: (...args: any[]) => mockListIssues(...args),
-    updateIssue: vi.fn(),
-    listMembers: () => Promise.resolve([]),
-    listAgents: () => Promise.resolve([]),
-  }),
-  setApiInstance: vi.fn(),
-}));
+const mockGetChildIssueProgress = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ progress: [] }),
+);
+const mockGetIssueExecutionSummaries = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ summaries: [] }),
+);
+const mockGetIssue = vi.hoisted(() => vi.fn());
+const mockListTimeline = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+vi.mock("@multica/core/api", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/api")>(
+    "@multica/core/api",
+  );
+
+  return {
+    ...actual,
+    api: {
+      listIssues: (...args: any[]) => mockListIssues(...args),
+      getChildIssueProgress: (...args: any[]) => mockGetChildIssueProgress(...args),
+      getIssueExecutionSummaries: (...args: any[]) =>
+        mockGetIssueExecutionSummaries(...args),
+      getIssue: (...args: any[]) => mockGetIssue(...args),
+      listTimeline: (...args: any[]) => mockListTimeline(...args),
+      getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
+      createComment: vi.fn(),
+      updateIssue: vi.fn(),
+      listMembers: () => Promise.resolve([]),
+      listAgents: () => Promise.resolve([]),
+    },
+    getApi: () => ({
+      listIssues: (...args: any[]) => mockListIssues(...args),
+      getChildIssueProgress: (...args: any[]) => mockGetChildIssueProgress(...args),
+      getIssueExecutionSummaries: (...args: any[]) =>
+        mockGetIssueExecutionSummaries(...args),
+      getIssue: (...args: any[]) => mockGetIssue(...args),
+      listTimeline: (...args: any[]) => mockListTimeline(...args),
+      getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
+      createComment: vi.fn(),
+      updateIssue: vi.fn(),
+      listMembers: () => Promise.resolve([]),
+      listAgents: () => Promise.resolve([]),
+    }),
+    setApiInstance: vi.fn(),
+  };
+});
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
@@ -325,6 +375,7 @@ const mockIssues: Issue[] = [
 // ---------------------------------------------------------------------------
 
 import { IssuesPage } from "./issues-page";
+import { BoardView } from "./board-view";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -351,10 +402,42 @@ function renderWithQuery(ui: React.ReactElement) {
 describe("IssuesPage (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value: vi.fn(() => []),
+    });
+    navigationState.search = "";
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockGetChildIssueProgress.mockResolvedValue({ progress: [] });
+    mockGetIssueExecutionSummaries.mockResolvedValue({ summaries: [] });
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(mockIssues.find((issue) => issue.id === id) ?? mockIssues[0]),
+    );
+    mockListTimeline.mockResolvedValue([]);
     mockViewState.viewMode = "board";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("shows loading skeletons initially", () => {
@@ -423,5 +506,297 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("All");
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("opens preview via peek query when clicking an issue card", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    const title = await screen.findByText("Implement auth");
+    const link = title.closest("a");
+    expect(link).toBeTruthy();
+    fireEvent.click(link!);
+
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+  });
+
+  it("navigates the preview with J/K and arrow keys within the current lane", async () => {
+    const laneIssues: Issue[] = [
+      { ...mockIssues[0]!, position: 0 },
+      {
+        ...mockIssues[0]!,
+        id: "issue-4",
+        number: 4,
+        identifier: "TES-4",
+        title: "Second todo",
+        position: 1,
+      },
+    ];
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: laneIssues.filter((i) => i.status === params?.status),
+        total: laneIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(laneIssues.find((issue) => issue.id === id) ?? laneIssues[0]),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Second todo");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "j" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-4");
+
+    navigationState.replace.mockClear();
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-4");
+  });
+
+  it("navigates to the previous preview item with K and ArrowUp", async () => {
+    const laneIssues: Issue[] = [
+      { ...mockIssues[0]!, position: 0 },
+      {
+        ...mockIssues[0]!,
+        id: "issue-4",
+        number: 4,
+        identifier: "TES-4",
+        title: "Second todo",
+        position: 1,
+      },
+    ];
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: laneIssues.filter((i) => i.status === params?.status),
+        total: laneIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    mockGetIssue.mockImplementation((id: string) =>
+      Promise.resolve(laneIssues.find((issue) => issue.id === id) ?? laneIssues[1]),
+    );
+    navigationState.search = "?peek=issue-4";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Second todo");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "k" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+
+    navigationState.replace.mockClear();
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues?peek=issue-1");
+  });
+
+  it("closes preview with Escape without resetting workbench state", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Implement auth");
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(navigationState.replace).toHaveBeenCalledWith("/test/issues");
+  });
+
+  it("does not trigger preview shortcuts while typing in quick comment", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Quick comment");
+    const textbox = document.querySelector(
+      "[contenteditable='true'], [contenteditable='plaintext-only']",
+    ) as HTMLElement | null;
+    expect(textbox).toBeTruthy();
+    navigationState.replace.mockClear();
+
+    fireEvent.keyDown(textbox!, { key: "j" });
+    fireEvent.keyDown(textbox!, { key: "ArrowDown" });
+    fireEvent.keyDown(textbox!, { key: "Escape" });
+
+    expect(navigationState.replace).not.toHaveBeenCalled();
+  });
+
+  it("does not steal arrow or escape keys from open picker/listbox popovers", async () => {
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    navigationState.search = "?peek=issue-1";
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findAllByText("Implement auth");
+    navigationState.replace.mockClear();
+
+    const listbox = document.createElement("div");
+    listbox.setAttribute("role", "listbox");
+    const option = document.createElement("button");
+    listbox.appendChild(option);
+    document.body.appendChild(listbox);
+    try {
+      fireEvent.keyDown(option, { key: "ArrowDown" });
+      fireEvent.keyDown(option, { key: "Escape" });
+    } finally {
+      document.body.removeChild(listbox);
+    }
+
+    expect(navigationState.replace).not.toHaveBeenCalled();
+  });
+
+  it("scrolls the selected board card into the safe preview viewport", async () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollTo",
+    );
+    const originalClientWidth = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientWidth",
+    );
+    const originalOffsetLeft = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetLeft",
+    );
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetWidth",
+    );
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getTestRect(this: HTMLElement) {
+        if (this.getAttribute("data-testid") === "issues-board-scroll-container") {
+          return {
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 800,
+            top: 0,
+            right: 320,
+            bottom: 800,
+            left: 0,
+            toJSON: () => {},
+          };
+        }
+        if (this.getAttribute("data-issue-card-id") === "issue-2") {
+          return {
+            x: 620,
+            y: 0,
+            width: 220,
+            height: 120,
+            top: 0,
+            right: 840,
+            bottom: 120,
+            left: 620,
+            toJSON: () => {},
+          };
+        }
+        return {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          toJSON: () => {},
+        };
+      });
+
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get() {
+        return this.getAttribute("data-testid") === "issues-board-scroll-container"
+          ? 320
+          : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetLeft", {
+      configurable: true,
+      get() {
+        return this.getAttribute("data-issue-card-id") === "issue-2" ? 900 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return this.getAttribute("data-issue-card-id") === "issue-2" ? 220 : 0;
+      },
+    });
+
+    try {
+      const statuses: IssueStatus[] = [
+        "backlog",
+        "todo",
+        "in_progress",
+        "in_review",
+        "done",
+        "blocked",
+      ];
+
+      renderWithQuery(
+        <BoardView
+          issues={mockIssues}
+          visibleStatuses={statuses}
+          hiddenStatuses={[]}
+          onMoveIssue={vi.fn()}
+          selectedIssueId="issue-2"
+        />,
+      );
+
+      await waitFor(() => {
+        expect(scrollTo).toHaveBeenCalledWith({
+          left: 850,
+          behavior: "smooth",
+        });
+      });
+    } finally {
+      rectSpy.mockRestore();
+      if (originalScrollTo) {
+        Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+      } else {
+        delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+      }
+      if (originalClientWidth) {
+        Object.defineProperty(HTMLElement.prototype, "clientWidth", originalClientWidth);
+      }
+      if (originalOffsetLeft) {
+        Object.defineProperty(HTMLElement.prototype, "offsetLeft", originalOffsetLeft);
+      }
+      if (originalOffsetWidth) {
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+      }
+    }
   });
 });

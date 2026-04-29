@@ -44,3 +44,23 @@ export interface Issue {
   created_at: string;
   updated_at: string;
 }
+
+export type IssueExecutionState =
+  | "idle"
+  | "queued"
+  | "running"
+  | "failed"
+  | "completed";
+
+export interface IssueExecutionSummary {
+  issue_id: string;
+  state: IssueExecutionState;
+  queued_count: number;
+  running_count: number;
+  latest_task_id: string | null;
+  latest_agent_id: string | null;
+  latest_completed_at: string | null;
+  latest_error: string | null;
+  latest_trigger_comment_id: string | null;
+  latest_trigger_excerpt: string | null;
+}

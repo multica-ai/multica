@@ -205,6 +205,7 @@ export function PickerItem({
     <button
       type="button"
       data-picker-item
+      data-selected={selected ? "true" : undefined}
       disabled={disabled}
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}

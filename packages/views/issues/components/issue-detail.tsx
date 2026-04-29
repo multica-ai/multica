@@ -48,7 +48,13 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import {
+  issueListOptions,
+  issueDetailOptions,
+  childIssuesOptions,
+  issueUsageOptions,
+  issueExecutionSummaryForIssueOptions,
+} from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -62,6 +68,7 @@ import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { IssueExecutionBanner } from "./issue-execution";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -158,6 +165,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: executionSummaryResult } = useQuery(
+    issueExecutionSummaryForIssueOptions(wsId, id),
+  );
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
@@ -263,7 +273,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   const loading = issueLoading;
-
+  const executionSummary = executionSummaryResult ?? undefined;
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
     if (!highlightCommentId || timeline.length === 0) return;
@@ -575,6 +585,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
             }}
           />
+
+          <div className="mt-4">
+            <IssueExecutionBanner summary={executionSummary} />
+          </div>
 
           {parentIssue && (
             <AppLink

@@ -3,6 +3,7 @@ import type {
   CreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesResponse,
+  IssueExecutionSummary,
   SearchIssuesResponse,
   SearchProjectsResponse,
   UpdateMeRequest,
@@ -427,6 +428,15 @@ export class ApiClient {
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
     return this.fetch("/api/issues/child-progress");
+  }
+
+  async getIssueExecutionSummaries(params?: { issueId?: string; limit?: number; offset?: number }): Promise<{ summaries: IssueExecutionSummary[] }> {
+    const search = new URLSearchParams();
+    if (params?.issueId) search.set("issue_id", params.issueId);
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/issues/execution-summary${qs ? `?${qs}` : ""}`);
   }
 
   async deleteIssue(id: string): Promise<void> {

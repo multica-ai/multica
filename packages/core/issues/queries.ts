@@ -1,6 +1,11 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { IssueStatus, ListIssuesParams, ListIssuesCache } from "../types";
+import type {
+  IssueExecutionSummary,
+  IssueStatus,
+  ListIssuesParams,
+  ListIssuesCache,
+} from "../types";
 import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
@@ -17,6 +22,10 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
+  executionSummary: (wsId: string, issueId?: string) =>
+    issueId
+      ? ([...issueKeys.all(wsId), "execution-summary", issueId] as const)
+      : ([...issueKeys.all(wsId), "execution-summary"] as const),
   timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
@@ -109,6 +118,30 @@ export function childIssueProgressOptions(wsId: string) {
         map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
       }
       return map;
+    },
+  });
+}
+
+export function issueExecutionSummaryOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.executionSummary(wsId),
+    queryFn: () => api.getIssueExecutionSummaries({ limit: 1000 }),
+    select: (data) => {
+      const map = new Map<string, IssueExecutionSummary>();
+      for (const summary of data.summaries) {
+        map.set(summary.issue_id, summary);
+      }
+      return map;
+    },
+  });
+}
+
+export function issueExecutionSummaryForIssueOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.executionSummary(wsId, issueId),
+    queryFn: async () => {
+      const data = await api.getIssueExecutionSummaries({ issueId });
+      return data.summaries[0] ?? null;
     },
   });
 }

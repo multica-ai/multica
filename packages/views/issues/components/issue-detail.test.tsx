@@ -79,13 +79,25 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 // Mock navigation
+const navigationState = vi.hoisted(() => ({
+  push: vi.fn(),
+  back: vi.fn(),
+  search: "",
+}));
+
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues/issue-1", getShareableUrl: undefined }),
+  useNavigation: () => ({
+    push: navigationState.push,
+    back: navigationState.back,
+    pathname: "/issues/issue-1",
+    searchParams: new URLSearchParams(navigationState.search),
+    getShareableUrl: undefined,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -186,6 +198,7 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getIssueExecutionSummaries: vi.fn().mockResolvedValue({ summaries: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -364,6 +377,7 @@ function renderIssueDetail(issueId = "issue-1") {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    navigationState.search = "";
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
@@ -377,6 +391,7 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.getIssueExecutionSummaries.mockResolvedValue({ summaries: [] });
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -501,5 +516,20 @@ describe("IssueDetail (shared)", () => {
         expect.objectContaining({ description: "" }),
       );
     });
+  });
+
+  it("does not show the workbench-specific return action on full detail", async () => {
+    navigationState.search = "from=peek&returnTo=%2Ftest%2Fissues%3Fpeek%3Dissue-1";
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Back to Workbench" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 });

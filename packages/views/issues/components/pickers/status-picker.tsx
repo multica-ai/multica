@@ -14,6 +14,7 @@ export function StatusPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  showSelection = true,
 }: {
   status: IssueStatus;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -22,6 +23,7 @@ export function StatusPicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  showSelection?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -49,7 +51,7 @@ export function StatusPicker({
         return (
           <PickerItem
             key={s}
-            selected={s === status}
+            selected={showSelection && s === status}
             hoverClassName={c.hoverBg}
             onClick={() => {
               onUpdate({ status: s });

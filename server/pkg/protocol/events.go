@@ -23,6 +23,7 @@ const (
 	EventAgentRestored = "agent:restored"
 
 	// Task events (server <-> daemon)
+	EventTaskQueued    = "task:queued"
 	EventTaskDispatch  = "task:dispatch"
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed"

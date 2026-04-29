@@ -82,6 +82,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	}
 
 	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.notifyTaskAvailable(task)
 	return task, nil
 }
@@ -117,6 +118,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.notifyTaskAvailable(task)
 	return task, nil
 }
@@ -148,6 +150,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.notifyTaskAvailable(task)
 	return task, nil
 }
@@ -162,13 +165,14 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 // manual `multica agent update <id> --status idle` to unwedge. Matches the
 // pattern already used by CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
-	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
+	tasks, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
 	if err != nil {
-		return err
+		return fmt.Errorf("cancel tasks for issue: %w", err)
 	}
-	for _, t := range cancelled {
-		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	for _, task := range tasks {
+		slog.Info("task cancelled for issue", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issueID), "agent_id", util.UUIDToString(task.AgentID))
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 	}
 	return nil
 }
@@ -203,9 +207,10 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) error {
 	cancelled, err := s.Queries.CancelAgentTasksByTriggerComment(ctx, commentID)
 	if err != nil {
-		return err
+		return fmt.Errorf("cancel tasks by trigger comment: %w", err)
 	}
 	for _, t := range cancelled {
+		slog.Info("task cancelled for deleted trigger comment", "task_id", util.UUIDToString(t.ID), "comment_id", util.UUIDToString(commentID), "agent_id", util.UUIDToString(t.AgentID))
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
@@ -678,8 +683,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"attempt", child.Attempt,
 		"max_attempts", child.MaxAttempts,
 	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 	s.notifyTaskAvailable(child)
-	s.broadcastTaskEvent(ctx, protocol.EventTaskDispatch, child)
 	return &child, nil
 }
 

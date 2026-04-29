@@ -2,8 +2,7 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppLink } from "../../navigation";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueExecutionSummary } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -13,6 +12,8 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
+import { IssueExecutionBadge } from "./issue-execution";
+import { IssueCardLink } from "./issue-card-link";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 
@@ -31,9 +32,13 @@ function formatDate(date: string): string {
 export const ListRow = memo(function ListRow({
   issue,
   childProgress,
+  executionSummary,
+  onOpenIssue,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  executionSummary?: IssueExecutionSummary;
+  onOpenIssue?: (issue: Issue) => void;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -74,8 +79,9 @@ export const ListRow = memo(function ListRow({
             }`}
           />
         </div>
-        <AppLink
+        <IssueCardLink
           href={p.issueDetail(issue.id)}
+          onOpenIssue={onOpenIssue ? () => onOpenIssue(issue) : undefined}
           className="flex flex-1 items-center gap-2 min-w-0"
         >
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
@@ -83,6 +89,7 @@ export const ListRow = memo(function ListRow({
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
+            <IssueExecutionBadge summary={executionSummary} className="shrink-0" />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
@@ -123,7 +130,7 @@ export const ListRow = memo(function ListRow({
               enableHoverCard
             />
           )}
-        </AppLink>
+        </IssueCardLink>
       </div>
     </IssueActionsContextMenu>
   );

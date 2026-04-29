@@ -586,7 +586,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 scope={projectScope}
                 filter={projectFilter}
               />
-              <BatchActionToolbar />
+              <BatchActionToolbar issues={projectIssues} />
             </ViewStoreProvider>
           </div>
         </ResizablePanel>

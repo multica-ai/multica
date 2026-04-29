@@ -5,7 +5,7 @@ import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueExecutionSummary, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
@@ -22,12 +22,16 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  executionSummaryMap,
+  onOpenIssue,
   myIssuesScope,
   myIssuesFilter,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
+  executionSummaryMap?: Map<string, IssueExecutionSummary>;
+  onOpenIssue?: (issue: Issue) => void;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -84,6 +88,8 @@ export function ListView({
             status={status}
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
+            executionSummaryMap={executionSummaryMap}
+            onOpenIssue={onOpenIssue}
             myIssuesOpts={myIssuesOpts}
           />
         ))}
@@ -96,11 +102,15 @@ function StatusAccordionItem({
   status,
   issues,
   childProgressMap,
+  executionSummaryMap,
+  onOpenIssue,
   myIssuesOpts,
 }: {
   status: IssueStatus;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
+  executionSummaryMap?: Map<string, IssueExecutionSummary>;
+  onOpenIssue?: (issue: Issue) => void;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -166,7 +176,13 @@ function StatusAccordionItem({
         {issues.length > 0 ? (
           <>
             {issues.map((issue) => (
-              <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+              <ListRow
+                key={issue.id}
+                issue={issue}
+                childProgress={childProgressMap.get(issue.id)}
+                executionSummary={executionSummaryMap?.get(issue.id)}
+                onOpenIssue={onOpenIssue}
+              />
             ))}
             {hasMore && (
               <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

@@ -278,11 +278,11 @@ const FAILURE_REASON_LABEL: Record<TaskFailureReason, string> = {
    组件渲染（5 态视觉）         组件渲染（4 态视觉）
 
    ──────────────────────────────────────────────
-   
+
                     实时更新
-                  
+
    后端 WS 事件 ──→ 前端 invalidate query ──→ 重拉 ──→ 派生重算 ──→ UI 更新
-   
+
    桌面端额外：本机 IPC ──→ setQueryData 直接预填 ──→ 亚秒级响应
 ```
 

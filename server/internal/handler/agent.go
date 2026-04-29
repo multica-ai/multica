@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -133,10 +134,17 @@ type AgentTaskResponse struct {
 	Agent                   *TaskAgentData  `json:"agent,omitempty"`
 	Repos                   []RepoData      `json:"repos,omitempty"`
 	CreatedAt               string          `json:"created_at"`
-	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	TriggerCommentID        *string         `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string          `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	PriorSessionID          string          `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
+	TriggerCommentID        *string         `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent   string          `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSource           string          `json:"trigger_source,omitempty"`
+	TriggerExcerpt          *string         `json:"trigger_excerpt,omitempty"`
+	QueuePosition           *int32          `json:"queue_position,omitempty"`
+	QueueAheadCount         *int32          `json:"queue_ahead_count,omitempty"`
+	QueueBlockedReason      *string         `json:"queue_blocked_reason,omitempty"`
+	IssueIdentifier         *string         `json:"issue_identifier,omitempty"`
+	IssueTitle              *string         `json:"issue_title,omitempty"`
 	TriggerAuthorType       string          `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string          `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string          `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
@@ -195,6 +203,89 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 	}
+}
+
+type enrichedAgentTaskRow struct {
+	Task                  db.AgentTaskQueue
+	IssueNumber           pgtype.Int4
+	IssueTitle            pgtype.Text
+	TriggerCommentContent pgtype.Text
+	ChatMessage           pgtype.Text
+}
+
+type queuedTaskMetadata struct {
+	position      *int32
+	aheadCount    *int32
+	blockedReason *string
+}
+
+func queuedTaskKey(task db.AgentTaskQueue) string {
+	if task.IssueID.Valid {
+		return "issue:" + uuidToString(task.IssueID)
+	}
+	if task.ChatSessionID.Valid {
+		return "chat:" + uuidToString(task.ChatSessionID)
+	}
+	return ""
+}
+
+func computeQueuedTaskMetadata(tasks []db.AgentTaskQueue) map[string]queuedTaskMetadata {
+	meta := make(map[string]queuedTaskMetadata, len(tasks))
+	activeKeys := make(map[string]struct{})
+	for _, task := range tasks {
+		if task.Status != "dispatched" && task.Status != "running" {
+			continue
+		}
+		if key := queuedTaskKey(task); key != "" {
+			activeKeys[key] = struct{}{}
+		}
+	}
+
+	queued := make([]db.AgentTaskQueue, 0)
+	for _, task := range tasks {
+		if task.Status == "queued" {
+			queued = append(queued, task)
+		}
+	}
+
+	sort.SliceStable(queued, func(i, j int) bool {
+		left := queued[i]
+		right := queued[j]
+		if left.Priority != right.Priority {
+			return left.Priority > right.Priority
+		}
+		leftTime := left.CreatedAt.Time
+		rightTime := right.CreatedAt.Time
+		if !leftTime.Equal(rightTime) {
+			return leftTime.Before(rightTime)
+		}
+		return uuidToString(left.ID) < uuidToString(right.ID)
+	})
+
+	var claimablePosition int32
+	for _, task := range queued {
+		key := queuedTaskKey(task)
+		if _, blocked := activeKeys[key]; blocked {
+			reason := "Waiting for current run on this issue to finish"
+			if task.ChatSessionID.Valid {
+				reason = "Waiting for current chat run to finish"
+			}
+			meta[uuidToString(task.ID)] = queuedTaskMetadata{
+				blockedReason: &reason,
+			}
+			continue
+		}
+
+		claimablePosition++
+		position := claimablePosition
+		ahead := claimablePosition - 1
+		meta[uuidToString(task.ID)] = queuedTaskMetadata{
+			position:   &position,
+			aheadCount: &ahead,
+		}
+	}
+
+	return meta
 }
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -740,15 +831,130 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
+	// Keep this custom projection local until the enriched task response is
+	// promoted to sqlc; it joins issue/comment/chat metadata in one round trip.
+	rows, err := h.DB.Query(r.Context(), `
+SELECT
+	atq.id,
+	atq.agent_id,
+	atq.issue_id,
+	atq.status,
+	atq.priority,
+	atq.dispatched_at,
+	atq.started_at,
+	atq.completed_at,
+	atq.result,
+	atq.error,
+	atq.created_at,
+	atq.context,
+	atq.runtime_id,
+	atq.session_id,
+	atq.work_dir,
+	atq.trigger_comment_id,
+	atq.chat_session_id,
+	atq.autopilot_run_id,
+	i.number,
+	i.title,
+	c.content AS trigger_comment_content,
+	latest_chat_message.content AS chat_message
+FROM agent_task_queue atq
+LEFT JOIN issue i ON i.id = atq.issue_id AND i.workspace_id = $2
+LEFT JOIN comment c ON c.id = atq.trigger_comment_id
+LEFT JOIN LATERAL (
+	SELECT cm.content
+	FROM chat_message cm
+	WHERE cm.chat_session_id = atq.chat_session_id
+		AND cm.role = 'user'
+	ORDER BY cm.created_at DESC
+	LIMIT 1
+) latest_chat_message ON true
+WHERE atq.agent_id = $1
+ORDER BY atq.created_at DESC
+`, agent.ID, agent.WorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
+	defer rows.Close()
 
-	resp := make([]AgentTaskResponse, len(tasks))
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+	taskRows := make([]enrichedAgentTaskRow, 0)
+	baseTasks := make([]db.AgentTaskQueue, 0)
+	for rows.Next() {
+		var row enrichedAgentTaskRow
+		if err := rows.Scan(
+			&row.Task.ID,
+			&row.Task.AgentID,
+			&row.Task.IssueID,
+			&row.Task.Status,
+			&row.Task.Priority,
+			&row.Task.DispatchedAt,
+			&row.Task.StartedAt,
+			&row.Task.CompletedAt,
+			&row.Task.Result,
+			&row.Task.Error,
+			&row.Task.CreatedAt,
+			&row.Task.Context,
+			&row.Task.RuntimeID,
+			&row.Task.SessionID,
+			&row.Task.WorkDir,
+			&row.Task.TriggerCommentID,
+			&row.Task.ChatSessionID,
+			&row.Task.AutopilotRunID,
+			&row.IssueNumber,
+			&row.IssueTitle,
+			&row.TriggerCommentContent,
+			&row.ChatMessage,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+			return
+		}
+		taskRows = append(taskRows, row)
+		baseTasks = append(baseTasks, row.Task)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
+
+	queueMeta := computeQueuedTaskMetadata(baseTasks)
+	prefix := h.getIssuePrefix(r.Context(), agent.WorkspaceID)
+
+	resp := make([]AgentTaskResponse, len(taskRows))
+	for i, row := range taskRows {
+		taskResp := taskToResponse(row.Task)
+		taskResp.WorkspaceID = uuidToString(agent.WorkspaceID)
+
+		switch {
+		case row.Task.ChatSessionID.Valid:
+			taskResp.TriggerSource = "chat"
+		case row.Task.TriggerCommentID.Valid:
+			taskResp.TriggerSource = "message"
+		default:
+			taskResp.TriggerSource = "issue"
+		}
+
+		if row.Task.TriggerCommentID.Valid {
+			taskResp.TriggerCommentContent = row.TriggerCommentContent.String
+			taskResp.TriggerExcerpt = textToPtr(row.TriggerCommentContent)
+		} else if row.Task.ChatSessionID.Valid {
+			taskResp.ChatMessage = row.ChatMessage.String
+			taskResp.TriggerExcerpt = textToPtr(row.ChatMessage)
+		}
+
+		if row.Task.IssueID.Valid && row.IssueTitle.Valid {
+			identifier := fmt.Sprintf("%s-%d", prefix, row.IssueNumber.Int32)
+			title := row.IssueTitle.String
+			taskResp.IssueIdentifier = &identifier
+			taskResp.IssueTitle = &title
+		}
+
+		if meta, ok := queueMeta[uuidToString(row.Task.ID)]; ok {
+			taskResp.QueuePosition = meta.position
+			taskResp.QueueAheadCount = meta.aheadCount
+			taskResp.QueueBlockedReason = meta.blockedReason
+		}
+
+		resp[i] = taskResp
 	}
 
 	writeJSON(w, http.StatusOK, resp)

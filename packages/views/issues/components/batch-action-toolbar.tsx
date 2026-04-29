@@ -14,12 +14,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type {
+  Issue,
+  IssueAssigneeType,
+  IssuePriority,
+  IssueStatus,
+  UpdateIssueRequest,
+} from "@multica/core/types";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 
-export function BatchActionToolbar() {
+function getCommonValue<T>(values: T[]): T | undefined {
+  if (values.length === 0) return undefined;
+  const first = values[0];
+  return values.every((value) => value === first) ? first : undefined;
+}
+
+export function BatchActionToolbar({ issues = [] }: { issues?: Issue[] }) {
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
   const count = selectedIds.size;
@@ -35,6 +47,28 @@ export function BatchActionToolbar() {
   if (count === 0) return null;
 
   const ids = Array.from(selectedIds);
+  const selectedIdSet = new Set(ids);
+  const selectedIssues = issues.filter((issue) => selectedIdSet.has(issue.id));
+  const hasCompleteSelectionData = selectedIssues.length === count;
+
+  const commonStatus = hasCompleteSelectionData
+    ? getCommonValue<IssueStatus>(selectedIssues.map((issue) => issue.status))
+    : undefined;
+  const commonPriority = hasCompleteSelectionData
+    ? getCommonValue<IssuePriority>(selectedIssues.map((issue) => issue.priority))
+    : undefined;
+  const commonAssignee = hasCompleteSelectionData
+    ? getCommonValue(
+        selectedIssues.map(
+          (issue) => `${issue.assignee_type ?? ""}:${issue.assignee_id ?? ""}`,
+        ),
+      )
+    : undefined;
+  const showAssigneeSelection = commonAssignee !== undefined;
+  const [commonAssigneeType, commonAssigneeId] =
+    commonAssignee && commonAssignee !== ":"
+      ? (commonAssignee.split(":") as [IssueAssigneeType, string])
+      : [null, null];
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
@@ -73,36 +107,39 @@ export function BatchActionToolbar() {
 
         {/* Status */}
         <StatusPicker
-          status="todo"
+          status={commonStatus ?? "todo"}
           onUpdate={handleBatchUpdate}
           open={statusOpen}
           onOpenChange={setStatusOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
           trigger="Status"
           align="center"
+          showSelection={commonStatus !== undefined}
         />
 
         {/* Priority */}
         <PriorityPicker
-          priority="none"
+          priority={commonPriority ?? "none"}
           onUpdate={handleBatchUpdate}
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
           trigger="Priority"
           align="center"
+          showSelection={commonPriority !== undefined}
         />
 
         {/* Assignee */}
         <AssigneePicker
-          assigneeType={null}
-          assigneeId={null}
+          assigneeType={commonAssigneeType}
+          assigneeId={commonAssigneeId}
           onUpdate={handleBatchUpdate}
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
           trigger="Assignee"
           align="center"
+          showSelection={showAssigneeSelection}
         />
 
         {/* Delete */}
@@ -143,4 +180,3 @@ export function BatchActionToolbar() {
     </>
   );
 }
-

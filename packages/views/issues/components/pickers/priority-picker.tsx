@@ -14,6 +14,7 @@ export function PriorityPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  showSelection = true,
 }: {
   priority: IssuePriority;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -22,6 +23,7 @@ export function PriorityPicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  showSelection?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -49,7 +51,7 @@ export function PriorityPicker({
         return (
           <PickerItem
             key={p}
-            selected={p === priority}
+            selected={showSelection && p === priority}
             onClick={() => {
               onUpdate({ priority: p });
               setOpen(false);

@@ -21,14 +21,25 @@ interface TestWorkspace {
 
 export class TestApiClient {
   private token: string | null = null;
+  private userId: string | null = null;
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdCommentIds: string[] = [];
+  private createdTaskIds: string[] = [];
+  private createdAgentIds: string[] = [];
+  private createdRuntimeIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
+    const advisoryKey = `e2e-login:${email}`;
     try {
+      await client.query(
+        "SELECT pg_advisory_lock(hashtext($1)::bigint)",
+        [advisoryKey],
+      );
+
       // Keep each E2E login isolated so previous test runs do not trip the
       // per-email send-code rate limit.
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
@@ -64,6 +75,7 @@ export class TestApiClient {
       const data = await verifyRes.json();
 
       this.token = data.token;
+      this.userId = data.user?.id ?? null;
 
       // Update user name if needed
       if (name && data.user?.name !== name) {
@@ -77,6 +89,10 @@ export class TestApiClient {
 
       return data;
     } finally {
+      await client.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [advisoryKey],
+      ).catch(() => {});
       await client.end();
     }
   }
@@ -133,12 +149,144 @@ export class TestApiClient {
     return issue;
   }
 
+  async seedIssueExecution(
+    issueId: string,
+    opts: {
+      status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+      triggerText?: string;
+      priority?: number;
+      error?: string;
+    },
+  ) {
+    if (!this.workspaceId || !this.userId) {
+      throw new Error("workspace and user must be initialized before seeding execution");
+    }
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const unique = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+      const runtimeResult = await client.query(
+        `
+          INSERT INTO agent_runtime (
+            workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+          )
+          VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+          RETURNING id
+        `,
+        [
+          this.workspaceId,
+          `E2E Runtime ${unique}`,
+          `e2e_runtime_${unique}`,
+          "E2E seeded runtime",
+        ],
+      );
+      const runtimeId = runtimeResult.rows[0]?.id as string;
+      this.createdRuntimeIds.push(runtimeId);
+
+      const agentResult = await client.query(
+        `
+          INSERT INTO agent (
+            workspace_id, name, description, runtime_mode, runtime_config,
+            runtime_id, visibility, max_concurrent_tasks, owner_id
+          )
+          VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
+          RETURNING id
+        `,
+        [this.workspaceId, `E2E Agent ${unique}`, runtimeId, this.userId],
+      );
+      const agentId = agentResult.rows[0]?.id as string;
+      this.createdAgentIds.push(agentId);
+
+      let triggerCommentId: string | null = null;
+      if (opts.triggerText) {
+        const commentResult = await client.query(
+          `
+            INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+            VALUES ($1, $2, 'member', $3, $4, 'comment')
+            RETURNING id
+          `,
+          [issueId, this.workspaceId, this.userId, opts.triggerText],
+        );
+        triggerCommentId = commentResult.rows[0]?.id as string;
+        this.createdCommentIds.push(triggerCommentId);
+      }
+
+      const timestamps =
+        opts.status === "running"
+          ? { dispatchedAt: null, startedAt: "now()", completedAt: null }
+          : opts.status === "dispatched"
+            ? { dispatchedAt: "now()", startedAt: null, completedAt: null }
+            : opts.status === "completed" || opts.status === "failed" || opts.status === "cancelled"
+              ? { dispatchedAt: "now() - interval '1 minute'", startedAt: "now() - interval '1 minute'", completedAt: "now()" }
+              : { dispatchedAt: null, startedAt: null, completedAt: null };
+
+      const taskResult = await client.query(
+        `
+          INSERT INTO agent_task_queue (
+            agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, error,
+            dispatched_at, started_at, completed_at, created_at
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            ${timestamps.dispatchedAt ?? "NULL"},
+            ${timestamps.startedAt ?? "NULL"},
+            ${timestamps.completedAt ?? "NULL"},
+            now()
+          )
+          RETURNING id
+        `,
+        [
+          agentId,
+          runtimeId,
+          issueId,
+          opts.status,
+          opts.priority ?? 1,
+          triggerCommentId,
+          opts.error ?? null,
+        ],
+      );
+
+      const taskId = taskResult.rows[0]?.id as string;
+      this.createdTaskIds.push(taskId);
+
+      return { agentId, runtimeId, taskId, triggerCommentId };
+    } finally {
+      await client.end();
+    }
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
   /** Clean up all issues created during this test. */
   async cleanup() {
+    if (this.createdTaskIds.length > 0) {
+      const taskIds = [...this.createdTaskIds];
+      this.createdTaskIds = [];
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        await client.query(`DELETE FROM agent_task_queue WHERE id = ANY($1::uuid[])`, [taskIds]);
+      } finally {
+        await client.end();
+      }
+    }
+
+    if (this.createdCommentIds.length > 0) {
+      const commentIds = [...this.createdCommentIds];
+      this.createdCommentIds = [];
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        await client.query(`DELETE FROM comment WHERE id = ANY($1::uuid[])`, [commentIds]);
+      } finally {
+        await client.end();
+      }
+    }
+
     for (const id of this.createdIssueIds) {
       try {
         await this.deleteIssue(id);
@@ -147,6 +295,30 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+
+    if (this.createdAgentIds.length > 0) {
+      const agentIds = [...this.createdAgentIds];
+      this.createdAgentIds = [];
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        await client.query(`DELETE FROM agent WHERE id = ANY($1::uuid[])`, [agentIds]);
+      } finally {
+        await client.end();
+      }
+    }
+
+    if (this.createdRuntimeIds.length > 0) {
+      const runtimeIds = [...this.createdRuntimeIds];
+      this.createdRuntimeIds = [];
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        await client.query(`DELETE FROM agent_runtime WHERE id = ANY($1::uuid[])`, [runtimeIds]);
+      } finally {
+        await client.end();
+      }
+    }
   }
 
   getToken() {

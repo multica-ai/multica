@@ -70,6 +70,14 @@ export interface AgentTask {
   // `omitempty`, so the field may also be missing on non-failed tasks).
   failure_reason?: TaskFailureReason | "";
   created_at: string;
+  trigger_source?: "message" | "issue" | "chat";
+  trigger_comment_id?: string | null;
+  trigger_excerpt?: string | null;
+  queue_position?: number | null;
+  queue_ahead_count?: number | null;
+  queue_blocked_reason?: string | null;
+  issue_identifier?: string | null;
+  issue_title?: string | null;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
