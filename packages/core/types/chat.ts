@@ -7,6 +7,8 @@ export interface ChatSession {
   status: "active" | "archived";
   /** True when the session has any unread assistant replies. List-only. */
   has_unread: boolean;
+  session_id?: string;
+  work_dir?: string;
   created_at: string;
   updated_at: string;
 }
