@@ -210,11 +210,11 @@
   padding: 1rem;
 }
 
-.rich-text-editor .mermaid-diagram svg {
+.rich-text-editor .mermaid-diagram-frame {
+  border: 0;
   display: block;
-  height: auto;
-  margin: 0 auto;
-  max-width: 100%;
+  min-height: 320px;
+  width: 100%;
 }
 
 .rich-text-editor .mermaid-diagram-loading,

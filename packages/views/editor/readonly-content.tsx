@@ -49,6 +49,39 @@ import "./content-editor.css";
 
 const lowlight = createLowlight(common);
 
+type MermaidAPI = typeof import("mermaid").default;
+
+let mermaidPromise: Promise<MermaidAPI> | null = null;
+
+function getMermaid(): Promise<MermaidAPI> {
+  mermaidPromise ??= import("mermaid").then(({ default: mermaid }) => {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      themeVariables: {
+        primaryColor: "var(--muted)",
+        primaryBorderColor: "var(--primary)",
+        primaryTextColor: "var(--foreground)",
+        lineColor: "var(--muted-foreground)",
+        fontFamily: "inherit",
+      },
+    });
+    return mermaid;
+  });
+
+  return mermaidPromise;
+}
+
+function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
+  const styles = host ? getComputedStyle(host) : null;
+  const cssVariables = ["--muted", "--primary", "--foreground", "--muted-foreground"]
+    .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
+    .join(" ");
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+}
+
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
 // ---------------------------------------------------------------------------
@@ -160,11 +193,12 @@ function ReadonlyLink({
 
 function MermaidDiagram({ chart }: { chart: string }) {
   const reactId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
   const diagramId = useMemo(
     () => `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
     [reactId],
   );
-  const [svg, setSvg] = useState<string | null>(null);
+  const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -173,22 +207,14 @@ function MermaidDiagram({ chart }: { chart: string }) {
     async function renderDiagram() {
       try {
         setError(null);
-        setSvg(null);
-        const { default: mermaid } = await import("mermaid");
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: "base",
-          themeVariables: {
-            primaryColor: "#f5f3ff",
-            primaryBorderColor: "#7c3aed",
-            primaryTextColor: "#111827",
-            lineColor: "#6b7280",
-            fontFamily: "inherit",
-          },
-        });
+        setSandboxedDocument(null);
+        const mermaid = await getMermaid();
         const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
-        if (!cancelled) setSvg(renderedSvg);
+        if (!cancelled) {
+          setSandboxedDocument(
+            buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
+          );
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram");
@@ -205,7 +231,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
 
   if (error) {
     return (
-      <div className="mermaid-diagram mermaid-diagram-error">
+      <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
         <p>Unable to render Mermaid diagram.</p>
         <pre>
           <code>{chart}</code>
@@ -215,9 +241,14 @@ function MermaidDiagram({ chart }: { chart: string }) {
   }
 
   return (
-    <div className="mermaid-diagram" aria-label="Mermaid diagram">
-      {svg ? (
-        <div dangerouslySetInnerHTML={{ __html: svg }} />
+    <div ref={containerRef} className="mermaid-diagram" aria-label="Mermaid diagram">
+      {sandboxedDocument ? (
+        <iframe
+          className="mermaid-diagram-frame"
+          sandbox=""
+          srcDoc={sandboxedDocument}
+          title="Mermaid diagram"
+        />
       ) : (
         <div className="mermaid-diagram-loading">Rendering diagram…</div>
       )}

@@ -45,6 +45,9 @@ catalogs:
     lucide-react:
       specifier: ^1.0.1
       version: 1.0.1
+    mermaid:
+      specifier: ^11.14.0
+      version: 11.14.0
     posthog-js:
       specifier: ^1.176.1
       version: 1.369.3
@@ -740,7 +743,7 @@ importers:
         specifier: 'catalog:'
         version: 1.0.1(react@19.2.3)
       mermaid:
-        specifier: ^11.14.0
+        specifier: 'catalog:'
         version: 11.14.0
       react:
         specifier: 'catalog:'

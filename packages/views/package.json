@@ -72,7 +72,7 @@
     "hast-util-to-html": "^4.0.1",
     "katex": "catalog:",
     "lowlight": "^3.3.0",
-    "mermaid": "^11.14.0",
+    "mermaid": "catalog:",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
     "recharts": "3.8.0",
