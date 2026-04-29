@@ -61,26 +61,52 @@ import CallbackPage from "./page";
 describe("CallbackPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
+    // Snapshot keys before deleting — forEach + delete skips entries because
+    // the iteration index advances while the underlying list shrinks.
+    Array.from(mockSearchParams.keys()).forEach((k) =>
+      mockSearchParams.delete(k),
+    );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
   });
 
-  it("unonboarded user lands on /onboarding regardless of next=", async () => {
+  it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
     mockSearchParams.set("state", "next:/invite/abc123");
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith("/invite/abc123");
+    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
   });
 
-  it("unonboarded user with no next= also lands on /onboarding", async () => {
+  it("unonboarded user with no next= and zero workspaces lands on /onboarding", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
+  });
+
+  it("unonboarded user with existing workspace lands in that workspace, not /onboarding", async () => {
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
+    });
+    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
   });
 
   it("onboarded user ignores unsafe next= targets and lands on the default destination", async () => {
