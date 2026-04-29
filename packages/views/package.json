@@ -85,6 +85,7 @@
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
+    "@tanstack/react-table": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

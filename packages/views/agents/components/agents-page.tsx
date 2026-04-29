@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   Search,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
 import {
   type AgentAvailability,
@@ -43,7 +44,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import {
@@ -53,7 +54,7 @@ import {
   taskStateConfig,
 } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
-import { AGENT_LIST_GRID, AgentListItem } from "./agent-list-item";
+import { type AgentRow, createAgentColumns } from "./agent-columns";
 
 // Filter axes layered top → bottom by frequency:
 //
@@ -142,9 +143,6 @@ export function AgentsPage() {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const fadeStyle = useScrollFade(scrollRef);
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -353,10 +351,56 @@ export function AgentsPage() {
     navigation.push(paths.agentDetail(agent.id));
   };
 
-  const handleDuplicate = (agent: Agent) => {
+  const handleDuplicate = useCallback((agent: Agent) => {
     setDuplicateTemplate(agent);
     setShowCreate(true);
-  };
+  }, []);
+
+  // Assemble per-row data once per render — agent + runtime + presence +
+  // activity + role flags. The columns reach into `row.original` and never
+  // pull their own queries, which keeps each cell a pure function.
+  const agentRows = useMemo<AgentRow[]>(() => {
+    return sortedAgents.map((agent) => {
+      const isOwner =
+        !!currentUser?.id && agent.owner_id === currentUser.id;
+      const canManage = isWorkspaceAdmin || isOwner;
+      const ownerIdToShow =
+        scope === "all" &&
+        agent.owner_id &&
+        agent.owner_id !== currentUser?.id
+          ? agent.owner_id
+          : null;
+      return {
+        agent,
+        runtime: runtimesById.get(agent.runtime_id) ?? null,
+        presence: presenceMap.get(agent.id) ?? null,
+        activity: activityMap.get(agent.id) ?? null,
+        runCount: runCountsById.get(agent.id) ?? 0,
+        ownerIdToShow,
+        canManage,
+      };
+    });
+  }, [
+    sortedAgents,
+    currentUser,
+    isWorkspaceAdmin,
+    scope,
+    runtimesById,
+    presenceMap,
+    activityMap,
+    runCountsById,
+  ]);
+
+  const columns = useMemo(
+    () => createAgentColumns({ onDuplicate: handleDuplicate }),
+    [handleDuplicate],
+  );
+
+  const table = useReactTable({
+    data: agentRows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   // ---- Loading ----
   if (isLoading) {
@@ -474,67 +518,12 @@ export function AgentsPage() {
                 scope={scope}
               />
             ) : (
-              <div
-                ref={scrollRef}
-                style={fadeStyle}
-                className="flex-1 min-h-0 overflow-y-auto"
-              >
-                {/*
-                  Layout strategy — CSS Grid + `max-content` on Status, ratio
-                  fr's elsewhere. The Status column shrinks to fit when no
-                  agent is in a high-load Working state, and only widens
-                  when the data demands it; the freed space flows into the
-                  Agent (1.6fr) primary column. See AGENT_LIST_GRID for the
-                  full breakpoint ladder. Sticky header reuses the same grid
-                  template so column edges align with rows pixel-for-pixel.
-                */}
-                <div
-                  role="row"
-                  className={`${AGENT_LIST_GRID} sticky top-0 z-10 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground backdrop-blur`}
-                >
-                  {/* Avatar leading slot — empty header cell so the "Agent"
-                      label below aligns with the row's name text, not the
-                      avatar's left edge. */}
-                  <span aria-hidden />
-                  <span>Agent</span>
-                  <span>Status</span>
-                  <span className="hidden md:block">Last run</span>
-                  <span className="hidden md:block">Runtime</span>
-                  <span className="hidden lg:block">Activity (7d)</span>
-                  <span className="hidden text-right md:block">Runs</span>
-                  {/* Operations column header — kept silent; the kebab
-                      cell speaks for itself. */}
-                  <span aria-label="Actions" />
-                </div>
-                {sortedAgents.map((agent) => {
-                  const isOwner =
-                    !!currentUser?.id && agent.owner_id === currentUser.id;
-                  const canManage = isWorkspaceAdmin || isOwner;
-                  // Inline owner avatar only in All scope on a teammate's
-                  // agent — Mine scope means owner is always you, so a
-                  // self-avatar everywhere would be visual noise.
-                  const ownerIdToShow =
-                    scope === "all" &&
-                    agent.owner_id &&
-                    agent.owner_id !== currentUser?.id
-                      ? agent.owner_id
-                      : null;
-                  return (
-                    <AgentListItem
-                      key={agent.id}
-                      agent={agent}
-                      runtime={runtimesById.get(agent.runtime_id) ?? null}
-                      presence={presenceMap.get(agent.id) ?? null}
-                      activity={activityMap.get(agent.id) ?? null}
-                      runCount={runCountsById.get(agent.id) ?? 0}
-                      ownerIdToShow={ownerIdToShow}
-                      canManage={canManage}
-                      onDuplicate={handleDuplicate}
-                      href={paths.agentDetail(agent.id)}
-                    />
-                  );
-                })}
-              </div>
+              <DataTable
+                table={table}
+                onRowClick={(row) =>
+                  navigation.push(paths.agentDetail(row.original.agent.id))
+                }
+              />
             )}
           </div>
         )}
