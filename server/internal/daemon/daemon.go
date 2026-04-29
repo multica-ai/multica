@@ -1638,12 +1638,14 @@ func isBlockedEnvKey(key string) bool {
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {
+	var args []string
 	switch provider {
 	case "claude":
-		return cfg.ClaudeArgs
+		args = cfg.ClaudeArgs
 	case "codex":
-		return cfg.CodexArgs
+		args = cfg.CodexArgs
 	default:
 		return nil
 	}
+	return append([]string(nil), args...)
 }
