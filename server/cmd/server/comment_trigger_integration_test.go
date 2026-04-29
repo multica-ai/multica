@@ -8,11 +8,20 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // authRequestWithAgent makes an authenticated request with X-Agent-ID header,
 // causing the server to resolve the actor as an agent instead of a member.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
+	t.Helper()
+	return authRequestWithAgentTask(t, method, path, body, agentID, "")
+}
+
+// authRequestWithAgentTask makes an authenticated request with X-Agent-ID and
+// optional X-Task-ID headers, modelling an agent acting from within an
+// executing task (the CLI sets both).
+func authRequestWithAgentTask(t *testing.T, method, path string, body any, agentID, taskID string) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
@@ -27,12 +36,48 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
+	if taskID != "" {
+		req.Header.Set("X-Task-ID", taskID)
+	}
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	return r
+}
+
+// insertTaskWithStatus inserts an agent_task_queue row for the given
+// (agent, issue, status) tuple and returns its ID.
+func insertTaskWithStatus(t *testing.T, agentID, issueID, status string) string {
+	t.Helper()
+	var id string
+	err := testPool.QueryRow(context.Background(),
+		`INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id, started_at, completed_at)
+		 VALUES ($1, $2, $3,
+			 (SELECT runtime_id FROM agent WHERE id = $1),
+			 CASE WHEN $3 = 'running' THEN now() ELSE NULL END,
+			 CASE WHEN $3 = 'completed' THEN now() ELSE NULL END)
+		 RETURNING id`,
+		agentID, issueID, status).Scan(&id)
+	if err != nil {
+		t.Fatalf("failed to insert %s task: %v", status, err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE id = $1`, id)
+	})
+	return id
+}
+
+func insertRunningTask(t *testing.T, agentID, issueID string) string {
+	t.Helper()
+	return insertTaskWithStatus(t, agentID, issueID, "running")
+}
+
+func insertCompletedTask(t *testing.T, agentID, issueID string) string {
+	t.Helper()
+	return insertTaskWithStatus(t, agentID, issueID, "completed")
 }
 
 // countPendingTasks returns the number of queued/dispatched tasks for an issue.
@@ -104,8 +149,12 @@ func createSecondAgent(t *testing.T) string {
 	}
 	runtimeID := agents[0]["runtime_id"].(string)
 
+	// Use a unique name so repeated runs (go test -count=N) don't collide with
+	// archived agents left over from prior runs — archive keeps the row, and
+	// (workspace_id, name) is unique.
+	name := fmt.Sprintf("Second Test Agent %d", time.Now().UnixNano())
 	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
-		"name":       "Second Test Agent",
+		"name":       name,
 		"runtime_id": runtimeID,
 		"visibility": "workspace",
 	})
@@ -328,6 +377,92 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		postComment(t, issueID, "Here is more context for you", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {
 			t.Errorf("expected 1 pending task (assignee mentioned in thread root), got %d", n)
+		}
+	})
+
+	t.Run("comment from a different agent triggers the assignee agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// A second agent posts a comment on the issue (sequential chaining use case).
+		secondAgentID := createSecondAgent(t)
+		postCommentAsAgent(t, issueID, "Tu peux démarrer", secondAgentID, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (comment from different agent), got %d", n)
+		}
+	})
+
+	t.Run("comment from the assignee agent does not trigger itself", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// The assignee agent posts a comment on its own issue — must not loop.
+		postCommentAsAgent(t, issueID, "I am working on this", agentID, nil)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (assignee self-comment), got %d", n)
+		}
+	})
+
+	t.Run("assignee agent commenting from a task on a different issue triggers hand-off", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Simulate the agent completing another issue and posting a hand-off
+		// comment on THIS issue (both assigned to the same agent). The task
+		// context points at the OTHER issue, so this is a chain, not a loop.
+		otherIssueID := createIssueAssignedToAgent(t, "Previous issue in chain", agentID)
+		t.Cleanup(func() {
+			clearTasks(t, otherIssueID)
+			resp := authRequest(t, "DELETE", "/api/issues/"+otherIssueID, nil)
+			resp.Body.Close()
+		})
+		clearTasks(t, issueID)
+		clearTasks(t, otherIssueID)
+		otherTaskID := insertRunningTask(t, agentID, otherIssueID)
+		body := map[string]any{"content": "Previous issue done, you can start", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, otherTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("hand-off comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (hand-off from different-issue task), got %d", n)
+		}
+	})
+
+	t.Run("assignee agent commenting from a task on the same issue does not loop", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Same agent, same issue, same task — classic self-loop, must not trigger.
+		ownTaskID := insertRunningTask(t, agentID, issueID)
+		body := map[string]any{"content": "Progress update", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, ownTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("self-task comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (self-loop suppressed), got %d", n)
+		}
+	})
+
+	t.Run("completed task context does not bypass assignee self-comment guard", func(t *testing.T) {
+		clearTasks(t, issueID)
+		otherIssueID := createIssueAssignedToAgent(t, "Completed task issue", agentID)
+		t.Cleanup(func() {
+			clearTasks(t, otherIssueID)
+			resp := authRequest(t, "DELETE", "/api/issues/"+otherIssueID, nil)
+			resp.Body.Close()
+		})
+		clearTasks(t, otherIssueID)
+		completedTaskID := insertCompletedTask(t, agentID, otherIssueID)
+		body := map[string]any{"content": "Manual follow-up", "type": "comment"}
+		resp := authRequestWithAgentTask(t, "POST", "/api/issues/"+issueID+"/comments", body, agentID, completedTaskID)
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("completed-task comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		resp.Body.Close()
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (completed task must not bypass guard), got %d", n)
 		}
 	})
 }

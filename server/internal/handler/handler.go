@@ -256,6 +256,26 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	return "agent", agentID
 }
 
+// actorCurrentIssueID returns the issue_id of the agent's currently running
+// task when X-Task-ID is present and valid, or "" otherwise. Used to scope
+// self-loop guards: an agent acting on its own assigned issue FROM a task on
+// that same issue is a loop, but an agent acting from a task on a DIFFERENT
+// issue is a hand-off and must still trigger pickup.
+func (h *Handler) actorCurrentIssueID(r *http.Request) string {
+	taskID := r.Header.Get("X-Task-ID")
+	if taskID == "" {
+		return ""
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		return ""
+	}
+	if task.Status != "running" {
+		return ""
+	}
+	return uuidToString(task.IssueID)
+}
+
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := requestUserID(r)
 	if userID == "" {
