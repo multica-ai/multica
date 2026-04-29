@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -500,6 +501,394 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+// runIssueTakeCmd executes `multica issue take` via the real rootCmd,
+// against a stub server. takeFlags are inserted as `--<k>=<v>` on the
+// command line so cobra parses + marks them Changed. Returns captured
+// stdout and the cobra error.
+//
+// Sequential execution is required: rootCmd is package-global state.
+// We reset the flags this command touches between calls because cobra
+// keeps the previous Set value otherwise.
+func runIssueTakeCmd(t *testing.T, serverURL string, posArgs []string, takeFlags map[string]string) (string, error) {
+	t.Helper()
+
+	for _, name := range []string{"provider", "print", "copy"} {
+		if f := issueTakeCmd.Flags().Lookup(name); f != nil {
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		}
+	}
+
+	args := []string{
+		"--server-url=" + serverURL,
+		"--workspace-id=ws-1",
+		"issue", "take",
+	}
+	args = append(args, posArgs...)
+	for k, v := range takeFlags {
+		if v == "true" {
+			args = append(args, "--"+k)
+		} else {
+			args = append(args, "--"+k+"="+v)
+		}
+	}
+
+	origStdout := os.Stdout
+	r, wPipe, _ := os.Pipe()
+	os.Stdout = wPipe
+
+	rootCmd.SetArgs(args)
+	err := rootCmd.Execute()
+
+	wPipe.Close()
+	os.Stdout = origStdout
+
+	out, _ := io.ReadAll(r)
+	return string(out), err
+}
+
+// TestResumeCommandForProvider locks the provider→CLI mapping for `issue take`.
+// Drift here breaks the contract documented on the command — these are the
+// commands users would otherwise have to assemble by hand.
+func TestResumeCommandForProvider(t *testing.T) {
+	const sid = "sess-123"
+	cases := []struct {
+		provider string
+		wantBin  string
+		wantArgs []string
+	}{
+		{"claude", "claude", []string{"--resume", sid}},
+		{"codex", "codex", []string{"resume", sid}},
+		{"cursor", "cursor-agent", []string{"--resume", sid}},
+		{"gemini", "gemini", []string{"-r", sid}},
+		{"opencode", "opencode", []string{"--session", sid}},
+		{"copilot", "copilot", []string{"--resume", sid}},
+		{"  Claude  ", "claude", []string{"--resume", sid}}, // case + whitespace tolerant
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			r, err := resumeCommandForProvider(tc.provider, sid)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if r.Bin != tc.wantBin {
+				t.Errorf("bin = %q, want %q", r.Bin, tc.wantBin)
+			}
+			if !equalStringSlice(r.Args, tc.wantArgs) {
+				t.Errorf("args = %#v, want %#v", r.Args, tc.wantArgs)
+			}
+		})
+	}
+
+	t.Run("unknown provider returns error", func(t *testing.T) {
+		if _, err := resumeCommandForProvider("openai-codex-2099", "sid"); err == nil {
+			t.Fatal("expected error for unknown provider")
+		}
+	})
+}
+
+func TestShellSingleQuote(t *testing.T) {
+	cases := map[string]string{
+		"plain":               "'plain'",
+		"":                    "''",
+		"with spaces":         "'with spaces'",
+		"it's-fine":           `'it'\''s-fine'`,
+		"/tmp/multica/wd-1":   "'/tmp/multica/wd-1'",
+		"$HOME/path":          "'$HOME/path'", // single quotes block expansion
+		"a'b'c":               `'a'\''b'\''c'`,
+	}
+	for in, want := range cases {
+		if got := shellSingleQuote(in); got != want {
+			t.Errorf("shellSingleQuote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBuildShellResumeCommand(t *testing.T) {
+	resume := providerResume{Bin: "claude", Args: []string{"--resume", "sess-1"}}
+
+	t.Run("with workdir", func(t *testing.T) {
+		got := buildShellResumeCommand("/tmp/wd", resume)
+		want := `cd '/tmp/wd' && claude '--resume' 'sess-1'`
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("workdir with quote", func(t *testing.T) {
+		got := buildShellResumeCommand("/tmp/it's/wd", resume)
+		want := `cd '/tmp/it'\''s/wd' && claude '--resume' 'sess-1'`
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty workdir omits cd prefix", func(t *testing.T) {
+		got := buildShellResumeCommand("", resume)
+		want := `claude '--resume' 'sess-1'`
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+func TestPickResumableRun(t *testing.T) {
+	t.Run("picks first completed with session_id", func(t *testing.T) {
+		runs := []map[string]any{
+			{"status": "in_progress", "runtime_id": "rt-skip", "result": map[string]any{"session_id": "skip"}},
+			{"status": "completed", "runtime_id": "rt-1", "result": map[string]any{"session_id": "sid-1", "work_dir": "/tmp/wd-1"}},
+			{"status": "completed", "runtime_id": "rt-2", "result": map[string]any{"session_id": "sid-2"}},
+		}
+		sid, wd, rid, ok := pickResumableRun(runs)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if sid != "sid-1" || wd != "/tmp/wd-1" || rid != "rt-1" {
+			t.Errorf("got (%q, %q, %q), want (sid-1, /tmp/wd-1, rt-1)", sid, wd, rid)
+		}
+	})
+
+	t.Run("skips completed runs without session_id", func(t *testing.T) {
+		runs := []map[string]any{
+			{"status": "completed", "result": map[string]any{}},
+			{"status": "completed", "runtime_id": "rt-2", "result": map[string]any{"session_id": "sid-2", "work_dir": "/tmp/wd-2"}},
+		}
+		sid, wd, rid, ok := pickResumableRun(runs)
+		if !ok || sid != "sid-2" || wd != "/tmp/wd-2" || rid != "rt-2" {
+			t.Errorf("got (%q, %q, %q, %v), want sid-2 run", sid, wd, rid, ok)
+		}
+	})
+
+	t.Run("no completed runs returns ok=false", func(t *testing.T) {
+		runs := []map[string]any{
+			{"status": "in_progress", "result": map[string]any{"session_id": "s"}},
+			{"status": "failed", "result": map[string]any{"session_id": "s"}},
+		}
+		_, _, _, ok := pickResumableRun(runs)
+		if ok {
+			t.Fatal("expected ok=false")
+		}
+	})
+
+	t.Run("empty list returns ok=false", func(t *testing.T) {
+		_, _, _, ok := pickResumableRun(nil)
+		if ok {
+			t.Fatal("expected ok=false on empty list")
+		}
+	})
+
+	t.Run("missing work_dir is fine", func(t *testing.T) {
+		runs := []map[string]any{
+			{"status": "completed", "runtime_id": "rt-x", "result": map[string]any{"session_id": "sid-x"}},
+		}
+		sid, wd, rid, ok := pickResumableRun(runs)
+		if !ok || sid != "sid-x" || wd != "" || rid != "rt-x" {
+			t.Errorf("got (%q, %q, %q, %v)", sid, wd, rid, ok)
+		}
+	})
+}
+
+// TestIssueTakeProviderAutoDetect exercises the full take flow against a stub
+// server: list runs → list runtimes → render command. --print is used so the
+// test never spawns an actual agent CLI. The work_dir points at a real temp
+// dir so the workdir-existence check does not strip the `cd` prefix.
+func TestIssueTakeProviderAutoDetect(t *testing.T) {
+	wd := t.TempDir()
+	runs := []map[string]any{
+		{
+			"id":         "task-1",
+			"status":     "completed",
+			"runtime_id": "runtime-1",
+			"result":     map[string]any{"session_id": "sid-abc", "work_dir": wd},
+		},
+	}
+	runtimes := []map[string]any{
+		{"id": "runtime-1", "provider": "claude"},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/issue-1/task-runs":
+			json.NewEncoder(w).Encode(runs)
+		case "/api/runtimes":
+			json.NewEncoder(w).Encode(runtimes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	out, err := runIssueTakeCmd(t, srv.URL, []string{"issue-1"}, map[string]string{"print": "true"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := strings.TrimSpace(out)
+	want := "cd " + shellSingleQuote(wd) + " && claude '--resume' 'sid-abc'"
+	if got != want {
+		t.Errorf("printed command = %q, want %q", got, want)
+	}
+}
+
+// TestIssueTakeNoCompletedRun verifies the spec error when no completed
+// run is available.
+func TestIssueTakeNoCompletedRun(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/issue-1/task-runs":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"status": "in_progress", "result": map[string]any{"session_id": "x"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := runIssueTakeCmd(t, srv.URL, []string{"issue-1"}, map[string]string{"print": "true"})
+	if err == nil {
+		t.Fatal("expected error when no completed run is available")
+	}
+	if !strings.Contains(err.Error(), "no completed run found") {
+		t.Errorf("error = %v, want 'no completed run found'", err)
+	}
+}
+
+// TestIssueTakePrintAndCopyMutex covers --print and --copy being mutually exclusive.
+func TestIssueTakePrintAndCopyMutex(t *testing.T) {
+	_, err := runIssueTakeCmd(t, "http://unused", []string{"issue-1"}, map[string]string{
+		"print": "true",
+		"copy":  "true",
+	})
+	if err == nil {
+		t.Fatal("expected error when both --print and --copy are set")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want 'mutually exclusive'", err)
+	}
+}
+
+// TestIssueTakeUnsupportedProvider ensures we exit non-zero (with a helpful
+// message) when the runtime's provider is not in the take map.
+func TestIssueTakeUnsupportedProvider(t *testing.T) {
+	runs := []map[string]any{
+		{
+			"id":         "task-1",
+			"status":     "completed",
+			"runtime_id": "runtime-1",
+			"result":     map[string]any{"session_id": "sid-abc", "work_dir": "/tmp/wd"},
+		},
+	}
+	runtimes := []map[string]any{
+		{"id": "runtime-1", "provider": "kimi"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/issue-1/task-runs":
+			json.NewEncoder(w).Encode(runs)
+		case "/api/runtimes":
+			json.NewEncoder(w).Encode(runtimes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := runIssueTakeCmd(t, srv.URL, []string{"issue-1"}, map[string]string{"print": "true"})
+	if err == nil {
+		t.Fatal("expected error for unsupported provider")
+	}
+	if !strings.Contains(err.Error(), "unsupported provider") {
+		t.Errorf("error = %v, want 'unsupported provider'", err)
+	}
+}
+
+// TestIssueTakeRuntimeNotFound covers the case where the task references a
+// runtime that no longer appears in /api/runtimes.
+func TestIssueTakeRuntimeNotFound(t *testing.T) {
+	runs := []map[string]any{
+		{
+			"id":         "task-1",
+			"status":     "completed",
+			"runtime_id": "runtime-missing",
+			"result":     map[string]any{"session_id": "sid-abc", "work_dir": "/tmp/wd"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/issue-1/task-runs":
+			json.NewEncoder(w).Encode(runs)
+		case "/api/runtimes":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := runIssueTakeCmd(t, srv.URL, []string{"issue-1"}, map[string]string{"print": "true"})
+	if err == nil {
+		t.Fatal("expected error when runtime is missing")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %v, want 'not found'", err)
+	}
+}
+
+// TestIssueTakeProviderOverride checks that --provider skips the runtime
+// lookup entirely (and therefore works even when /api/runtimes is broken).
+func TestIssueTakeProviderOverride(t *testing.T) {
+	wd := t.TempDir()
+	runs := []map[string]any{
+		{
+			"id":         "task-1",
+			"status":     "completed",
+			"runtime_id": "runtime-1",
+			"result":     map[string]any{"session_id": "sid-abc", "work_dir": wd},
+		},
+	}
+	hitRuntimes := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/issue-1/task-runs":
+			json.NewEncoder(w).Encode(runs)
+		case "/api/runtimes":
+			hitRuntimes = true
+			http.Error(w, "boom", 500)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	out, err := runIssueTakeCmd(t, srv.URL, []string{"issue-1"}, map[string]string{
+		"provider": "codex",
+		"print":    "true",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if hitRuntimes {
+		t.Error("--provider should bypass /api/runtimes lookup")
+	}
+	got := strings.TrimSpace(out)
+	want := "cd " + shellSingleQuote(wd) + " && codex 'resume' 'sid-abc'"
+	if got != want {
+		t.Errorf("printed command = %q, want %q", got, want)
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestValidIssueStatuses(t *testing.T) {
