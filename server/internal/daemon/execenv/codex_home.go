@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,6 +42,11 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// McpConfig is the agent's structured MCP config (Claude-shaped JSON:
+	// {"mcpServers": {name: {command, args, env}}}). When non-empty, the
+	// daemon renders it into [mcp_servers.*] tables and appends to the
+	// per-task config.toml inside a multica-managed block.
+	McpConfig json.RawMessage
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -99,6 +105,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+	}
+
+	// Reconcile the multica-managed [mcp_servers.*] block to reflect the
+	// agent's current MCP config. Called unconditionally so a cleared
+	// mcp_config on Reuse actually evicts previously authorized servers.
+	// This is the Codex counterpart to Claude's --mcp-config; see
+	// multica-ai/multica#674 for design context.
+	if err := syncMcpServersToml(filepath.Join(codexHome, "config.toml"), opts.McpConfig, logger); err != nil {
+		logger.Warn("execenv: codex-home sync mcp_servers failed", "error", err)
 	}
 
 	return nil

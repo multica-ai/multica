@@ -26,6 +26,7 @@ type PrepareParams struct {
 	AgentName      string            // for git branch naming only
 	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
+	McpConfig      json.RawMessage   // agent-scoped MCP config (Codex provider only)
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -117,7 +118,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion: params.CodexVersion,
+			McpConfig:    params.McpConfig,
+		}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := writeCodexWorkspaceSkills(codexHome, params.Task.AgentSkills); err != nil {
@@ -136,7 +140,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // codexVersion is the detected Codex CLI version, used (only when provider is
 // "codex") to pick the right sandbox policy for the per-task config.toml.
 // Pass an empty string when the version is unknown.
-func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logger *slog.Logger) *Environment {
+//
+// mcpConfig is the agent-scoped MCP config (Codex provider only).
+func Reuse(workDir, provider, codexVersion string, mcpConfig json.RawMessage, task TaskContextForEnv, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(workDir); err != nil {
 		return nil
 	}
@@ -157,7 +163,10 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 	// config (especially sandbox/network access) is up to date.
 	if provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: codexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion: codexVersion,
+			McpConfig:    mcpConfig,
+		}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

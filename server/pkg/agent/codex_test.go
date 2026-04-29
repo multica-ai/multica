@@ -914,6 +914,87 @@ func TestCodexProtocolDetectionLegacyBlocksRaw(t *testing.T) {
 	}
 }
 
+// ── Custom args filtering tests ──
+
+func TestFilterCodexConfigOverridesBlocksMcpServersSplit(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"-c", "mcp_servers.x.command=evil", "-c", "model=o3"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	expected := []string{"-c", "model=o3"}
+	if !equalStrings(out, expected) {
+		t.Errorf("filtered: %v, want: %v", out, expected)
+	}
+}
+
+func TestFilterCodexConfigOverridesBlocksMcpServersLongFlag(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"--config", "mcp_servers.fs.command=evil", "--verbose"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	expected := []string{"--verbose"}
+	if !equalStrings(out, expected) {
+		t.Errorf("filtered: %v, want: %v", out, expected)
+	}
+}
+
+func TestFilterCodexConfigOverridesBlocksMcpServersInline(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"--config=mcp_servers.x.command=evil", "--config=model=o3"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	expected := []string{"--config=model=o3"}
+	if !equalStrings(out, expected) {
+		t.Errorf("filtered: %v, want: %v", out, expected)
+	}
+}
+
+func TestFilterCodexConfigOverridesBlocksShortInline(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"-c=mcp_servers.x.command=evil", "-c=model=o3"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	expected := []string{"-c=model=o3"}
+	if !equalStrings(out, expected) {
+		t.Errorf("filtered: %v, want: %v", out, expected)
+	}
+}
+
+func TestFilterCodexConfigOverridesBlocksGluedShort(t *testing.T) {
+	t.Parallel()
+
+	// codex 0.121.0 accepts `-ckey=value` glued — confirmed by running
+	// `codex -cmodel="glued-test" exec` and seeing the model override apply.
+	args := []string{"-cmcp_servers.x.command=evil", "-cmodel=o3"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	expected := []string{"-cmodel=o3"}
+	if !equalStrings(out, expected) {
+		t.Errorf("filtered: %v, want: %v", out, expected)
+	}
+}
+
+func TestFilterCodexConfigOverridesAllowsUnrelatedKeys(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"-c", "model=o3", "-c", "sandbox_mode=workspace-write"}
+	out := filterCodexConfigOverrides(args, codexBlockedConfigKeyPrefixes, slog.Default())
+	if !equalStrings(out, args) {
+		t.Errorf("filtered: %v, want unchanged %v", out, args)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestStderrTailForwardsAndCapturesTail(t *testing.T) {
 	t.Parallel()
 

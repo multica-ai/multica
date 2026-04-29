@@ -1499,7 +1499,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 
 	// Reuse should restore CodexHome.
-	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{IssueID: "reuse-test"}, testLogger())
+	reused := Reuse(env.WorkDir, "codex", "", nil, TaskContextForEnv{IssueID: "reuse-test"}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}

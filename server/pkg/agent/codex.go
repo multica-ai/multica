@@ -20,6 +20,13 @@ var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
 
+// codexBlockedConfigKeyPrefixes are dotted-key prefixes for `-c` / `--config`
+// overrides that must not be settable via custom_args. Structured
+// ExecOptions.McpConfig is the single source of truth for MCP servers.
+var codexBlockedConfigKeyPrefixes = []string{
+	"mcp_servers",
+}
+
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
 // error messages when codex exits before the JSON-RPC handshake (e.g. the
 // user supplied a custom_args flag that the `app-server` subcommand
@@ -55,7 +62,9 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	codexArgs := append([]string{"app-server", "--listen", "stdio://"}, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, b.cfg.Logger)...)
+	filteredCustom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, b.cfg.Logger)
+	filteredCustom = filterCodexConfigOverrides(filteredCustom, codexBlockedConfigKeyPrefixes, b.cfg.Logger)
+	codexArgs := append([]string{"app-server", "--listen", "stdio://"}, filteredCustom...)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
@@ -1153,3 +1162,69 @@ func nilIfEmpty(s string) any {
 	}
 	return s
 }
+
+// ── Custom args filtering ──
+
+// filterCodexConfigOverrides drops any `-c KEY=V` / `--config KEY=V` pairs
+// (inline or split across two args) where KEY starts with any of the given
+// dotted prefixes. Used to prevent custom_args from smuggling values that the
+// daemon owns through structured fields (e.g. mcp_servers).
+func filterCodexConfigOverrides(args []string, blockedPrefixes []string, logger *slog.Logger) []string {
+	if len(args) == 0 || len(blockedPrefixes) == 0 {
+		return args
+	}
+
+	isConfigFlag := func(a string) bool { return a == "-c" || a == "--config" }
+	keyBlocked := func(key string) bool {
+		for _, p := range blockedPrefixes {
+			if key == p || strings.HasPrefix(key, p+".") {
+				return true
+			}
+		}
+		return false
+	}
+
+	filtered := make([]string, 0, len(args))
+	skip := false
+	for i, arg := range args {
+		if skip {
+			skip = false
+			continue
+		}
+
+		// Split form: `-c key=value` or `--config key=value` (two args).
+		if isConfigFlag(arg) && i+1 < len(args) {
+			next := args[i+1]
+			key, _, _ := strings.Cut(next, "=")
+			if keyBlocked(key) {
+				logger.Warn("custom_args: blocked codex config key override, skipping", "flag", arg, "key", key)
+				skip = true
+				continue
+			}
+		}
+		// Inline forms accepted by codex's clap parser:
+		//   --config=key=value
+		//   -c=key=value
+		//   -ckey=value    (glued short form — confirmed accepted by codex 0.121.0)
+		inlineFlag := ""
+		inlineRest := ""
+		switch {
+		case strings.HasPrefix(arg, "--config="):
+			inlineFlag, inlineRest = "--config", strings.TrimPrefix(arg, "--config=")
+		case strings.HasPrefix(arg, "-c="):
+			inlineFlag, inlineRest = "-c", strings.TrimPrefix(arg, "-c=")
+		case strings.HasPrefix(arg, "-c") && len(arg) > 2:
+			inlineFlag, inlineRest = "-c", strings.TrimPrefix(arg, "-c")
+		}
+		if inlineFlag != "" {
+			key, _, _ := strings.Cut(inlineRest, "=")
+			if keyBlocked(key) {
+				logger.Warn("custom_args: blocked codex config key override, skipping", "flag", inlineFlag, "key", key)
+				continue
+			}
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
+}
+

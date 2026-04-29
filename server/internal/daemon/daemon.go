@@ -1057,11 +1057,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		mcpConfig = task.Agent.McpConfig
 	}
 
 	// Prepare isolated execution environment.
@@ -1088,7 +1090,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)
+		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, mcpConfig, taskCtx, d.logger)
 	}
 	if env == nil {
 		var err error
@@ -1099,6 +1101,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			AgentName:      agentName,
 			Provider:       provider,
 			CodexVersion:   codexVersion,
+			McpConfig:      mcpConfig,
 			Task:           taskCtx,
 		}, d.logger)
 		if err != nil {
@@ -1183,10 +1186,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskStart := time.Now()
 
 	var customArgs []string
-	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
