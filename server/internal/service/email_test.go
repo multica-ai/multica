@@ -166,7 +166,7 @@ func TestBuildInvitationEmail_BodyContainsInviteURL(t *testing.T) {
 
 func TestSendNotificationEmail_DevMode(t *testing.T) {
 	svc := &EmailService{sender: nil, fromEmail: "test@multica.ai"}
-	err := svc.SendNotificationEmail("user@example.com", "Test Title", "Test Body", "https://app.multica.ai/issue/123")
+	err := svc.SendNotificationEmail("user@example.com", "Test Title", "Test Body", "https://app.multica.ai/issue/123", "Alice")
 	if err != nil {
 		t.Fatalf("expected nil error in dev mode, got %v", err)
 	}
@@ -174,7 +174,7 @@ func TestSendNotificationEmail_DevMode(t *testing.T) {
 
 func TestSendNotificationEmail_EmptyTitle(t *testing.T) {
 	svc := &EmailService{sender: nil, fromEmail: "test@multica.ai"}
-	err := svc.SendNotificationEmail("user@example.com", "", "Body text", "")
+	err := svc.SendNotificationEmail("user@example.com", "", "Body text", "", "")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestSendNotificationEmail_HTMLEscaping(t *testing.T) {
 	}
 	svc := &EmailService{sender: mockSender, fromEmail: "test@multica.ai"}
 
-	err := svc.SendNotificationEmail("user@example.com", "<script>alert(1)</script>", "Hello & goodbye", "https://app.multica.ai")
+	err := svc.SendNotificationEmail("user@example.com", "<script>alert(1)</script>", "Hello & goodbye", "https://app.multica.ai", "Alice")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -206,6 +206,9 @@ func TestSendNotificationEmail_HTMLEscaping(t *testing.T) {
 	}
 	if !strings.Contains(capturedBody, "View in Multica") {
 		t.Errorf("body should contain link button: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "<strong>From:</strong> Alice") {
+		t.Errorf("body should contain sender name: %s", capturedBody)
 	}
 	_ = capturedSubject
 }
@@ -242,7 +245,7 @@ func TestSendNotificationEmail_LinkEscaping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := svc.SendNotificationEmail("user@example.com", "Test", "Body", tt.link)
+			err := svc.SendNotificationEmail("user@example.com", "Test", "Body", tt.link, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -253,6 +256,39 @@ func TestSendNotificationEmail_LinkEscaping(t *testing.T) {
 				t.Errorf("body should contain escaped link segment %q:\n%s", tt.wantContain, capturedBody)
 			}
 		})
+	}
+}
+
+func TestSendNotificationEmail_SenderInSubjectAndBody(t *testing.T) {
+	var capturedSubject, capturedBody string
+	mockSender := &mockEmailSender{
+		sendFn: func(from string, to []string, subject, htmlBody string) error {
+			capturedSubject = subject
+			capturedBody = htmlBody
+			return nil
+		},
+	}
+	svc := &EmailService{sender: mockSender, fromEmail: "test@multica.ai"}
+
+	err := svc.SendNotificationEmail("user@example.com", "OPE-20 · Review", "Please check", "https://app.multica.ai", "Alice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedSubject != "Alice mentioned you in OPE-20 · Review" {
+		t.Fatalf("unexpected subject: %q", capturedSubject)
+	}
+	if !strings.Contains(capturedBody, "<strong>From:</strong> Alice") {
+		t.Fatalf("body missing sender: %s", capturedBody)
+	}
+}
+
+func TestBuildNotificationEmailSubject_StripsControls(t *testing.T) {
+	subject := buildNotificationEmailSubject("Issue\r\nBcc: evil@example.com", "Alice\t")
+	if strings.ContainsAny(subject, "\r\n\t") {
+		t.Fatalf("subject still contains control characters: %q", subject)
+	}
+	if subject != "Alice mentioned you in IssueBcc: evil@example.com" {
+		t.Fatalf("unexpected subject: %q", subject)
 	}
 }
 

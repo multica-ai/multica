@@ -941,9 +941,13 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 	var nested struct {
 		IssueIdentifier string `json:"issue_identifier"`
 		Link            string `json:"link"`
+		ActorName       string `json:"actor_name"`
 	}
 	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
 		t.Fatalf("unmarshal nested notification_event: %v", err)
+	}
+	if nested.ActorName != integrationTestName {
+		t.Fatalf("expected nested actor_name %q, got %q", integrationTestName, nested.ActorName)
 	}
 	expectedIdentifier := issueIdentifierForTest(t, queries, issueID)
 	if nested.IssueIdentifier != expectedIdentifier {
@@ -956,6 +960,95 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 	expectedLink := "http://localhost:3000/" + workspace.Slug + "/issues/" + expectedIdentifier + "?comment=" + commentID
 	if nested.Link != expectedLink {
 		t.Fatalf("expected nested link %q, got %q", expectedLink, nested.Link)
+	}
+}
+
+func TestNotification_MentionedCommentQueuesEmailDeliveryWhenEnabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-mentioned-email@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	bindingID := createNotificationBindingForUser(t, mentionedID, "email")
+	enableNotificationPreferenceForUser(t, mentionedID, "email", "mentioned", bindingID)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentID := "00000000-0000-0000-0000-000000000567"
+	commentContent := "email [@Mentioned](mention://member/" + mentionedID + ") now"
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "mentioned issue",
+			"issue_status": "todo",
+			"app_origin":   "http://localhost:3000",
+		},
+	})
+
+	events := notificationEventsForRecipient(t, queries, mentionedID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 canonical notification event, got %d", len(events))
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(events[0].ID))
+	if len(deliveries) != 2 {
+		t.Fatalf("expected 2 notification deliveries, got %d", len(deliveries))
+	}
+	if deliveries[1].Channel != "email" {
+		t.Fatalf("expected second delivery channel 'email', got %q", deliveries[1].Channel)
+	}
+	if deliveries[1].Status != "pending" {
+		t.Fatalf("expected email delivery status 'pending', got %q", deliveries[1].Status)
+	}
+
+	var snapshot struct {
+		BindingID         string          `json:"binding_id"`
+		Provider          string          `json:"provider"`
+		NotificationEvent json.RawMessage `json:"notification_event"`
+	}
+	if err := json.Unmarshal(deliveries[1].PayloadSnapshot, &snapshot); err != nil {
+		t.Fatalf("unmarshal email payload snapshot: %v", err)
+	}
+	if snapshot.BindingID != bindingID {
+		t.Fatalf("expected binding_id %q, got %q", bindingID, snapshot.BindingID)
+	}
+	if snapshot.Provider != "email" {
+		t.Fatalf("expected provider 'email', got %q", snapshot.Provider)
+	}
+
+	var nested struct {
+		ActorName string `json:"actor_name"`
+	}
+	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
+		t.Fatalf("unmarshal nested notification_event: %v", err)
+	}
+	if nested.ActorName != integrationTestName {
+		t.Fatalf("expected nested actor_name %q, got %q", integrationTestName, nested.ActorName)
 	}
 }
 
@@ -1035,9 +1128,13 @@ func TestNotification_SelfMentionQueuesDingTalkDeliveryWhenEnabled(t *testing.T)
 	}
 	var nested struct {
 		IssueIdentifier string `json:"issue_identifier"`
+		ActorName       string `json:"actor_name"`
 	}
 	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
 		t.Fatalf("unmarshal nested notification_event: %v", err)
+	}
+	if nested.ActorName != integrationTestName {
+		t.Fatalf("expected nested actor_name %q, got %q", integrationTestName, nested.ActorName)
 	}
 	if expected := issueIdentifierForTest(t, queries, issueID); nested.IssueIdentifier != expected {
 		t.Fatalf("expected nested issue_identifier %q, got %q", expected, nested.IssueIdentifier)

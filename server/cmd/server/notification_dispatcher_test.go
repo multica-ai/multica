@@ -165,6 +165,7 @@ func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
 	card := buildDingTalkDeliveryMarkdown(notificationEventPayload{
 		Title:           "1. Install a runtime (Desktop app or CLI)",
 		IssueIdentifier: "OPE-20",
+		ActorName:       "Alice",
 		Body:            "[@guodage003](mention://member/04e19961-c5c1-4757-a114-1355a1049ea4) hello",
 		Link:            "http://localhost:3000/guodage/issues/a77996be-cab2-4bc1-95bc-fbf4a33d5188?comment=5b0050c5-0575-4c5d-9ffb-9803c43af196",
 	})
@@ -177,6 +178,9 @@ func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
 	}
 	if strings.Contains(card.Text, "mention://") {
 		t.Fatalf("card text should not expose internal mention links: %q", card.Text)
+	}
+	if !strings.Contains(card.Text, "**From**\nAlice") {
+		t.Fatalf("expected sender in card text, got %q", card.Text)
 	}
 	if !strings.Contains(card.Text, "**Issue**\nOPE-20 · 1. Install a runtime (Desktop app or CLI)") {
 		t.Fatalf("expected issue identifier in card text, got %q", card.Text)
@@ -237,6 +241,9 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 			}
 			if !strings.Contains(msgParam.Text, "**Issue**\nOPE-20 · dispatcher issue") {
 				t.Fatalf("expected msgParam to include issue identifier, got %q", body.MsgParam)
+			}
+			if !strings.Contains(msgParam.Text, "**From**\nIntegration Tester") {
+				t.Fatalf("expected msgParam to include sender, got %q", body.MsgParam)
 			}
 			if count := strings.Count(msgParam.Text, "Open In Multica"); count != 1 {
 				t.Fatalf("expected exactly one Open In Multica link, got %d in %q", count, msgParam.Text)
