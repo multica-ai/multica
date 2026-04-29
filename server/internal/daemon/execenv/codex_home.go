@@ -89,6 +89,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Drop `[[skills.config]]` entries inherited from the user's
+	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
+	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
+	// `missing field path` and bails out of `thread/start`. Multica writes the
+	// agent's active skills directly to `codex-home/skills/`, so the
+	// user-level registry is redundant here. See codex_skill_strip.go.
+	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
+		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
+	}
+
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}

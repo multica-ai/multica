@@ -1125,6 +1125,57 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 }
 
+// Regression test for #1753 — Codex Desktop writes plugin-backed
+// `[[skills.config]]` entries without a `path` field, and the CLI's TOML
+// parser rejects them with `missing field path`. prepareCodexHome must drop
+// every `[[skills.config]]` entry while copying the user's config.toml so
+// the per-task home stays parseable.
+func TestPrepareCodexHomeStripsSkillsConfigEntries(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedConfig := `model = "o3"
+
+[[skills.config]]
+path = "/Users/x/SKILL.md"
+enabled = false
+
+[[skills.config]]
+name = "superpowers:brainstorming"
+enabled = false
+
+[profiles.default]
+model = "o3"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(sharedConfig), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	tomlStr := string(data)
+	if strings.Contains(tomlStr, "[[skills.config]]") {
+		t.Errorf("per-task config.toml should not inherit [[skills.config]] entries, got:\n%s", tomlStr)
+	}
+	if strings.Contains(tomlStr, "superpowers:brainstorming") {
+		t.Errorf("per-task config.toml should not retain plugin skill names, got:\n%s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, `model = "o3"`) {
+		t.Errorf("top-level keys should be preserved, got:\n%s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, "[profiles.default]") {
+		t.Errorf("unrelated tables should be preserved, got:\n%s", tomlStr)
+	}
+}
+
 func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
