@@ -109,10 +109,11 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 	return items, nil
 }
 
-const revokePersonalAccessToken = `-- name: RevokePersonalAccessToken :exec
+const revokePersonalAccessToken = `-- name: RevokePersonalAccessToken :one
 UPDATE personal_access_token
 SET revoked = TRUE
 WHERE id = $1 AND user_id = $2
+RETURNING token_hash
 `
 
 type RevokePersonalAccessTokenParams struct {
@@ -120,9 +121,11 @@ type RevokePersonalAccessTokenParams struct {
 	UserID pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePersonalAccessTokenParams) error {
-	_, err := q.db.Exec(ctx, revokePersonalAccessToken, arg.ID, arg.UserID)
-	return err
+func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePersonalAccessTokenParams) (string, error) {
+	row := q.db.QueryRow(ctx, revokePersonalAccessToken, arg.ID, arg.UserID)
+	var token_hash string
+	err := row.Scan(&token_hash)
+	return token_hash, err
 }
 
 const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLastUsed :exec

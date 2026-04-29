@@ -621,7 +621,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
+					// Match the CLI's --content / --description behavior: agents that
+					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
+					// decoded into real newlines before the comment hits the DB. See
+					// util.UnescapeBackslashEscapes for the exact contract.
+					body := util.UnescapeBackslashEscapes(payload.Output)
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
 				}
 			}
 		}
@@ -642,10 +647,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if task.ChatSessionID.Valid {
 		var payload protocol.TaskCompletedPayload
 		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
+			// Same unescape as the issue-comment path above: literal `\n` from
+			// agent stdout becomes a real newline so the chat panel renders
+			// paragraph breaks instead of one wall of prose.
+			body := util.UnescapeBackslashEscapes(payload.Output)
 			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
 				Role:          "assistant",
-				Content:       redact.Text(payload.Output),
+				Content:       redact.Text(body),
 				TaskID:        task.ID,
 			}); err != nil {
 				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)

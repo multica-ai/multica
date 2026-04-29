@@ -257,9 +257,13 @@ export function AgentCreatePanel({
         {/* Prompt — same rich editor Advanced uses, so paste/drop images,
             mentions, and formatting all work. The dropZone wrapper enables
             drag-and-drop file uploads alongside paste. */}
+        {/* `flex-1 min-h-0 overflow-y-auto` so the editor area absorbs the
+            remaining vertical space inside the (now max-bounded) DialogContent
+            and scrolls internally. Without it, pasting an image expanded the
+            editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
-          className="relative px-5 pb-3 min-h-[140px]"
+          className="relative px-5 pb-3 flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
             ref={editorRef}

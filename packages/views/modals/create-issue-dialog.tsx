@@ -57,7 +57,10 @@ export function CreateIssueDialog({
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
-          "!max-w-xl !w-full",
+          // Width is capped; height is content-driven up to 80vh so a
+          // pasted screenshot can't push the dialog past the viewport
+          // (the inner editor area scrolls instead).
+          "!max-w-xl !w-full !max-h-[80vh]",
           // Smooth size transition when switching modes — the manual mode
           // uses the same easing.
           "!transition-all !duration-300 !ease-out",
