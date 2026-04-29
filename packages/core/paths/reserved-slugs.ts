@@ -85,7 +85,7 @@ export const RESERVED_SLUGS = new Set([
   "tokens",
   "cli",
 
-  // Backend ops / observability. `/health`, `/readyz`, `/healthz`, and `/ws`
+  // Backend ops / observability. `/health`, `/readyz`, `/healthz`, `/ws`, and `/sse`
   // exist on the backend
   // host; reserving them on the workspace slug space prevents naming
   // confusion if/when these paths are ever proxied through the web origin.
@@ -93,6 +93,7 @@ export const RESERVED_SLUGS = new Set([
   "readyz",
   "healthz",
   "ws",
+  "sse",
   "metrics",
   "ping",
 
