@@ -111,6 +111,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}
 
+	// Disable Codex native multi-agent inside daemon-managed task sessions
+	// so the parent thread's `turn/completed` is not interpreted as task
+	// completion while spawned subagents are still running. See
+	// codex_multi_agent.go for the full rationale and escape hatch.
+	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
+	}
+
 	return nil
 }
 
