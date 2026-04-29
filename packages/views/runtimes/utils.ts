@@ -4,6 +4,8 @@ import type {
   RuntimeUsageByHour,
 } from "@multica/core/types";
 
+import { PRICING, type ModelCost } from "./pricing.generated";
+
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
@@ -114,57 +116,68 @@ export function formatTokens(n: number): string {
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Pricing per million tokens (USD). Sourced from
-// https://platform.claude.com/docs/en/about-claude/pricing — keep in sync
-// when Anthropic releases new models or adjusts prices. cacheWrite reflects
-// the 5-minute cache TTL (1.25× input); the daemon reports
-// cache_creation_input_tokens without TTL metadata, so 5m is the safest /
-// cheapest assumption (matches the API default).
-//
-// Iteration order matters: the resolver's startsWith() fallback walks this
-// object in insertion order, so MORE SPECIFIC keys (e.g. claude-sonnet-4-5)
-// must precede SHORTER prefixes (e.g. claude-sonnet-4) of the same family.
-const MODEL_PRICING: Record<
-  string,
-  { input: number; output: number; cacheRead: number; cacheWrite: number }
-> = {
-  // -- Current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
-  "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
-  "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
-  "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
-  "claude-opus-4-5":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-opus-4-6":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-opus-4-7":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+// Internal pricing shape used by the cost-estimation functions. The
+// generated `ModelCost` type mirrors `models.dev` exactly (snake_case,
+// optional `cache_read` / `cache_write`); we adapt it to non-optional
+// camelCase fields here so callers stay simple. Where the upstream omits
+// a cache tier we fall back to `input` — conservative (no discount
+// applied) and keeps `estimateCacheSavings` returning 0 naturally.
+interface ResolvedPricing {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
 
-  // -- Pre-4.5 Opus (legacy, still served at original price tier) --
-  "claude-opus-4-1":    { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
-  "claude-opus-4":      { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
+function adapt(p: ModelCost): ResolvedPricing {
+  return {
+    input: p.input,
+    output: p.output,
+    cacheRead: p.cache_read ?? p.input,
+    cacheWrite: p.cache_write ?? p.input,
+  };
+}
 
-  // -- Sonnet 4.0 (deprecated; same price as the 4.x family) --
-  "claude-sonnet-4":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
+// Strip a leading `provider/` segment, e.g. `openai/gpt-4o` → `gpt-4o`.
+function stripProviderPrefix(model: string): string {
+  const slash = model.indexOf("/");
+  return slash > 0 ? model.slice(slash + 1) : model;
+}
 
-  // -- Older Haiku tier (defensive entry for the rare runtime still on it) --
-  "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
-};
+// Strip a trailing date / `-latest` tag, e.g. `claude-sonnet-4-5-20250929`
+// → `claude-sonnet-4-5`. Anthropic, OpenAI and Google all version their
+// model snapshots this way; the family is what we price.
+function stripDateSuffix(model: string): string {
+  return model.replace(/-(20\d{2}-?\d{2}-?\d{2}|latest)$/, "");
+}
 
-// Resolve a model string to its pricing tier. Two layers of fallback so the
-// daemon-reported model name doesn't have to match the keys exactly:
-//   1. Exact match.
-//   2. Strip a trailing date / "latest" tag (Claude Code typically reports
-//      `claude-sonnet-4-5-20250929` — the date is volatile, the family is
-//      what we price). Try exact match again on the stripped name.
-//   3. startsWith on either the raw or stripped name.
-// Anything that misses all three is genuinely unknown; we return undefined
-// so callers can distinguish "$0 spend" from "spent but model not priced".
-function resolvePricing(model: string) {
+// Resolve a model string to its pricing tier. PRICING is keyed by
+// `provider/model`. Walked in two passes so exact bare matches always
+// win over prefix matches — otherwise `gpt-4o-2024-05-13` would resolve
+// to `openai/gpt-4o`'s price (alphabetically first; `keyBare.startsWith`
+// is true) instead of the dated entry's specific price.
+//   1. Exact match on the full string (`provider/model`).
+//   2. First pass — exact bare match (`keyBare === bare`). Catches a
+//      bare-keyed input (`gpt-4o`, `gpt-4o-mini`, `gpt-4o-2024-05-13`)
+//      hitting the corresponding `provider/<id>` entry verbatim.
+//   3. Second pass — `keyBare.startsWith(withoutDate)`. Catches a
+//      date-suffixed input whose exact dated entry isn't tracked
+//      (`claude-opus-4-1-20260105` falls back to `claude-opus-4-1`).
+function resolvePricing(model: string): ResolvedPricing | undefined {
   if (!model) return undefined;
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
 
-  const stripped = model.replace(/-(20\d{6}|latest)$/, "");
-  if (stripped !== model && MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
+  const exact = PRICING[model];
+  if (exact) return adapt(exact);
 
-  for (const [key, p] of Object.entries(MODEL_PRICING)) {
-    if (model.startsWith(key) || stripped.startsWith(key)) return p;
+  const bare = stripProviderPrefix(model);
+  const withoutDate = stripDateSuffix(bare);
+
+  for (const [key, p] of Object.entries(PRICING)) {
+    if (stripProviderPrefix(key) === bare) return adapt(p);
+  }
+
+  for (const [key, p] of Object.entries(PRICING)) {
+    if (stripProviderPrefix(key).startsWith(withoutDate)) return adapt(p);
   }
   return undefined;
 }
