@@ -241,7 +241,7 @@ export function AgentCreatePanel({
         <DialogTitle className="sr-only">Quick create issue</DialogTitle>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+        <div className="flex items-center justify-between px-5 pt-4 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
@@ -252,6 +252,7 @@ export function AgentCreatePanel({
               on the first focusable element on mount, causing the tooltip to
               auto-pop every open. */}
           <button
+            type="button"
             onClick={onClose}
             title="Close"
             aria-label="Close"
@@ -262,23 +263,24 @@ export function AgentCreatePanel({
         </div>
 
         {/* Agent picker */}
-        <div className="px-5 pt-1 pb-2 shrink-0">
+        <div className="px-5 pt-1 pb-3 shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <button
                   type="button"
-                  className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm px-1.5 py-1 -ml-1.5 hover:bg-accent/60"
+                  aria-label="Select agent"
+                  className="inline-flex max-w-full items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground cursor-pointer"
                 >
-                  <span>Created by</span>
+                  <span className="shrink-0">Created by</span>
                   {selectedAgent ? (
-                    <span className="flex items-center gap-1.5 text-foreground">
+                    <span className="flex min-w-0 items-center gap-1.5 text-foreground">
                       <ActorAvatar
                         actorType="agent"
                         actorId={selectedAgent.id}
                         size={16}
                       />
-                      {selectedAgent.name}
+                      <span className="truncate">{selectedAgent.name}</span>
                     </span>
                   ) : (
                     <span>Pick an agent…</span>
@@ -307,6 +309,9 @@ export function AgentCreatePanel({
                       size={16}
                     />
                     <span className="flex-1 truncate">{a.name}</span>
+                    {agentId === a.id && (
+                      <Check className="size-3.5 text-muted-foreground" />
+                    )}
                   </DropdownMenuItem>
                 ))
               )}
@@ -331,12 +336,12 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
-          className="relative px-5 pb-3 flex-1 min-h-[140px] overflow-y-auto"
+          className="relative mx-5 mb-4 flex-1 min-h-[11rem] max-h-[42vh] overflow-y-auto rounded-lg border bg-background px-3 py-2.5 transition-[border-color,box-shadow] focus-within:border-ring/50 focus-within:ring-[3px] focus-within:ring-ring/15"
         >
           <ContentEditor
             ref={editorRef}
             defaultValue={initialPrompt}
-            placeholder='Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"'
+            placeholder="Describe the task for this agent..."
             onUpdate={(md) => setHasContent(md.trim().length > 0)}
             onUploadFile={handleUploadFile}
             onSubmit={submit}
@@ -350,30 +355,30 @@ export function AgentCreatePanel({
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <div className="flex items-center gap-1.5">
+        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-h-7 items-center gap-2">
             <FileUploadButton
               size="sm"
+              disabled={uploading}
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
-            <span className="text-xs text-muted-foreground">
-              {keepOpen && sentCount > 0 && (
-                <span className="text-emerald-600 dark:text-emerald-400">{sentCount} sent · </span>
-              )}
-              ⌘↵ to submit
-            </span>
+            {keepOpen && sentCount > 0 && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                {sentCount} sent
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={switchToManual}
               title="Switch to manual create — fill the fields yourself"
-              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="size-3.5" />
               Switch to manual
             </button>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
               <Switch
                 size="sm"
                 checked={keepOpen}
@@ -390,7 +395,7 @@ export function AgentCreatePanel({
                   ? `Daemon CLI must be ≥ ${versionCheck.min}`
                   : undefined
               }
-              className={justSent ? "!bg-emerald-600 !text-white" : undefined}
+              className={justSent ? "min-w-20 !bg-emerald-600 !text-white" : "min-w-20"}
             >
               {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />Sent</span>
