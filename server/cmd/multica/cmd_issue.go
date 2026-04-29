@@ -465,6 +465,15 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
+// isHTTPURL reports whether path is an http:// or https:// URL.
+// Used to skip URL-shaped values passed to --attachment, which only
+// accepts local file paths. Trims surrounding whitespace because
+// agent-generated commands sometimes copy URLs with stray spaces.
+func isHTTPURL(path string) bool {
+	p := strings.TrimSpace(path)
+	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -529,22 +538,53 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["origin_id"] = taskID
 	}
 
+	// Pre-validate attachments BEFORE creating the issue so a bad path
+	// can never produce a half-created issue (which would otherwise
+	// trigger callers — especially the agent doing quick-create — to
+	// retry the whole `issue create` and end up with duplicates).
+	//
+	//   - http(s) URLs are not local files; the API only accepts local
+	//     paths here. Warn and skip rather than fail — a markdown image
+	//     URL embedded in the prompt should never be re-attached, and
+	//     skipping is the safest outcome for that case.
+	//   - Anything else is treated as a local path and read upfront.
+	//     A read failure here is a real user/agent mistake (typo,
+	//     missing file) and we surface it pre-create so the issue
+	//     never lands.
+	type pendingAttachment struct {
+		path string
+		data []byte
+	}
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
 
 	// Upload attachments and link them to the newly created issue.
+	// Failures here are partial-success: the issue exists already, so
+	// turning a non-zero exit on the caller would invite a retry that
+	// duplicates the issue. Warn on stderr and continue.
 	issueID := strVal(result, "id")
-	for _, filePath := range attachments {
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+	for _, att := range pending {
+		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
+				att.path, strVal(result, "identifier"), uploadErr)
+			continue
 		}
-		if _, uploadErr := client.UploadFile(ctx, data, filePath, issueID); uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -835,9 +875,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Upload attachments and collect their IDs.
+	// Upload attachments and collect their IDs. URLs are skipped with a
+	// warning — `--attachment` only accepts local file paths, and a
+	// markdown image URL embedded in agent-supplied content should never
+	// be re-uploaded as if it were a file. Unlike `issue create`, this
+	// path uploads BEFORE posting the comment, so a hard failure on a
+	// real (local) attachment correctly aborts the whole call.
 	var attachmentIDs []string
 	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
 			return fmt.Errorf("read attachment %s: %w", filePath, readErr)

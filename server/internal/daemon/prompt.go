@@ -57,9 +57,10 @@ func buildQuickCreatePrompt(task Task) string {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n")
 	}
 	b.WriteString("- project: omit. The platform will route the issue to the workspace default.\n")
-	b.WriteString("- status: omit (defaults to `todo`).\n\n")
+	b.WriteString("- status: omit (defaults to `todo`).\n")
+	b.WriteString("- attachments: do NOT pass `--attachment`. The flag only accepts LOCAL file paths, and any image URL embedded in the user input is already part of the description as markdown — keep it inline in `--description` instead of trying to re-attach it. (Trying to pass `https://…` to `--attachment` will fail and look like a create error to you, but the issue may already exist; never retry `issue create` on that signal.)\n\n")
 	b.WriteString("Output format:\n")
-	b.WriteString("- Run exactly one `multica issue create` invocation.\n")
+	b.WriteString("- Run exactly one `multica issue create` invocation. Do not retry it for any reason — even on a non-zero exit. The issue may already exist; another attempt would create a duplicate.\n")
 	b.WriteString("- After it succeeds, print exactly one line: `Created MUL-<n>: <title>` and exit. No commentary, no follow-up tool calls.\n")
 	b.WriteString("- Do NOT call `multica issue get` or `multica issue comment add` for this task — there is no issue to query or comment on prior to creation.\n")
 	b.WriteString("- If the CLI returns an error, exit with that error as the only output. The platform writes a failure notification automatically; do not retry.\n")
