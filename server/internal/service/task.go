@@ -1436,7 +1436,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		Type:          "quick_create_done",
 		Severity:      "info",
 		IssueID:       issue.ID,
-		Title:         fmt.Sprintf("Created %s: %s", identifier, issue.Title),
+		Title:         issue.Title,
 		Body:          pgtype.Text{},
 		ActorType:     pgtype.Text{String: "agent", Valid: true},
 		ActorID:       task.AgentID,
