@@ -39,6 +39,9 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// Subscribe @mentioned users in description
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
+				if m.Type == "issue" {
+					continue // issue cross-refs are not users
+				}
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 			}
 		}
@@ -74,6 +77,9 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
+						if m.Type == "issue" {
+							continue // issue cross-refs are not users
+						}
 						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 					}
 				}
