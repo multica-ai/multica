@@ -20,46 +20,158 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// markerOnlyBMADAgents is the set of BMAD agent names that are contractually
-// forbidden from driving issue status transitions directly. They communicate
-// state through contract-marker comments (parsed by the BMAD sidecar) which
-// then route the card on their behalf. See bmad-tea/SKILL.md,
-// bmad-agent-reviewer/SKILL.md, bmad-architect-impl-plan/SKILL.md, and
-// bmad-dev-story/SKILL.md for the exact markers each agent emits.
+// Strict status-change lockdown (2026-04-29).
 //
-// Each entry maps the agent name to the set of statuses the agent is still
-// permitted to flip to (allow-list). nil / empty set means "every status flip
-// is forbidden". This is needed for `bmad-agent-dev` (Amelia), which retains
-// one documented direct flip path — the `staged` flip in `bmad-dev-story`
-// Step 1.1.0 post-merge no-op short-circuit.
-var markerOnlyBMADAgents = map[string]map[string]struct{}{
-	"bmad-tea":             nil, // Murat   — emits <!-- completion-note v1 -->
-	"bmad-agent-reviewer":  nil, // Quinn   — emits <!-- review-findings v1 -->
-	"bmad-agent-architect": nil, // Winston — emits <!-- impl-plan v1 -->
-	"bmad-agent-dev":       {"staged": {}}, // Amelia — emits <!-- claim v1 -->, <!-- completion-note v1 -->, etc.; `staged` exempt
+// Status transitions on issues are now centrally gated by
+// `checkStatusFlipPolicy`. The contract is:
+//
+//   * Member callers (humans on the web/desktop UI) may only flip status
+//     `backlog -> todo` and `todo -> planning`. All other flips return 403
+//     and the human is told to leave a comment mentioning the agent.
+//   * The BMAD sidecar (agent name `bmad-sidecar`) is the privileged actor —
+//     it parses contract markers and routes cards on agents' behalf, so it
+//     is fully exempt and may flip any status to any status.
+//   * All other agents (Murat, Quinn, Winston, Amelia, plus any future or
+//     non-BMAD agents) are blocked from direct status flips, with a single
+//     documented exemption: `bmad-agent-dev` (Amelia) may flip into
+//     `staged` from anywhere — that path is preserved for
+//     `bmad-dev-story` Step 1.1.0 post-merge no-op short-circuit.
+//   * `CreateIssue` always lands new cards in `backlog`, regardless of the
+//     `status` field on the request. Movement out of `backlog` happens via
+//     the rules above.
+//
+// This collapses the older marker-only allowlist (which only covered a
+// subset of BMAD agents on `UpdateIssue`) into a single source of truth
+// applied across `UpdateIssue`, `BatchUpdateIssues`, and `CreateIssue`.
+
+// sidecarAgentName is the agent name reserved for the BMAD sidecar. The
+// sidecar is the only actor permitted to perform unrestricted status flips
+// on agents' behalf.
+const sidecarAgentName = "bmad-sidecar"
+
+// memberAllowedStatusTransitions maps an `from -> set of permitted to`
+// statuses for member (human) callers. Anything not present here is denied.
+var memberAllowedStatusTransitions = map[string]map[string]struct{}{
+	"backlog": {"todo": {}},
+	"todo":    {"planning": {}},
 }
 
-// isMarkerOnlyBMADAgent reports whether an agent name belongs to the
-// marker-only deny list above. Names are matched case-insensitively after
-// trimming whitespace.
-func isMarkerOnlyBMADAgent(name string) bool {
-	_, ok := markerOnlyBMADAgents[strings.ToLower(strings.TrimSpace(name))]
+// agentDirectFlipExemptions maps an agent name to the set of `to` statuses
+// the agent is permitted to flip into directly (regardless of `from`). All
+// other agents (and all other statuses) are blocked. The sidecar is handled
+// separately and is fully unrestricted.
+var agentDirectFlipExemptions = map[string]map[string]struct{}{
+	"bmad-agent-dev": {"staged": {}}, // Amelia — bmad-dev-story Step 1.1.0 staged short-circuit
+}
+
+// memberMayFlipStatus reports whether a member caller is permitted to flip
+// an issue from `prev` to `next`. A no-op flip (prev == next) is always
+// allowed. Inputs are matched case-insensitively after trimming whitespace.
+func memberMayFlipStatus(prev, next string) bool {
+	prev = strings.ToLower(strings.TrimSpace(prev))
+	next = strings.ToLower(strings.TrimSpace(next))
+	if prev == next {
+		return true
+	}
+	allowed, ok := memberAllowedStatusTransitions[prev]
+	if !ok {
+		return false
+	}
+	_, ok = allowed[next]
 	return ok
 }
 
-// markerOnlyAgentAllowsStatus reports whether an agent on the marker-only
-// list is nonetheless permitted to flip to the given status (the per-agent
-// allow-list of exempt statuses).
-func markerOnlyAgentAllowsStatus(name, status string) bool {
-	allow, ok := markerOnlyBMADAgents[strings.ToLower(strings.TrimSpace(name))]
+// agentMayFlipStatus reports whether the given agent is permitted to flip
+// an issue from `prev` to `next`. The sidecar is fully exempt; any other
+// agent must have an entry in `agentDirectFlipExemptions` covering `next`.
+// A no-op flip (prev == next) is always allowed.
+func agentMayFlipStatus(agentName, prev, next string) bool {
+	name := strings.ToLower(strings.TrimSpace(agentName))
+	if name == sidecarAgentName {
+		return true
+	}
+	prev = strings.ToLower(strings.TrimSpace(prev))
+	next = strings.ToLower(strings.TrimSpace(next))
+	if prev == next {
+		return true
+	}
+	allowed, ok := agentDirectFlipExemptions[name]
 	if !ok {
-		return true // not on the list — unrestricted
+		return false
 	}
-	if allow == nil || len(allow) == 0 {
-		return false // on the list, no exemptions — fully forbidden
+	_, ok = allowed[next]
+	return ok
+}
+
+// statusFlipForbiddenMessage builds the user-facing 403 error string. The
+// `actorType` is either "member" or "agent"; for agents `actorName` carries
+// the agent name, ignored for members.
+func statusFlipForbiddenMessage(actorType, actorName, prev, next string) string {
+	switch actorType {
+	case "member":
+		return fmt.Sprintf(
+			"members may only flip status `backlog -> todo` and `todo -> planning`; "+
+				"requested `%s -> %s` was rejected. To move this card any other way, "+
+				"leave a comment mentioning the agent you want to handle it (for "+
+				"example: \"@bmad-agent-architect please plan this\") and the BMAD "+
+				"sidecar will route the card for you.",
+			prev, next)
+	case "agent":
+		return fmt.Sprintf(
+			"agent %q is forbidden from flipping status directly (`%s -> %s`). "+
+				"Status transitions are owned by the BMAD sidecar, which parses "+
+				"contract markers in your comments (`<!-- claim v1 -->`, "+
+				"`<!-- impl-plan v1 -->`, `<!-- completion-note v1 -->`, "+
+				"`<!-- review-findings v1 -->`, `<!-- fix-note v1 -->`, "+
+				"`<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`) and routes "+
+				"the card. Drop the `multica issue status` call and post your "+
+				"marker comment instead.",
+			actorName, prev, next)
+	default:
+		return fmt.Sprintf("status flip `%s -> %s` is not permitted", prev, next)
 	}
-	_, exempt := allow[strings.ToLower(strings.TrimSpace(status))]
-	return exempt
+}
+
+// checkStatusFlipPolicy is the centralized gate called by every issue
+// handler that can change `status`. It returns (forbidden=true, msg) when
+// the request must be rejected; otherwise (false, ""). On forbidden it also
+// emits a structured warn log so the rejection is observable in container
+// logs.
+func (h *Handler) checkStatusFlipPolicy(r *http.Request, userID, workspaceID, prevStatus, newStatus, issueID string) (bool, string) {
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType == "member" {
+		if memberMayFlipStatus(prevStatus, newStatus) {
+			return false, ""
+		}
+		slog.Warn("member blocked from status flip",
+			append(logger.RequestAttrs(r),
+				"issue_id", issueID,
+				"workspace_id", workspaceID,
+				"prev_status", prevStatus,
+				"requested_status", newStatus,
+			)...)
+		return true, statusFlipForbiddenMessage("member", "", prevStatus, newStatus)
+	}
+	// actorType == "agent"
+	actorAgent, err := h.Queries.GetAgent(r.Context(), parseUUID(actorID))
+	if err != nil {
+		// Unknown agent — let the rest of the handler's validation handle it
+		// rather than emit a misleading lockdown 403.
+		return false, ""
+	}
+	if agentMayFlipStatus(actorAgent.Name, prevStatus, newStatus) {
+		return false, ""
+	}
+	slog.Warn("agent blocked from status flip",
+		append(logger.RequestAttrs(r),
+			"agent_name", actorAgent.Name,
+			"agent_id", actorID,
+			"issue_id", issueID,
+			"workspace_id", workspaceID,
+			"prev_status", prevStatus,
+			"requested_status", newStatus,
+		)...)
+	return true, statusFlipForbiddenMessage("agent", actorAgent.Name, prevStatus, newStatus)
 }
 
 // IssueResponse is the JSON response for an issue.
@@ -881,10 +993,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := req.Status
-	if status == "" {
-		status = "todo"
+	// Strict status-change lockdown (2026-04-29). Anything created lands
+	// in `backlog` regardless of the request's `status` field. Movement
+	// out of `backlog` happens via the rules in `checkStatusFlipPolicy`
+	// (members: backlog -> todo; sidecar: anything; specific agent
+	// exemptions). Log when an explicit non-backlog status is overridden
+	// so callers can spot stale clients.
+	if req.Status != "" && strings.ToLower(strings.TrimSpace(req.Status)) != "backlog" {
+		slog.Info("create issue: forcing status to backlog (lockdown)",
+			append(logger.RequestAttrs(r),
+				"workspace_id", workspaceID,
+				"requested_status", req.Status,
+			)...)
 	}
+	status := "backlog"
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
@@ -1192,42 +1314,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Marker-only BMAD agent guard (Option 1, 2026-04-28).
-	// Some BMAD personas (bmad-tea / Murat, bmad-agent-reviewer / Quinn) are
-	// contractually forbidden from driving status transitions directly — the
-	// sidecar parses their <!-- completion-note v1 --> / <!-- review-findings v1 -->
-	// markers and routes the card. When the LLM ignores its persona prompt
-	// and PATCHes status anyway, it races the sidecar and corrupts column
-	// state. Reject the request at the API layer so the bad transition
-	// never reaches the activity log. The sidecar (X-Agent-ID = bmad-sidecar)
-	// and the architect (bmad-architect-impl-plan) are NOT blocked — they
-	// have legitimate flips. Member callers are also not blocked.
+	// Strict status-change lockdown (2026-04-29). Members may only flip
+	// `backlog -> todo` and `todo -> planning`; the BMAD sidecar is
+	// fully exempt; all other agents are blocked except for Amelia's
+	// `staged` short-circuit. See `checkStatusFlipPolicy` at the top of
+	// this file for full contract. This single call replaces the older
+	// marker-only allowlist that only covered a subset of agents.
 	if req.Status != nil && prevIssue.Status != *req.Status {
-		actorTypePre, actorIDPre := h.resolveActor(r, userID, workspaceID)
-		if actorTypePre == "agent" {
-			actorAgent, err := h.Queries.GetAgent(r.Context(), parseUUID(actorIDPre))
-			if err == nil && isMarkerOnlyBMADAgent(actorAgent.Name) &&
-				!markerOnlyAgentAllowsStatus(actorAgent.Name, *req.Status) {
-				slog.Warn("marker-only BMAD agent blocked from direct status flip",
-					append(logger.RequestAttrs(r),
-						"agent_name", actorAgent.Name,
-						"agent_id", actorIDPre,
-						"issue_id", id,
-						"prev_status", prevIssue.Status,
-						"requested_status", *req.Status,
-					)...)
-				writeError(w, http.StatusForbidden, fmt.Sprintf(
-					"agent %q is forbidden from calling `multica issue status` directly. "+
-						"Status transitions are owned by the BMAD sidecar, which parses "+
-						"contract markers in your comments (`<!-- claim v1 -->`, "+
-						"`<!-- impl-plan v1 -->`, `<!-- completion-note v1 -->`, "+
-						"`<!-- review-findings v1 -->`, `<!-- fix-note v1 -->`, "+
-						"`<!-- plan-issue v1 -->`, `<!-- pr-opened v1 -->`) and routes "+
-						"the card. Drop the `multica issue status` call and post your "+
-						"marker comment instead.",
-					actorAgent.Name))
-				return
-			}
+		if forbidden, msg := h.checkStatusFlipPolicy(r, userID, workspaceID, prevIssue.Status, *req.Status, id); forbidden {
+			writeError(w, http.StatusForbidden, msg)
+			return
 		}
 	}
 
@@ -1500,6 +1596,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			params.Description = pgtype.Text{String: *req.Updates.Description, Valid: true}
 		}
 		if req.Updates.Status != nil {
+			// Strict status-change lockdown (2026-04-29). Apply the same gate
+			// as UpdateIssue so kanban drag-drop (which routes through
+			// BatchUpdateIssues) cannot bypass member/agent transition rules.
+			// On forbidden, skip this issue silently — the WS broadcast will
+			// not fire and the frontend's optimistic update will revert.
+			if *req.Updates.Status != prevIssue.Status {
+				if forbidden, _ := h.checkStatusFlipPolicy(r, userID, workspaceID, prevIssue.Status, *req.Updates.Status, issueID); forbidden {
+					continue
+				}
+			}
 			params.Status = pgtype.Text{String: *req.Updates.Status, Valid: true}
 		}
 		if req.Updates.Priority != nil {
