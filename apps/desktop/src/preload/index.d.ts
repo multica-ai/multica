@@ -34,10 +34,14 @@ interface DesktopAPI {
   ) => () => void;
   /**
    * Resolve and copy the local resume command for an issue. Main runs
-   * `multica issue take <id> --print`, copies stdout to the clipboard,
-   * and returns the command + parsed workdir for the confirmation toast.
+   * `multica issue take <id> --print --workspace-id <ws>`, copies stdout
+   * to the clipboard, and returns the command + parsed workdir for the
+   * confirmation toast.
    */
-  takeOverIssue: (issueId: string) => Promise<{
+  takeOverIssue: (
+    issueId: string,
+    workspaceId: string,
+  ) => Promise<{
     ok: boolean;
     command?: string;
     workDir?: string;

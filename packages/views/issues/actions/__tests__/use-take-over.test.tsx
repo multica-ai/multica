@@ -191,7 +191,7 @@ describe("useTakeOver", () => {
       await result.current.takeOver();
     });
 
-    expect(takeOverIssueIPC).toHaveBeenCalledWith("issue-1");
+    expect(takeOverIssueIPC).toHaveBeenCalledWith("issue-1", "ws-1");
     expect(toastSuccess).toHaveBeenCalledWith(
       "Command copied. Paste in your terminal to take over.",
       { description: "/Users/x/work" },

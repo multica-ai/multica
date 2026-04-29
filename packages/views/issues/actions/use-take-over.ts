@@ -12,6 +12,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 interface DesktopAPIWithTakeOver {
   takeOverIssue?: (
     issueId: string,
+    workspaceId: string,
   ) => Promise<{
     ok: boolean;
     command?: string;
@@ -78,8 +79,8 @@ export function useTakeOver(
   );
 
   const takeOver = useCallback(async () => {
-    if (!issueId || !desktopAPI?.takeOverIssue) return;
-    const result = await desktopAPI.takeOverIssue(issueId);
+    if (!issueId || !desktopAPI?.takeOverIssue || !wsId) return;
+    const result = await desktopAPI.takeOverIssue(issueId, wsId);
     if (!result.ok) {
       toast.error("Could not prepare take-over command", {
         description: result.error,
@@ -95,7 +96,7 @@ export function useTakeOver(
     toast.success("Command copied. Paste in your terminal to take over.", {
       description,
     });
-  }, [issueId, desktopAPI]);
+  }, [issueId, desktopAPI, wsId]);
 
   return { visible, takeOver };
 }

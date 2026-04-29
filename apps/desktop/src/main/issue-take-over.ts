@@ -55,9 +55,15 @@ function runCli(
   });
 }
 
-async function takeOver(issueId: string): Promise<TakeOverResult> {
+async function takeOver(
+  issueId: string,
+  workspaceId: string,
+): Promise<TakeOverResult> {
   if (!isAcceptableIssueId(issueId)) {
     return { ok: false, error: "Invalid issue id" };
+  }
+  if (!UUID_RE.test(workspaceId)) {
+    return { ok: false, error: "Missing workspace id" };
   }
 
   const cli = await resolveCliInvocation();
@@ -68,7 +74,19 @@ async function takeOver(issueId: string): Promise<TakeOverResult> {
     };
   }
 
-  const args = ["issue", "take", issueId, "--print", ...cli.profileArgs];
+  // The desktop profile config doesn't pin a workspace — the renderer is the
+  // source of truth (the user can switch workspaces inside the app without
+  // the CLI ever knowing). Pass --workspace-id explicitly so the API request
+  // carries the right X-Workspace-* header.
+  const args = [
+    "issue",
+    "take",
+    issueId,
+    "--print",
+    "--workspace-id",
+    workspaceId,
+    ...cli.profileArgs,
+  ];
 
   try {
     const { stdout } = await runCli(cli.bin, args, cli.env);
@@ -91,7 +109,9 @@ async function takeOver(issueId: string): Promise<TakeOverResult> {
 }
 
 export function setupIssueTakeOver(): void {
-  ipcMain.handle("issue:takeOver", (_event, issueId: string) =>
-    takeOver(issueId),
+  ipcMain.handle(
+    "issue:takeOver",
+    (_event, issueId: string, workspaceId: string) =>
+      takeOver(issueId, workspaceId),
   );
 }
