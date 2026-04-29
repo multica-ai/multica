@@ -405,7 +405,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 }
 
 // CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// Issue status is NOT changed here directly — the agent manages it via the CLI.
+// Issue tasks may auto-advance to in_review once the final active task for the
+// issue finishes; chat tasks never touch issue status.
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -518,6 +520,50 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 		}
 		s.broadcastChatDone(ctx, task)
+	}
+
+	// Auto-advance issue to in_review when a non-chat issue task completes, the
+	// issue is still in an active work state, and no other active tasks remain
+	// for that issue. Parking/terminal states must be preserved: backlog stays
+	// backlog, blocked stays blocked, and terminal statuses are left untouched
+	// if the agent already set them manually.
+	if task.IssueID.Valid && !task.ChatSessionID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			prevStatus := issue.Status
+			active := prevStatus == "todo" || prevStatus == "in_progress"
+			if active {
+				hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+				if checkErr != nil {
+					slog.Warn("auto in_review skipped: failed to check active tasks", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", checkErr)
+				} else if !hasActive {
+					if updatedIssue, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+						ID:     task.IssueID,
+						Status: "in_review",
+					}); err != nil {
+						slog.Warn("auto in_review failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+					} else {
+						slog.Info("issue auto-advanced to in_review", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
+						s.broadcastIssueUpdated(updatedIssue, map[string]any{
+							"assignee_changed":    false,
+							"status_changed":      true,
+							"priority_changed":    false,
+							"due_date_changed":    false,
+							"description_changed": false,
+							"title_changed":       false,
+							"prev_title":          issue.Title,
+							"prev_assignee_type":  util.TextToPtr(issue.AssigneeType),
+							"prev_assignee_id":    util.UUIDToPtr(issue.AssigneeID),
+							"prev_status":         prevStatus,
+							"prev_priority":       issue.Priority,
+							"prev_due_date":       util.TimestampToPtr(issue.DueDate),
+							"prev_description":    util.TextToPtr(issue.Description),
+							"creator_type":        issue.CreatorType,
+							"creator_id":          util.UUIDToString(issue.CreatorID),
+						})
+					}
+				}
+			}
+		}
 	}
 
 	// Reconcile agent status
@@ -1035,14 +1081,20 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	})
 }
 
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
+func (s *TaskService) broadcastIssueUpdated(issue db.Issue, extra map[string]any) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	payload := map[string]any{
+		"issue": issueToMap(issue, prefix),
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload:     map[string]any{"issue": issueToMap(issue, prefix)},
+		Payload:     payload,
 	})
 }
 
