@@ -61,6 +61,20 @@ model = "o3"
 `,
 		},
 		{
+			name: "drops top-level dotted-key form with whitespace",
+			in: `model = "o3"
+features . multi_agent = true
+
+[profiles.default]
+model = "o3"
+`,
+			want: `model = "o3"
+
+[profiles.default]
+model = "o3"
+`,
+		},
+		{
 			name: "drops multi_agent inside [features] table",
 			in: `[features]
 multi_agent = true
@@ -74,6 +88,26 @@ experimental_foo = true
 
 [profiles.default]
 model = "o3"
+`,
+		},
+		{
+			name: "drops multi_agent inside [features] table with inline comment",
+			in: `[features] # user feature flags
+multi_agent = true
+experimental_foo = true
+`,
+			want: `[features] # user feature flags
+experimental_foo = true
+`,
+		},
+		{
+			name: "drops multi_agent inside spaced [ features ] table",
+			in: `[ features ]
+multi_agent = true
+experimental_foo = true
+`,
+			want: `[ features ]
+experimental_foo = true
 `,
 		},
 		{
@@ -193,6 +227,30 @@ model = "o3"
 	requireMultiAgentDisabled(t, parseTOML(t, got))
 }
 
+func TestEnsureCodexMultiAgentConfigDottedKeyWithWhitespace(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	original := `model = "o3"
+features . multi_agent = true
+`
+	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
+		t.Fatalf("ensureCodexMultiAgentConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	got := string(data)
+	if strings.Contains(got, "features . multi_agent = true") {
+		t.Errorf("expected user features . multi_agent = true to be stripped, got:\n%s", got)
+	}
+	requireMultiAgentDisabled(t, parseTOML(t, got))
+}
+
 func TestEnsureCodexMultiAgentConfigFeaturesTable(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +292,52 @@ model = "o3"
 
 	// Output must parse as valid TOML and have features.multi_agent = false.
 	requireMultiAgentDisabled(t, parseTOML(t, got))
+}
+
+func TestEnsureCodexMultiAgentConfigFeaturesTableHeaderVariants(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"inline_comment": `[features] # user feature flags
+multi_agent = true
+experimental_thinking = true
+`,
+		"spaced_header": `[ features ]
+multi_agent = true
+experimental_thinking = true
+`,
+	}
+
+	for name, original := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+
+			if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
+				t.Fatalf("ensureCodexMultiAgentConfig failed: %v", err)
+			}
+
+			data, _ := os.ReadFile(configPath)
+			got := string(data)
+			if strings.Contains(got, "features.multi_agent = false") {
+				t.Errorf("managed block must NOT use root dotted-key form when [features] table exists; got:\n%s", got)
+			}
+			if strings.Contains(got, "multi_agent = true") {
+				t.Errorf("expected user multi_agent = true to be stripped, got:\n%s", got)
+			}
+
+			parsed := parseTOML(t, got)
+			requireMultiAgentDisabled(t, parsed)
+			features := parsed["features"].(map[string]any)
+			if v, _ := features["experimental_thinking"].(bool); !v {
+				t.Errorf("expected user's features.experimental_thinking preserved, got %v", features["experimental_thinking"])
+			}
+		})
+	}
 }
 
 func TestEnsureCodexMultiAgentConfigFeaturesTableEmpty(t *testing.T) {

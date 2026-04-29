@@ -68,12 +68,15 @@ var multiAgentBlockRe = regexp.MustCompile(
 		`.*?^` + regexp.QuoteMeta(multicaMultiAgentEndMarker) + `\n*`)
 
 var (
+	// matches a top-level `[features]` table header, allowing TOML's optional
+	// whitespace inside brackets and inline comments after the header.
+	rootFeaturesTableHeaderRe = regexp.MustCompile(`^\s*\[\s*features\s*\]\s*(?:#.*)?$`)
 	// matches `multi_agent = ...` (with optional whitespace) inside a
 	// `[features]` table.
 	featuresTableMultiAgentRe = regexp.MustCompile(`^\s*multi_agent\s*=`)
 	// matches `features.multi_agent = ...` at the TOML root (top-level
-	// dotted-key form).
-	rootDottedMultiAgentRe = regexp.MustCompile(`^\s*features\.multi_agent\s*=`)
+	// dotted-key form, including TOML's optional whitespace around dots).
+	rootDottedMultiAgentRe = regexp.MustCompile(`^\s*features\s*\.\s*multi_agent\s*=`)
 )
 
 // codexMultiAgentEnabled reports whether the user opted into keeping Codex
@@ -118,6 +121,11 @@ func stripUserMultiAgentDirectives(content string) string {
 	currentTable := "" // empty = TOML root
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if rootFeaturesTableHeaderRe.MatchString(line) {
+			currentTable = "[features]"
+			out = append(out, line)
+			continue
+		}
 		if strings.HasPrefix(trimmed, "[") {
 			currentTable = trimmed
 			out = append(out, line)
@@ -144,7 +152,7 @@ func stripUserMultiAgentDirectives(content string) string {
 // root-level `features.multi_agent` dotted key.
 func hasRootFeaturesTable(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == "[features]" {
+		if rootFeaturesTableHeaderRe.MatchString(line) {
 			return true
 		}
 	}
@@ -162,7 +170,7 @@ func injectManagedBlockIntoFeaturesTable(content string) string {
 	blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
-		if strings.TrimSpace(line) != "[features]" {
+		if !rootFeaturesTableHeaderRe.MatchString(line) {
 			continue
 		}
 		out := make([]string, 0, len(lines)+len(blockLines))
