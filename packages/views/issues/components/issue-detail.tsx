@@ -317,6 +317,8 @@ interface IssueDetailProps {
   onDelete?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
+  /** Controls whether the component canonicalizes the browser URL to /issues/{identifier}. */
+  syncUrl?: boolean;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
 }
@@ -325,7 +327,14 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({
+  issueId,
+  onDelete,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  syncUrl = true,
+  highlightCommentId,
+}: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const deepLinkedCommentId = router.searchParams?.get("comment") ?? undefined;
@@ -394,13 +403,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const searchString = router.searchParams?.toString() ?? "";
 
   useEffect(() => {
+    if (!syncUrl) return;
     if (!issue) return;
     if (id === issue.identifier) return;
     const nextPath = paths.issueDetail(issue.identifier);
     const nextSearch = new URLSearchParams(searchString);
     const query = nextSearch.toString();
     router.replace(query ? `${nextPath}?${query}` : nextPath);
-  }, [issue, id, paths, router.replace, searchString]);
+  }, [syncUrl, issue, id, paths, router.replace, searchString]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
