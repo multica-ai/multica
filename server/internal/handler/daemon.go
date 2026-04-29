@@ -17,8 +17,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -574,90 +576,159 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	updateStart := time.Now()
-	_, updateErr := h.Queries.UpdateAgentRuntimeHeartbeat(r.Context(), rt.ID)
-	updateMs = time.Since(updateStart).Milliseconds()
-	if updateErr != nil {
+	ack, m, err := h.processHeartbeat(r.Context(), rt)
+	updateMs = m.UpdateMs
+	probeSkillsMs = m.ProbeSkillsMs
+	popSkillsMs = m.PopSkillsMs
+	probeImportMs = m.ProbeImportMs
+	popImportMs = m.PopImportMs
+	probeSkillsTimedOut = m.ProbeSkillsTimedOut
+	probeImportTimedOut = m.ProbeImportTimedOut
+	if err != nil {
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
 	}
 
-	slog.Debug("daemon heartbeat", "runtime_id", req.RuntimeID)
+	outcome = "ok"
+	// Preserve the existing HTTP response shape: the runtime_id field is new
+	// in the WS path and would be redundant noise on the HTTP path where the
+	// caller already knows which runtime it asked about.
+	resp := map[string]any{"status": ack.Status}
+	if ack.PendingUpdate != nil {
+		resp["pending_update"] = ack.PendingUpdate
+	}
+	if ack.PendingModelList != nil {
+		resp["pending_model_list"] = ack.PendingModelList
+	}
+	if ack.PendingLocalSkills != nil {
+		resp["pending_local_skills"] = ack.PendingLocalSkills
+	}
+	if ack.PendingLocalSkillImport != nil {
+		resp["pending_local_skill_import"] = ack.PendingLocalSkillImport
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
-	resp := map[string]any{"status": "ok"}
+// HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point: it
+// resolves the runtime, verifies the connection's workspace owns it, and
+// returns the ack payload. It is the WebSocket-side mirror of DaemonHeartbeat.
+//
+// Workspace authorization is re-checked on every heartbeat instead of trusted
+// from the upgrade-time check because runtime ownership can change (e.g. a
+// runtime is reassigned to another workspace mid-connection).
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error) {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid runtime_id: %w", err)
+	}
+	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
+	if err != nil {
+		return nil, fmt.Errorf("runtime not found: %w", err)
+	}
+	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
+		return nil, fmt.Errorf("runtime not in connection workspace")
+	}
+	ack, _, err := h.processHeartbeat(ctx, rt)
+	return ack, err
+}
 
-	// Check for pending update requests for this runtime.
-	if pending := h.UpdateStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_update"] = map[string]string{
-			"id":             pending.ID,
-			"target_version": pending.TargetVersion,
+// heartbeatMetrics carries per-stage timings out of processHeartbeat so the
+// HTTP slow-log can stay structured. The WS path discards them.
+type heartbeatMetrics struct {
+	UpdateMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeSkillsTimedOut, ProbeImportTimedOut                         bool
+}
+
+// processHeartbeat does the work shared by HTTP POST /api/daemon/heartbeat and
+// the WebSocket daemon:heartbeat path: bumps last_seen_at and pulls any
+// pending actions queued for the runtime. Auth and request decoding live in
+// the caller because they differ between transports.
+func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+	var m heartbeatMetrics
+	runtimeID := uuidToString(rt.ID)
+
+	updateStart := time.Now()
+	_, updateErr := h.Queries.UpdateAgentRuntimeHeartbeat(ctx, rt.ID)
+	m.UpdateMs = time.Since(updateStart).Milliseconds()
+	if updateErr != nil {
+		return nil, m, updateErr
+	}
+
+	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
+
+	ack := &protocol.DaemonHeartbeatAckPayload{
+		RuntimeID: runtimeID,
+		Status:    "ok",
+	}
+
+	if pending := h.UpdateStore.PopPending(runtimeID); pending != nil {
+		ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
+			ID:            pending.ID,
+			TargetVersion: pending.TargetVersion,
 		}
 	}
 
-	// Check for pending model-list requests for this runtime.
-	if pending := h.ModelListStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_model_list"] = map[string]string{"id": pending.ID}
+	if pending := h.ModelListStore.PopPending(runtimeID); pending != nil {
+		ack.PendingModelList = &protocol.DaemonHeartbeatPendingModelList{ID: pending.ID}
 	}
 
 	// Probe then claim the local-skill list queue. The probe is bounded so a
 	// slow shared store cannot stall the heartbeat on empty-queue ticks; the
-	// claim runs unbounded (it inherits only r.Context()) because its Lua
-	// side effects cannot be safely aborted mid-script.
+	// claim runs unbounded (it inherits only ctx) because its Lua side
+	// effects cannot be safely aborted mid-script.
 	probeSkillsStart := time.Now()
-	probeSkillsCtx, cancelProbeSkills := context.WithTimeout(r.Context(), heartbeatHasPendingTimeout)
-	hasSkills, probeErr := h.LocalSkillListStore.HasPending(probeSkillsCtx, req.RuntimeID)
+	probeSkillsCtx, cancelProbeSkills := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasSkills, probeErr := h.LocalSkillListStore.HasPending(probeSkillsCtx, runtimeID)
 	cancelProbeSkills()
-	probeSkillsMs = time.Since(probeSkillsStart).Milliseconds()
+	m.ProbeSkillsMs = time.Since(probeSkillsStart).Milliseconds()
 	switch {
 	case probeErr == nil && hasSkills:
 		popStart := time.Now()
-		pendingSkills, popErr := h.LocalSkillListStore.PopPending(r.Context(), req.RuntimeID)
-		popSkillsMs = time.Since(popStart).Milliseconds()
+		pendingSkills, popErr := h.LocalSkillListStore.PopPending(ctx, runtimeID)
+		m.PopSkillsMs = time.Since(popStart).Milliseconds()
 		if popErr != nil {
-			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", req.RuntimeID)
+			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", runtimeID)
 		} else if pendingSkills != nil {
-			resp["pending_local_skills"] = map[string]string{"id": pendingSkills.ID}
+			ack.PendingLocalSkills = &protocol.DaemonHeartbeatPendingLocalSkills{ID: pendingSkills.ID}
 		}
 	case probeErr != nil:
 		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
-			probeSkillsTimedOut = true
-			slog.Warn("local skill list HasPending timed out", "runtime_id", req.RuntimeID, "elapsed_ms", probeSkillsMs)
+			m.ProbeSkillsTimedOut = true
+			slog.Warn("local skill list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeSkillsMs)
 		} else {
-			slog.Warn("local skill list HasPending failed", "error", probeErr, "runtime_id", req.RuntimeID)
+			slog.Warn("local skill list HasPending failed", "error", probeErr, "runtime_id", runtimeID)
 		}
 	}
 
-	// Same probe-then-claim pattern for the import queue.
 	probeImportStart := time.Now()
-	probeImportCtx, cancelProbeImport := context.WithTimeout(r.Context(), heartbeatHasPendingTimeout)
-	hasImport, probeErr := h.LocalSkillImportStore.HasPending(probeImportCtx, req.RuntimeID)
+	probeImportCtx, cancelProbeImport := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasImport, probeErr := h.LocalSkillImportStore.HasPending(probeImportCtx, runtimeID)
 	cancelProbeImport()
-	probeImportMs = time.Since(probeImportStart).Milliseconds()
+	m.ProbeImportMs = time.Since(probeImportStart).Milliseconds()
 	switch {
 	case probeErr == nil && hasImport:
 		popStart := time.Now()
-		pendingImport, popErr := h.LocalSkillImportStore.PopPending(r.Context(), req.RuntimeID)
-		popImportMs = time.Since(popStart).Milliseconds()
+		pendingImport, popErr := h.LocalSkillImportStore.PopPending(ctx, runtimeID)
+		m.PopImportMs = time.Since(popStart).Milliseconds()
 		if popErr != nil {
-			slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", req.RuntimeID)
+			slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", runtimeID)
 		} else if pendingImport != nil {
-			resp["pending_local_skill_import"] = map[string]string{
-				"id":        pendingImport.ID,
-				"skill_key": pendingImport.SkillKey,
+			ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
+				ID:       pendingImport.ID,
+				SkillKey: pendingImport.SkillKey,
 			}
 		}
 	case probeErr != nil:
 		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
-			probeImportTimedOut = true
-			slog.Warn("local skill import HasPending timed out", "runtime_id", req.RuntimeID, "elapsed_ms", probeImportMs)
+			m.ProbeImportTimedOut = true
+			slog.Warn("local skill import HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeImportMs)
 		} else {
-			slog.Warn("local skill import HasPending failed", "error", probeErr, "runtime_id", req.RuntimeID)
+			slog.Warn("local skill import HasPending failed", "error", probeErr, "runtime_id", runtimeID)
 		}
 	}
 
-	outcome = "ok"
-	writeJSON(w, http.StatusOK, resp)
+	return ack, m, nil
 }
 
 // logHeartbeatEndpointSlow emits one structured log when /api/daemon/heartbeat

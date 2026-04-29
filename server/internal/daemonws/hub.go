@@ -1,6 +1,7 @@
 package daemonws
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -64,6 +65,12 @@ func (c *client) markSeen(eventID string) bool {
 	return true
 }
 
+// HeartbeatHandler processes a daemon:heartbeat frame. It must verify that
+// runtimeID is one of identity.RuntimeIDs (the connection's authenticated
+// scope) and return the ack payload to send back. Returning an error skips
+// the ack and is logged at debug level.
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error)
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -72,6 +79,9 @@ type Hub struct {
 	mu        sync.RWMutex
 	clients   map[*client]bool
 	byRuntime map[string]map[*client]bool
+
+	hbMu        sync.RWMutex
+	onHeartbeat HeartbeatHandler
 }
 
 func NewHub() *Hub {
@@ -87,6 +97,26 @@ func NewHub() *Hub {
 		clients:   make(map[*client]bool),
 		byRuntime: make(map[string]map[*client]bool),
 	}
+}
+
+// SetHeartbeatHandler installs the callback used for daemon:heartbeat frames.
+// Wiring is done after handler construction because the handler depends on
+// DB queries that aren't available when the hub is built. A nil handler
+// disables WS heartbeat processing — daemons fall back to HTTP heartbeat
+// transparently because their fallback timer fires whenever no ack arrives.
+func (h *Hub) SetHeartbeatHandler(fn HeartbeatHandler) {
+	if h == nil {
+		return
+	}
+	h.hbMu.Lock()
+	h.onHeartbeat = fn
+	h.hbMu.Unlock()
+}
+
+func (h *Hub) heartbeatHandler() HeartbeatHandler {
+	h.hbMu.RLock()
+	defer h.hbMu.RUnlock()
+	return h.onHeartbeat
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -315,9 +345,73 @@ func (c *client) handleFrame(raw []byte) {
 		slog.Debug("daemon websocket invalid frame", "error", err, "daemon_id", c.identity.DaemonID)
 		return
 	}
-	// The phase-one daemon channel is server-push only. Inbound frames are
-	// drained so control frames and close handling work, but app messages are
-	// intentionally ignored for forward compatibility.
+	switch msg.Type {
+	case protocol.EventDaemonHeartbeat:
+		c.handleHeartbeatFrame(msg.Payload)
+	default:
+		// Unknown app messages are intentionally ignored for forward
+		// compatibility with future daemon → server message types.
+	}
+}
+
+// handleHeartbeatFrame processes an inbound daemon:heartbeat from the daemon,
+// invokes the hub's handler, and writes back a daemon:heartbeat_ack.
+func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
+	handler := c.hub.heartbeatHandler()
+	if handler == nil {
+		// Server doesn't have a heartbeat handler wired — daemon will time
+		// out waiting for an ack and fall back to HTTP heartbeat.
+		return
+	}
+
+	var payload protocol.DaemonHeartbeatRequestPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		slog.Debug("daemon websocket heartbeat invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if payload.RuntimeID == "" {
+		slog.Debug("daemon websocket heartbeat missing runtime_id", "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if _, ok := c.runtimes[payload.RuntimeID]; !ok {
+		// The connection authenticated for a fixed runtime set; reject any
+		// heartbeat for a runtime the client did not register for.
+		slog.Warn("daemon websocket heartbeat for unauthorized runtime",
+			"daemon_id", c.identity.DaemonID,
+			"runtime_id", payload.RuntimeID)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ack, err := handler(ctx, c.identity, payload.RuntimeID)
+	if err != nil {
+		slog.Warn("daemon websocket heartbeat handler failed",
+			"error", err,
+			"daemon_id", c.identity.DaemonID,
+			"runtime_id", payload.RuntimeID)
+		return
+	}
+	if ack == nil {
+		return
+	}
+	frame, err := json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonHeartbeatAck,
+		Payload: mustMarshalRaw(ack),
+	})
+	if err != nil {
+		slog.Debug("daemon websocket heartbeat ack marshal failed", "error", err)
+		return
+	}
+	select {
+	case c.send <- frame:
+	default:
+		// Send buffer is full — slow client. Don't block the read pump; the
+		// next writePump tick or notifyFrame eviction will clean up.
+		slog.Debug("daemon websocket heartbeat ack dropped: send buffer full",
+			"daemon_id", c.identity.DaemonID,
+			"runtime_id", payload.RuntimeID)
+	}
 }
 
 func (c *client) writePump() {

@@ -50,6 +50,9 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	wsHBMu      sync.RWMutex         // guards wsHBLastAck
+	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
+
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
@@ -72,6 +75,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeIndex:  make(map[string]Runtime),
 		runtimeSetCh:  make(chan struct{}, 1),
 		agentVersions: make(map[string]string),
+		wsHBLastAck:   make(map[string]time.Time),
 	}
 }
 
@@ -106,6 +110,52 @@ func (d *Daemon) drainRuntimeSetChanged() {
 			return
 		}
 	}
+}
+
+// wsHeartbeatFreshness defines how long a WS heartbeat ack is considered
+// "fresh enough" to suppress the HTTP heartbeat for that runtime. The window
+// is 2× HeartbeatInterval so a single dropped WS ack still keeps HTTP
+// suppressed, but two missed acks (~30s of WS silence) re-enable HTTP — well
+// inside the server-side 45s offline threshold.
+func (d *Daemon) wsHeartbeatFreshness() time.Duration {
+	if d.cfg.HeartbeatInterval <= 0 {
+		return 30 * time.Second
+	}
+	return 2 * d.cfg.HeartbeatInterval
+}
+
+// recordWSHeartbeatAck stamps the runtime as having received a fresh WS
+// heartbeat ack from the server. Called by the WS read pump.
+func (d *Daemon) recordWSHeartbeatAck(runtimeID string) {
+	if runtimeID == "" {
+		return
+	}
+	d.wsHBMu.Lock()
+	d.wsHBLastAck[runtimeID] = time.Now()
+	d.wsHBMu.Unlock()
+}
+
+// wsHeartbeatRecentlyAcked reports whether the runtime received a WS
+// heartbeat ack inside the freshness window. The HTTP heartbeat loop uses
+// this to skip duplicate work when WS is already keeping the runtime alive.
+func (d *Daemon) wsHeartbeatRecentlyAcked(runtimeID string) bool {
+	d.wsHBMu.RLock()
+	last, ok := d.wsHBLastAck[runtimeID]
+	d.wsHBMu.RUnlock()
+	if !ok {
+		return false
+	}
+	return time.Since(last) < d.wsHeartbeatFreshness()
+}
+
+// clearWSHeartbeatAcks drops all WS heartbeat freshness records. Called on
+// WS disconnect so HTTP heartbeats resume on the next tick.
+func (d *Daemon) clearWSHeartbeatAcks() {
+	d.wsHBMu.Lock()
+	for k := range d.wsHBLastAck {
+		delete(d.wsHBLastAck, k)
+	}
+	d.wsHBMu.Unlock()
 }
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
@@ -519,41 +569,50 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			for _, rid := range d.allRuntimeIDs() {
+				// Skip HTTP heartbeat for runtimes that successfully acked
+				// a recent WebSocket heartbeat. The WS path keeps last_seen_at
+				// fresh and delivers actions, so the HTTP write would be a
+				// duplicate DB update. If the WS heartbeat goes silent the
+				// freshness window expires and HTTP resumes automatically on
+				// the next tick — that is the fallback the WS path relies on.
+				if d.wsHeartbeatRecentlyAcked(rid) {
+					continue
+				}
 				resp, err := d.client.SendHeartbeat(ctx, rid)
 				if err != nil {
 					d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 					continue
 				}
-
-				// Handle pending update requests.
-				if resp.PendingUpdate != nil {
-					go d.handleUpdate(ctx, rid, resp.PendingUpdate)
-				}
-
-				// Handle pending model-list requests.
-				if resp.PendingModelList != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
-					}
-				}
-
-				// Handle pending runtime-local-skill inventory requests.
-				if resp.PendingLocalSkills != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
-					}
-				}
-
-				// Handle pending runtime-local-skill import requests.
-				if resp.PendingLocalSkillImport != nil {
-					rt := d.findRuntime(rid)
-					if rt != nil {
-						go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
-					}
-				}
+				d.handleHeartbeatActions(ctx, rid, resp)
 			}
+		}
+	}
+}
+
+// handleHeartbeatActions dispatches the pending-action set returned by either
+// transport (HTTP POST /api/daemon/heartbeat or WS daemon:heartbeat_ack).
+// Each action is dispatched in its own goroutine so a slow handler cannot
+// block subsequent heartbeats.
+func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
+	if resp == nil {
+		return
+	}
+	if resp.PendingUpdate != nil {
+		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
+	}
+	if resp.PendingModelList != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+		}
+	}
+	if resp.PendingLocalSkills != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
+		}
+	}
+	if resp.PendingLocalSkillImport != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
 	}
 }

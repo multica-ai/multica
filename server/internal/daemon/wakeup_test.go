@@ -1,6 +1,10 @@
 package daemon
 
-import "testing"
+import (
+	"log/slog"
+	"testing"
+	"time"
+)
 
 func TestTaskWakeupURL(t *testing.T) {
 	tests := []struct {
@@ -39,5 +43,35 @@ func TestTaskWakeupURL(t *testing.T) {
 				t.Fatalf("taskWakeupURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWSHeartbeatFreshnessSuppressesHTTP pins the WS-vs-HTTP coordination:
+// once a runtime acked over WS within the freshness window the HTTP
+// heartbeat loop must skip it to avoid duplicate DB writes.
+func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
+	d := New(Config{HeartbeatInterval: 15 * time.Second}, slog.Default())
+
+	if d.wsHeartbeatRecentlyAcked("runtime-1") {
+		t.Fatalf("expected unrecorded runtime to be stale")
+	}
+
+	d.recordWSHeartbeatAck("runtime-1")
+	if !d.wsHeartbeatRecentlyAcked("runtime-1") {
+		t.Fatalf("expected just-acked runtime to be fresh")
+	}
+
+	// Force the entry past the freshness window.
+	d.wsHBMu.Lock()
+	d.wsHBLastAck["runtime-1"] = time.Now().Add(-d.wsHeartbeatFreshness() - time.Second)
+	d.wsHBMu.Unlock()
+	if d.wsHeartbeatRecentlyAcked("runtime-1") {
+		t.Fatalf("expected aged runtime to be stale (HTTP heartbeat must resume)")
+	}
+
+	d.recordWSHeartbeatAck("runtime-2")
+	d.clearWSHeartbeatAcks()
+	if d.wsHeartbeatRecentlyAcked("runtime-2") {
+		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
 	}
 }

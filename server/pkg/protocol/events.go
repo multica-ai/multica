@@ -99,6 +99,7 @@ const (
 
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
+	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
 )

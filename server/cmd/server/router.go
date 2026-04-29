@@ -108,6 +108,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
+	// Wire WS heartbeat after stores are finalized so the WS path uses the
+	// same (possibly Redis-backed) stores as the HTTP path.
+	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
