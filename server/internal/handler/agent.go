@@ -8,6 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -17,6 +20,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+const (
+	ProviderOpencode    = "opencode"
+	OpencodeAgentPrefix = "opencode-"
+	OpencodeModelPrefix = "opencode-go/"
 )
 
 type AgentResponse struct {
@@ -324,6 +333,50 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	return raw, nil
 }
 
+// deriveOpencodeGoModel maps opencode-* agent names to opencode-go models.
+// Numeric version groups are joined with dots, while family names keep hyphens.
+func deriveOpencodeGoModel(agentName string) (string, bool) {
+	model, ok := strings.CutPrefix(agentName, OpencodeAgentPrefix)
+	if !ok || model == "" {
+		return "", false
+	}
+
+	parts := strings.Split(model, "-")
+	var b strings.Builder
+	for i, part := range parts {
+		if i > 0 {
+			sep := "-"
+			if isDigits(part) && endsWithDigit(parts[i-1]) {
+				sep = "."
+			}
+			b.WriteString(sep)
+		}
+		b.WriteString(part)
+	}
+
+	return OpencodeModelPrefix + b.String(), true
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func endsWithDigit(value string) bool {
+	if value == "" {
+		return false
+	}
+	last, _ := utf8.DecodeLastRuneInString(value)
+	return unicode.IsDigit(last)
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -370,6 +423,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
 		return
+	}
+	if req.Model == "" && runtime.Provider == ProviderOpencode {
+		if model, ok := deriveOpencodeGoModel(req.Name); ok {
+			req.Model = model
+		}
 	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
