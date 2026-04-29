@@ -609,9 +609,9 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 			continue
 		}
 		if fp == "SKILL.md" {
-			result.content = string(body)
+			result.content = nullSafeString(body)
 		} else {
-			result.files = append(result.files, importedFile{path: fp, content: string(body)})
+			result.files = append(result.files, importedFile{path: fp, content: nullSafeString(body)})
 		}
 	}
 
@@ -697,7 +697,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	result := &importedSkill{
 		name:        name,
 		description: description,
-		content:     string(skillMdBody),
+		content:     nullSafeString(skillMdBody),
 	}
 
 	// 2. List supporting files via GitHub API
@@ -740,7 +740,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 		// Convert absolute GitHub path to relative path within skill
 		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
+		result.files = append(result.files, importedFile{path: relPath, content: nullSafeString(body)})
 	}
 
 	return result, nil
@@ -1032,6 +1032,14 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// nullSafeString converts bytes to string, stripping null bytes (0x00) that
+// PostgreSQL TEXT columns reject with error 22021. Binary files such as PDFs
+// embedded in skill packages contain null bytes, which must be removed before
+// any database write.
+func nullSafeString(b []byte) string {
+	return strings.ReplaceAll(string(b), "\x00", "")
 }
 
 func buildRawGitHubURL(rawPrefix, repoPath string) string {
