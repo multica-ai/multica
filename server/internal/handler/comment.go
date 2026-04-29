@@ -508,8 +508,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := existing.AuthorType == actorType && uuidToString(existing.AuthorID) == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	if !isAuthor && !isAdmin {
-		writeError(w, http.StatusForbidden, "only comment author or admin can edit")
+	var isAgentOwner bool
+	if existing.AuthorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), existing.AuthorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+		}
+	}
+	if !isAuthor && !isAdmin && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only comment author, agent owner, or admin can edit")
 		return
 	}
 
