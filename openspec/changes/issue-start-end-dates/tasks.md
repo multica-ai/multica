@@ -18,5 +18,11 @@
 
 ## 4. End-to-end verification
 
-- [x] 4.1 Add or update issue workflow coverage that proves users can create and edit `start_date` and `end_date` through the primary UI.
-- [x] 4.2 Verify the final change with the relevant backend, frontend, and workflow tests before archiving the change.
+- [ ] 3.1 Extend issue/API types and any issue draft state in `apps/workspace` to carry `start_date` and `end_date`.
+- [ ] 3.2 Reuse or generalize the existing date-picker UI so create-issue and issue-detail flows in `apps/workspace` can view, set, and clear both schedule dates.
+- [ ] 3.3 Add or update `apps/workspace` tests for schedule date editing behavior in issue workflows.
+
+## 4. End-to-end verification
+
+- [ ] 5.1 Add or update issue workflow coverage that proves users can create and edit `start_date` and `end_date` through the primary UI.
+- [ ] 5.2 Verify the final change with the relevant backend, frontend, and workflow tests before archiving the change.
