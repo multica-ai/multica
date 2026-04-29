@@ -60,12 +60,10 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. The Runtime column has `meta.grow: true` so
-// DataTable skips its inline width — fixed table-layout assigns it the
-// leftover space. Its `size: 240` still flows into table.getTotalSize()
-// to set the table's `min-width`, giving the runtime column a 240px
-// floor below which the container scrolls horizontally instead of
-// shrinking the column further.
+// Column widths in px. Runtime, Health, and CLI grow together until the
+// user resizes them. Their `size` values still flow into table.getTotalSize()
+// to set the table's min-width, giving each grow column a real floor below
+// which the container scrolls horizontally instead of shrinking further.
 const COL_WIDTHS = {
   runtime: 240,
   health: 200,
@@ -105,6 +103,7 @@ export function createRuntimeColumns({
       id: "health",
       header: "Health",
       size: COL_WIDTHS.health,
+      meta: { grow: true },
       cell: ({ row }) => (
         <HealthCell runtime={row.original.runtime} now={now} />
       ),
@@ -164,6 +163,7 @@ export function createRuntimeColumns({
       id: "cli",
       header: "CLI",
       size: COL_WIDTHS.cli,
+      meta: { grow: true },
       cell: ({ row }) => (
         <CliCell
           runtime={row.original.runtime}
@@ -175,6 +175,7 @@ export function createRuntimeColumns({
       id: "actions",
       header: () => null,
       size: COL_WIDTHS.actions,
+      enableResizing: false,
       cell: ({ row }) => (
         <div
           className="flex justify-end"
