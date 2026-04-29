@@ -24,5 +24,5 @@
 
 ## 5. End-to-end verification
 
-- [ ] 5.1 Add or update issue workflow coverage that proves users can create and edit `start_date` and `end_date` through the primary UI.
-- [ ] 5.2 Verify the final change with the relevant backend, frontend, and workflow tests before archiving the change.
+- [x] 5.1 Add or update issue workflow coverage that proves users can create and edit `start_date` and `end_date` through the primary UI.
+- [x] 5.2 Verify the final change with the relevant backend, frontend, and workflow tests before archiving the change.
