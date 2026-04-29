@@ -3,6 +3,15 @@ INSERT INTO attachment (id, workspace_id, issue_id, comment_id, uploader_type, u
 VALUES ($1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
+-- name: UpdateAttachmentSize :one
+-- After a successful pre-signed S3 PUT, the client calls /confirm and
+-- the handler sets the byte count to the value HeadObject reported.
+-- The CreateAttachment that preceded the presign left size_bytes=0 as a
+-- sentinel for "upload in progress"; this query flips it to the real
+-- size and is idempotent — calling /confirm twice with the same byte
+-- count is a no-op.
+UPDATE attachment SET size_bytes = $2 WHERE id = $1 RETURNING *;
+
 -- name: ListAttachmentsByIssue :many
 SELECT * FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2

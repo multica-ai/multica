@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -325,7 +326,9 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
-// Downloads are limited to 100 MB to match the upload size limit.
+// Downloads are limited to 100 MB to match the upload size limit. For files
+// that may exceed 100 MB (kernel dumps, video, etc), use DownloadFileToPath
+// which streams directly to disk without a memory cap.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
 // (a server-relative path like "/uploads/...") depending on how the
@@ -362,6 +365,40 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 
 	const maxDownloadSize = 100 << 20 // 100 MB
 	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+}
+
+// DownloadFileToPath streams the remote URL to the given local path without
+// buffering the whole body in memory. Used for attachment download, where
+// kernel dumps and video files can exceed the in-memory cap that
+// DownloadFile enforces. The destination file is truncated if it exists.
+// Returns the number of bytes written.
+func (c *APIClient) DownloadFileToPath(ctx context.Context, downloadURL, destPath string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, fmt.Errorf("download returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", destPath, err)
+	}
+	defer f.Close()
+
+	n, err := io.Copy(f, resp.Body)
+	if err != nil {
+		return n, fmt.Errorf("stream to %s: %w", destPath, err)
+	}
+	return n, nil
 }
 
 // HealthCheck hits the /health endpoint and returns the response body.

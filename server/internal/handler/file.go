@@ -61,8 +61,30 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
+	// download_url resolution order (first matching wins):
+	//  1. CloudFront signed URL (production S3 + CloudFront setup)
+	//  2. S3 pre-signed GET URL (private bucket, e.g. 移动云 EOS)
+	//  3. raw a.Url (LocalStorage, or public-read bucket)
+	//
+	// We never fail attachmentToResponse over signing errors — we fall
+	// through to the unsigned URL so the UI at least shows the attachment
+	// metadata. Download will still 403 if the bucket is private, but
+	// that's no worse than the pre-signing-never-existed state.
 	if h.CFSigner != nil {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
+	} else if h.Storage != nil {
+		key := h.Storage.KeyFromURL(a.Url)
+		if key != "" {
+			// Cap the sign call at 5s — it's a pure local compute on AWS
+			// SDK side but we don't want a misbehaving backend to hang the
+			// JSON response.
+			signCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			signed, err := h.Storage.PresignGet(signCtx, key, 30*time.Minute)
+			cancel()
+			if err == nil && signed != "" {
+				resp.DownloadURL = signed
+			}
+		}
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
