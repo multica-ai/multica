@@ -51,6 +51,13 @@ export type { StorageAdapter } from "./storage";
 export type { Project, ProjectStatus, ProjectPriority, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
+  GitHubInstallation,
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
+} from "./github";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
