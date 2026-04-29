@@ -28,8 +28,38 @@ spec:
                 name: backend
                 port:
                   number: 8080
-          - path: /auth
-            pathType: Prefix
+          # Auth API routes → backend. Keep these exact so frontend-owned
+          # routes such as /auth/callback are not shadowed by the backend.
+          - path: /auth/send-code
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8080
+          - path: /auth/verify-code
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8080
+          - path: /auth/google
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8080
+          - path: /auth/dingtalk
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8080
+          - path: /auth/logout
+            pathType: Exact
             backend:
               service:
                 name: backend

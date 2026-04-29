@@ -41,7 +41,7 @@ interface DingTalkAuthConfig {
   scope?: string;
 }
 
-interface CliCallbackConfig {
+export interface CliCallbackConfig {
   /** Validated localhost callback URL */
   url: string;
   /** Opaque state to pass back to CLI */
@@ -72,7 +72,31 @@ interface LoginPageProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function redirectToCliCallback(url: string, token: string, state: string) {
+const CLI_OAUTH_STATE_PREFIX = "cli:";
+
+export function buildCliOAuthStatePart(cliCallback: CliCallbackConfig): string {
+  const params = new URLSearchParams();
+  params.set("callback", cliCallback.url);
+  params.set("state", cliCallback.state);
+  return `${CLI_OAUTH_STATE_PREFIX}${encodeURIComponent(params.toString())}`;
+}
+
+export function parseCliOAuthStatePart(part: string): CliCallbackConfig | null {
+  if (!part.startsWith(CLI_OAUTH_STATE_PREFIX)) return null;
+
+  try {
+    const params = new URLSearchParams(
+      decodeURIComponent(part.slice(CLI_OAUTH_STATE_PREFIX.length)),
+    );
+    const url = params.get("callback");
+    if (!url || !validateCliCallback(url)) return null;
+    return { url, state: params.get("state") ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
   window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
 }

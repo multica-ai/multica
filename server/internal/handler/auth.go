@@ -2,11 +2,11 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -358,7 +358,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
-	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
@@ -408,6 +408,7 @@ type googleTokenResponse struct {
 }
 
 type googleUserInfo struct {
+	ID      string `json:"id"`
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
@@ -542,6 +543,24 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Auto-create Google binding so the account shows in Settings → Linked Accounts
+	// and can be used for notification preferences.
+	googleExternalID := gUser.ID
+	if googleExternalID == "" {
+		googleExternalID = email // fallback to email if Google ID is missing
+	}
+	_, _ = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
+		UserID:                user.ID,
+		Provider:              "google",
+		ExternalUserID:        googleExternalID,
+		DisplayName:           strToText(gUser.Name),
+		AccessTokenEncrypted:  pgtype.Text{},
+		RefreshTokenEncrypted: pgtype.Text{},
+		TokenExpiresAt:        pgtype.Timestamptz{},
+		Status:                "active",
+		Metadata:              []byte("{}"),
+	})
+
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
 		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
@@ -549,7 +568,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
@@ -592,7 +611,7 @@ func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	auth.ClearAuthCookies(w)
+	auth.ClearAuthCookiesForRequest(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 

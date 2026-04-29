@@ -8,6 +8,10 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import {
+  parseCliOAuthStatePart,
+  redirectToCliCallback,
+} from "@multica/views/auth";
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -16,6 +20,7 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 
 function CallbackContent() {
   const router = useRouter();
@@ -54,7 +59,25 @@ function CallbackContent() {
       return;
     }
 
-    const stateParts = state.split(",");
+    if (state.startsWith("google.")) {
+      api
+        .completeGoogleBinding(code, state)
+        .then(({ next_path }) => {
+          router.push(next_path || paths.root());
+        })
+        .catch((err) => {
+          setError(
+            err instanceof Error ? err.message : "Google connection failed",
+          );
+        });
+      return;
+    }
+
+    const stateParts = state.split(",").filter(Boolean);
+    const cliCallback =
+      stateParts
+        .map((part) => parseCliOAuthStatePart(part))
+        .find((part) => part !== null) ?? null;
 
     // DingTalk login flow
     if (stateParts.includes("provider:dingtalk")) {
@@ -69,6 +92,16 @@ function CallbackContent() {
           .then(({ token }) => {
             setDesktopToken(token);
             window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "Login failed");
+          });
+      } else if (cliCallback) {
+        api
+          .dingtalkLogin(code, redirectUri)
+          .then(({ token }) => {
+            setLoggedInCookie();
+            redirectToCliCallback(cliCallback.url, token, cliCallback.state);
           })
           .catch((err) => {
             setError(err instanceof Error ? err.message : "Login failed");
@@ -108,6 +141,16 @@ function CallbackContent() {
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+    } else if (cliCallback) {
+      api
+        .googleLogin(code, redirectUri)
+        .then(({ token }) => {
+          setLoggedInCookie();
+          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

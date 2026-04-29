@@ -68,3 +68,30 @@ func TestNormalizeAPIBaseURL(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserCommandsForOS(t *testing.T) {
+	t.Run("windows includes fallbacks", func(t *testing.T) {
+		cmds, err := browserCommandsForOS("windows", "https://example.com")
+		if err != nil {
+			t.Fatalf("browserCommandsForOS() error = %v", err)
+		}
+		if len(cmds) != 3 {
+			t.Fatalf("browserCommandsForOS() len = %d, want 3", len(cmds))
+		}
+		if cmds[0].name != "rundll32" {
+			t.Fatalf("first windows browser command = %q, want %q", cmds[0].name, "rundll32")
+		}
+		if cmds[1].name != "cmd" {
+			t.Fatalf("second windows browser command = %q, want %q", cmds[1].name, "cmd")
+		}
+		if cmds[2].name != "powershell" {
+			t.Fatalf("third windows browser command = %q, want %q", cmds[2].name, "powershell")
+		}
+	})
+
+	t.Run("unsupported platform errors", func(t *testing.T) {
+		if _, err := browserCommandsForOS("plan9", "https://example.com"); err == nil {
+			t.Fatal("browserCommandsForOS() expected error for unsupported platform")
+		}
+	})
+}

@@ -66,6 +66,9 @@ import type {
   StartEmailBindingResponse,
   VerifyEmailBindingRequest,
   VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -187,7 +190,10 @@ export class ApiClient {
     return headers;
   }
 
-  private handleUnauthorized() {
+  private handleUnauthorized(requestToken: string | null) {
+    if (requestToken !== this.token) {
+      return;
+    }
     this.token = null;
     // Workspace id is owned by the URL-driven workspace-storage singleton
     // (set by [workspaceSlug]/layout.tsx). On 401, the auth flow navigates
@@ -210,6 +216,7 @@ export class ApiClient {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const requestToken = this.token;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -227,7 +234,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(requestToken);
       const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
@@ -384,6 +391,25 @@ export class ApiClient {
     return this.fetch("/api/me/notification-bindings/email/verify", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  }
+
+  async startGoogleBinding(
+    payload: StartGoogleBindingRequest,
+  ): Promise<StartGoogleBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/google/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeGoogleBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteGoogleBindingResponse> {
+    return this.fetch("/api/notification-bindings/google/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
     });
   }
 
@@ -735,6 +761,7 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    google_client_id?: string;
     dingtalk_client_id?: string;
     dingtalk_oauth_scope?: string;
     hide_email_login?: boolean;
@@ -912,6 +939,7 @@ export class ApiClient {
 
     const rid = createRequestId();
     const start = Date.now();
+    const requestToken = this.token;
     this.logger.info("→ POST /api/upload-file", { rid });
 
     const res = await fetch(`${this.baseUrl}/api/upload-file`, {
@@ -922,7 +950,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(requestToken);
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);

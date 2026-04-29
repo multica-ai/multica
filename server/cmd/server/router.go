@@ -134,6 +134,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/dingtalk", h.DingTalkLogin)
 	r.Post("/auth/logout", h.Logout)
+	r.Post("/api/notification-bindings/google/callback", h.CompleteGoogleBindingByState)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -175,6 +176,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/me/notification-bindings/dingtalk/start", h.StartMyDingTalkBinding)
 		r.Post("/api/me/notification-bindings/dingtalk/callback", h.CompleteMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/google/start", h.StartMyGoogleBinding)
+		r.Post("/api/me/notification-bindings/google/callback", h.CompleteMyGoogleBinding)
 		r.Post("/api/me/notification-bindings/email/start", h.StartMyEmailBinding)
 		r.Post("/api/me/notification-bindings/email/verify", h.VerifyMyEmailBinding)
 		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)

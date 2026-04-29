@@ -37,6 +37,7 @@ export interface UpdateNotificationPreferenceRequest {
 
 export interface StartDingTalkBindingRequest {
   next_path?: string;
+  redirect_uri?: string;
 }
 
 export interface StartDingTalkBindingResponse {
@@ -63,4 +64,18 @@ export interface VerifyEmailBindingRequest {
 
 export interface VerifyEmailBindingResponse {
   binding: ExternalAccountBinding;
+}
+
+export interface StartGoogleBindingRequest {
+  next_path?: string;
+  redirect_uri?: string;
+}
+
+export interface StartGoogleBindingResponse {
+  auth_url: string;
+}
+
+export interface CompleteGoogleBindingResponse {
+  binding: ExternalAccountBinding;
+  next_path: string | null;
 }

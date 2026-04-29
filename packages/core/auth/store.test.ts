@@ -91,3 +91,23 @@ describe("authStore.initialize — token mode", () => {
     expect(storage.snapshot().multica_token).toBe("t");
   });
 });
+
+describe("authStore login", () => {
+  it("sets the in-memory API token after DingTalk login in cookie auth mode", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      dingtalkLogin: vi.fn().mockResolvedValue({
+        token: "fresh-token",
+        user: fakeUser,
+      }),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    await store.getState().loginWithDingTalk("code", "http://app/auth/callback");
+
+    expect(api.setToken).toHaveBeenCalledWith("fresh-token");
+    expect(storage.snapshot().multica_token).toBeUndefined();
+    expect(store.getState().user).toEqual(fakeUser);
+  });
+});

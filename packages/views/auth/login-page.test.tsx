@@ -54,7 +54,12 @@ vi.mock("@multica/core/types", () => ({}));
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { LoginPage, validateCliCallback } from "./login-page";
+import {
+  LoginPage,
+  buildCliOAuthStatePart,
+  parseCliOAuthStatePart,
+  validateCliCallback,
+} from "./login-page";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -779,5 +784,32 @@ describe("validateCliCallback", () => {
 
   it("rejects invalid URLs", () => {
     expect(validateCliCallback("not-a-url")).toBe(false);
+  });
+});
+
+describe("CLI OAuth state helpers", () => {
+  it("round-trips callback URL and state without exposing delimiters", () => {
+    const part = buildCliOAuthStatePart({
+      url: "http://localhost:9876/callback?existing=1",
+      state: "abc,123",
+    });
+
+    expect(part).toMatch(/^cli:/);
+    expect(part).not.toContain(",");
+    expect(parseCliOAuthStatePart(part)).toEqual({
+      url: "http://localhost:9876/callback?existing=1",
+      state: "abc,123",
+    });
+  });
+
+  it("rejects CLI OAuth state with an unsafe callback URL", () => {
+    const part = `cli:${encodeURIComponent(
+      new URLSearchParams({
+        callback: "https://evil.example/callback",
+        state: "abc",
+      }).toString(),
+    )}`;
+
+    expect(parseCliOAuthStatePart(part)).toBeNull();
   });
 });

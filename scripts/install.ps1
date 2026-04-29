@@ -200,6 +200,7 @@ function Install-CliBinary {
     Remove-Item $tmpDir -Recurse -Force
 
     Add-ToUserPath $CliBinDir
+    Write-CurrentSessionPathHint
     Write-Ok "Multica CLI installed to $CliBinPath"
 }
 
@@ -216,6 +217,12 @@ function Add-ToUserPath {
         $env:Path = "$Dir;$env:Path"
     }
     Write-Info "Added $Dir to user PATH (restart your terminal for other sessions to pick it up)."
+}
+
+function Write-CurrentSessionPathHint {
+    Write-Warn "The installer updated your user PATH, but the PowerShell session that invoked this script may not pick it up automatically."
+    Write-Host "For this terminal, run: " -NoNewline
+    Write-Host "`$env:Path = `"$CliBinDir;`$env:Path`"" -ForegroundColor Yellow
 }
 
 function Install-Cli {

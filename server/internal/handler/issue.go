@@ -917,7 +917,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{
+		"issue":      resp,
+		"app_origin": requestAppOrigin(r),
+	})
 
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
@@ -1097,6 +1100,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
+		"app_origin":          requestAppOrigin(r),
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
@@ -1419,6 +1423,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 			"issue":            resp,
+			"app_origin":       requestAppOrigin(r),
 			"assignee_changed": assigneeChanged,
 			"status_changed":   statusChanged,
 			"priority_changed": priorityChanged,
