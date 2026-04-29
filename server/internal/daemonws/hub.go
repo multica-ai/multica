@@ -382,9 +382,14 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	ack, err := handler(ctx, c.identity, payload.RuntimeID)
+	// Intentionally do NOT wrap this ctx with WithTimeout. The handler
+	// reaches LocalSkill{List,Import}Store.PopPending, whose Redis Lua
+	// claim script has side effects (ZREM + SET-running) that cannot be
+	// safely un-run if the client cancels mid-script — the same invariant
+	// that keeps the HTTP heartbeat from putting a per-call timeout on
+	// PopPending. The natural bound is the read pump's lifetime (the conn
+	// closes if the daemon goes away) plus Redis's own server-side limits.
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

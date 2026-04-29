@@ -107,16 +107,30 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	go d.runWSWriter(conn, writes, writerDone)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	defer cancelHeartbeat()
-	go d.runWSHeartbeatSender(heartbeatCtx, runtimeIDs, writes)
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		d.runWSHeartbeatSender(heartbeatCtx, runtimeIDs, writes)
+	}()
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
 	}()
 
+	// Defer cleanup must shut goroutines down in this order:
+	//   1. cancel the heartbeat sender's ctx
+	//   2. wait for the sender to actually return — only then is it safe
+	//      to close the writes channel without a "send on closed channel"
+	//      panic from sendWSHeartbeats
+	//   3. close writes; the writer drains and exits
+	//   4. wait for the writer to finish so it doesn't outlive the conn
+	//
+	// LIFO defer order would close writes before the sender stops, so the
+	// teardown is folded into a single deferred function instead.
 	defer func() {
-		// Stop the writer once we leave so it doesn't outlive the conn.
+		cancelHeartbeat()
+		<-hbDone
 		close(writes)
 		<-writerDone
 	}()
