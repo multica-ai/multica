@@ -618,13 +618,13 @@ export function IssueDetail({
               </PropRow>
               {(usage.total_cache_read_tokens > 0 ||
                 usage.total_cache_write_tokens > 0) && (
-                <PropRow label="Cache">
-                  <span className="text-muted-foreground">
-                    {formatTokenCount(usage.total_cache_read_tokens)} read /{" "}
-                    {formatTokenCount(usage.total_cache_write_tokens)} write
-                  </span>
-                </PropRow>
-              )}
+                  <PropRow label="Cache">
+                    <span className="text-muted-foreground">
+                      {formatTokenCount(usage.total_cache_read_tokens)} read /{" "}
+                      {formatTokenCount(usage.total_cache_write_tokens)} write
+                    </span>
+                  </PropRow>
+                )}
               <PropRow label="Runs">
                 <span className="text-muted-foreground">
                   {usage.task_count}
@@ -687,9 +687,6 @@ export function IssueDetail({
                   <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
                 </>
               )}
-              <span className="shrink-0 text-muted-foreground">
-                {issue.identifier}
-              </span>
               <span className="truncate font-medium text-foreground">
                 {issue.title}
               </span>
@@ -701,19 +698,14 @@ export function IssueDetail({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      className={cn(
-                        "text-muted-foreground",
-                        actions.isPinned && "text-foreground",
-                      )}
+                      className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
                       onClick={actions.togglePin}
                     >
                       {actions.isPinned ? <PinOff /> : <Pin />}
                     </Button>
                   }
                 />
-                <TooltipContent side="bottom">
-                  {actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-                </TooltipContent>
+                <TooltipContent side="bottom">{actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
               </Tooltip>
               <IssueActionsDropdown
                 issue={issue}
@@ -722,11 +714,7 @@ export function IssueDetail({
                 // above and skip navigation. Otherwise the modal navigates for us.
                 onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
                 trigger={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                  >
+                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                     <MoreHorizontal />
                   </Button>
                 }
@@ -1059,45 +1047,45 @@ export function IssueDetail({
                             )}
                             {agents.filter((a) => !a.archived_at).length >
                               0 && (
-                              <CommandGroup heading="Agents">
-                                {agents
-                                  .filter((a) => !a.archived_at)
-                                  .map((a) => {
-                                    const sub = subscribers.find(
-                                      (s) =>
-                                        s.user_type === "agent" &&
-                                        s.user_id === a.id,
-                                    );
-                                    const isSubbed = !!sub;
-                                    return (
-                                      <CommandItem
-                                        key={`agent-${a.id}`}
-                                        onSelect={() =>
-                                          toggleSubscriber(
-                                            a.id,
-                                            "agent",
-                                            isSubbed,
-                                          )
-                                        }
-                                        className="flex items-center gap-2.5"
-                                      >
-                                        <Checkbox
-                                          checked={isSubbed}
-                                          className="pointer-events-none"
-                                        />
-                                        <ActorAvatar
-                                          actorType="agent"
-                                          actorId={a.id}
-                                          size={22}
-                                        />
-                                        <span className="truncate flex-1">
-                                          {a.name}
-                                        </span>
-                                      </CommandItem>
-                                    );
-                                  })}
-                              </CommandGroup>
-                            )}
+                                <CommandGroup heading="Agents">
+                                  {agents
+                                    .filter((a) => !a.archived_at)
+                                    .map((a) => {
+                                      const sub = subscribers.find(
+                                        (s) =>
+                                          s.user_type === "agent" &&
+                                          s.user_id === a.id,
+                                      );
+                                      const isSubbed = !!sub;
+                                      return (
+                                        <CommandItem
+                                          key={`agent-${a.id}`}
+                                          onSelect={() =>
+                                            toggleSubscriber(
+                                              a.id,
+                                              "agent",
+                                              isSubbed,
+                                            )
+                                          }
+                                          className="flex items-center gap-2.5"
+                                        >
+                                          <Checkbox
+                                            checked={isSubbed}
+                                            className="pointer-events-none"
+                                          />
+                                          <ActorAvatar
+                                            actorType="agent"
+                                            actorId={a.id}
+                                            size={22}
+                                          />
+                                          <span className="truncate flex-1">
+                                            {a.name}
+                                          </span>
+                                        </CommandItem>
+                                      );
+                                    })}
+                                </CommandGroup>
+                              )}
                           </CommandList>
                         </Command>
                       </PopoverContent>
@@ -1139,7 +1127,7 @@ export function IssueDetail({
                           prev.actor_id === entry.actor_id &&
                           Math.abs(
                             new Date(entry.created_at).getTime() -
-                              new Date(prev.created_at).getTime(),
+                            new Date(prev.created_at).getTime(),
                           ) <= COALESCE_MS
                         ) {
                           // Replace previous with this one (keep the later result)

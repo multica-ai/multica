@@ -2,10 +2,11 @@
 
 import {
   flexRender,
+  type Header as TanstackHeader,
   type Row,
   type Table as TanstackTable,
 } from "@tanstack/react-table";
-import type * as React from "react";
+import * as React from "react";
 
 // We deliberately use the lower-level shadcn primitives (TableHeader /
 // TableBody / TableRow / TableHead / TableCell) but NOT the wrapping
@@ -48,8 +49,8 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
 //     makes each column's width come from its first row's <th>
 //     inline width. column.size is authoritative for sized columns.
 //   - Columns flagged `meta.grow: true` skip their inline width, so
-//     fixed table-layout assigns them the leftover space (no spacer
-//     column needed).
+//     fixed table-layout assigns them the leftover space until the user
+//     resizes them. Once resized, the explicit width is applied.
 //   - The table's `min-width` is the sum of every column's TanStack
 //     size (`table.getTotalSize()`). That gives grow columns a real
 //     floor — fixed mode ignores cell-level min-width, but it does
@@ -64,6 +65,98 @@ export function DataTable<TData>({
   className,
   ...props
 }: DataTableProps<TData>) {
+  const [resizingColumnId, setResizingColumnId] = React.useState<string | null>(
+    null,
+  );
+
+  const columnSizing = table.getState().columnSizing;
+  const hasExplicitSize = React.useCallback(
+    (columnId: string) =>
+      Object.prototype.hasOwnProperty.call(columnSizing, columnId),
+    [columnSizing],
+  );
+
+  const setColumnWidth = React.useCallback(
+    (header: TanstackHeader<TData, unknown>, width: number) => {
+      const minSize = header.column.columnDef.minSize ?? 48;
+      const maxSize =
+        header.column.columnDef.maxSize ?? Number.MAX_SAFE_INTEGER;
+      const next = Math.min(maxSize, Math.max(minSize, Math.round(width)));
+
+      table.setColumnSizing((old) => ({
+        ...old,
+        [header.column.id]: next,
+      }));
+    },
+    [table],
+  );
+
+  const beginColumnResize = React.useCallback(
+    (
+      header: TanstackHeader<TData, unknown>,
+      event: React.PointerEvent<HTMLDivElement>,
+    ) => {
+      if (!header.column.getCanResize()) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startX = event.clientX;
+      const headerCell = event.currentTarget.closest("th");
+      const startWidth =
+        headerCell?.getBoundingClientRect().width ?? header.column.getSize();
+
+      setResizingColumnId(header.column.id);
+      setColumnWidth(header, startWidth);
+
+      const originalCursor = document.body.style.cursor;
+      const originalUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (pointerEvent: PointerEvent) => {
+        setColumnWidth(header, startWidth + pointerEvent.clientX - startX);
+      };
+
+      const stopResize = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", stopResize);
+        window.removeEventListener("pointercancel", stopResize);
+        document.body.style.cursor = originalCursor;
+        document.body.style.userSelect = originalUserSelect;
+        setResizingColumnId(null);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", stopResize);
+      window.addEventListener("pointercancel", stopResize);
+    },
+    [setColumnWidth],
+  );
+
+  const handleResizeKeyDown = React.useCallback(
+    (
+      header: TanstackHeader<TData, unknown>,
+      event: React.KeyboardEvent<HTMLDivElement>,
+    ) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const headerCell = event.currentTarget.closest("th");
+      const currentWidth = hasExplicitSize(header.column.id)
+        ? header.column.getSize()
+        : (headerCell?.getBoundingClientRect().width ??
+          header.column.getSize());
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const step = event.shiftKey ? 20 : 8;
+
+      setColumnWidth(header, currentWidth + direction * step);
+    },
+    [hasExplicitSize, setColumnWidth],
+  );
+
   return (
     <div
       className={cn("flex min-h-0 flex-1 flex-col", className)}
@@ -79,6 +172,13 @@ export function DataTable<TData>({
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                   const isPinned = header.column.getIsPinned();
+                  const columnHasExplicitSize = hasExplicitSize(
+                    header.column.id,
+                  );
+                  const headerLabel =
+                    typeof header.column.columnDef.header === "string"
+                      ? header.column.columnDef.header
+                      : header.column.id;
                   return (
                     <TableHead
                       key={header.id}
@@ -98,10 +198,13 @@ export function DataTable<TData>({
                       // into the header strip rather than appearing as
                       // a white block under sticky scroll.
                       className={cn(
-                        "h-8 overflow-hidden px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground",
+                        "relative h-8 overflow-hidden px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground",
                         isPinned && "bg-muted/30 backdrop-blur",
                       )}
-                      style={getCellStyle(header.column, { withBorder: true })}
+                      style={getCellStyle(header.column, {
+                        withBorder: true,
+                        hasExplicitSize: columnHasExplicitSize,
+                      })}
                     >
                       {header.isPlaceholder
                         ? null
@@ -109,6 +212,33 @@ export function DataTable<TData>({
                             header.column.columnDef.header,
                             header.getContext(),
                           )}
+                      {!header.isPlaceholder &&
+                        header.column.getCanResize() && (
+                          <div
+                            role="separator"
+                            aria-label={`Resize ${headerLabel} column`}
+                            aria-orientation="vertical"
+                            tabIndex={0}
+                            className={cn(
+                              "absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none outline-none",
+                              "after:absolute after:top-1/2 after:right-0 after:h-4 after:w-px after:-translate-y-1/2 after:bg-border after:opacity-0 after:transition-opacity",
+                              "hover:after:opacity-100 focus-visible:after:opacity-100",
+                              resizingColumnId === header.column.id &&
+                                "after:bg-primary after:opacity-100",
+                            )}
+                            onPointerDown={(event) =>
+                              beginColumnResize(header, event)
+                            }
+                            onDoubleClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              header.column.resetSize();
+                            }}
+                            onKeyDown={(event) =>
+                              handleResizeKeyDown(header, event)
+                            }
+                          />
+                        )}
                     </TableHead>
                   );
                 })}
@@ -135,6 +265,9 @@ export function DataTable<TData>({
                 >
                   {row.getVisibleCells().map((cell) => {
                     const isPinned = cell.column.getIsPinned();
+                    const columnHasExplicitSize = hasExplicitSize(
+                      cell.column.id,
+                    );
                     return (
                       <TableCell
                         key={cell.id}
@@ -151,7 +284,10 @@ export function DataTable<TData>({
                           isPinned &&
                             "bg-background group-hover:bg-muted/50",
                         )}
-                        style={getCellStyle(cell.column, { withBorder: true })}
+                        style={getCellStyle(cell.column, {
+                          withBorder: true,
+                          hasExplicitSize: columnHasExplicitSize,
+                        })}
                       >
                         {flexRender(
                           cell.column.columnDef.cell,

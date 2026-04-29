@@ -5,6 +5,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { InboxDetailLabel } from "./inbox-detail-label";
+import { getInboxDisplayTitle } from "./inbox-display";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -30,6 +31,8 @@ export function InboxListItem({
   onClick: () => void;
   onArchive: () => void;
 }) {
+  const displayTitle = getInboxDisplayTitle(item);
+
   return (
     <button
       onClick={onClick}
@@ -52,7 +55,7 @@ export function InboxListItem({
             <span
               className={`truncate text-sm ${!item.read ? "font-medium" : "text-muted-foreground"}`}
             >
-              {item.title}
+              {displayTitle}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">

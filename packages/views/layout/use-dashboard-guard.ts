@@ -21,8 +21,14 @@ import { useNavigation } from "../navigation";
  *  - Not logged in → /login
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
  *  - Logged in but URL slug doesn't resolve to any workspace →
- *    `resolvePostAuthDestination(list, hasOnboarded)` — onboarding for
- *    first-timers, /workspaces/new for returning users who deleted out.
+ *    `resolvePostAuthDestination(list, hasOnboarded)` — first workspace if any,
+ *    onboarding for first-timers, /workspaces/new for returning users who
+ *    deleted out.
+ *
+ * Onboarding is NOT a separate gate: a user invited into a workspace can have
+ * `onboarded_at == null` yet legitimately belong inside a workspace, and must
+ * not be bounced to the new-workspace wizard. The onboarding redirect only
+ * fires from the resolver when the user has zero workspaces.
  *
  * We read the workspace list query state directly (rather than relying on
  * useCurrentWorkspace's null return) so we can distinguish "list loading"
@@ -47,10 +53,6 @@ export function useDashboardGuard() {
       return;
     }
     if (!workspaceListFetched) return;
-    if (!hasOnboarded) {
-      replace(paths.onboarding());
-      return;
-    }
     if (!workspace) {
       replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }

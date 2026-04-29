@@ -32,20 +32,25 @@ export default function OnboardingPage() {
   const hasOnboarded = useHasOnboarded();
   const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
     ...workspaceListOptions(),
-    enabled: !!user && hasOnboarded,
+    enabled: !!user,
   });
+  const hasWorkspaces = workspaces.length > 0;
 
   useEffect(() => {
     if (isLoading || !user) {
       if (!isLoading && !user) router.replace(paths.login());
       return;
     }
-    if (hasOnboarded && workspacesFetched) {
+    if (!workspacesFetched) return;
+    // Bounce out if onboarding doesn't apply: either already onboarded, or
+    // the user already has a workspace (e.g. arrived via invitation) — we
+    // never trap an in-workspace user on the onboarding screen.
+    if (hasOnboarded || hasWorkspaces) {
       router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
+  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, hasWorkspaces, router]);
 
-  if (isLoading || !user || hasOnboarded) return null;
+  if (isLoading || !user || hasOnboarded || hasWorkspaces) return null;
 
   // Layout: page owns its own scroll (root layout sets `body {
   // overflow: hidden }` for the app-shell convention). OnboardingFlow

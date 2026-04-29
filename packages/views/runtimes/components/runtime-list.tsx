@@ -149,6 +149,7 @@ export function RuntimeList({
     data: rows,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
     // Pin the kebab column right so it stays accessible during horizontal
     // scroll — matches the pattern in Linear / Notion / GitHub.
     initialState: { columnPinning: { right: ["actions"] } },

@@ -66,10 +66,10 @@ function CallbackContent() {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
           const onboarded = loggedInUser.onboarded_at != null;
-          if (!onboarded) {
-            router.push(paths.onboarding());
-            return;
-          }
+          // Workspace presence beats onboarding state: an invitee with zero
+          // `onboarded_at` but a real workspace must land in that workspace,
+          // not in the new-workspace wizard. A `next=` (e.g. /invite/<id>)
+          // always wins so invite acceptance flows survive auth round-trips.
           router.push(
             nextUrl || resolvePostAuthDestination(wsList, onboarded),
           );

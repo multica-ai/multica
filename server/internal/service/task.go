@@ -1424,10 +1424,11 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	prefix := s.getIssuePrefix(workspaceID)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
-		"task_id":    util.UUIDToString(task.ID),
-		"agent_id":   util.UUIDToString(task.AgentID),
-		"issue_id":   util.UUIDToString(issue.ID),
-		"identifier": identifier,
+		"task_id":         util.UUIDToString(task.ID),
+		"agent_id":        util.UUIDToString(task.AgentID),
+		"issue_id":        util.UUIDToString(issue.ID),
+		"identifier":      identifier,
+		"original_prompt": qc.Prompt,
 	})
 	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		WorkspaceID:   workspaceID,
@@ -1436,7 +1437,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		Type:          "quick_create_done",
 		Severity:      "info",
 		IssueID:       issue.ID,
-		Title:         fmt.Sprintf("Created %s: %s", identifier, issue.Title),
+		Title:         issue.Title,
 		Body:          pgtype.Text{},
 		ActorType:     pgtype.Text{String: "agent", Valid: true},
 		ActorID:       task.AgentID,

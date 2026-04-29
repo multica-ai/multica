@@ -4,10 +4,9 @@ import type * as React from "react";
 // Extend TanStack Table's ColumnMeta with a `grow` flag. TanStack merges
 // a default `size: 150` into every columnDef, so "no explicit size" can't
 // be detected by inspecting columnDef.size (it's always a number). Setting
-// `meta: { grow: true }` is the official extension point — DataTable then
-// skips the inline width for these columns and lets fixed table-layout
-// assign them the leftover space (Linear / GitHub-PR-list pattern: title
-// column grows, others stay at their declared widths).
+// `meta: { grow: true }` is the official extension point: DataTable skips
+// the inline width for these columns until the user explicitly resizes them,
+// then the resized width wins.
 declare module "@tanstack/react-table" {
   interface ColumnMeta<TData extends RowData, TValue> {
     grow?: boolean;
@@ -25,10 +24,10 @@ declare module "@tanstack/react-table" {
 // `group-hover:`.
 export function getCellStyle<TData>(
   column: Column<TData>,
-  options?: { withBorder?: boolean },
+  options?: { withBorder?: boolean; hasExplicitSize?: boolean },
 ): React.CSSProperties {
   const grow = column.columnDef.meta?.grow;
-  const width = grow ? undefined : column.columnDef.size;
+  const width = grow && !options?.hasExplicitSize ? undefined : column.getSize();
 
   const isPinned = column.getIsPinned();
   if (!isPinned) {

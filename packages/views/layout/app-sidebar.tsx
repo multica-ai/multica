@@ -491,10 +491,7 @@ export function AppSidebar({
     <Sidebar variant="inset">
       {topSlot}
       {/* Workspace Switcher */}
-      <SidebarHeader
-        className={cn("py-3", headerClassName)}
-        style={headerStyle}
-      >
+      <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -502,10 +499,7 @@ export function AppSidebar({
                 render={
                   <SidebarMenuButton>
                     <span className="relative">
-                      <WorkspaceAvatar
-                        name={workspace?.name ?? "M"}
-                        size="sm"
-                      />
+                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
                       {myInvitations.length > 0 && (
                         <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                       )}
@@ -575,17 +569,9 @@ export function AppSidebar({
                         Pending invitations
                       </DropdownMenuLabel>
                       {myInvitations.map((inv) => (
-                        <div
-                          key={inv.id}
-                          className="flex items-center gap-2 px-2 py-1.5"
-                        >
-                          <WorkspaceAvatar
-                            name={inv.workspace_name ?? "W"}
-                            size="sm"
-                          />
-                          <span className="flex-1 truncate text-sm">
-                            {inv.workspace_name ?? "Workspace"}
-                          </span>
+                        <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
+                          <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
+                          <span className="flex-1 truncate text-sm">{inv.workspace_name ?? "Workspace"}</span>
                           <button
                             type="button"
                             className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
@@ -625,20 +611,22 @@ export function AppSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
         <SidebarMenu>
-          {searchSlot && <SidebarMenuItem>{searchSlot}</SidebarMenuItem>}
+          {searchSlot && (
+            <SidebarMenuItem>
+              {searchSlot}
+            </SidebarMenuItem>
+          )}
           <SidebarMenuItem>
             <SidebarMenuButton
               className="text-muted-foreground"
-              onClick={() => useModalStore.getState().open("create-issue")}
+              onClick={() => useModalStore.getState().open("quick-create-issue")}
             >
               <span className="relative">
                 <SquarePen />
                 <DraftDot />
               </span>
               <span>New Issue</span>
-              <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
-                C
-              </kbd>
+              <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">C</kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

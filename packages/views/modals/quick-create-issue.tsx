@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, ChevronRight, Sparkles, X as XIcon } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -37,6 +38,7 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 
 // AgentCreatePanel — agent-mode body of the create-issue dialog. Renders
 // only the inner content; the surrounding `<Dialog>` AND `<DialogContent>`
@@ -78,6 +80,8 @@ export function AgentCreatePanel({
 
   const lastAgentId = useQuickCreateStore((s) => s.lastAgentId);
   const setLastAgentId = useQuickCreateStore((s) => s.setLastAgentId);
+  const keepOpen = useQuickCreateStore((s) => s.keepOpen);
+  const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
 
   const [agentId, setAgentId] = useState<string | undefined>(() => {
@@ -130,12 +134,14 @@ export function AgentCreatePanel({
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
   const [submitting, setSubmitting] = useState(false);
+  const [justSent, setJustSent] = useState(false);
+  const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast, uploading } = useFileUpload(api);
   const handleUploadFile = useCallback(
     (file: File) => uploadWithToast(file),
     [uploadWithToast],
@@ -154,7 +160,7 @@ export function AgentCreatePanel({
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !agentId || submitting || versionBlocked) return;
+    if (!md || !agentId || submitting || versionBlocked || uploading) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -164,7 +170,18 @@ export function AgentCreatePanel({
       toast.success("Sent to agent — you'll get an inbox notification when it's done", {
         duration: 4000,
       });
-      onClose();
+      if (keepOpen) {
+        // Stay open for continuous creation — clear the editor so the
+        // user can immediately type the next prompt.
+        editorRef.current?.clearContent();
+        setHasContent(false);
+        setSentCount((c) => c + 1);
+        setJustSent(true);
+        setTimeout(() => setJustSent(false), 1500);
+        requestAnimationFrame(() => editorRef.current?.focus());
+      } else {
+        onClose();
+      }
     } catch (e) {
       // Server returns 422 with { code, ... } for the structured rejection
       // paths the modal cares about. Surface the reason in-modal so the
@@ -235,6 +252,7 @@ export function AgentCreatePanel({
               on the first focusable element on mount, causing the tooltip to
               auto-pop every open. */}
           <button
+            type="button"
             onClick={onClose}
             title="Close"
             aria-label="Close"
@@ -251,9 +269,9 @@ export function AgentCreatePanel({
               render={
                 <button
                   type="button"
+                  aria-label="Select agent"
                   className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm px-1.5 py-1 -ml-1.5 hover:bg-accent/60"
                 >
-                  <Sparkles className="size-3.5" />
                   <span>Created by</span>
                   {selectedAgent ? (
                     <span className="flex items-center gap-1.5 text-foreground">
@@ -291,6 +309,9 @@ export function AgentCreatePanel({
                       size={16}
                     />
                     <span className="flex-1 truncate">{a.name}</span>
+                    {agentId === a.id && (
+                      <Check className="size-3.5 text-muted-foreground" />
+                    )}
                   </DropdownMenuItem>
                 ))
               )}
@@ -334,29 +355,51 @@ export function AgentCreatePanel({
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <span className="text-xs text-muted-foreground">⌘↵ to submit</span>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-h-7 items-center gap-2">
+            <FileUploadButton
+              size="sm"
+              disabled={uploading}
+              onSelect={(file) => editorRef.current?.uploadFile(file)}
+            />
+            {keepOpen && sentCount > 0 && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                {sentCount} sent
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={switchToManual}
               title="Switch to manual create — fill the fields yourself"
-              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="size-3.5" />
-              Switch to manual
+              Switch to Manual
             </button>
+            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <Switch
+                size="sm"
+                checked={keepOpen}
+                onCheckedChange={setKeepOpen}
+              />
+              Create another
+            </label>
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !agentId || submitting || versionBlocked}
+              disabled={!hasContent || !agentId || submitting || versionBlocked || uploading}
               title={
                 versionBlocked
                   ? `Daemon CLI must be ≥ ${versionCheck.min}`
                   : undefined
               }
+              className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
-              {submitting ? "Sending…" : "Create"}
+              {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
+                <span className="flex items-center gap-1"><Check className="size-3.5" />Sent</span>
+              ) : "Create (⌘↵)"}
             </Button>
           </div>
         </div>

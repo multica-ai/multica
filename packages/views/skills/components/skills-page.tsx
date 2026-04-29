@@ -288,6 +288,7 @@ export default function SkillsPage() {
     data: skillRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
   });
 
   // --- Loading ---

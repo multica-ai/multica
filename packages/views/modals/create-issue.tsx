@@ -30,6 +30,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
@@ -38,6 +39,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -84,8 +86,11 @@ export function ManualCreatePanel({
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  const keepOpen = useQuickCreateStore((s) => s.keepOpen);
+  const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
 
   const [title, setTitle] = useState(draft.title);
+  const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -138,6 +143,28 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const resetForNextIssue = () => {
+    setTitle("");
+    setStatus("todo");
+    setPriority("none");
+    setDueDate(null);
+    setProjectId(undefined);
+    setParentIssueId(undefined);
+    setChildIssues([]);
+    setAttachmentIds([]);
+    setDraft({
+      title: "",
+      description: "",
+      status: "todo",
+      priority: "none",
+      assigneeType,
+      assigneeId,
+      dueDate: null,
+    });
+    descEditorRef.current?.clearContent();
+    setFormResetKey((key) => key + 1);
+  };
+
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
@@ -186,6 +213,8 @@ export function ManualCreatePanel({
 
       if (shouldShowBacklogHint) {
         setBacklogHintIssueId(issue.id);
+      } else if (keepOpen) {
+        resetForNextIssue();
       } else {
         onClose();
       }
@@ -304,6 +333,7 @@ export function ManualCreatePanel({
             {/* Title */}
             <div className="px-5 pb-2 shrink-0">
               <TitleEditor
+                key={formResetKey}
                 autoFocus
                 defaultValue={draft.title}
                 placeholder="Issue title"
@@ -494,20 +524,30 @@ export function ManualCreatePanel({
             />
 
             {/* Footer */}
-            <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-              <FileUploadButton
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-h-7 items-center gap-2">
+                <FileUploadButton
+                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={switchToAgent}
                   title="Switch to create with agent — describe in one line and let the agent file it"
-                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+                  className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
                 >
                   <ArrowLeftRight className="size-3.5" />
-                  Switch to agent
+                  Switch to Agent
                 </button>
+                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Switch
+                    size="sm"
+                    checked={keepOpen}
+                    onCheckedChange={setKeepOpen}
+                  />
+                  Create another
+                </label>
                 <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
                   {submitting ? "Creating..." : "Create Issue"}
                 </Button>

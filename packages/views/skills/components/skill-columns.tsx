@@ -102,6 +102,7 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
       id: "_chevron",
       header: () => null,
       size: COL_WIDTHS.chevron,
+      enableResizing: false,
       cell: () => (
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
       ),
