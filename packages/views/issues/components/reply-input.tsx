@@ -80,6 +80,8 @@ function ReplyInput({
       editorRef.current?.clearContent();
       setIsEmpty(true);
       uploadMapRef.current.clear();
+    } catch {
+      // The timeline hook already shows the error toast. Keep the reply text intact.
     } finally {
       setSubmitting(false);
     }

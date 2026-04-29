@@ -210,15 +210,21 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   const submitComment = useCallback(
     async (content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || submitting || !userId) return;
+      if (!content.trim()) return;
+      if (submitting) throw new Error("Comment submission already in progress");
+      if (!userId) {
+        toast.error("Failed to send comment");
+        throw new Error("Cannot submit comment without an authenticated user");
+      }
       setSubmitting(true);
       try {
         await createCommentMutation.mutateAsync({
           content,
           attachmentIds,
         });
-      } catch {
+      } catch (err) {
         toast.error("Failed to send comment");
+        throw err;
       } finally {
         setSubmitting(false);
       }
@@ -228,7 +234,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   const submitReply = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+      if (!content.trim()) return;
+      if (!userId) {
+        toast.error("Failed to send reply");
+        throw new Error("Cannot submit reply without an authenticated user");
+      }
       try {
         await createCommentMutation.mutateAsync({
           content,
@@ -236,8 +246,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
         });
-      } catch {
+      } catch (err) {
         toast.error("Failed to send reply");
+        throw err;
       }
     },
     [userId, createCommentMutation],
