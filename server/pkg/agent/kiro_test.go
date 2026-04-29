@@ -67,6 +67,9 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"currentModelId":"auto","availableModels":[{"modelId":"auto","name":"auto"}]}}}\n' "$id"
       ;;
     *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"history should be ignored"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"UsageUpdate","usage":{"inputTokens":1000,"outputTokens":1000,"cachedReadTokens":100}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCall","toolCallId":"tc-current","name":"Shell","status":"pending","parameters":{"command":"echo replay"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/resume"'*)
@@ -100,6 +103,7 @@ while IFS= read -r line; do
           exit 0
           ;;
       esac
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
       exit 0
@@ -244,17 +248,46 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var messages []Message
+	messagesDone := make(chan struct{})
 	go func() {
-		for range session.Messages {
+		defer close(messagesDone)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
 		}
 	}()
 
 	result := <-session.Result
+	<-messagesDone
 	if result.Status != "completed" {
 		t.Fatalf("expected completed result, got status=%q error=%q", result.Status, result.Error)
 	}
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
+	}
+	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0", usage)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)
+	}
+	if messages[0].Type != MessageToolUse {
+		t.Fatalf("messages[0].Type = %v, want MessageToolUse", messages[0].Type)
+	}
+	if messages[0].Tool != "terminal" {
+		t.Fatalf("messages[0].Tool = %q, want terminal", messages[0].Tool)
+	}
+	if command, _ := messages[0].Input["command"].(string); command != "echo current" {
+		t.Fatalf("messages[0].Input[command] = %q, want echo current", command)
+	}
+	if messages[1].Type != MessageToolResult {
+		t.Fatalf("messages[1].Type = %v, want MessageToolResult", messages[1].Type)
+	}
+	if messages[1].Output != "current tool output\n" {
+		t.Fatalf("messages[1].Output = %q, want current tool output", messages[1].Output)
+	}
+	if messages[2].Type != MessageText || messages[2].Content != "loaded" {
+		t.Fatalf("messages[2] = %+v, want text loaded", messages[2])
 	}
 	if result.SessionID != "ses_existing" {
 		t.Fatalf("session id = %q, want ses_existing", result.SessionID)

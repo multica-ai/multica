@@ -379,8 +379,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <div>
                 <label className="text-xs text-muted-foreground">Agent</label>
                 <div className="mt-1 flex items-center gap-2">
-                  <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={20} />
-                  <span>{getActorName("agent", autopilot.assignee_id)}</span>
+                  <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={20} enableHoverCard showStatusDot />
+                  <span className="cursor-pointer">{getActorName("agent", autopilot.assignee_id)}</span>
                 </div>
               </div>
               <div>

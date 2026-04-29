@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
@@ -37,6 +38,19 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceListOptions: () => ({
+    queryKey: ["workspaces"],
+    queryFn: () =>
+      Promise.resolve([
+        {
+          id: "ws-1",
+          name: "Runtime Local Skills Demo",
+          slug: "runtime-local-skills-demo",
+          created_at: "2026-04-23T00:00:00Z",
+          updated_at: "2026-04-23T00:00:00Z",
+        },
+      ]),
+  }),
   memberListOptions: () => ({
     queryKey: ["members", "ws-1"],
     queryFn: () =>
@@ -136,6 +150,10 @@ describe("BatchActionToolbar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectionState.selectedIds = new Set(["issue-1", "issue-2"]);
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("marks the shared selected assignee instead of defaulting to unassigned", async () => {

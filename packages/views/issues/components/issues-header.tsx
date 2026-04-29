@@ -274,7 +274,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                  <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                   <span className="truncate">{a.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">

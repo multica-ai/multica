@@ -177,6 +177,27 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	return nil
 }
 
+// CancelTasksForAgent cancels every active task belonging to an agent
+// (queued + dispatched + running), reconciles the agent's status, and
+// broadcasts task:cancelled events. Used by the agent-level "Cancel all
+// tasks" action — same shape as CancelTasksForIssue but scoped on agent_id.
+//
+// Returns the cancelled rows so callers can report counts / log them.
+func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	cancelled, err := s.Queries.CancelAgentTasksByAgent(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range cancelled {
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	// Reconcile once after the loop — agent transitions from
+	// working→available based on remaining task counts, no need to call
+	// per row (the rows we just cancelled all belong to the same agent).
+	s.ReconcileAgentStatus(ctx, agentID)
+	return cancelled, nil
+}
+
 // CancelTasksByTriggerComment cancels active tasks whose trigger is the given
 // comment. Called from DeleteComment so an agent does not run with the
 // now-deleted content already embedded in its prompt. Must be invoked BEFORE

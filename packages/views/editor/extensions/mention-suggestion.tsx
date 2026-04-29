@@ -310,6 +310,7 @@ function MentionRow({
         actorType={item.type === "all" ? "member" : item.type}
         actorId={item.id}
         size={20}
+        showStatusDot
       />
       <span className="truncate font-medium">{item.label}</span>
       {item.type === "agent" && (

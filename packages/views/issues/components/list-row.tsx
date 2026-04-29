@@ -127,6 +127,7 @@ export const ListRow = memo(function ListRow({
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
               size={20}
+              enableHoverCard
             />
           )}
         </IssueCardLink>

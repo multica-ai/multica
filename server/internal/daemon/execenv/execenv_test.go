@@ -861,6 +861,34 @@ func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigCodexEmphasizesStdinForFormattedComments(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
+		IssueID:          "issue-1",
+		TriggerCommentID: "comment-1",
+	}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"Codex-Specific Comment Formatting",
+		"Treat inline `--content \"...\"` examples as short single-line examples only",
+		"`--content-stdin` with a HEREDOC",
+		"keep the same `--parent` value",
+		"Do not compress a multi-paragraph answer",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing Codex multiline guidance %q\n---\n%s", want, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -9,6 +9,7 @@ import {
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
+import { WorkspacePresencePrefetch } from "@multica/views/layout";
 import { useTabStore } from "@/stores/tab-store";
 
 /**
@@ -82,6 +83,7 @@ export function WorkspaceRouteLayout() {
 
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
+      <WorkspacePresencePrefetch />
       <Outlet />
     </WorkspaceSlugProvider>
   );

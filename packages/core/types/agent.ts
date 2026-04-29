@@ -23,6 +23,34 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
+// Coarse classifier set by the backend when a task transitions to "failed".
+// Mirrors the migration-055 enum in agent_task_queue.failure_reason. Used by
+// the agent presence derivation and the UI failure-message lookup.
+export type TaskFailureReason =
+  | "agent_error"
+  | "timeout"
+  | "runtime_offline"
+  | "runtime_recovery"
+  | "manual";
+
+// One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
+// only returns days that had at least one completion; the front-end fills
+// in missing days with zero when rendering the 7-bucket series. The series
+// is anchored on completed_at (a task in flight contributes nothing).
+export interface AgentActivityBucket {
+  agent_id: string;
+  // ISO timestamp at midnight UTC of the day.
+  bucket_at: string;
+  task_count: number;
+  failed_count: number;
+}
+
+// 30-day total run count per agent, drives the Agents-list RUNS column.
+export interface AgentRunCount {
+  agent_id: string;
+  run_count: number;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -38,6 +66,9 @@ export interface AgentTask {
   completed_at: string | null;
   result: unknown;
   error: string | null;
+  // Empty string when the task is not in a failed state (the backend uses
+  // `omitempty`, so the field may also be missing on non-failed tasks).
+  failure_reason?: TaskFailureReason | "";
   created_at: string;
   trigger_source?: "message" | "issue" | "chat";
   trigger_comment_id?: string | null;
@@ -176,6 +207,33 @@ export interface RuntimeUsage {
 export interface RuntimeHourlyActivity {
   hour: number;
   count: number;
+}
+
+// One (agent, model) row of the "Cost by agent" tab on the runtime detail
+// page. Model stays on the wire because cost is computed client-side from
+// a per-model pricing table — the client groups these rows by agent_id and
+// sums cost per agent across models.
+export interface RuntimeUsageByAgent {
+  agent_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// One (hour, model) row for the "By hour" tab; hour ∈ 0..23. Hours with
+// zero activity are omitted by the server; the client fills the gap to
+// render a continuous axis. Model preserved for client-side cost math.
+export interface RuntimeUsageByHour {
+  hour: number;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
 }
 
 export type RuntimeUpdateStatus =

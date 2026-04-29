@@ -106,6 +106,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
 	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
 
+	if provider == "codex" {
+		b.WriteString("## Codex-Specific Comment Formatting\n\n")
+		b.WriteString("Codex often follows the per-turn reply command literally. Treat inline `--content \"...\"` examples as short single-line examples only. ")
+		b.WriteString("For paragraphs, bullets, code blocks, backticks, quotes, or any text where line breaks matter, use `--content-stdin` with a HEREDOC and keep the same `--parent` value from the trigger comment. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one `--content` argument and do not rely on `\\n` escapes.\n\n")
+	}
+
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")

@@ -41,6 +41,7 @@ export function InboxListItem({
         actorType={item.actor_type ?? item.recipient_type}
         actorId={item.actor_id ?? item.recipient_id}
         size={28}
+        enableHoverCard
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
