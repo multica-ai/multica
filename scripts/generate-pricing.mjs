@@ -57,18 +57,18 @@ async function loadModelsDev() {
 const COST_FIELD_ORDER = [
   "input",
   "output",
-  "reasoning",
+  // "reasoning", // never used in Multica cost computation
   "cache_read",
   "cache_write",
-  "input_audio",
-  "output_audio",
+  // "input_audio", // never used in Multica cost computation
+  // "output_audio", // never used in Multica cost computation
 ];
 
 const COST_OUTPUT_KEY_MAP = {
   cache_read: "cacheRead",
   cache_write: "cacheWrite",
-  input_audio: "inputAudio",
-  output_audio: "outputAudio",
+  // input_audio: "inputAudio", // never used in Multica cost computation
+  // output_audio: "outputAudio", // never used in Multica cost computation
 };
 
 function serializeCost(cost) {
@@ -80,10 +80,9 @@ function serializeCost(cost) {
   // COST_FIELD_ORDER and ModelCost together.
   const entries = [];
   for (const k of COST_FIELD_ORDER) {
-    if (typeof cost[k] === "number") {
-      const outputKey = COST_OUTPUT_KEY_MAP[k] || k;
-      entries.push(`${outputKey}: ${cost[k]}`);
-    }
+    const outputKey = COST_OUTPUT_KEY_MAP[k] || k;
+    const value = typeof cost[k] === "number" ? cost[k] : 0;
+    entries.push(`${outputKey}: ${value}`);
   }
   return `{ ${entries.join(", ")} }`;
 }
@@ -130,16 +129,16 @@ function serializeCost(cost) {
     "// Regenerate with: node scripts/generate-pricing.mjs",
     "",
     "// Cost values are USD per million tokens, matching the raw",
-    "// `cost` shape on models.dev — fields are optional and only",
-    "// present when the upstream provider charges separately.",
+    "// `cost` shape on models.dev. We emit a complete numeric shape",
+    "// and default missing provider fields to 0 for type safety.",
     "export interface ModelCost {",
     "  input: number;",
     "  output: number;",
-    "  reasoning?: number;",
-    "  cacheRead?: number;",
-    "  cacheWrite?: number;",
-    "  inputAudio?: number;",
-    "  outputAudio?: number;",
+//    "  reasoning: number;", // never used in Multica cost computation
+    "  cacheRead: number;",
+    "  cacheWrite: number;",
+//    "  inputAudio: number;", // never used in Multica cost computation
+//    "  outputAudio: number;", // never used in Multica cost computation
     "}",
     "",
     "// Keys are `<provider>/<model>` to match what OpenCode and other",
