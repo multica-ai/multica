@@ -10,13 +10,13 @@
 - [ ] 2.2 Update activity and notification listeners so schedule date changes are recorded consistently with existing due-date changes.
 - [ ] 2.3 Add backend tests for creating, updating, clearing, and rejecting invalid issue schedule windows.
 
-## 3. apps/web issue workflows
+## 3. apps/workspace issue workflows
 
-- [ ] 3.1 Extend shared issue/API types and any issue draft state in `apps/web` to carry `start_date` and `end_date`.
-- [ ] 3.2 Reuse or generalize the existing date-picker UI so create-issue and issue-detail flows in `apps/web` can view, set, and clear both schedule dates.
-- [ ] 3.3 Add or update `apps/web` tests for schedule date editing behavior in issue workflows.
+- [ ] 3.1 Extend issue/API types and any issue draft state in `apps/workspace` to carry `start_date` and `end_date`.
+- [ ] 3.2 Reuse or generalize the existing date-picker UI so create-issue and issue-detail flows in `apps/workspace` can view, set, and clear both schedule dates.
+- [ ] 3.3 Add or update `apps/workspace` tests for schedule date editing behavior in issue workflows.
 
-## 4. apps/workspace issue workflows
+## 4. End-to-end verification
 
 - [ ] 4.1 Extend mirrored issue/API types and any issue draft state in `apps/workspace` to carry `start_date` and `end_date`.
 - [ ] 4.2 Reuse or generalize the existing date-picker UI so create-issue and issue-detail flows in `apps/workspace` can view, set, and clear both schedule dates.

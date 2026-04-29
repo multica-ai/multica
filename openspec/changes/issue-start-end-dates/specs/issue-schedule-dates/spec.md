@@ -41,8 +41,8 @@ The system SHALL reject any create or update request whose effective schedule wo
 - **WHEN** an issue already has `end_date` set and a client updates `start_date` to a later value than that `end_date`
 - **THEN** the request is rejected with a validation error
 
-### Requirement: Issue workflows expose schedule dates in both frontend apps
-The system SHALL let users view and edit `start_date` and `end_date` in issue creation and issue detail workflows in both `apps/web` and `apps/workspace`.
+### Requirement: Issue workflows expose schedule dates in the workspace frontend
+The system SHALL let users view and edit `start_date` and `end_date` in issue creation and issue detail workflows in `apps/workspace`.
 
 #### Scenario: Setting schedule dates while creating an issue
 - **WHEN** a user sets `start_date` and `end_date` in the create-issue flow

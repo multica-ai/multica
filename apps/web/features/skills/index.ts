@@ -1,1 +1,0 @@
-export { SkillsPage } from "./components";

@@ -4,7 +4,6 @@ This guide matches the current repository layout:
 
 - `apps/workspace` is the user-facing SPA
 - `server` is the Go backend
-- `apps/web` is the marketing site and is not required for the app deployment below
 
 ## 1. Deploy the frontend to Vercel
 
@@ -103,6 +102,6 @@ Your backend variables should then be:
 ## 5. Notes and constraints
 
 - This deployment path only covers the workspace SPA in `apps/workspace`.
-- If you also want the marketing site, deploy `apps/web` as a separate Vercel project.
+- The shared `workspace/` directory in the backend release output is only needed when the Go server serves the SPA directly.
 - The backend returns JWTs in JSON, so split-domain login works.
 - If you enable CloudFront signed cookies for private file delivery, keep `COOKIE_DOMAIN` and `CLOUDFRONT_DOMAIN` aligned with your final public domains.

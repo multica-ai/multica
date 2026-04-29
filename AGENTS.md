@@ -9,13 +9,12 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 - Agents can be assigned issues, create issues, comment, and change status
 - Supports local (daemon) and cloud agent runtimes
 - Built for 2-10 person AI-native teams
-- The repo is a monorepo with a Go backend, a product workspace SPA, a marketing site, CLI tooling, and OpenSpec change artifacts
+- The repo is a monorepo with a Go backend, a product workspace SPA, CLI tooling, and OpenSpec change artifacts
 
 ## Current Repository Shape
 
 - `server/` — Go backend, CLI, daemon, migrations, sqlc queries, and generated DB code
 - `apps/workspace/` — primary product app. Vite + React + TanStack Router
-- `apps/web/` — Next.js 16 marketing/public site
 - `e2e/` — Playwright end-to-end tests
 - `openspec/` — spec-driven change proposals and evolving product requirements
 - `scripts/` and root `Makefile` — local setup, verification, and worktree helpers
@@ -26,7 +25,6 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
 - `apps/workspace/` — Vite + React product workspace app
-- `apps/web/` — Next.js 16 frontend (App Router) for marketing/public pages
 - `e2e/` — Playwright end-to-end tests
 - `scripts/` and root `Makefile` — local setup and verification
 
@@ -50,40 +48,6 @@ apps/workspace/src/
 
 `apps/workspace` uses `@/` alias mapping to `src/`.
 
-### Web App Structure (`apps/web/`)
-
-The frontend uses a **feature-based architecture** with four layers:
-
-```
-apps/web/
-├── app/          # Routing layer (thin shells — import from features/)
-├── features/     # Business logic, organized by domain
-├── shared/       # Cross-feature utilities (api client, types, logger)
-├── test/         # Shared test utilities and setup
-├── public/       # Static assets
-```
-
-**`app/`** — Next.js App Router pages. Route files should be thin: import and re-export from `features/`. Layout components and route-specific glue (redirects, auth guards) live here. Shared layout components (e.g. `app-sidebar`) stay in `app/(dashboard)/_components/`.
-
-**`features/`** — Domain modules, each with its own components, hooks, stores, and config:
-
-| Feature | Purpose | Exports |
-|---|---|---|
-| `features/auth/` | Authentication state | `useAuthStore`, `AuthInitializer` |
-| `features/workspace/` | Workspace, members, agents | `useWorkspaceStore`, `useActorName` |
-| `features/issues/` | Issue state, components, config | `useIssueStore`, icons, pickers, status/priority config |
-| `features/inbox/` | Inbox notification state | `useInboxStore` |
-| `features/realtime/` | WebSocket connection + sync | `WSProvider`, `useWSEvent`, `useRealtimeSync` |
-| `features/modals/` | Modal registry and state | Modal store and components |
-| `features/skills/` | Skill management | Skill components |
-
-**`shared/`** — Code used across multiple features:
-- `shared/api/` — `ApiClient` (REST) and `WSClient` (WebSocket) for backend communication, plus the `api` singleton.
-- `shared/types/` — Domain types (Issue, Agent, Workspace, etc.) and WebSocket event types.
-- `shared/logger.ts` — Logger utility.
-
-`apps/web` uses `@/` alias mapping to the app root.
-
 ### State Management
 
 - **Zustand** for global client state — one store per feature domain (`features/auth/store.ts`, `features/workspace/store.ts`, `features/issues/store.ts`, `features/inbox/store.ts`).
@@ -101,7 +65,6 @@ apps/web/
 
 Use `@/` alias:
 
-- In `apps/web`, `@/` maps to `apps/web/`.
 - In `apps/workspace`, `@/` maps to `apps/workspace/src/`.
 
 Example imports:
@@ -161,7 +124,7 @@ Assignees are polymorphic — can be a member or an agent. `assignee_type` + `as
 ```bash
 # One-click setup & run
 make setup            # Install deps, ensure shared DB, run migrations
-make start            # Start backend + workspace SPA + marketing site
+make start            # Start backend + workspace SPA
 make stop             # Stop app processes for the current checkout
 make check            # Full verification for the current checkout
 make db-down          # Stop the shared PostgreSQL container
@@ -170,10 +133,9 @@ make db-down          # Stop the shared PostgreSQL container
 pnpm install
 pnpm dev:workspace    # Workspace SPA on FRONTEND_PORT (default 3000)
 pnpm dev:web          # Alias for workspace SPA from the repo root
-pnpm dev:marketing    # Marketing site on MARKETING_PORT (default 3001)
-pnpm build            # Build both frontends
-pnpm typecheck        # TypeScript check for both frontends
-pnpm lint             # TypeScript-based lint commands for both frontends
+pnpm build            # Build the workspace frontend
+pnpm typecheck        # TypeScript check for the workspace frontend
+pnpm lint             # TypeScript-based lint commands for the workspace frontend
 pnpm test             # Frontend tests (Vitest)
 
 # Backend (Go)
@@ -191,7 +153,6 @@ cd server && go test ./internal/handler/ -run TestName
 
 # Run a single TS test
 pnpm --filter @multica/workspace exec vitest run src/path/to/file.test.ts
-pnpm --filter @multica/web exec vitest run path/to/file.test.ts
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/issues.spec.ts
@@ -224,7 +185,7 @@ make start-worktree     # Start using .env.worktree
 ## Coding Rules
 
 - TypeScript strict mode is enabled; keep types explicit.
-- TypeScript in `apps/web` and `apps/workspace` uses 2-space indentation, double quotes, and semicolons.
+- TypeScript in `apps/workspace` uses 2-space indentation, double quotes, and semicolons.
 - Prefer PascalCase for React components, camelCase for hooks and helpers, and colocated test files such as `page.test.tsx`.
 - Go code follows standard Go conventions (gofmt, go vet). Use domain-oriented filenames like `issue.go` or `cmd_issue.go`.
 - Do not hand-edit generated code in `server/pkg/db/generated/`.
@@ -234,7 +195,6 @@ make start-worktree     # Start using .env.worktree
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Treat compatibility code as a maintenance cost, not a default safety mechanism. Avoid "just in case" branches that make the codebase harder to reason about.
 - Avoid broad refactors unless required by the task.
-- When shared behavior exists in both frontends, prefer mirrored updates rather than allowing them to drift.
 
 ## UI/UX Rules
 
@@ -257,8 +217,8 @@ make start-worktree     # Start using .env.worktree
 
 - Use atomic commits grouped by logical intent.
 - Conventional format with scopes:
-  - `feat(workspace): ...`, `feat(web): ...`, `feat(server): ...`, `feat(cli): ...`
-  - `fix(workspace): ...`, `fix(web): ...`, `fix(server): ...`, `fix(cli): ...`
+  - `feat(workspace): ...`, `feat(server): ...`, `feat(cli): ...`
+  - `fix(workspace): ...`, `fix(server): ...`, `fix(cli): ...`
   - `refactor(daemon): ...`
   - `test(scope): ...`
   - `docs: ...`

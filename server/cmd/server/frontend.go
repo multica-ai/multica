@@ -31,7 +31,6 @@ var workspaceDevPrefixes = []string{
 }
 
 func newFrontendHandler() http.Handler {
-	marketingProxy := newOptionalProxy(os.Getenv("MARKETING_SITE_ORIGIN"))
 	workspaceProxy := newOptionalProxy(os.Getenv("WORKSPACE_SITE_ORIGIN"))
 	workspaceDist := strings.TrimSpace(os.Getenv("WORKSPACE_DIST_DIR"))
 	if workspaceDist == "" {
@@ -60,16 +59,14 @@ func newFrontendHandler() http.Handler {
 			return
 		}
 
-		if marketingProxy != nil {
-			marketingProxy.ServeHTTP(w, r)
-			return
-		}
-
 		http.NotFound(w, r)
 	})
 }
 
 func isWorkspaceRoute(path string) bool {
+	if path == "/" {
+		return true
+	}
 	for _, prefix := range workspaceRoutePrefixes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
@@ -86,6 +83,9 @@ func isWorkspaceDevPath(path string) bool {
 		if path == prefix || strings.HasPrefix(path, prefix) {
 			return true
 		}
+	}
+	if ext := filepath.Ext(path); ext != "" && ext != "." {
+		return true
 	}
 	return false
 }
