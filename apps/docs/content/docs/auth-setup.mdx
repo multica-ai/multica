@@ -1,6 +1,6 @@
 ---
 title: Sign-in and signup configuration
-description: Configure email + verification code sign-in, Google OAuth, and signup allowlists. Avoid the 888888 trap.
+description: Configure email + verification code sign-in, Google OAuth, signup allowlists, and local test codes.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -27,17 +27,24 @@ The user enters an email on the sign-in page → the server sends a 6-digit code
 
 **What happens if you don't set `RESEND_API_KEY`**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
 
-## The 888888 trap
+## Fixed local testing codes
 
 <Callout type="warning">
-**If `APP_ENV` is not set to `production`, anyone can sign in to any account with the code `888888`.**
+**Do not enable a fixed verification code on a publicly reachable instance.**
 
-Multica has a development-only master code, `888888` — a backdoor so local development doesn't depend on Resend. The rule is straightforward: when `APP_ENV != "production"`, **any email** plus `888888` passes verification.
+The old behavior where non-production instances accepted `888888` by default has been removed. Unless you explicitly configure it, typing `888888` is treated like any other wrong code.
 
-**Production deployments must set `APP_ENV=production`**. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, this value is already set to `production` by default; but if you deploy from source yourself, write your own Docker config, or redefine environment variables in Kubernetes — you must add `APP_ENV=production` yourself.
+Local development without Resend should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+This shortcut is ignored when `APP_ENV=production`.
 </Callout>
 
-To check whether your deployment has this trap: open the sign-in page, enter **any email** to request a code, then enter `888888`. If you get in, your `APP_ENV` is not set to `production`, and **the entire instance is wide open**.
+Production deployments should leave `MULTICA_DEV_VERIFICATION_CODE` empty and set `APP_ENV=production`. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, `APP_ENV` defaults to `production`.
 
 ## Google OAuth configuration
 

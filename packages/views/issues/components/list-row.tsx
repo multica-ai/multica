@@ -14,6 +14,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
 
 export interface ChildProgress {
   done: number;
@@ -44,11 +45,13 @@ export const ListRow = memo(function ListRow({
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
+  const showLabels = storeProperties.labels && labels.length > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -86,6 +89,18 @@ export const ListRow = memo(function ListRow({
                 <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
+              </span>
+            )}
+            {showLabels && (
+              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                {labels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 3 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 3}
+                  </span>
+                )}
               </span>
             )}
           </span>

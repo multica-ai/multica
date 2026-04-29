@@ -8,6 +8,7 @@ const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
@@ -22,8 +23,11 @@ const mockDraftStore = {
     assigneeId: undefined,
     dueDate: null,
   },
+  lastAssigneeType: undefined,
+  lastAssigneeId: undefined,
   setDraft: mockSetDraft,
   clearDraft: mockClearDraft,
+  setLastAssignee: mockSetLastAssignee,
 };
 
 vi.mock("../navigation", () => ({
@@ -238,6 +242,7 @@ describe("CreateIssueModal", () => {
       });
     });
 
+    expect(mockSetLastAssignee).toHaveBeenCalledWith(undefined, undefined);
     expect(mockClearDraft).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
     expect(mockToastCustom).toHaveBeenCalledTimes(1);

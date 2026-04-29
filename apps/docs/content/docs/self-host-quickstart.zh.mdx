@@ -44,19 +44,19 @@ make selfhost
 - **前端**：[http://localhost:3000](http://localhost:3000)
 - **后端**：[http://localhost:8080](http://localhost:8080)
 
-## 2. 重要：改 `APP_ENV` 成 `production`
+## 2. 重要：保持生产安全配置
 
 <Callout type="warning">
-**`docker-compose.selfhost.yml` 默认把 `APP_ENV` 设成 `production`**——这防止开发用的"万能验证码 `888888`"在你公网暴露的实例上启用。
+**`docker-compose.selfhost.yml` 默认把 `APP_ENV` 设成 `production`**，并让 `MULTICA_DEV_VERIFICATION_CODE` 为空，所以公网实例默认没有固定验证码。
 
-**但如果你的 `.env` 里把 `APP_ENV` 留空或改成其他值**，`888888` 会被启用——**任何人输入任何邮箱 + `888888` 都能登录**。详见 [登录与注册配置 → 888888 陷阱](/auth-setup#888888-陷阱)。
+只在本地或私有测试自动化里设置 `MULTICA_DEV_VERIFICATION_CODE`。如果在 `APP_ENV` 非 production 时启用了固定验证码，任何能请求验证码的人都能用这个固定值登录。详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)。
 
-公网部署前一定检查 `.env` 里 `APP_ENV=production`。
+公网部署前一定检查 `.env` 里 `APP_ENV=production`，且 `MULTICA_DEV_VERIFICATION_CODE` 为空。
 </Callout>
 
 ## 3. 配置邮件服务（可选但推荐）
 
-如果不配邮件，你的用户无法收到验证码——**但如果 `APP_ENV != production` 你可以用 `888888` 登录**（见上方警告）。
+如果不配邮件，用户无法通过邮件收到验证码；server 会把生成的验证码打印到 stdout。
 
 要真的发验证码邮件：
 
@@ -79,6 +79,7 @@ make selfhost
 
 - 输入你的邮箱
 - 从 Resend 邮件里拿验证码（或者前面没配 Resend 的话从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行）
+- 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `MULTICA_DEV_VERIFICATION_CODE=888888` 后它才会生效
 - 登录后创建第一个工作区
 
 ## 5. 连接命令行工具到你自己的 server

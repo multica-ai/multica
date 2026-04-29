@@ -39,6 +39,7 @@
     "recharts": "3.8.0",
     "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
     "shiki": "^3.21.0",

@@ -18,6 +18,7 @@ import {
   onIssueCreated,
   onIssueUpdated,
   onIssueDeleted,
+  onIssueLabelsChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -31,6 +32,7 @@ import type {
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
+  IssueLabelsChangedPayload,
   InboxNewPayload,
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -117,6 +119,17 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      label: () => {
+        // label:created/updated/deleted — also refresh issues, since each
+        // issue carries a denormalized snapshot of its labels (rename/recolor
+        // /delete on a label needs to flush the chips on every issue showing
+        // it).
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: ["labels", wsId] });
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
+      },
       pin: () => {
         const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
@@ -147,7 +160,7 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "activity:created",
       "reaction:added", "reaction:removed",
@@ -198,6 +211,13 @@ export function useRealtimeSync(
         onIssueDeleted(qc, wsId, issue_id);
         onInboxIssueDeleted(qc, wsId, issue_id);
       }
+    });
+
+    const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
+      const { issue_id, labels } = p as IssueLabelsChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
     });
 
     const unsubInboxNew = ws.on("inbox:new", (p) => {
@@ -464,6 +484,7 @@ export function useRealtimeSync(
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
+      unsubIssueLabelsChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

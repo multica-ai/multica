@@ -193,8 +193,12 @@ func (s *ModelListStore) Fail(id string, errMsg string) {
 // Called by the frontend; the daemon picks it up on its next heartbeat.
 func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
@@ -207,7 +211,7 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := h.ModelListStore.Create(runtimeID)
+	req := h.ModelListStore.Create(uuidToString(rt.ID))
 	writeJSON(w, http.StatusOK, req)
 }
 

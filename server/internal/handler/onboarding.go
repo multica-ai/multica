@@ -7,11 +7,11 @@ import (
 	"net/mail"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -356,16 +356,14 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	// Reject malformed UUIDs up front. Without this, `parseUUID` below
-	// silently returns a zero-UUID and the membership check fails with
-	// a misleading 403 "not a member of this workspace" instead of the
-	// true 400. Defense-in-depth: even if the membership check is ever
-	// refactored, a garbage workspace_id never reaches CreateProject /
+	// Reject malformed UUIDs up front and reuse the parsed value for every
+	// write below so a garbage workspace_id never reaches CreateProject /
 	// CreateIssue.
-	if _, err := uuid.Parse(req.WorkspaceID); err != nil {
-		writeError(w, http.StatusBadRequest, "workspace_id is invalid")
+	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
+	if !ok {
 		return
 	}
+	req.WorkspaceID = uuidToString(wsUUID)
 	if req.Project.Title == "" {
 		writeError(w, http.StatusBadRequest, "project.title is required")
 		return
@@ -406,7 +404,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	// since members are looked up by `user_id`.
 	if _, err := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
 		UserID:      parseUUID(userID),
-		WorkspaceID: parseUUID(req.WorkspaceID),
+		WorkspaceID: wsUUID,
 	}); err != nil {
 		writeError(w, http.StatusForbidden, "not a member of this workspace")
 		return
@@ -418,7 +416,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	// workspace. `ListAgents` orders by created_at ASC, so "agents[0]"
 	// is deterministically the earliest-created agent. This replaces
 	// the old client-supplied `welcome_issue.agent_id` trust chain.
-	agents, err := qtx.ListAgents(r.Context(), parseUUID(req.WorkspaceID))
+	agents, err := qtx.ListAgents(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
 		return
@@ -435,7 +433,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 
 	// --- Create project ---
 	project, err := qtx.CreateProject(r.Context(), db.CreateProjectParams{
-		WorkspaceID: parseUUID(req.WorkspaceID),
+		WorkspaceID: wsUUID,
 		Title:       req.Project.Title,
 		Description: strOrNullText(req.Project.Description),
 		Icon:        strOrNullText(req.Project.Icon),
@@ -452,7 +450,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	var welcomeIssueID *string
 	var welcomeIssueForEvent *db.Issue
 	if hasAgent && req.WelcomeIssueTemplate.Title != "" {
-		welcomeNumber, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(req.WorkspaceID))
+		welcomeNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
@@ -462,7 +460,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 			priority = "high"
 		}
 		welcome, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-			WorkspaceID:  parseUUID(req.WorkspaceID),
+			WorkspaceID:  wsUUID,
 			Title:        req.WelcomeIssueTemplate.Title,
 			Description:  strOrNullText(req.WelcomeIssueTemplate.Description),
 			Status:       "todo",
@@ -490,7 +488,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 		if sub.Title == "" {
 			continue
 		}
-		number, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(req.WorkspaceID))
+		number, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
@@ -510,7 +508,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 			priority = "none"
 		}
 		issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-			WorkspaceID:  parseUUID(req.WorkspaceID),
+			WorkspaceID:  wsUUID,
 			Title:        sub.Title,
 			Description:  strOrNullText(sub.Description),
 			Status:       status,
@@ -538,7 +536,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	pinnedProjectPos := float64(1)
 	var pinProjectForEvent *db.PinnedItem
 	pinProject, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
-		WorkspaceID: parseUUID(req.WorkspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 		ItemType:    "project",
 		ItemID:      project.ID,
@@ -552,7 +550,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	var pinWelcomeIssueForEvent *db.PinnedItem
 	if welcomeIssueForEvent != nil {
 		pinWelcome, err := qtx.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
-			WorkspaceID: parseUUID(req.WorkspaceID),
+			WorkspaceID: wsUUID,
 			UserID:      parseUUID(userID),
 			ItemType:    "issue",
 			ItemID:      welcomeIssueForEvent.ID,
@@ -587,7 +585,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	projectResp := projectToResponse(project)
 	h.publish(protocol.EventProjectCreated, req.WorkspaceID, "member", userID, map[string]any{"project": projectResp})
 
-	workspacePrefix := h.getIssuePrefix(r.Context(), parseUUID(req.WorkspaceID))
+	workspacePrefix := h.getIssuePrefix(r.Context(), wsUUID)
 	if welcomeIssueForEvent != nil {
 		welcomeResp := issueToResponse(*welcomeIssueForEvent, workspacePrefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": welcomeResp})
@@ -675,12 +673,13 @@ func (h *Handler) DismissStarterContent(w http.ResponseWriter, r *http.Request) 
 	// ListAgents returns empty.
 	branch := analytics.StarterContentBranchSelfServe
 	if req.WorkspaceID != "" {
-		if _, err := uuid.Parse(req.WorkspaceID); err == nil {
+		if wsUUID, err := util.ParseUUID(req.WorkspaceID); err == nil {
+			req.WorkspaceID = uuidToString(wsUUID)
 			if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
 				UserID:      parseUUID(userID),
-				WorkspaceID: parseUUID(req.WorkspaceID),
+				WorkspaceID: wsUUID,
 			}); err == nil {
-				agents, err := h.Queries.ListAgents(r.Context(), parseUUID(req.WorkspaceID))
+				agents, err := h.Queries.ListAgents(r.Context(), wsUUID)
 				if err == nil && len(agents) > 0 {
 					branch = analytics.StarterContentBranchAgentGuided
 				}

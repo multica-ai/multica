@@ -12,12 +12,19 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
+)
+
+var (
+	version = "dev"
+	commit  = "unknown"
 )
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
@@ -118,6 +125,13 @@ func main() {
 	if os.Getenv("RESEND_API_KEY") == "" {
 		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
 	}
+	if os.Getenv("MULTICA_DEV_VERIFICATION_CODE") != "" {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is set but ignored because APP_ENV=production.")
+		} else {
+			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
+		}
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -148,6 +162,8 @@ func main() {
 	bus := events.New()
 	hub := realtime.NewHub()
 	go hub.Run()
+	daemonHub := daemonws.NewHub()
+	var daemonWakeup service.TaskWakeupNotifier = daemonHub
 
 	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
 	// multiple API nodes can deliver each other's events. Without it the hub
@@ -191,15 +207,21 @@ func main() {
 			case "legacy":
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+				slog.Info("daemon websocket wakeup: Redis fanout disabled in legacy realtime relay mode")
 			case "dual":
 				shardedReadRedis = newNamedRedisClient(opts, "realtime-read-sharded")
 				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
+				sharded.SetDaemonRuntimeDeliverer(daemonHub)
 				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, legacyReadRedis)
 				relay = realtime.NewMirroredRelay(sharded, legacy)
+				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			default:
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
-				relay = realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
+				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
+				sharded.SetDaemonRuntimeDeliverer(daemonHub)
+				relay = sharded
+				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			}
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
@@ -233,7 +255,32 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
-	r := NewRouter(pool, hub, bus, analyticsClient, storeRedis)
+	metricsConfig := obsmetrics.ConfigFromEnv()
+	var metricsServer *http.Server
+	var httpMetrics *obsmetrics.HTTPMetrics
+	if metricsConfig.Enabled() {
+		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
+			Pool:     pool,
+			Realtime: realtime.M,
+			DaemonWS: daemonws.M,
+			Version:  version,
+			Commit:   commit,
+		})
+		httpMetrics = metricsRegistry.HTTP
+		metricsServer = obsmetrics.NewServer(metricsConfig.Addr, metricsRegistry.Gatherer)
+		if !obsmetrics.IsLoopbackAddr(metricsConfig.Addr) {
+			slog.Warn(
+				"metrics listener is not loopback-only; restrict access with private networking, allowlists, or proxy auth",
+				"addr", metricsConfig.Addr,
+			)
+		}
+	}
+
+	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+		HTTPMetrics:  httpMetrics,
+		DaemonHub:    daemonHub,
+		DaemonWakeup: daemonWakeup,
+	})
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -243,7 +290,7 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, pool, hub, bus)
+	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
@@ -252,7 +299,15 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runDBStatsLogger(sweepCtx, pool)
 
-	// Graceful shutdown
+	if metricsServer != nil {
+		go func() {
+			slog.Info("metrics server starting", "addr", metricsConfig.Addr)
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server disabled after startup error", "error", err)
+			}
+		}()
+	}
+
 	go func() {
 		slog.Info("server starting", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -268,12 +323,21 @@ func main() {
 	slog.Info("shutting down server")
 	sweepCancel()
 	autopilotCancel()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := srv.Shutdown(apiShutdownCtx); err != nil {
+		apiShutdownCancel()
 		slog.Error("server forced to shutdown", "error", err)
 		os.Exit(1)
+	}
+	apiShutdownCancel()
+
+	if metricsServer != nil {
+		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := metricsServer.Shutdown(metricsShutdownCtx); err != nil {
+			slog.Error("metrics server forced to shutdown", "error", err)
+		}
+		metricsShutdownCancel()
 	}
 	slog.Info("server stopped")
 }

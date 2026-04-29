@@ -211,6 +211,61 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 	return items, nil
 }
 
+const listLabelsForIssues = `-- name: ListLabelsForIssues :many
+SELECT il.issue_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
+FROM issue_label l
+JOIN issue_to_label il ON il.label_id = l.id
+WHERE il.issue_id = ANY($1::uuid[])
+  AND l.workspace_id = $2::uuid
+ORDER BY il.issue_id, LOWER(l.name) ASC
+`
+
+type ListLabelsForIssuesParams struct {
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type ListLabelsForIssuesRow struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Color       string             `json:"color"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Bulk variant: fetch labels for many issues in one round-trip so the issue
+// list endpoints can fold labels into each row without N+1 queries from the
+// client. Workspace-guarded the same way as ListLabelsByIssue.
+func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssuesParams) ([]ListLabelsForIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listLabelsForIssues, arg.IssueIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLabelsForIssuesRow{}
+	for rows.Next() {
+		var i ListLabelsForIssuesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Color,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateLabel = `-- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE($3, name),

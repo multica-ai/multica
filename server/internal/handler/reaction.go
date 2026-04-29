@@ -41,9 +41,17 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -66,7 +74,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 
 	reaction, err := h.Queries.AddReaction(r.Context(), db.AddReactionParams{
 		CommentID:   comment.ID,
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		ActorType:   actorType,
 		ActorID:     parseUUID(actorID),
 		Emoji:       req.Emoji,
@@ -108,9 +116,17 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -143,7 +159,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(protocol.EventReactionRemoved, workspaceID, actorType, actorID, map[string]any{
-		"comment_id": commentId,
+		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
 		"emoji":      req.Emoji,
 		"actor_type": actorType,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -64,9 +63,9 @@ func cleanupTestUser(t *testing.T, email string) {
 func isSubscribed(t *testing.T, queries *db.Queries, issueID, userType, userID string) bool {
 	t.Helper()
 	subscribed, err := queries.IsIssueSubscriber(context.Background(), db.IsIssueSubscriberParams{
-		IssueID:  util.ParseUUID(issueID),
+		IssueID:  util.MustParseUUID(issueID),
 		UserType: userType,
-		UserID:   util.ParseUUID(userID),
+		UserID:   util.MustParseUUID(userID),
 	})
 	if err != nil {
 		t.Fatalf("IsIssueSubscriber: %v", err)
@@ -76,7 +75,7 @@ func isSubscribed(t *testing.T, queries *db.Queries, issueID, userType, userID s
 
 func subscriberCount(t *testing.T, queries *db.Queries, issueID string) int {
 	t.Helper()
-	subs, err := queries.ListIssueSubscribers(context.Background(), util.ParseUUID(issueID))
+	subs, err := queries.ListIssueSubscribers(context.Background(), util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("ListIssueSubscribers: %v", err)
 	}
@@ -394,11 +393,13 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	}
 }
 
-// Verify parseUUID is consistent — pgtype.UUID from our local helper should match util.ParseUUID
+// Verify parseUUID is consistent — the local helper should agree with util.MustParseUUID
+// for valid input, and panic on invalid input (the silent-zero behavior was removed
+// after #1661 to prevent silent SQL writes against a zero UUID).
 func TestParseUUIDConsistency(t *testing.T) {
 	uuid := "550e8400-e29b-41d4-a716-446655440000"
 	local := parseUUID(uuid)
-	utilResult := util.ParseUUID(uuid)
+	utilResult := util.MustParseUUID(uuid)
 	if local != utilResult {
 		t.Fatalf("parseUUID inconsistency: local=%v, util=%v", local, utilResult)
 	}
@@ -406,9 +407,11 @@ func TestParseUUIDConsistency(t *testing.T) {
 		t.Fatal("expected valid UUID")
 	}
 
-	// Empty string should produce invalid UUID
-	empty := parseUUID("")
-	if empty != (pgtype.UUID{}) {
-		t.Fatalf("expected zero UUID for empty string, got %v", empty)
-	}
+	// Invalid input (empty string) must panic now — never silently return a zero UUID.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected parseUUID(\"\") to panic, but it returned normally")
+		}
+	}()
+	_ = parseUUID("")
 }

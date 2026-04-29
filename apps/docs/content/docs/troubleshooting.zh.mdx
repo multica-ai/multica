@@ -108,28 +108,29 @@ multica issue show <issue-id>             # 看 task 历史
 - 域名没验证 → Resend console 里走 DNS 验证流程（加 SPF / DKIM 记录）
 - 紧急情况下（如内部测试）→ 从 server 日志里抄 `[DEV]` 打印出的验证码
 
-## 验证码是 `888888` 但登不进去
+## 固定本地测试验证码登不进去
 
-**症状**：自部署实例，想用开发用的主验证码 `888888` 登录，但被拒 `invalid or expired code`。
+**症状**：自部署实例，想用 `888888` 这类固定本地测试验证码登录，但被拒 `invalid or expired code`。
 
-**可能原因**（这俩互斥）：
+**可能原因**（互斥）：
 
-1. **`APP_ENV=production`** —— 这正是你**应该**的生产配置；`888888` 在 `APP_ENV=production` 时**被禁用**。这是刻意设计，不是 bug
-2. **你在 Resend 收到了真实验证码** —— 如果 Resend 已配，server 实际发了真邮件，`888888` 只作为 dev fallback
+1. **`MULTICA_DEV_VERIFICATION_CODE` 为空** —— 固定验证码默认关闭
+2. **`APP_ENV=production`** —— 这是正确的生产配置；固定本地测试验证码在 production 中会被忽略
+3. **配置的验证码不是 6 位数字** —— 这个快捷码只接受 6 位数字
 
 **怎么查**：
 
 ```bash
-cat .env | grep APP_ENV       # 看当前配置
-docker exec <container> env | grep APP_ENV   # docker 部署
+cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 ```
 
 检查邮箱（含 spam）看有没有收到真实验证码。
 
 **怎么修**：
 
-- 生产环境你本来就不该用 `888888`—— 配好 Resend 用真实验证码
-- **本地开发或内网测试**若需要 `888888`，确保 `APP_ENV` 未设或不是 `production`——但**绝对不要**这样跑公网实例（详见 [登录与注册配置 → 888888 陷阱](/auth-setup#888888-陷阱)）
+- 生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空，配好 Resend 后使用真实验证码
+- 本地开发或内网测试可以从 server 日志抄生成的验证码；如果需要 `888888`，设置 `APP_ENV=development` 和 `MULTICA_DEV_VERIFICATION_CODE=888888`。不要在公网实例启用固定验证码（详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)）
 
 ## 端口冲突
 

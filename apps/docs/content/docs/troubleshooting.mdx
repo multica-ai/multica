@@ -108,28 +108,29 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 - Domain not verified → run the DNS verification flow in the Resend console (add SPF / DKIM records)
 - In an emergency (internal testing) → copy the code printed under `[DEV]` from the server logs
 
-## Verification code `888888` doesn't work
+## Fixed local test code doesn't work
 
-**Symptom**: on a self-hosted instance, you try to sign in with the development-only master code `888888` and it's rejected with `invalid or expired code`.
+**Symptom**: on a self-hosted instance, you try to sign in with a fixed local test code such as `888888` and it's rejected with `invalid or expired code`.
 
 **Likely causes** (mutually exclusive):
 
-1. **`APP_ENV=production`** — this is the **correct** production configuration; `888888` is **disabled** when `APP_ENV=production`. Intentional design, not a bug
-2. **You received a real code via Resend** — if Resend is configured, the server sent an actual email; `888888` is only a dev fallback
+1. **`MULTICA_DEV_VERIFICATION_CODE` is empty** — fixed codes are disabled by default
+2. **`APP_ENV=production`** — this is the **correct** production configuration; fixed local test codes are ignored in production
+3. **The configured code is not 6 digits** — the shortcut only accepts a 6-digit value
 
 **How to diagnose**:
 
 ```bash
-cat .env | grep APP_ENV       # inspect current config
-docker exec <container> env | grep APP_ENV   # docker deployment
+cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 ```
 
 Check your inbox (including spam) for the real verification code.
 
 **How to fix**:
 
-- In production, you shouldn't be using `888888` at all — configure Resend and use real codes
-- **For local development or internal testing**, if you need `888888`, ensure `APP_ENV` is unset or not `production` — but **never** run a public instance this way (see [Sign-in and signup configuration → The 888888 trap](/auth-setup#the-888888-trap))
+- In production, leave `MULTICA_DEV_VERIFICATION_CODE` empty — configure Resend and use real codes
+- For local development or internal testing, either copy the generated code from server logs or set `APP_ENV=development` plus `MULTICA_DEV_VERIFICATION_CODE=888888` — never enable a fixed code on a public instance (see [Sign-in and signup configuration → Fixed local testing codes](/auth-setup#fixed-local-testing-codes))
 
 ## Port conflicts
 

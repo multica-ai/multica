@@ -16,6 +16,13 @@ type TaskDispatchPayload struct {
 	Description string `json:"description"`
 }
 
+// TaskAvailablePayload is sent from server to daemon as a wakeup hint. The
+// daemon still claims work through the existing HTTP claim endpoint.
+type TaskAvailablePayload struct {
+	RuntimeID string `json:"runtime_id"`
+	TaskID    string `json:"task_id,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`
@@ -37,10 +44,10 @@ type TaskMessagePayload struct {
 	IssueID string         `json:"issue_id,omitempty"`
 	Seq     int            `json:"seq"`
 	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool    string         `json:"tool,omitempty"`     // tool name for tool_use/tool_result
-	Content string         `json:"content,omitempty"`  // text content
-	Input   map[string]any `json:"input,omitempty"`    // tool input (tool_use only)
-	Output  string         `json:"output,omitempty"`   // tool output (tool_result only)
+	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content string         `json:"content,omitempty"` // text content
+	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

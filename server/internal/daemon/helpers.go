@@ -78,3 +78,21 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+func sleepWithContextOrWakeup(ctx context.Context, d time.Duration, wakeups <-chan struct{}) error {
+	if wakeups == nil {
+		return sleepWithContext(ctx, d)
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wakeups:
+		return nil
+	case <-timer.C:
+		return nil
+	}
+}

@@ -7,20 +7,21 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量读取配置——数据库、登录、邮件、存储、注册白名单都在这里配。这一页按用途分组给完整清单：每组说清楚**不设会怎样**、**生产必须设哪几个**。Auth 相关那几个怎么真正配见 [登录与注册配置](/auth-setup)。
 
-## 启动必填的五个
+## 核心 server 环境变量
 
-这五个是你部署前必须考虑的——有些有默认值能让 server 启动，但生产环境里你应该全部显式配。
+这些是你部署前必须考虑的核心变量——有些有默认值能让 server 启动，但生产环境里你应该显式配置必填项。
 
 | 环境变量 | 默认值 | 生产必须设？ |
 |---|---|---|
 | `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |
 | `PORT` | `8080` | 否（除非换端口）|
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
-| `APP_ENV` | 空 | **是**（必须 `production`——见下一节陷阱）|
+| `APP_ENV` | 空 | **是**（必须 `production`）|
 | `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
+| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 否（生产必须保持为空）|
 
 <Callout type="warning">
-**`APP_ENV` 不设为 `production`，任何人都能用 `888888` 登录任何账号。** Multica 有一个开发用的主验证码（master code）`888888`——`APP_ENV != "production"` 时**任何邮箱**输 `888888` 都能通过。本地开发时故意留空方便调试；**生产环境一旦不设 `production`，等于 auth 完全失效**。详见 [登录与注册配置 → 888888 陷阱](/auth-setup#888888-陷阱)。
+**生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。
 </Callout>
 
 ### 数据库连接池

@@ -115,6 +115,17 @@ UPDATE agent_task_queue
 SET status = 'cancelled'
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running');
 
+-- name: CancelAgentTasksByTriggerComment :many
+-- Cancels active tasks whose trigger is the given comment. Called when a
+-- comment is deleted so the agent does not run with the now-deleted content
+-- already embedded in its prompt. Must run BEFORE the comment row is deleted
+-- because the FK ON DELETE SET NULL would otherwise nullify trigger_comment_id
+-- and we'd lose the ability to find the affected tasks.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
+
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
 WHERE id = $1;

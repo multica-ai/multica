@@ -147,7 +147,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 **关键约定**：
 
-- **Callout**：`<Callout type="info|warning|tip">...</Callout>`。warning 用于陷阱（如 888888），info 用于补充说明，tip 用于最佳实践
+- **Callout**：`<Callout type="info|warning|tip">...</Callout>`。warning 用于陷阱（如固定测试验证码），info 用于补充说明，tip 用于最佳实践
 - **代码块**：shell 命令用 \`\`\`bash；配置用 \`\`\`yaml / \`\`\`env；JSON 用 \`\`\`json
 - **Cross-link**：用 markdown 链接 `[显示文字](/docs/page-slug)`，不要写成 "详见 Tasks 章节"
 - **表格**：有 3 行以上对照才用表格，不要 1-2 行也用
@@ -723,11 +723,11 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 > **合并说明**：原 7.3 Auth Setup + 7.10 Signup Controls 合并。
 
-- **Source files**: `server/internal/handler/auth.go`（APP_ENV 判断 + checkSignupAllowed）, `.env.example`（auth 相关注释）
+- **Source files**: `server/internal/handler/auth.go`（固定测试验证码 + checkSignupAllowed）, `.env.example`（auth 相关注释）
 - **目标读者**: self-host 运维
 - **叙事位置**: self-host 的 auth 配置。
 - **写什么**（1500-2000 字）:
-  - **🚨 超醒目 warning block**：`APP_ENV=production` 必须设置，否则 verification code 恒为 `888888`（任何人登录任何账号）
+  - **🚨 超醒目 warning block**：生产环境必须保持 `MULTICA_DEV_VERIFICATION_CODE` 为空；固定测试验证码只用于非 production 私有测试
   - Email + verification code 登录流程（依赖 Resend）
   - Google OAuth 配置步骤（创建 OAuth client → redirect URI → 填 env）
   - **Signup 白名单三层优先级决策树**:
@@ -737,9 +737,9 @@ multica issue assign <issue-id> --agent <agent-slug>
   - 典型场景：开放给公司域 / 限定几个邮箱 / 完全关闭 signup
   - 和邀请的关系（signup 关了也能通过邀请加人）
 - **不写**: JWT 实现、token 类型（§8.2 讲）
-- **写前要验证**: APP_ENV 判断条件；OAuth 流程最新；Signup 优先级
+- **写前要验证**: 固定测试验证码的 env 条件；OAuth 流程最新；Signup 优先级
 - **⚠️ 动笔前必读**:
-  - ⚠️⚠️ **888888 陷阱必须最醒目**（红色 warning block），这是 self-host 最大坑
+  - ⚠️⚠️ **固定测试验证码风险必须最醒目**（红色 warning block），这是 self-host 最大坑
   - OAuth 给外部步骤截图，别假设读者懂 GCP Console
   - 决策树建议用 Mermaid 图
 - **Owner**: –
@@ -754,7 +754,7 @@ multica issue assign <issue-id> --agent <agent-slug>
   - 任务一直 queued（runtime offline / max_concurrent 满 / agent 配错）
   - WebSocket 连不上（cookie / CORS / proxy）
   - Email 没收到（Resend 未配置 → 看 stderr）
-  - 验证码收到是 888888 但不工作（APP_ENV 检查）
+  - 固定测试验证码不工作（APP_ENV / MULTICA_DEV_VERIFICATION_CODE 检查）
   - Port 冲突
   - 日志位置：daemon / server / browser console
 - **不写**: 深度 bug report（去 GitHub issue）

@@ -37,8 +37,8 @@ func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
 }
 
 type CreatePATRequest struct {
-	Name         string `json:"name"`
-	ExpiresInDays *int  `json:"expires_in_days"`
+	Name          string `json:"name"`
+	ExpiresInDays *int   `json:"expires_in_days"`
 }
 
 func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Request) {
@@ -77,11 +77,11 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
-		UserID:    parseUUID(userID),
-		Name:      req.Name,
-		TokenHash: auth.HashToken(rawToken),
+		UserID:      parseUUID(userID),
+		Name:        req.Name,
+		TokenHash:   auth.HashToken(rawToken),
 		TokenPrefix: prefix,
-		ExpiresAt: expiresAt,
+		ExpiresAt:   expiresAt,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create token")
@@ -120,8 +120,12 @@ func (h *Handler) RevokePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	id := chi.URLParam(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "token id")
+	if !ok {
+		return
+	}
 	if err := h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
-		ID:     parseUUID(id),
+		ID:     idUUID,
 		UserID: parseUUID(userID),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke token")

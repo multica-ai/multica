@@ -65,6 +65,7 @@ func init() {
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
@@ -81,6 +82,7 @@ func init() {
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonCmd.AddCommand(daemonStartCmd)
@@ -174,11 +176,29 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = daemonSysProcAttr()
+	// On Windows we want to break the child out of the parent shell's Job
+	// Object so the daemon survives parent-shell exit. If the parent's Job
+	// has not granted BREAKAWAY_OK, CreateProcess returns
+	// ERROR_ACCESS_DENIED — fall back to spawning without breakaway, which
+	// matches the pre-fix behaviour. On Unix the bool is a no-op.
+	child.SysProcAttr = daemonSysProcAttr(true)
 
 	if err := child.Start(); err != nil {
-		logFile.Close()
-		return fmt.Errorf("start daemon: %w", err)
+		if isAccessDeniedSpawnErr(err) {
+			// Retry without breakaway. Reset the cmd state — exec.Cmd is
+			// not safe to Start() twice, so build a fresh one.
+			child = exec.Command(exePath, args...)
+			child.Stdout = logFile
+			child.Stderr = logFile
+			child.SysProcAttr = daemonSysProcAttr(false)
+			if err := child.Start(); err != nil {
+				logFile.Close()
+				return fmt.Errorf("start daemon (no breakaway): %w", err)
+			}
+		} else {
+			logFile.Close()
+			return fmt.Errorf("start daemon: %w", err)
+		}
 	}
 	logFile.Close()
 	pid := child.Process.Pid
@@ -241,6 +261,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		args = append(args, "--agent-timeout", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		args = append(args, "--codex-semantic-inactivity-timeout", d.String())
+	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
 	}
@@ -281,6 +304,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		overrides.AgentTimeout = d
+	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		overrides.CodexSemanticInactivityTimeout = d
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
@@ -327,12 +353,26 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = daemonSysProcAttr()
+		// Break out of the parent's Job Object on Windows; see the
+		// runDaemonBackground call site for rationale.
+		child.SysProcAttr = daemonSysProcAttr(true)
 
 		if err := child.Start(); err != nil {
-			logFile.Close()
-			logger.Error("failed to start new daemon", "error", err)
-			return nil
+			if isAccessDeniedSpawnErr(err) {
+				child = exec.Command(restartBin, args...)
+				child.Stdout = logFile
+				child.Stderr = logFile
+				child.SysProcAttr = daemonSysProcAttr(false)
+				if err := child.Start(); err != nil {
+					logFile.Close()
+					logger.Error("failed to start new daemon (no breakaway)", "error", err)
+					return nil
+				}
+			} else {
+				logFile.Close()
+				logger.Error("failed to start new daemon", "error", err)
+				return nil
+			}
 		}
 		logFile.Close()
 		child.Process.Release()

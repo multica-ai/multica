@@ -22,6 +22,7 @@ import ReactMarkdown, {
   type Components,
 } from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -297,7 +298,7 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
   return (
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
+        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}

@@ -130,7 +130,10 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
 		echo ""; \
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or set APP_ENV=development in .env (private networks only) to enable code 888888."; \
+		echo "        or read the generated code from backend logs when Resend is unset."; \
+		echo ""; \
+		echo "Built images locally via docker-compose.selfhost.build.yml."; \
+		echo "Local tags: multica-backend:dev and multica-web:dev."; \
 		echo ""; \
 		echo "Built images locally via docker-compose.selfhost.build.yml."; \
 		echo "Local tags: multica-backend:dev and multica-web:dev."; \
@@ -277,7 +280,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build: ## Build the server, CLI, and migrate binaries into server/bin
-	cd server && go build -o bin/server ./cmd/server
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
 

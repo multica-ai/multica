@@ -57,6 +57,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
+  const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
 
   const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -153,6 +154,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         }
       }
 
+      setLastAssignee(assigneeType, assigneeId);
       clearDraft();
       const shouldShowBacklogHint =
         status === "backlog" && assigneeType === "agent" && assigneeId &&

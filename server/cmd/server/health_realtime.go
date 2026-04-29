@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/realtime"
 )
 
@@ -47,7 +48,9 @@ func realtimeMetricsHandler(token string) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(realtime.M.Snapshot())
+		snapshot := realtime.M.Snapshot()
+		snapshot["daemonws"] = daemonws.M.Snapshot()
+		_ = json.NewEncoder(w).Encode(snapshot)
 	}
 }
 

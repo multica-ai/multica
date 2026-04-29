@@ -26,10 +26,19 @@ type TaskService struct {
 	TxStarter TxStarter
 	Hub       *realtime.Hub
 	Bus       *events.Bus
+	Wakeup    TaskWakeupNotifier
 }
 
-func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
+type TaskWakeupNotifier interface {
+	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
+	var wakeup TaskWakeupNotifier
+	if len(wakeups) > 0 {
+		wakeup = wakeups[0]
+	}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -73,6 +82,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	}
 
 	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -107,6 +117,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -137,6 +148,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
+	s.notifyTaskAvailable(task)
 	return task, nil
 }
 
@@ -151,6 +163,24 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 // pattern already used by CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
+	if err != nil {
+		return err
+	}
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return nil
+}
+
+// CancelTasksByTriggerComment cancels active tasks whose trigger is the given
+// comment. Called from DeleteComment so an agent does not run with the
+// now-deleted content already embedded in its prompt. Must be invoked BEFORE
+// the comment row is deleted because the FK ON DELETE SET NULL would
+// otherwise nullify trigger_comment_id and we'd lose the ability to find
+// the affected tasks.
+func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) error {
+	cancelled, err := s.Queries.CancelAgentTasksByTriggerComment(ctx, commentID)
 	if err != nil {
 		return err
 	}
@@ -627,6 +657,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"attempt", child.Attempt,
 		"max_attempts", child.MaxAttempts,
 	)
+	s.notifyTaskAvailable(child)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskDispatch, child)
 	return &child, nil
 }
@@ -882,6 +913,13 @@ func priorityToInt(p string) int32 {
 	default:
 		return 0
 	}
+}
+
+func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
+	if s.Wakeup == nil || !task.RuntimeID.Valid {
+		return
+	}
+	s.Wakeup.NotifyTaskAvailable(util.UUIDToString(task.RuntimeID), util.UUIDToString(task.ID))
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {

@@ -115,8 +115,16 @@ func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetLabel(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "label id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	label, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,9 +193,17 @@ func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "label id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	params := db.UpdateLabelParams{
-		ID:          parseUUID(id),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          idUUID,
+		WorkspaceID: wsUUID,
 	}
 	if req.Name != nil {
 		name, err := validateLabelName(*req.Name)
@@ -236,10 +252,18 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "label id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	// DeleteLabel is :one RETURNING id — ErrNoRows means the label wasn't in
 	// this workspace (404). Any other error is a real 500.
 	if _, err := h.Queries.DeleteLabel(r.Context(), db.DeleteLabelParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
@@ -249,7 +273,7 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete label")
 		return
 	}
-	h.publish(protocol.EventLabelDeleted, workspaceID, "member", userID, map[string]any{"label_id": id})
+	h.publish(protocol.EventLabelDeleted, workspaceID, "member", userID, map[string]any{"label_id": uuidToString(idUUID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -267,13 +291,13 @@ type AttachLabelRequest struct {
 // nil → clients refetch via query invalidation, and we skip broadcasting an
 // empty list that would incorrectly overwrite every subscriber's optimistic
 // state.
-func (h *Handler) listLabelsForIssueSafe(r *http.Request, issueID, workspaceID string) ([]db.IssueLabel, bool) {
+func (h *Handler) listLabelsForIssueSafe(r *http.Request, issueID, workspaceID pgtype.UUID) ([]db.IssueLabel, bool) {
 	labels, err := h.Queries.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
-		IssueID:     parseUUID(issueID),
-		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		slog.Warn("ListLabelsByIssue failed after mutation", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		slog.Warn("ListLabelsByIssue failed after mutation", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issueID))...)
 		return nil, false
 	}
 	return labels, true
@@ -282,17 +306,15 @@ func (h *Handler) listLabelsForIssueSafe(r *http.Request, issueID, workspaceID s
 // ListLabelsForIssue returns the labels currently attached to an issue.
 func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
-	workspaceID := h.resolveWorkspaceID(r)
 	// Authorize via the issue — if it's not in this workspace, the caller
 	// shouldn't see its labels.
-	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
-	if err != nil || uuidToString(issue.WorkspaceID) != workspaceID {
-		writeError(w, http.StatusNotFound, "issue not found")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
 		return
 	}
 	labels, err := h.Queries.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
-		IssueID:     parseUUID(issueID),
-		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		slog.Warn("ListLabelsForIssue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -305,7 +327,6 @@ func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 // AttachLabel attaches a label to an issue.
 func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
-	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -322,13 +343,16 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Both the issue and label must belong to this workspace.
-	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
-	if err != nil || uuidToString(issue.WorkspaceID) != workspaceID {
-		writeError(w, http.StatusNotFound, "issue not found")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	labelID, ok := parseUUIDOrBadRequest(w, req.LabelID, "label_id")
+	if !ok {
 		return
 	}
 	if _, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
-		ID: parseUUID(req.LabelID), WorkspaceID: parseUUID(workspaceID),
+		ID: labelID, WorkspaceID: issue.WorkspaceID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
@@ -340,9 +364,9 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
-		IssueID:     parseUUID(issueID),
-		LabelID:     parseUUID(req.LabelID),
-		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     issue.ID,
+		LabelID:     labelID,
+		WorkspaceID: issue.WorkspaceID,
 	}); err != nil {
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
@@ -353,14 +377,14 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	// committed — return success without a labels body (clients refetch via
 	// query invalidation) and skip the broadcast so we don't overwrite every
 	// subscriber's optimistic state with an incorrect empty list.
-	labels, ok2 := h.listLabelsForIssueSafe(r, issueID, workspaceID)
+	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
 	if !ok2 {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, workspaceID, "member", userID, map[string]any{
-		"issue_id": issueID,
+	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+		"issue_id": uuidToString(issue.ID),
 		"labels":   resp,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
@@ -370,7 +394,6 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	labelID := chi.URLParam(r, "labelId")
-	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -380,13 +403,16 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	// (mirror of AttachLabel). Without this, a crafted request with a foreign
 	// labelID would no-op and return 200 — "silent success" is worse than an
 	// explicit 404.
-	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
-	if err != nil || uuidToString(issue.WorkspaceID) != workspaceID {
-		writeError(w, http.StatusNotFound, "issue not found")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	labelUUID, ok := parseUUIDOrBadRequest(w, labelID, "label id")
+	if !ok {
 		return
 	}
 	if _, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
-		ID: parseUUID(labelID), WorkspaceID: parseUUID(workspaceID),
+		ID: labelUUID, WorkspaceID: issue.WorkspaceID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
@@ -398,23 +424,23 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
-		IssueID:     parseUUID(issueID),
-		LabelID:     parseUUID(labelID),
-		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     issue.ID,
+		LabelID:     labelUUID,
+		WorkspaceID: issue.WorkspaceID,
 	}); err != nil {
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to detach label")
 		return
 	}
 
-	labels, ok2 := h.listLabelsForIssueSafe(r, issueID, workspaceID)
+	labels, ok2 := h.listLabelsForIssueSafe(r, issue.ID, issue.WorkspaceID)
 	if !ok2 {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, workspaceID, "member", userID, map[string]any{
-		"issue_id": issueID,
+	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+		"issue_id": uuidToString(issue.ID),
 		"labels":   resp,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
