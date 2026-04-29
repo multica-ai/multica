@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -111,10 +112,29 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
-	if _, err := exec.LookPath(hermesPath); err == nil {
+	if resolved, err := exec.LookPath(hermesPath); err == nil {
 		agents["hermes"] = AgentEntry{
-			Path:  hermesPath,
+			Path:  resolved,
 			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+		}
+	} else if runtime.GOOS == "windows" {
+		// Windows fallback: check the managed wrapper at %APPDATA%\Multica\bin\hermes.cmd.
+		// Hermes is a Python agent typically installed inside WSL on Windows.
+		// The daemon process (spawned by the Desktop app or background start)
+		// does not load .env files, so MULTICA_HERMES_PATH is usually empty
+		// and exec.LookPath("hermes") fails because there is no native
+		// Windows binary named "hermes" on PATH.
+		// A lightweight .cmd wrapper placed at this well-known location
+		// delegates to the WSL-resident Hermes binary transparently.
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			fallback := filepath.Join(appData, "Multica", "bin", "hermes.cmd")
+			if _, statErr := os.Stat(fallback); statErr == nil {
+				agents["hermes"] = AgentEntry{
+					Path:         fallback,
+					Model:        strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+					NeedsWSLPath: true, // discovered via WSL bridge — translate Windows paths to /mnt/...
+				}
+			}
 		}
 	}
 	geminiPath := envOrDefault("MULTICA_GEMINI_PATH", "gemini")

@@ -91,6 +91,7 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	NeedsWSLPath   bool // when true, translate Windows paths to WSL mount paths (/mnt/...) before passing to the agent
 }
 
 // New creates a Backend for the given agent type.
