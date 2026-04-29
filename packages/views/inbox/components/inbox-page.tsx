@@ -32,6 +32,7 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  Settings,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -53,6 +54,7 @@ import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
+import { InboxNotificationSettings } from "./inbox-notification-settings";
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
@@ -200,7 +202,17 @@ export function InboxPage() {
           </span>
         )}
       </div>
-      <DropdownMenu>
+      <div className="flex items-center gap-0.5">
+        <InboxNotificationSettings>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+        </InboxNotificationSettings>
+        <DropdownMenu>
         <DropdownMenuTrigger
           render={
             <Button
@@ -232,6 +244,7 @@ export function InboxPage() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </PageHeader>
   );
 

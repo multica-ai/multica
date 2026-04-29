@@ -486,6 +486,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+				r.Get("/preferences", h.ListNotificationPreferences)
+				r.Put("/preferences", h.UpdateNotificationPreferences)
 			})
 		})
 	})

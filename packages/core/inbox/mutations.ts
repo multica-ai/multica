@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { inboxKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
-import type { InboxItem } from "../types";
+import type { InboxItem, NotificationPreference } from "../types";
 
 export function useMarkInboxRead() {
   const qc = useQueryClient();
@@ -108,6 +108,34 @@ export function useArchiveCompletedInbox() {
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
+
+export function useUpdateNotificationPreferences() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (preferences: NotificationPreference[]) =>
+      api.updateNotificationPreferences(preferences),
+    onMutate: async (preferences) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.preferences(wsId) });
+      const prev = qc.getQueryData<NotificationPreference[]>(inboxKeys.preferences(wsId));
+      qc.setQueryData<NotificationPreference[]>(inboxKeys.preferences(wsId), (old) => {
+        if (!old) return preferences;
+        const map = new Map(old.map((p) => [p.notification_type, p]));
+        for (const p of preferences) {
+          map.set(p.notification_type, p);
+        }
+        return Array.from(map.values());
+      });
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.preferences(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: inboxKeys.preferences(wsId) });
     },
   });
 }
