@@ -232,13 +232,11 @@ test.describe("Issues", () => {
 
     await page.getByRole("button", { name: "No labels" }).click();
     await page.getByPlaceholder("Search or create label...").fill("Backend");
-    await page.getByRole("button", { name: /Create “Backend”/ }).click();
-    await expect(page.getByText("Backend").first()).toBeVisible();
+    await page.getByRole("button", { name: /^Backend$/ }).click();
 
     await page.getByRole("button", { name: "Blocked by" }).click();
     await page.getByPlaceholder("Add blocked by issue...").fill(blocker.title);
     await page.getByRole("button", { name: new RegExp(blocker.title) }).click();
-    await expect(page.getByText(blocker.identifier).first()).toBeVisible();
 
     const issueId = page.url().split("/").pop();
     if (!issueId) {

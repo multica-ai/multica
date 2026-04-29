@@ -936,6 +936,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if raw, exists := rawTop["updates"]; exists {
 		json.Unmarshal(raw, &rawUpdates)
 	}
+	if _, ok := rawUpdates["parent_issue_id"]; ok {
+		writeError(w, http.StatusBadRequest, "parent_issue_id is not supported in batch updates")
+		return
+	}
 
 	workspaceID := resolveWorkspaceID(r)
 	updated := 0
@@ -998,9 +1002,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			} else {
 				params.ProjectID = pgtype.UUID{Valid: false}
 			}
-		}
-		if _, ok := rawUpdates["parent_issue_id"]; ok {
-			continue
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
 			parsedDueDate, err := parseOptionalRFC3339Timestamp(req.Updates.DueDate, "due_date")

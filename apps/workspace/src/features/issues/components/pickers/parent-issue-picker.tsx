@@ -12,18 +12,25 @@ import {
 } from "./property-picker";
 
 function collectDescendantIssueIds(issueId: string, issues: IssueReference[]): Set<string> {
+  const childrenByParent = new Map<string, string[]>();
+  issues.forEach((issue) => {
+    if (!issue.parent_issue_id) return;
+    const childIssueIds = childrenByParent.get(issue.parent_issue_id) ?? [];
+    childIssueIds.push(issue.id);
+    childrenByParent.set(issue.parent_issue_id, childIssueIds);
+  });
+
   const descendants = new Set<string>();
   const queue = [issueId];
 
   while (queue.length > 0) {
     const currentIssueId = queue.shift();
     if (!currentIssueId) continue;
-
-    issues.forEach((issue) => {
-      if (issue.parent_issue_id === currentIssueId && !descendants.has(issue.id)) {
-        descendants.add(issue.id);
-        queue.push(issue.id);
-      }
+    const childIssueIds = childrenByParent.get(currentIssueId) ?? [];
+    childIssueIds.forEach((childIssueId) => {
+      if (descendants.has(childIssueId)) return;
+      descendants.add(childIssueId);
+      queue.push(childIssueId);
     });
   }
 
