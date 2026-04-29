@@ -291,9 +291,19 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 }
 
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
+//
+// HasActiveTask is a *bool so the daemon can distinguish three states:
+//   - nil      → server didn't send the field (old server)  → fast tier refuses delete
+//   - &false   → server confirmed no active task            → fast tier may delete (subject to TTL)
+//   - &true    → server confirmed an active task            → fast tier refuses delete (strict race guard)
+//
+// This makes the deploy order between server and daemon free: a new daemon
+// running against an old server simply never deletes via the fast tier and
+// falls back to the existing slow tier. Contract 09 §10.
 type IssueGCStatus struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Status        string    `json:"status"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	HasActiveTask *bool     `json:"has_active_task,omitempty"`
 }
 
 // GetIssueGCCheck returns the status and updated_at of an issue for GC decisions.

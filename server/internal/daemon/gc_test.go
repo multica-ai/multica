@@ -28,6 +28,8 @@ func newGCTestDaemon(t *testing.T, handler http.Handler) *Daemon {
 		GCInterval:     1 * time.Hour,
 		GCTTL:          5 * 24 * time.Hour,
 		GCOrphanTTL:    30 * 24 * time.Hour,
+		GCDoneInterval: 30 * time.Second,
+		GCDoneTTL:      30 * time.Second,
 	}
 	d := New(cfg, slog.Default())
 	d.client = NewClient(srv.URL)
@@ -296,6 +298,209 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 
 	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
 		t.Fatal("empty workspace dir should be removed after all tasks cleaned")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fast-tier (gcDoneLoop) tests — contract 09 §10 terminal hygiene.
+// ---------------------------------------------------------------------------
+
+// TestGCDoneFastTier_DeletesDoneWorkdirAfterTTL asserts that a workdir whose
+// issue is in `done` and whose updated_at is older than GCDoneTTL is deleted
+// on the next fast-tier scan.
+func TestGCDoneFastTier_DeletesDoneWorkdirAfterTTL(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-1111-1111-1111-111111111111"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "done",
+			"updated_at":      time.Now().Add(-1 * time.Minute), // beyond 30s GCDoneTTL
+			"has_active_task": false,
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "fast-clean", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-1 * time.Minute),
+	})
+
+	action := d.shouldCleanDoneTaskDir(context.Background(), taskDir)
+	if action != gcActionClean {
+		t.Fatalf("expected gcActionClean for done+TTL+!active, got %d", action)
+	}
+
+	// runGCDone end-to-end: actually delete.
+	d.runGCDone(context.Background())
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Fatal("task dir should be removed after fast-tier scan")
+	}
+}
+
+// TestGCDoneFastTier_RespectsGracePeriod asserts that a workdir whose issue
+// just flipped to `done` (within GCDoneTTL) is NOT deleted on this cycle.
+func TestGCDoneFastTier_RespectsGracePeriod(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-2222-2222-2222-222222222222"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "done",
+			"updated_at":      time.Now().Add(-1 * time.Second), // inside grace window
+			"has_active_task": false,
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "fresh-done", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now(),
+	})
+
+	action := d.shouldCleanDoneTaskDir(context.Background(), taskDir)
+	if action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for done within grace window, got %d", action)
+	}
+}
+
+// TestGCDoneFastTier_StrictRaceGuard asserts that even if status=done, a
+// workdir is NOT deleted while has_active_task=true.
+func TestGCDoneFastTier_StrictRaceGuard(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-3333-3333-3333-333333333333"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "done",
+			"updated_at":      time.Now().Add(-1 * time.Minute),
+			"has_active_task": true, // strict race guard
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "race-skip", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-1 * time.Minute),
+	})
+
+	action := d.shouldCleanDoneTaskDir(context.Background(), taskDir)
+	if action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip when has_active_task=true, got %d", action)
+	}
+}
+
+// TestGCDoneFastTier_OldServerNilFieldRefusesDelete asserts deploy-safety:
+// when the server omits has_active_task entirely (old server, daemon
+// upgraded first), the fast tier MUST refuse to delete.
+func TestGCDoneFastTier_OldServerNilFieldRefusesDelete(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-4444-4444-4444-444444444444"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Note: NO has_active_task field — simulates an old server.
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-1 * time.Minute),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "old-server", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-1 * time.Minute),
+	})
+
+	action := d.shouldCleanDoneTaskDir(context.Background(), taskDir)
+	if action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for nil has_active_task (old server), got %d", action)
+	}
+
+	// Sanity-check: a runGCDone cycle must NOT delete the dir.
+	d.runGCDone(context.Background())
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatal("task dir must remain when server returns no has_active_task field")
+	}
+}
+
+// TestGCDoneFastTier_IgnoresCancelledAndBlocked asserts that the fast tier
+// never touches cancelled/blocked workdirs (slow tier owns those).
+func TestGCDoneFastTier_IgnoresCancelledAndBlocked(t *testing.T) {
+	t.Parallel()
+	cancelledID := "aaaaaaaa-5555-5555-5555-555555555555"
+	blockedID := "aaaaaaaa-6666-6666-6666-666666666666"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", cancelledID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "canceled",
+			"updated_at":      time.Now().Add(-1 * time.Minute),
+			"has_active_task": false,
+		})
+	})
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", blockedID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "blocked",
+			"updated_at":      time.Now().Add(-1 * time.Minute),
+			"has_active_task": false,
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	cancelledDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "cancelled-task", &execenv.GCMeta{
+		IssueID:     cancelledID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-1 * time.Minute),
+	})
+	blockedDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "blocked-task", &execenv.GCMeta{
+		IssueID:     blockedID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-1 * time.Minute),
+	})
+
+	if a := d.shouldCleanDoneTaskDir(context.Background(), cancelledDir); a != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for cancelled, got %d", a)
+	}
+	if a := d.shouldCleanDoneTaskDir(context.Background(), blockedDir); a != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for blocked, got %d", a)
+	}
+
+	d.runGCDone(context.Background())
+	if _, err := os.Stat(cancelledDir); err != nil {
+		t.Fatal("cancelled dir must remain (slow tier owns it)")
+	}
+	if _, err := os.Stat(blockedDir); err != nil {
+		t.Fatal("blocked dir must remain (never reaped)")
+	}
+}
+
+// TestGCDoneFastTier_IgnoresOrphans asserts the fast tier does not act on
+// directories without .gc_meta.json (orphans). Slow tier owns orphans via
+// mtime-gated cleanup after GCOrphanTTL.
+func TestGCDoneFastTier_IgnoresOrphans(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0 // would be eligible under slow tier
+	orphanDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "orphan", nil)
+
+	if a := d.shouldCleanDoneTaskDir(context.Background(), orphanDir); a != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for orphan in fast tier, got %d", a)
+	}
+	d.runGCDone(context.Background())
+	if _, err := os.Stat(orphanDir); err != nil {
+		t.Fatal("orphan dir must remain after fast-tier scan")
 	}
 }
 

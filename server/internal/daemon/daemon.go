@@ -156,6 +156,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+	go d.gcDoneLoop(ctx) // fast-tier terminal hygiene per contract 09 §10
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx)
 }

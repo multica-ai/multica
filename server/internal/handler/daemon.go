@@ -1463,7 +1463,8 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 // read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "issueId")
-	issue, err := h.Queries.GetIssue(r.Context(), parseUUID(issueID))
+	issueUUID := parseUUID(issueID)
+	issue, err := h.Queries.GetIssue(r.Context(), issueUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return
@@ -1471,8 +1472,19 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
+	// Strict race guard for the GC fast tier (contract 09 §10): if any task on
+	// this issue is queued/dispatched/running, the daemon must not delete the
+	// workdir even if the issue is `done`. Defense-in-depth — under normal
+	// contract flow no agent runs on a done issue, but cheap to enforce.
+	hasActive, err := h.Queries.HasActiveTaskForIssue(r.Context(), issueUUID)
+	if err != nil {
+		// Conservative on query failure: report active so the daemon refuses
+		// to delete this cycle. Slow tier picks it up later if needed.
+		hasActive = true
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     issue.Status,
-		"updated_at": issue.UpdatedAt.Time,
+		"status":          issue.Status,
+		"updated_at":      issue.UpdatedAt.Time,
+		"has_active_task": hasActive,
 	})
 }

@@ -20,8 +20,10 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL           = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCTTL                 = 24 * time.Hour   // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL           = 72 * time.Hour   // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCDoneInterval        = 30 * time.Second // fast-tier scan cadence for `done` issues only (terminal hygiene per contract 09 §10)
+	DefaultGCDoneTTL             = 30 * time.Second // grace window after `done` flip before deletion
 
 	// WorkdirSharingTask is the historical default: every task gets its own
 	// {workspacesRoot}/{workspaceID}/{shortTaskID}/workdir/, with reuse only
@@ -39,7 +41,7 @@ const (
 type Config struct {
 	ServerBaseURL      string
 	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	LegacyDaemonIDs    []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName         string
 	RuntimeName        string
 	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
@@ -55,6 +57,8 @@ type Config struct {
 	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
 	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 24h)
 	GCOrphanTTL        time.Duration         // clean orphan dirs with no meta older than this (default: 72h). Dirs whose issue returned 404 are cleaned immediately.
+	GCDoneInterval     time.Duration         // fast-tier cadence — only acts on `done` issues (default: 30s, contract 09 §10)
+	GCDoneTTL          time.Duration         // grace before deleting a `done` workdir (default: 30s, contract 09 §10)
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
@@ -307,6 +311,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcDoneInterval, err := durationFromEnv("MULTICA_GC_DONE_INTERVAL", DefaultGCDoneInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	gcDoneTTL, err := durationFromEnv("MULTICA_GC_DONE_TTL", DefaultGCDoneTTL)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		ServerBaseURL:      serverBaseURL,
@@ -323,6 +335,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCInterval:         gcInterval,
 		GCTTL:              gcTTL,
 		GCOrphanTTL:        gcOrphanTTL,
+		GCDoneInterval:     gcDoneInterval,
+		GCDoneTTL:          gcDoneTTL,
 		HealthPort:         healthPort,
 		MaxConcurrentTasks: maxConcurrentTasks,
 		PollInterval:       pollInterval,

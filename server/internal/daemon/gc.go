@@ -236,3 +236,192 @@ func isBareRepo(path string) bool {
 	}
 	return true
 }
+
+// ---------------------------------------------------------------------------
+// Fast-tier GC — terminal hygiene for `done` issues (contract 09 §10).
+//
+// The slow tier (gcLoop) handles `done`, `canceled`, and orphan workdirs at
+// hour-scale cadence with a 24h+ grace window. That's appropriate for
+// `canceled` (operators may want to inspect a cancelled card) and for
+// orphans (no meta → conservative), but it leaves successfully-merged
+// issues' worktrees on disk for up to 25h.
+//
+// The HARD RULE for `done` is: when an issue is merged, the local worktree
+// MUST be deleted. The fast tier enforces this. It runs every
+// GCDoneInterval (30s default), checks each workdir's issue status, and
+// deletes after a small grace window (GCDoneTTL, 30s default) so any
+// in-flight final actions can settle.
+//
+// End-to-end SLA: ≤ GCDoneInterval + GCDoneTTL + ~2s = ~62s from the
+// moment the GitHub webhook flips status to `done` to os.RemoveAll return.
+//
+// The fast tier does NOT touch `canceled` (slow tier owns it) or `blocked`
+// (never reaped — may need a human revival). Orphans are also slow-tier
+// only since fast-tier latency offers no benefit there.
+// ---------------------------------------------------------------------------
+
+// gcDoneLoop is the fast-tier GC loop. Independent from gcLoop; both run
+// concurrently. Safe to coexist — each operates on disjoint subsets:
+//
+//	gcLoop:     {canceled} ∪ {orphan} ∪ {done very old}
+//	gcDoneLoop: {done within slow-tier window}
+//
+// The two loops compete only when an issue is `done` AND older than
+// GCTTL (24h). In that case the first to win the os.RemoveAll succeeds
+// and the other logs a benign "remove failed" warning — acceptable, since
+// in practice the fast tier reaps `done` workdirs in <1m so the slow
+// tier never sees them.
+func (d *Daemon) gcDoneLoop(ctx context.Context) {
+	if !d.cfg.GCEnabled {
+		d.logger.Info("gc_done: disabled (GCEnabled=false)")
+		return
+	}
+	d.logger.Info("gc_done: started",
+		"interval", d.cfg.GCDoneInterval,
+		"ttl", d.cfg.GCDoneTTL,
+	)
+
+	// Small initial delay so we don't race the slow tier's startup scan.
+	if err := sleepWithContext(ctx, 5*time.Second); err != nil {
+		return
+	}
+
+	ticker := time.NewTicker(d.cfg.GCDoneInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.runGCDone(ctx)
+		}
+	}
+}
+
+// runGCDone performs a single fast-tier scan across all workspaces.
+func (d *Daemon) runGCDone(ctx context.Context) {
+	root := d.cfg.WorkspacesRoot
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Warn("gc_done: read workspaces root failed", "error", err)
+		}
+		return
+	}
+
+	var cleaned, skipped int
+	for _, wsEntry := range entries {
+		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
+			continue
+		}
+		wsDir := filepath.Join(root, wsEntry.Name())
+		c, s := d.gcDoneWorkspace(ctx, wsDir)
+		cleaned += c
+		skipped += s
+	}
+
+	if cleaned > 0 {
+		// Bare-cache references to the now-removed worktrees: prune them.
+		// Reuses the slow-tier helper; idempotent.
+		d.pruneRepoWorktrees(root)
+		d.logger.Info("gc_done: cycle complete", "cleaned", cleaned, "skipped", skipped)
+	}
+}
+
+// gcDoneWorkspace scans task directories inside one workspace directory.
+func (d *Daemon) gcDoneWorkspace(ctx context.Context, wsDir string) (cleaned, skipped int) {
+	taskEntries, err := os.ReadDir(wsDir)
+	if err != nil {
+		d.logger.Warn("gc_done: read workspace dir failed", "dir", wsDir, "error", err)
+		return
+	}
+
+	for _, entry := range taskEntries {
+		if ctx.Err() != nil {
+			return
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		taskDir := filepath.Join(wsDir, entry.Name())
+		if d.shouldCleanDoneTaskDir(ctx, taskDir) == gcActionClean {
+			d.cleanTaskDir(taskDir)
+			cleaned++
+		} else {
+			skipped++
+		}
+	}
+
+	if cleaned > 0 {
+		if remaining, _ := os.ReadDir(wsDir); len(remaining) == 0 {
+			os.Remove(wsDir)
+		}
+	}
+	return
+}
+
+// shouldCleanDoneTaskDir is the fast-tier decision. It only acts when:
+//
+//   - the workdir has a .gc_meta.json (orphans go to the slow tier);
+//   - the issue's status is exactly `done`;
+//   - the server's has_active_task field is present and false (deploy-safe);
+//   - the done flip is older than GCDoneTTL (grace window).
+//
+// Anything else returns gcActionSkip. The function is read-only — the caller
+// performs the actual deletion — so it is safe to call concurrently with
+// shouldCleanTaskDir from the slow tier.
+func (d *Daemon) shouldCleanDoneTaskDir(ctx context.Context, taskDir string) gcAction {
+	meta, err := execenv.ReadGCMeta(taskDir)
+	if err != nil {
+		// No meta → orphan; slow tier owns this case (mtime-gated cleanup
+		// after GCOrphanTTL). Don't act here.
+		return gcActionSkip
+	}
+
+	status, err := d.client.GetIssueGCCheck(ctx, meta.IssueID)
+	if err != nil {
+		var reqErr *requestError
+		if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound {
+			// 404 ambiguity (deleted vs no access). Slow tier handles it via
+			// mtime-gated orphan cleanup; fast tier never deletes on 404.
+			return gcActionSkip
+		}
+		// Network/auth errors — retry next cycle.
+		return gcActionSkip
+	}
+
+	if status.Status != "done" {
+		return gcActionSkip
+	}
+
+	// Strict race guard with deploy-safe nil handling. Three states:
+	//   - nil    → old server didn't send the field; refuse to delete.
+	//             Behavior degrades to slow-tier-only.
+	//   - &true  → server confirmed an active task; refuse + log.
+	//   - &false → server confirmed no active task; clear to proceed.
+	if status.HasActiveTask == nil {
+		d.logger.Info("gc_done: skip (server has_active_task field absent — old server, refusing to delete)",
+			"dir", filepath.Base(taskDir),
+			"issue", meta.IssueID,
+		)
+		return gcActionSkip
+	}
+	if *status.HasActiveTask {
+		d.logger.Info("gc_done: skip (active task on done issue — strict race guard)",
+			"dir", filepath.Base(taskDir),
+			"issue", meta.IssueID,
+		)
+		return gcActionSkip
+	}
+	if time.Since(status.UpdatedAt) < d.cfg.GCDoneTTL {
+		return gcActionSkip // grace window
+	}
+
+	d.logger.Info("gc_done: eligible",
+		"dir", filepath.Base(taskDir),
+		"issue", meta.IssueID,
+		"age", time.Since(status.UpdatedAt).Round(time.Second),
+	)
+	return gcActionClean
+}
