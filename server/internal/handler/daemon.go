@@ -802,13 +802,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
-		if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
-			AgentID: task.AgentID,
-			IssueID: task.IssueID,
-		}); err == nil && prior.SessionID.Valid {
-			resp.PriorSessionID = prior.SessionID.String
-			if prior.WorkDir.Valid {
-				resp.PriorWorkDir = prior.WorkDir.String
+		//
+		// Skipped when the task was created with skip_session_resume=true — used
+		// by the fresh-task API when the skill/prompt has changed and resuming
+		// would silently keep executing the outdated plan.
+		if !task.SkipSessionResume {
+			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
+				AgentID: task.AgentID,
+				IssueID: task.IssueID,
+			}); err == nil && prior.SessionID.Valid {
+				resp.PriorSessionID = prior.SessionID.String
+				if prior.WorkDir.Valid {
+					resp.PriorWorkDir = prior.WorkDir.String
+				}
 			}
 		}
 	}

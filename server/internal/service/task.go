@@ -86,6 +86,55 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return task, nil
 }
 
+// EnqueueFreshTaskForIssue creates a queued task that explicitly opts out of the
+// usual "resume the prior session" lookup on task claim. Used when the issue's
+// skill definition, prompt template, or instructions have changed and the caller
+// needs the agent to read the new version from scratch instead of continuing the
+// old conversation. Behaviour is otherwise identical to EnqueueTaskForIssue: same
+// agent, same runtime, same priority, same optional trigger comment.
+func (s *TaskService) EnqueueFreshTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	if !issue.AssigneeID.Valid {
+		slog.Error("fresh task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
+		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
+	}
+
+	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil {
+		slog.Error("fresh task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	var commentID pgtype.UUID
+	if len(triggerCommentID) > 0 {
+		commentID = triggerCommentID[0]
+	}
+
+	task, err := s.Queries.CreateFreshAgentTask(ctx, db.CreateFreshAgentTaskParams{
+		AgentID:          issue.AssigneeID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: commentID,
+	})
+	if err != nil {
+		slog.Error("fresh task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create fresh task: %w", err)
+	}
+
+	slog.Info("fresh task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(issue.AssigneeID),
+	)
+	return task, nil
+}
+
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
@@ -724,6 +773,47 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		return nil, err
 	}
 	slog.Info("issue rerun enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issueID),
+		"agent_id", util.UUIDToString(issue.AssigneeID),
+		"cancelled_prior", len(cancelled),
+	)
+	return &task, nil
+}
+
+// RerunIssueFresh is like RerunIssue but uses EnqueueFreshTaskForIssue so the
+// new task explicitly skips the "resume previous session" lookup on claim. Used
+// when the skill definition or prompt template has changed and the caller needs
+// the agent to start from scratch instead of continuing the prior conversation.
+func (s *TaskService) RerunIssueFresh(ctx context.Context, issueID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("load issue: %w", err)
+	}
+	if !issue.AssigneeID.Valid || issue.AssigneeType.String != "agent" {
+		return nil, fmt.Errorf("issue is not assigned to an agent")
+	}
+	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: issue.AssigneeID,
+	})
+	if err != nil {
+		slog.Warn("rerun-fresh: cancel prior tasks failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(issue.AssigneeID),
+			"error", err,
+		)
+	}
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+
+	task, err := s.EnqueueFreshTaskForIssue(ctx, issue, triggerCommentID)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("issue rerun-fresh enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
 		"agent_id", util.UUIDToString(issue.AssigneeID),

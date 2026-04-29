@@ -113,3 +113,24 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusAccepted, taskToResponse(*task))
 }
+
+// RerunIssueFresh manually re-enqueues the issue's current agent assignment as
+// a fresh task that explicitly opts out of session resumption. Use when the
+// skill definition or prompt template has changed and the caller needs the
+// agent to start a brand-new conversation instead of continuing the previous
+// one. Any active tasks for (issue, current assignee) are cancelled first.
+func (h *Handler) RerunIssueFresh(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	task, err := h.TaskService.RerunIssueFresh(r.Context(), issue.ID, pgtype.UUID{})
+	if err != nil {
+		slog.Warn("issue rerun-fresh failed", "issue_id", id, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, taskToResponse(*task))
+}

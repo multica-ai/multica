@@ -69,6 +69,18 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
 RETURNING *;
 
+-- name: CreateFreshAgentTask :one
+-- Same as CreateAgentTask but marks the task with skip_session_resume=true so the
+-- runtime handler skips the "look up prior session" branch and the agent starts a
+-- brand-new conversation. Used when the skill or prompt template has changed and
+-- resuming the previous session would silently re-run the outdated plan.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    skip_session_resume
+)
+VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), true)
+RETURNING *;
+
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue

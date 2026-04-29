@@ -90,6 +90,8 @@ type AgentTaskQueue struct {
 	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
 	FailureReason    pgtype.Text        `json:"failure_reason"`
 	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
+	// When true, server skips the usual "resume previous session" lookup on task claim. Used when the issue's skill definition or instructions have changed and a fresh conversation is required.
+	SkipSessionResume bool `json:"skip_session_resume"`
 }
 
 type Attachment struct {

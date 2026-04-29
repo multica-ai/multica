@@ -1617,3 +1617,192 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
 }
+
+// TestClaimTask_SkipSessionResume_ClearsPriorSession verifies that when a task
+// is created with skip_session_resume=true, ClaimTaskByRuntime returns the
+// task to the daemon WITHOUT a prior_session_id, even when a prior completed
+// task on the same (agent, issue) pair has a session_id recorded. This is the
+// core of the fresh-task API contract: the daemon must start from scratch
+// instead of resuming the outdated conversation.
+func TestClaimTask_SkipSessionResume_ClearsPriorSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, assignee_type, assignee_id,
+			creator_type, creator_id
+		)
+		VALUES ($1, 'fresh-task fixture', 'in_progress', 'none', 'agent', $2, 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+
+	// Seed a COMPLETED task on the same (agent, issue) pair with a real
+	// session_id so GetLastTaskSession would find it under the normal flow.
+	priorSession := "seeded-session-" + strings.ReplaceAll(issueID, "-", "")[:8]
+	var priorTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			session_id, completed_at
+		)
+		VALUES ($1, $2, $3, 'completed', 0, $4, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID, priorSession).Scan(&priorTaskID); err != nil {
+		t.Fatalf("setup: insert prior task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID)
+
+	// Now create a fresh task with skip_session_resume=true that is queued
+	// and ready to be claimed.
+	var freshTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			skip_session_resume
+		)
+		VALUES ($1, $2, $3, 'queued', 0, true)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&freshTaskID); err != nil {
+		t.Fatalf("setup: insert fresh task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, freshTaskID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-claim")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID             string `json:"id"`
+			PriorSessionID string `json:"prior_session_id"`
+			PriorWorkDir   string `json:"prior_work_dir"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected a task in response, got nil")
+	}
+	if resp.Task.ID != freshTaskID {
+		t.Fatalf("expected claim to return fresh task %q, got %q", freshTaskID, resp.Task.ID)
+	}
+	if resp.Task.PriorSessionID != "" {
+		t.Fatalf("skip_session_resume=true: expected empty prior_session_id, got %q", resp.Task.PriorSessionID)
+	}
+	if resp.Task.PriorWorkDir != "" {
+		t.Fatalf("skip_session_resume=true: expected empty prior_work_dir, got %q", resp.Task.PriorWorkDir)
+	}
+}
+
+// TestClaimTask_DefaultResumeBehaviour_PreservesPriorSession is the companion
+// negative test: when skip_session_resume is NOT set (the default),
+// ClaimTaskByRuntime SHOULD populate prior_session_id from the most recent
+// session recorded for the (agent, issue) pair. Asserts that the new flag
+// doesn't accidentally break the long-standing resume path.
+func TestClaimTask_DefaultResumeBehaviour_PreservesPriorSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, assignee_type, assignee_id,
+			creator_type, creator_id
+		)
+		VALUES ($1, 'default-resume fixture', 'in_progress', 'none', 'agent', $2, 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+
+	priorSession := "seeded-default-" + strings.ReplaceAll(issueID, "-", "")[:8]
+	var priorTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			session_id, completed_at
+		)
+		VALUES ($1, $2, $3, 'completed', 0, $4, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID, priorSession).Scan(&priorTaskID); err != nil {
+		t.Fatalf("setup: insert prior task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID)
+
+	// A normal task — skip_session_resume defaults to false.
+	var normalTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&normalTaskID); err != nil {
+		t.Fatalf("setup: insert normal task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, normalTaskID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-claim")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID             string `json:"id"`
+			PriorSessionID string `json:"prior_session_id"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected a task in response, got nil")
+	}
+	if resp.Task.PriorSessionID != priorSession {
+		t.Fatalf("default path: expected prior_session_id=%q, got %q",
+			priorSession, resp.Task.PriorSessionID)
+	}
+}
