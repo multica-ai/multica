@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { Linking, StyleSheet, Text, View } from "react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
 
@@ -16,8 +17,8 @@ type InlineToken =
   | { type: "mention"; content: string }
   | { type: "link"; content: string; href: string };
 
-export function MarkdownText({ content }: { content: string }) {
-  const blocks = parseMarkdownBlocks(content);
+export const MarkdownText = memo(function MarkdownText({ content }: { content: string }) {
+  const blocks = useMemo(() => parseMarkdownBlocks(content), [content]);
 
   return (
     <View style={styles.root}>
@@ -26,7 +27,7 @@ export function MarkdownText({ content }: { content: string }) {
       ))}
     </View>
   );
-}
+});
 
 function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
   switch (block.type) {

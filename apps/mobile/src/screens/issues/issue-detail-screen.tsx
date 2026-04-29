@@ -78,7 +78,7 @@ declare const require: (moduleName: string) => unknown;
 type DetailListItem = {
   key: string;
   node: React.ReactElement;
-};
+} | CommentListRow;
 type DetailSection = {
   key: string;
   title?: string;
@@ -87,6 +87,14 @@ type DetailSection = {
   onToggle?: () => void;
   data: DetailListItem[];
 };
+type CommentThread = {
+  root: TimelineEntry;
+  replies: TimelineEntry[];
+};
+type CommentListRow =
+  | { key: string; kind: "root"; entry: TimelineEntry; rootId: string }
+  | { key: string; kind: "reply"; entry: TimelineEntry; rootId: string; isLastReply: boolean }
+  | { key: string; kind: "footer"; rootId: string };
 type AttachmentPreviewState = {
   attachment: Attachment;
   textContent?: string;
@@ -143,6 +151,8 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       .sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
+  const commentThreads = useMemo(() => buildCommentThreads(comments), [comments]);
+  const commentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
   const activities = useMemo(
     () => timeline
       .filter((entry) => entry.type === "activity")
@@ -156,13 +166,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     });
     return messagesByTaskId;
   }, [taskMessageQueries, taskRuns]);
-  const renderListItem = useCallback(({ item }: { item: DetailListItem }) => item.node, []);
   const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
     section.title ? <StickySectionHeader section={section} /> : null
   ), []);
-
-  if (isLoading) return <LoadingState />;
-  if (isError || !issue) return <EmptyState title="Unable to load issue" />;
 
   async function changeStatus(status: IssueStatus) {
     if (!issue || status === issue.status) return;
@@ -368,6 +374,68 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }
 
+  const renderListItem = useCallback(({ item }: { item: DetailListItem }) => {
+    if ("node" in item) return item.node;
+
+    if (item.kind === "footer") {
+      return (
+        <ThreadReplyFooter
+          isReplying={replyTargetId === item.rootId}
+          mentionTargets={mentionTargets}
+          onCancelReply={() => {
+            setReplyTargetId(null);
+            setReplyContent("");
+          }}
+          onChangeReply={setReplyContent}
+          onReply={() => setReplyTargetId(item.rootId)}
+          onSubmitReply={() => void submitReply(item.rootId)}
+          replyContent={replyContent}
+        />
+      );
+    }
+
+    return (
+      <TimelineItem
+        entry={item.entry}
+        editingCommentId={editingCommentId}
+        editingContent={editingContent}
+        onToggleReaction={handleCommentReaction}
+        onOpenAttachment={openAttachmentPreview}
+        onCancelEdit={() => {
+          setEditingCommentId(null);
+          setEditingContent("");
+        }}
+        onChangeEdit={setEditingContent}
+        onDelete={(commentId) => void removeComment(commentId)}
+        onReply={item.kind === "root" ? (commentId) => setReplyTargetId(commentId) : undefined}
+        onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
+        onStartEdit={startCommentEdit}
+        resolveActorName={getActorName}
+        userId={userId}
+        mentionTargets={mentionTargets}
+        variant={item.kind === "root" ? "threadRoot" : "reply"}
+        isLastReply={item.kind === "reply" ? item.isLastReply : false}
+      />
+    );
+  }, [
+    editingCommentId,
+    editingContent,
+    getActorName,
+    handleCommentReaction,
+    mentionTargets,
+    openAttachmentPreview,
+    removeComment,
+    replyContent,
+    replyTargetId,
+    saveCommentEdit,
+    startCommentEdit,
+    submitReply,
+    userId,
+  ]);
+
+  if (isLoading) return <LoadingState />;
+  if (isError || !issue) return <EmptyState title="Unable to load issue" />;
+
   const overviewItems: DetailListItem[] = [
     {
       key: "issue-summary",
@@ -534,38 +602,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     ? []
     : comments.length === 0
       ? [{ key: "comments-empty", node: <Text style={styles.emptyText}>No comments yet</Text> }]
-      : comments.map((entry) => ({
-          key: entry.id,
-          node: (
-            <TimelineItem
-              entry={entry}
-              editingCommentId={editingCommentId}
-              editingContent={editingContent}
-              onToggleReaction={handleCommentReaction}
-              onOpenAttachment={openAttachmentPreview}
-              onCancelEdit={() => {
-                setEditingCommentId(null);
-                setEditingContent("");
-              }}
-              onChangeEdit={setEditingContent}
-              onDelete={(commentId) => void removeComment(commentId)}
-              onReply={(commentId) => setReplyTargetId(commentId)}
-              onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
-              onStartEdit={startCommentEdit}
-              resolveActorName={getActorName}
-              replyContent={replyContent}
-              replyTargetId={replyTargetId}
-              onCancelReply={() => {
-                setReplyTargetId(null);
-                setReplyContent("");
-              }}
-              onChangeReply={setReplyContent}
-              onSubmitReply={(commentId) => void submitReply(commentId)}
-              userId={userId}
-              mentionTargets={mentionTargets}
-            />
-          ),
-        }));
+      : commentRows;
 
   const timelineItems: DetailListItem[] = timelineCollapsed
     ? []
@@ -922,6 +959,68 @@ function formatMentionMarkdown(target: WorkspaceMentionTarget) {
   return `[${label}](mention://${target.type}/${target.id})`;
 }
 
+function buildCommentThreads(comments: TimelineEntry[]): CommentThread[] {
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  const rootById = new Map<string, TimelineEntry>();
+
+  function findRoot(comment: TimelineEntry): TimelineEntry {
+    const seen = new Set<string>();
+    let current = comment;
+    while (current.parent_id && byId.has(current.parent_id) && !seen.has(current.id)) {
+      seen.add(current.id);
+      current = byId.get(current.parent_id)!;
+    }
+    return current;
+  }
+
+  for (const comment of comments) {
+    rootById.set(comment.id, findRoot(comment));
+  }
+
+  const threadByRootId = new Map<string, CommentThread>();
+  for (const comment of comments) {
+    const root = rootById.get(comment.id) ?? comment;
+    let thread = threadByRootId.get(root.id);
+    if (!thread) {
+      thread = { root, replies: [] };
+      threadByRootId.set(root.id, thread);
+    }
+    if (comment.id !== root.id) {
+      thread.replies.push(comment);
+    }
+  }
+
+  return Array.from(threadByRootId.values())
+    .sort((a, b) => a.root.created_at.localeCompare(b.root.created_at))
+    .map((thread) => ({
+      ...thread,
+      replies: thread.replies.sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    }));
+}
+
+function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
+  return threads.flatMap((thread) => [
+    {
+      key: `${thread.root.id}:root`,
+      kind: "root" as const,
+      entry: thread.root,
+      rootId: thread.root.id,
+    },
+    ...thread.replies.map((reply, index) => ({
+      key: `${reply.id}:reply`,
+      kind: "reply" as const,
+      entry: reply,
+      rootId: thread.root.id,
+      isLastReply: index === thread.replies.length - 1,
+    })),
+    {
+      key: `${thread.root.id}:footer`,
+      kind: "footer" as const,
+      rootId: thread.root.id,
+    },
+  ]);
+}
+
 function Property({
   children,
   label,
@@ -960,51 +1059,99 @@ function Chip({
   );
 }
 
+function ThreadReplyFooter({
+  isReplying,
+  mentionTargets,
+  onCancelReply,
+  onChangeReply,
+  onReply,
+  onSubmitReply,
+  replyContent,
+}: {
+  isReplying: boolean;
+  mentionTargets?: WorkspaceMentionTarget[];
+  onCancelReply?: () => void;
+  onChangeReply?: (content: string) => void;
+  onReply: () => void;
+  onSubmitReply?: () => void;
+  replyContent?: string;
+}) {
+  return (
+    <View style={styles.threadReplyFooter}>
+      {isReplying ? (
+        <View style={styles.replyBox}>
+          <MentionTextInput
+            autoFocus
+            mentionTargets={mentionTargets ?? []}
+            multiline
+            onChangeText={onChangeReply ?? (() => {})}
+            placeholder="Reply in thread"
+            placeholderTextColor={colors.mutedForeground}
+            style={styles.commentInput}
+            value={replyContent ?? ""}
+          />
+          <View style={styles.inlineActions}>
+            <Button onPress={onSubmitReply}>Send reply</Button>
+            <Button onPress={onCancelReply} variant="secondary">
+              Cancel
+            </Button>
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityLabel="Reply in thread"
+          accessibilityRole="button"
+          onPress={onReply}
+          style={({ pressed }) => [
+            styles.threadReplyButton,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text style={styles.threadReplyButtonText}>Reply in thread</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 function TimelineItem({
   editingCommentId,
   editingContent,
   entry,
+  isLastReply,
   onCancelEdit,
-  onCancelReply,
   onChangeEdit,
-  onChangeReply,
   onDelete,
   onOpenAttachment,
   onReply,
   onSaveEdit,
   onStartEdit,
-  onSubmitReply,
   onToggleReaction,
-  replyContent,
-  replyTargetId,
   resolveActorName,
   userId,
   mentionTargets,
+  variant = "card",
 }: {
   editingCommentId?: string | null;
   editingContent?: string;
   entry: TimelineEntry;
   onCancelEdit?: () => void;
-  onCancelReply?: () => void;
   onChangeEdit?: (content: string) => void;
-  onChangeReply?: (content: string) => void;
   onDelete?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment) => void;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
-  onSubmitReply?: (commentId: string) => void;
   onToggleReaction?: (entry: TimelineEntry, emoji: string) => void;
-  replyContent?: string;
-  replyTargetId?: string | null;
   resolveActorName: (type: string, id: string) => string;
   userId?: string;
   mentionTargets?: WorkspaceMentionTarget[];
+  variant?: "card" | "threadRoot" | "reply";
+  isLastReply?: boolean;
 }) {
   const actor = resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
-  const isReplying = replyTargetId === entry.id;
   const [openMenu, setOpenMenu] = useState<"reactions" | "actions" | null>(null);
   const [actionsMenuAnchor, setActionsMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
@@ -1012,10 +1159,11 @@ function TimelineItem({
     ? entry.content
     : formatActivity(entry, resolveActorName);
   const isComment = entry.type === "comment";
+  const hasCommentActions = Boolean(onReply || isOwnComment);
   const reactionOptions = Array.from(new Set([...DEFAULT_REACTIONS, ...(entry.reactions ?? []).map((r) => r.emoji)]));
 
   function openActionsMenuAtPress(event: GestureResponderEvent) {
-    if (!isComment || isEditing) return;
+    if (!isComment || isEditing || !hasCommentActions) return;
     setActionsMenuAnchor({
       x: event.nativeEvent.pageX,
       y: event.nativeEvent.pageY,
@@ -1031,13 +1179,15 @@ function TimelineItem({
   function renderActionsDropdownContent() {
     return (
       <>
-        <DropdownItem
-          label="Reply"
-          onPress={() => {
-            onReply?.(entry.id);
-            closeActionsMenu();
-          }}
-        />
+        {onReply ? (
+          <DropdownItem
+            label="Reply"
+            onPress={() => {
+              onReply(entry.id);
+              closeActionsMenu();
+            }}
+          />
+        ) : null}
         {isOwnComment ? (
           <>
             <DropdownItem
@@ -1064,7 +1214,7 @@ function TimelineItem({
   function renderActionsMenuModal() {
     if (openMenu !== "actions" || !actionsMenuAnchor) return null;
     const menuWidth = 132;
-    const menuHeight = isOwnComment ? 116 : 44;
+    const menuHeight = (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
     const left = Math.max(spacing.md, Math.min(actionsMenuAnchor.x - menuWidth / 2, windowWidth - menuWidth - spacing.md));
     const top = Math.max(spacing.md, Math.min(actionsMenuAnchor.y + spacing.xs, windowHeight - menuHeight - spacing.md));
 
@@ -1084,13 +1234,8 @@ function TimelineItem({
     );
   }
 
-  return (
-    <Pressable
-      delayLongPress={320}
-      onLongPress={isComment && !isEditing ? openActionsMenuAtPress : undefined}
-      style={styles.timelineItem}
-    >
-      {renderActionsMenuModal()}
+  const content = (
+    <>
       <View style={isComment ? styles.commentHeader : styles.timelineHeader}>
         <View style={styles.timelineActorGroup}>
           <Text style={styles.timelineActor}>{actor}</Text>
@@ -1111,6 +1256,7 @@ function TimelineItem({
               </HeaderIconButton>
               <HeaderIconButton
                 label="Comment actions"
+                disabled={!hasCommentActions}
                 onPress={(event) => {
                   if (openMenu === "actions") {
                     closeActionsMenu();
@@ -1182,25 +1328,28 @@ function TimelineItem({
           onOpen={onOpenAttachment ?? ((attachment) => void Linking.openURL(attachment.download_url || attachment.url))}
         />
       ) : null}
-      {isReplying ? (
-        <View style={styles.replyBox}>
-          <MentionTextInput
-            mentionTargets={mentionTargets ?? []}
-            multiline
-            onChangeText={onChangeReply ?? (() => {})}
-            placeholder="Reply"
-            placeholderTextColor={colors.mutedForeground}
-            style={styles.commentInput}
-            value={replyContent ?? ""}
-          />
-          <View style={styles.inlineActions}>
-            <Button onPress={() => onSubmitReply?.(entry.id)}>Send reply</Button>
-            <Button onPress={onCancelReply} variant="secondary">
-              Cancel
-            </Button>
-          </View>
+    </>
+  );
+
+  return (
+    <Pressable
+      delayLongPress={320}
+      onLongPress={isComment && !isEditing ? openActionsMenuAtPress : undefined}
+      style={[
+        styles.timelineItem,
+        variant === "threadRoot" && styles.timelineItemThreadRoot,
+        variant === "reply" && styles.timelineItemReply,
+      ]}
+    >
+      {renderActionsMenuModal()}
+      {variant === "reply" ? (
+        <View style={[
+          styles.replyInner,
+          !isLastReply && styles.replyInnerSeparator,
+        ]}>
+          {content}
         </View>
-      ) : null}
+      ) : content}
     </Pressable>
   );
 }
@@ -1781,6 +1930,59 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     position: "relative",
+  },
+  threadReplyFooter: {
+    backgroundColor: colors.card,
+    borderBottomLeftRadius: radii.md,
+    borderBottomRightRadius: radii.md,
+    borderColor: colors.border,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: -spacing.lg,
+    padding: spacing.md,
+  },
+  threadReplyButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: radii.md,
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  threadReplyButtonText: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  timelineItemThreadRoot: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
+  },
+  timelineItemReply: {
+    borderBottomWidth: 0,
+    borderColor: colors.border,
+    borderRadius: 0,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 0,
+    marginTop: -spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  replyInner: {
+    backgroundColor: colors.muted,
+    borderRadius: radii.md,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  replyInnerSeparator: {
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   timelineHeader: {
     alignItems: "flex-start",
