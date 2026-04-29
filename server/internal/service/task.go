@@ -494,6 +494,14 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, nil
 	}
 
+	// Sample the invalidation version BEFORE the SELECT. If a
+	// concurrent enqueue Bumps between this read and the post-SELECT
+	// MarkEmpty, the next IsEmpty will see the empty key tagged with
+	// a stale version and reject it — closing the race that would
+	// otherwise stall the just-queued task until the empty key's TTL
+	// expired.
+	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
+
 	t0 := time.Now()
 	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
 	listMs = time.Since(t0).Milliseconds()
@@ -504,11 +512,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}
 
 	if len(tasks) == 0 {
-		// Cache the empty verdict so subsequent polls skip the SELECT.
-		// Set MUST happen before any wakeup-driven enqueue could
-		// overlap; that's enforced by ordering inside the enqueue
-		// path (notifyTaskAvailable invalidates before notifying).
-		s.EmptyClaim.MarkEmpty(ctx, runtimeKey)
+		s.EmptyClaim.MarkEmpty(ctx, runtimeKey, preSelectVersion)
 		outcome = "empty_db"
 		return nil, nil
 	}
@@ -1200,22 +1204,25 @@ func (s *TaskService) NotifyTaskEnqueued(task db.AgentTaskQueue) {
 	s.notifyTaskAvailable(task)
 }
 
-// notifyTaskAvailable runs after a task has been inserted: drops the
-// runtime's empty-claim cache entry (so the next claim hits the DB
-// and finds this row) then kicks the daemon WS so the daemon claims
-// without waiting for its next poll. Order matters — see
-// EmptyClaimCache.Invalidate for why invalidation must precede the
-// wakeup.
+// notifyTaskAvailable runs after a task has been inserted: bumps the
+// runtime's invalidation version so any in-flight claim that is about
+// to write an "empty" verdict will have it rejected on read, then
+// kicks the daemon WS so the daemon claims without waiting for its
+// next poll. Order matters — Bump must happen before the wakeup,
+// otherwise the wakeup-driven claim could read the still-current
+// empty verdict and return null.
 func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	if !task.RuntimeID.Valid {
 		return
 	}
 	runtimeKey := util.UUIDToString(task.RuntimeID)
-	// Use a background context: the cache invalidate / wakeup must
-	// outlive the request that created the task, otherwise an early
-	// client disconnect could leave the empty key in place and stall
-	// the just-queued task until the TTL expires.
-	s.EmptyClaim.Invalidate(context.Background(), runtimeKey)
+	// Use a background context: the cache bump / wakeup must outlive
+	// the request that created the task, otherwise an early client
+	// disconnect could leave the empty verdict in place and stall the
+	// just-queued task until the TTL expires. The cache itself bounds
+	// every Redis call with a short timeout so a wedged Redis cannot
+	// block enqueue.
+	s.EmptyClaim.Bump(context.Background(), runtimeKey)
 	if s.Wakeup == nil {
 		return
 	}

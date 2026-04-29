@@ -18,17 +18,17 @@ func (s *stubWakeup) NotifyTaskAvailable(runtimeID, taskID string) {
 	s.calls = append(s.calls, struct{ runtimeID, taskID string }{runtimeID, taskID})
 }
 
-// TestNotifyTaskAvailable_InvalidatesEmptyClaim is the behavioural pin
-// for the contract noted in the EmptyClaimCache docs: invalidation
-// MUST run before the daemon WS wakeup, otherwise the wakeup arrives,
-// the daemon claims, and the still-cached empty key returns null
-// while the freshly queued task sits idle for up to one full TTL
-// window. The test marks the runtime empty, fires
-// notifyTaskAvailable, and asserts both that the cache entry is gone
-// AND the wakeup hook saw the new task — proving every enqueue path
-// (issue / mention / quick-create / chat / autopilot / retry) gets
-// the same invalidate-then-notify behaviour for free.
-func TestNotifyTaskAvailable_InvalidatesEmptyClaim(t *testing.T) {
+// TestNotifyTaskAvailable_BumpsBeforeWakeup pins the contract noted in
+// the EmptyClaimCache docs: the version Bump MUST run before the
+// daemon WS wakeup, otherwise the wakeup-driven claim could read a
+// still-current empty verdict and return null while the freshly
+// queued task sits idle. The test (1) marks the runtime empty under
+// the current version, (2) fires notifyTaskAvailable, then (3)
+// asserts the prior verdict is rejected AND the wakeup hook saw the
+// new task — proving every enqueue path (issue / mention /
+// quick-create / chat / autopilot / retry) gets the same
+// bump-then-notify behaviour for free.
+func TestNotifyTaskAvailable_BumpsBeforeWakeup(t *testing.T) {
 	rdb := newRedisTestClient(t)
 	cache := NewEmptyClaimCache(rdb)
 	wakeup := &stubWakeup{}
@@ -43,9 +43,10 @@ func TestNotifyTaskAvailable_InvalidatesEmptyClaim(t *testing.T) {
 	runtimeKey := util.UUIDToString(runtimeID)
 
 	ctx := context.Background()
-	cache.MarkEmpty(ctx, runtimeKey)
+	v0 := cache.CurrentVersion(ctx, runtimeKey)
+	cache.MarkEmpty(ctx, runtimeKey, v0)
 	if !cache.IsEmpty(ctx, runtimeKey) {
-		t.Fatal("precondition: cache should report empty after MarkEmpty")
+		t.Fatal("precondition: cache should report empty after MarkEmpty under current version")
 	}
 
 	svc.notifyTaskAvailable(db.AgentTaskQueue{
@@ -54,7 +55,7 @@ func TestNotifyTaskAvailable_InvalidatesEmptyClaim(t *testing.T) {
 	})
 
 	if cache.IsEmpty(ctx, runtimeKey) {
-		t.Fatal("notifyTaskAvailable must invalidate the empty-claim cache entry")
+		t.Fatal("notifyTaskAvailable must Bump the version so the prior empty verdict is rejected")
 	}
 	if got := len(wakeup.calls); got != 1 {
 		t.Fatalf("expected 1 wakeup call, got %d", got)
@@ -69,11 +70,11 @@ func TestNotifyTaskAvailable_InvalidatesEmptyClaim(t *testing.T) {
 
 // TestNotifyTaskAvailable_InvalidWithoutRuntimeIsNoOp guards the
 // no-RuntimeID early return — chat / quick-create / autopilot all set
-// it on insert, but a buggy caller that forgot must not silently wipe
-// every workspace's empty cache. The cache treats Invalidate("") as a
-// no-op, but this test pins that the RuntimeID guard sits above the
-// Invalidate call so a future refactor cannot drop the guard without
-// test coverage.
+// it on insert, but a buggy caller that forgot must not silently bump
+// every workspace's version. The cache treats Bump("") as a no-op,
+// but this test pins that the RuntimeID guard sits above the Bump
+// call so a future refactor cannot drop the guard without test
+// coverage.
 func TestNotifyTaskAvailable_InvalidWithoutRuntimeIsNoOp(t *testing.T) {
 	rdb := newRedisTestClient(t)
 	cache := NewEmptyClaimCache(rdb)
@@ -85,7 +86,8 @@ func TestNotifyTaskAvailable_InvalidWithoutRuntimeIsNoOp(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	cache.MarkEmpty(ctx, "rt-stays")
+	v0 := cache.CurrentVersion(ctx, "rt-stays")
+	cache.MarkEmpty(ctx, "rt-stays", v0)
 
 	svc.notifyTaskAvailable(db.AgentTaskQueue{
 		// RuntimeID intentionally invalid (zero value, Valid=false).
