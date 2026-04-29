@@ -108,6 +108,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
+	// PAT cache is shared between the auth middleware (read + populate) and
+	// the revoke handler (invalidate). NewPATCache returns nil when rdb is
+	// nil — both consumers handle that case as "no cache, always hit DB".
+	patCache := auth.NewPATCache(rdb)
+	h.PATCache = patCache
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -215,7 +220,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries))
+		r.Use(middleware.Auth(queries, patCache))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---

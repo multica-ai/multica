@@ -21,7 +21,12 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 //  2. multica_auth HttpOnly cookie (JWT) — requires valid CSRF token for state-changing requests
 //
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
-func Auth(queries *db.Queries) func(http.Handler) http.Handler {
+//
+// patCache is optional; when non-nil, PAT lookups are cached with a short
+// TTL (auth.PATCacheTTL). On cache hit the middleware skips both the DB
+// SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
+// at most once per TTL window per token, not per request.
+func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenString, fromCookie := extractToken(r)
@@ -40,11 +45,22 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 
 			// PAT: tokens starting with "mul_"
 			if strings.HasPrefix(tokenString, "mul_") {
+				hash := auth.HashToken(tokenString)
+
+				// Cache hit: TTL has not expired, the token was valid the
+				// last time we looked, and nothing has invalidated the
+				// entry since. Skip the DB SELECT and the last_used_at
+				// UPDATE — last_used_at is bumped once per TTL window.
+				if userID, ok := patCache.Get(r.Context(), hash); ok {
+					r.Header.Set("X-User-ID", userID)
+					next.ServeHTTP(w, r)
+					return
+				}
+
 				if queries == nil {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				hash := auth.HashToken(tokenString)
 				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
 				if err != nil {
 					slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
@@ -52,9 +68,13 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 					return
 				}
 
-				r.Header.Set("X-User-ID", uuidToString(pat.UserID))
+				userID := uuidToString(pat.UserID)
+				r.Header.Set("X-User-ID", userID)
+				patCache.Set(r.Context(), hash, userID)
 
-				// Best-effort: update last_used_at
+				// Cache miss = TTL expired (or first use after revoke /
+				// process restart). Refresh last_used_at; subsequent hits
+				// within the TTL window skip this write entirely.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
 				next.ServeHTTP(w, r)

@@ -66,6 +66,7 @@ type Handler struct {
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
+	PATCache              *auth.PATCache
 	cfg                   Config
 }
 
