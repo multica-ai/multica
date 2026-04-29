@@ -277,6 +277,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"app_origin":          requestAppOrigin(r),
 	})
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.

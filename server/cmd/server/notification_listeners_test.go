@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -789,6 +788,7 @@ func TestNotification_MentionedCommentCreatesCanonicalNotification(t *testing.T)
 			},
 			"issue_title":  issueTitle,
 			"issue_status": "todo",
+			"app_origin":   "http://localhost:3000",
 		},
 	})
 
@@ -824,9 +824,9 @@ func TestNotification_MentionedCommentCreatesCanonicalNotification(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
-	expectedLinkSuffix := "/" + workspace.Slug + "/issues/" + issueID + "?comment=" + commentID
-	if !events[0].Link.Valid || !strings.Contains(events[0].Link.String, expectedLinkSuffix) {
-		t.Fatalf("expected notification link to contain %q, got %#v", expectedLinkSuffix, events[0].Link)
+	expectedLink := "http://localhost:3000/" + workspace.Slug + "/issues/" + issueIdentifierForTest(t, queries, issueID) + "?comment=" + commentID
+	if !events[0].Link.Valid || events[0].Link.String != expectedLink {
+		t.Fatalf("expected notification link %q, got %#v", expectedLink, events[0].Link)
 	}
 
 	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(events[0].ID))
@@ -890,6 +890,7 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 			},
 			"issue_title":  "mentioned issue",
 			"issue_status": "todo",
+			"app_origin":   "http://localhost:3000",
 		},
 	})
 
@@ -939,12 +940,22 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 	}
 	var nested struct {
 		IssueIdentifier string `json:"issue_identifier"`
+		Link            string `json:"link"`
 	}
 	if err := json.Unmarshal(snapshot.NotificationEvent, &nested); err != nil {
 		t.Fatalf("unmarshal nested notification_event: %v", err)
 	}
-	if expected := issueIdentifierForTest(t, queries, issueID); nested.IssueIdentifier != expected {
-		t.Fatalf("expected nested issue_identifier %q, got %q", expected, nested.IssueIdentifier)
+	expectedIdentifier := issueIdentifierForTest(t, queries, issueID)
+	if nested.IssueIdentifier != expectedIdentifier {
+		t.Fatalf("expected nested issue_identifier %q, got %q", expectedIdentifier, nested.IssueIdentifier)
+	}
+	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	expectedLink := "http://localhost:3000/" + workspace.Slug + "/issues/" + expectedIdentifier + "?comment=" + commentID
+	if nested.Link != expectedLink {
+		t.Fatalf("expected nested link %q, got %q", expectedLink, nested.Link)
 	}
 }
 
