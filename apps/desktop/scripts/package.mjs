@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Wrapper around `electron-builder` that keeps the Desktop version in
-// lockstep with the CLI. Both are derived from `git describe --tags
-// --always --dirty` — the same source GoReleaser reads for the CLI
-// binary via the `main.version` ldflag — so a single `vX.Y.Z` tag push
-// produces matching CLI and Desktop versions.
+// Wrapper around `electron-builder` that keeps the Desktop version aligned
+// with the tracked CLI release version. The primary source is the checked-in
+// release/cli-version.txt file so desktop packaging follows the same
+// explicit release version as the CLI build. We keep a git-derived fallback
+// for local recovery if that file is missing or invalid.
 //
 // Builds the Electron bundles once, then for each requested target
 // (platform + arch) compiles the matching Go CLI into resources/bin/ and
@@ -27,6 +27,8 @@
 import { execFileSync, spawnSync, execSync } from "node:child_process";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { CLI_VERSION_FILE, readCliVersionNormalized } from "./cli-version.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -113,7 +115,7 @@ export function normalizeGitVersion(raw) {
 }
 
 function deriveVersion() {
-  return normalizeGitVersion(sh("git describe --tags --always --dirty"));
+  return readCliVersionNormalized() ?? normalizeGitVersion(sh("git describe --tags --always --dirty"));
 }
 
 function uniqueOrdered(values) {
@@ -354,12 +356,15 @@ function main() {
   }
 
   // Step 2: derive the version that should be written into the app.
+  const fileVersion = readCliVersionNormalized();
   const version = deriveVersion();
-  if (version) {
-    console.log(`[package] Desktop version → ${version} (from git describe)`);
+  if (version && fileVersion) {
+    console.log(`[package] Desktop version → ${version} (from ${CLI_VERSION_FILE})`);
+  } else if (version) {
+    console.log(`[package] Desktop version → ${version} (from git describe fallback)`);
   } else {
     console.warn(
-      "[package] could not derive version from git; falling back to package.json",
+      "[package] could not derive version from release/cli-version.txt or git; falling back to package.json",
     );
   }
 
