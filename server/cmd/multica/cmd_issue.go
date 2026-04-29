@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -171,6 +173,21 @@ var issueRerunCmd = &cobra.Command{
 	RunE:  runIssueRerun,
 }
 
+var issueTakeCmd = &cobra.Command{
+	Use:   "take <issue-id>",
+	Short: "Resume an agent's last session for an issue locally",
+	Long: `Take over an issue's most recent completed agent run on this machine.
+
+By default this spawns the matching agent CLI inside the worktree the
+agent used, with stdin/stdout/stderr wired through. The agent picks up
+the same session, so prior context is preserved.
+
+Use --print to emit the equivalent shell command for use with eval, or
+--copy to drop it on the system clipboard.`,
+	Args: exactArgs(1),
+	RunE: runIssueTake,
+}
+
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title or description",
@@ -194,6 +211,7 @@ func init() {
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueRerunCmd)
+	issueCmd.AddCommand(issueTakeCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -260,6 +278,11 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue take
+	issueTakeCmd.Flags().String("provider", "", "Force a specific provider (claude, codex, cursor, gemini, opencode, copilot); auto-detected from the latest run when omitted")
+	issueTakeCmd.Flags().Bool("print", false, "Print the shell command to stdout instead of executing it (use with eval)")
+	issueTakeCmd.Flags().Bool("copy", false, "Copy the shell command to the system clipboard instead of executing it")
 
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1022,6 +1045,211 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), strVal(task, "agent_id"))
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Take command — local agent takeover
+// ---------------------------------------------------------------------------
+
+// providerResume describes how to resume a session for a given provider.
+// Captured as a small struct (not just a single string) because the
+// flag-vs-subcommand split varies per CLI: claude uses `--resume <id>`,
+// codex uses a `resume <id>` subcommand, gemini uses `-r <id>`, etc.
+type providerResume struct {
+	Bin  string
+	Args []string
+}
+
+// resumeCommandForProvider maps a runtime provider to the local CLI
+// invocation that resumes the given session. Returns an error for
+// providers we have not mapped — callers translate that into a
+// non-zero exit per the take command spec.
+func resumeCommandForProvider(provider, sessionID string) (providerResume, error) {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "claude":
+		return providerResume{Bin: "claude", Args: []string{"--resume", sessionID}}, nil
+	case "codex":
+		return providerResume{Bin: "codex", Args: []string{"resume", sessionID}}, nil
+	case "cursor":
+		return providerResume{Bin: "cursor-agent", Args: []string{"--resume", sessionID}}, nil
+	case "gemini":
+		return providerResume{Bin: "gemini", Args: []string{"-r", sessionID}}, nil
+	case "opencode":
+		return providerResume{Bin: "opencode", Args: []string{"--session", sessionID}}, nil
+	case "copilot":
+		return providerResume{Bin: "copilot", Args: []string{"--resume", sessionID}}, nil
+	default:
+		return providerResume{}, fmt.Errorf("unsupported provider %q", provider)
+	}
+}
+
+// shellSingleQuote wraps s in POSIX single quotes, escaping any embedded
+// single quotes so the result is safe to paste into bash/zsh. We use
+// single quotes so the workdir path and session id are passed through
+// without any expansion.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// buildShellResumeCommand renders the user-pasteable command line for the
+// given workdir + resume invocation. When workdir is empty, we omit the
+// `cd` prefix so callers can still get a usable command after a GC.
+func buildShellResumeCommand(workDir string, r providerResume) string {
+	parts := make([]string, 0, len(r.Args)+1)
+	parts = append(parts, r.Bin)
+	for _, a := range r.Args {
+		parts = append(parts, shellSingleQuote(a))
+	}
+	cmd := strings.Join(parts, " ")
+	if workDir == "" {
+		return cmd
+	}
+	return "cd " + shellSingleQuote(workDir) + " && " + cmd
+}
+
+// pickResumableRun walks task-runs (newest first) and returns the first
+// completed run that carries a session_id. Returns ok=false when nothing
+// usable exists. work_dir may legitimately be empty and is not required
+// for matching — the agent CLI can still resume a session by id.
+func pickResumableRun(runs []map[string]any) (sessionID, workDir, runtimeID string, ok bool) {
+	for _, r := range runs {
+		if strVal(r, "status") != "completed" {
+			continue
+		}
+		result, _ := r["result"].(map[string]any)
+		sid := strVal(result, "session_id")
+		if sid == "" {
+			continue
+		}
+		return sid, strVal(result, "work_dir"), strVal(r, "runtime_id"), true
+	}
+	return "", "", "", false
+}
+
+// copyToClipboard pipes s into the platform's clipboard utility. macOS
+// has pbcopy in the base system; Linux requires xclip or xsel — we try
+// xclip first then fall back, matching what the take spec lists.
+func copyToClipboard(ctx context.Context, s string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.CommandContext(ctx, "pbcopy")
+	case "linux":
+		if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
+		} else {
+			return fmt.Errorf("no clipboard tool found; install xclip or xsel")
+		}
+	default:
+		return fmt.Errorf("clipboard copy not supported on %s", runtime.GOOS)
+	}
+	cmd.Stdin = strings.NewReader(s)
+	return cmd.Run()
+}
+
+func runIssueTake(cmd *cobra.Command, args []string) error {
+	printMode, _ := cmd.Flags().GetBool("print")
+	copyMode, _ := cmd.Flags().GetBool("copy")
+	if printMode && copyMode {
+		return fmt.Errorf("--print and --copy are mutually exclusive")
+	}
+	forceProvider, _ := cmd.Flags().GetString("provider")
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var runs []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+args[0]+"/task-runs", &runs); err != nil {
+		return fmt.Errorf("list runs: %w", err)
+	}
+
+	sessionID, workDir, runtimeID, ok := pickResumableRun(runs)
+	if !ok {
+		return fmt.Errorf("no completed run found for issue %s", args[0])
+	}
+
+	provider := strings.TrimSpace(forceProvider)
+	if provider == "" {
+		var runtimes []map[string]any
+		if err := client.GetJSON(ctx, "/api/runtimes", &runtimes); err != nil {
+			return fmt.Errorf("list runtimes: %w", err)
+		}
+		for _, rt := range runtimes {
+			if strVal(rt, "id") == runtimeID {
+				provider = strVal(rt, "provider")
+				break
+			}
+		}
+		if provider == "" {
+			return fmt.Errorf("runtime %s not found in this workspace; pass --provider explicitly", truncateID(runtimeID))
+		}
+	}
+
+	resume, providerErr := resumeCommandForProvider(provider, sessionID)
+	if providerErr != nil {
+		// Spec: print the raw command via --print style output and exit non-zero.
+		// We have no canonical command for this provider, so surface what we know
+		// (workdir + session id) so the user can assemble it themselves.
+		fmt.Fprintf(os.Stderr, "Provider %q is not in the supported take list. Resume manually with:\n", provider)
+		if workDir != "" {
+			fmt.Fprintf(os.Stderr, "  cd %s\n", shellSingleQuote(workDir))
+		}
+		fmt.Fprintf(os.Stderr, "  session_id: %s\n", sessionID)
+		return providerErr
+	}
+
+	// If the workdir was GC'd we still want the resume to work — most
+	// agent CLIs key off the session id, not the directory. Drop into
+	// the user's current shell cwd (i.e. clear Cmd.Dir) and warn so
+	// they know the file context they had may be gone.
+	workdirUsable := workDir != ""
+	if workdirUsable {
+		if _, statErr := os.Stat(workDir); statErr != nil {
+			workdirUsable = false
+			fmt.Fprintf(os.Stderr, "warning: worktree %s is gone; resuming session from current directory.\n", workDir)
+		}
+	}
+
+	if printMode {
+		effectiveDir := workDir
+		if !workdirUsable {
+			effectiveDir = ""
+		}
+		fmt.Println(buildShellResumeCommand(effectiveDir, resume))
+		return nil
+	}
+	if copyMode {
+		effectiveDir := workDir
+		if !workdirUsable {
+			effectiveDir = ""
+		}
+		if err := copyToClipboard(ctx, buildShellResumeCommand(effectiveDir, resume)); err != nil {
+			return fmt.Errorf("copy to clipboard: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "Resume command copied to clipboard.")
+		return nil
+	}
+
+	// Default: spawn the agent CLI directly. We do NOT try to change
+	// the parent shell's cwd — that's impossible from a child process.
+	// Setting Cmd.Dir scopes the spawn; the user's shell stays put.
+	// Use a fresh background context so the agent process is not bound
+	// to the 15s API timeout above.
+	exe := exec.Command(resume.Bin, resume.Args...)
+	if workdirUsable {
+		exe.Dir = workDir
+	}
+	exe.Stdin = os.Stdin
+	exe.Stdout = os.Stdout
+	exe.Stderr = os.Stderr
+	return exe.Run()
 }
 
 func runIssueSearch(cmd *cobra.Command, args []string) error {
