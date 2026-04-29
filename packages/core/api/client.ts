@@ -39,6 +39,7 @@ import type {
   RuntimeModelListRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
+  MentionFrequencyEntry,
   TaskMessagePayload,
   Attachment,
   ChatSession,
@@ -525,6 +526,10 @@ export class ApiClient {
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
     return this.fetch("/api/assignee-frequency");
+  }
+
+  async getMentionFrequency(): Promise<MentionFrequencyEntry[]> {
+    return this.fetch("/api/mention-frequency");
   }
 
   async updateComment(commentId: string, content: string): Promise<Comment> {

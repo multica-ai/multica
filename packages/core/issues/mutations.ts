@@ -21,6 +21,7 @@ import {
 } from "./cache-helpers";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
+import { workspaceKeys } from "../workspace/queries";
 import type { Issue, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
@@ -310,6 +311,7 @@ export function useBatchDeleteIssues() {
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       content,
@@ -347,6 +349,7 @@ export function useCreateComment(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.mentionFrequency(wsId) });
     },
   });
 }

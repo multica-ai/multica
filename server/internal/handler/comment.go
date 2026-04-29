@@ -302,6 +302,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	h.trackMentionFrequency(r.Context(), issue.WorkspaceID, authorType, authorID, comment.Content)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -448,6 +449,34 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		// actual reply that mentioned it, not the thread root.
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
+		}
+	}
+}
+
+// trackMentionFrequency records member/agent mentions for ranking in mention
+// suggestion UI. Called after comment creation; best effort only.
+func (h *Handler) trackMentionFrequency(ctx context.Context, workspaceID pgtype.UUID, authorType, authorID, content string) {
+	if authorType != "member" {
+		return
+	}
+	mentions := util.ParseMentions(content)
+	if len(mentions) == 0 {
+		return
+	}
+	for _, m := range mentions {
+		if m.Type != "member" && m.Type != "agent" {
+			continue
+		}
+		if m.ID == authorID {
+			continue
+		}
+		if err := h.Queries.UpsertMentionFrequency(ctx, db.UpsertMentionFrequencyParams{
+			WorkspaceID: workspaceID,
+			ActorType:   m.Type,
+			ActorID:     parseUUID(m.ID),
+			MentionedBy: parseUUID(authorID),
+		}); err != nil {
+			slog.Warn("upsert mention frequency failed", "workspace_id", uuidToString(workspaceID), "mentioned_by", authorID, "actor_type", m.Type, "actor_id", m.ID, "error", err)
 		}
 	}
 }

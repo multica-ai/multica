@@ -239,6 +239,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+			r.Get("/api/mention-frequency", h.GetMentionFrequency)
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {

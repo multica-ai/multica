@@ -123,6 +123,13 @@ type AssigneeFrequencyEntry struct {
 	Frequency    int64  `json:"frequency"`
 }
 
+type MentionFrequencyEntry struct {
+	ActorType       string `json:"actor_type"`
+	ActorID         string `json:"actor_id"`
+	Frequency       int64  `json:"frequency"`
+	LastMentionedAt string `json:"last_mentioned_at"`
+}
+
 // GetAssigneeFrequency returns assignee usage frequency for the current user,
 // combining data from assignee change activities and initial issue assignments.
 func (h *Handler) GetAssigneeFrequency(w http.ResponseWriter, r *http.Request) {
@@ -191,5 +198,35 @@ func (h *Handler) GetAssigneeFrequency(w http.ResponseWriter, r *http.Request) {
 		return result[i].Frequency > result[j].Frequency
 	})
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetMentionFrequency returns mention ranking entries for the current user in
+// the current workspace, newest mentions first.
+func (h *Handler) GetMentionFrequency(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+
+	rows, err := h.Queries.ListMentionFrequencyByUser(r.Context(), db.ListMentionFrequencyByUserParams{
+		WorkspaceID: parseUUID(workspaceID),
+		MentionedBy: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get mention frequency")
+		return
+	}
+
+	result := make([]MentionFrequencyEntry, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, MentionFrequencyEntry{
+			ActorType:       row.ActorType,
+			ActorID:         uuidToString(row.ActorID),
+			Frequency:       row.Frequency,
+			LastMentionedAt: timestampToString(row.LastMentionedAt),
+		})
+	}
 	writeJSON(w, http.StatusOK, result)
 }
