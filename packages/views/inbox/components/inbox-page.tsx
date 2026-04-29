@@ -14,6 +14,7 @@ import {
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
+  useMarkInboxUnread,
   useArchiveInbox,
   useMarkAllInboxRead,
   useArchiveAllInbox,
@@ -31,6 +32,7 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  Mail,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -112,6 +114,7 @@ export function InboxPage() {
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const markUnreadMutation = useMarkInboxUnread();
   const archiveMutation = useArchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
@@ -142,6 +145,12 @@ export function InboxPage() {
     if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
     archiveMutation.mutate(id, {
       onError: () => toast.error("Failed to archive"),
+    });
+  };
+
+  const handleMarkUnread = (id: string) => {
+    markUnreadMutation.mutate(id, {
+      onError: () => toast.error("Failed to mark as unread"),
     });
   };
 
@@ -235,6 +244,7 @@ export function InboxPage() {
           isSelected={(item.issue_id ?? item.id) === selectedKey}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
+          onMarkUnread={() => handleMarkUnread(item.id)}
         />
       ))}
     </div>
