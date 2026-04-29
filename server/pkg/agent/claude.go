@@ -35,11 +35,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildClaudeArgs(opts, b.cfg.Logger)
-
-	// If the caller provided an MCP config, write it to a temp file and pass
-	// --mcp-config <path> so the agent uses a controlled set of MCP servers
-	// instead of inheriting from the outer Claude Code session.
+	// If the caller provided an MCP config, write it to a temp file; the
+	// exclusivity contract (use ONLY those servers) is enforced inside
+	// buildClaudeArgs by pairing --mcp-config with --strict-mcp-config.
+	// With no per-agent config, the child inherits account-level MCPs from
+	// the outer Claude Code session — this is what surfaces connectors like
+	// claude.ai Figma.
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
 	if len(opts.McpConfig) > 0 {
@@ -50,8 +51,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 		mcpConfigPath = path
 		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
-		args = append(args, "--mcp-config", mcpConfigPath)
 	}
+	args := buildClaudeArgs(opts, mcpConfigPath, b.cfg.Logger)
 	// Clean up the temp file if we return before the goroutine takes ownership.
 	defer func() {
 		if mcpFileCleanup != nil {
@@ -413,13 +414,21 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
-func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+// buildClaudeArgs produces the CLI args for the Claude child process.
+//
+// The mcp-config branch preserves the exclusivity contract from #1168:
+// when an explicit per-agent MCP config is provided, we also pass
+// --strict-mcp-config so the child sees ONLY those servers and does not
+// inherit account-level MCPs from the outer Claude Code session. When no
+// per-agent config is provided, --strict-mcp-config is omitted and the
+// child falls back to its normal account-level MCP list (Figma, etc.).
+// Pass mcpConfigPath="" to take the account-level path.
+func buildClaudeArgs(opts ExecOptions, mcpConfigPath string, logger *slog.Logger) []string {
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 	}
 	if opts.Model != "" {
@@ -433,6 +442,9 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
+	}
+	if mcpConfigPath != "" {
+		args = append(args, "--mcp-config", mcpConfigPath, "--strict-mcp-config")
 	}
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
 	return args

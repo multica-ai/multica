@@ -199,16 +199,15 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsOmitsStrictMCPConfigWhenNoMcpConfig(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	args := buildClaudeArgs(ExecOptions{}, "", slog.Default())
 	expected := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 	}
 
@@ -219,6 +218,40 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+	for _, a := range args {
+		if a == "--strict-mcp-config" {
+			t.Fatalf("--strict-mcp-config should NOT appear when mcpConfigPath is empty, got %v", args)
+		}
+	}
+}
+
+func TestBuildClaudeArgsIncludesStrictMCPConfigWhenMcpConfigProvided(t *testing.T) {
+	t.Parallel()
+
+	mcpPath := "/tmp/fake-mcp-config.json"
+	args := buildClaudeArgs(ExecOptions{}, mcpPath, slog.Default())
+
+	var sawMcpConfig, sawStrict bool
+	var mcpValue string
+	for i, a := range args {
+		if a == "--mcp-config" && i+1 < len(args) {
+			sawMcpConfig = true
+			mcpValue = args[i+1]
+		}
+		if a == "--strict-mcp-config" {
+			sawStrict = true
+		}
+	}
+
+	if !sawMcpConfig {
+		t.Fatalf("--mcp-config missing from args: %v", args)
+	}
+	if mcpValue != mcpPath {
+		t.Fatalf("--mcp-config value = %q, want %q", mcpValue, mcpPath)
+	}
+	if !sawStrict {
+		t.Fatalf("--strict-mcp-config missing — the #1168 exclusivity contract requires it to be paired with --mcp-config: %v", args)
 	}
 }
 
@@ -274,7 +307,7 @@ func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 
 	args := buildClaudeArgs(ExecOptions{
 		CustomArgs: []string{"--max-turns", "50", "--verbose"},
-	}, slog.Default())
+	}, "", slog.Default())
 
 	// Custom args should appear at the end
 	found := 0
@@ -293,7 +326,7 @@ func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 
 	args := buildClaudeArgs(ExecOptions{
 		CustomArgs: []string{"--output-format", "text", "--model", "o3"},
-	}, slog.Default())
+	}, "", slog.Default())
 
 	// --output-format text should be stripped
 	for _, a := range args[len(args)-2:] {
@@ -420,7 +453,7 @@ func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
 	args := buildClaudeArgs(ExecOptions{
 		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
-	}, slog.Default())
+	}, "", slog.Default())
 
 	for i, a := range args {
 		if a == "--mcp-config" {
