@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleCheck,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -511,6 +512,23 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {issue.status !== "done" && issue.status !== "cancelled" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => handleUpdateField({ status: "done" })}
+                    >
+                      <CircleCheck />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Mark as done</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
