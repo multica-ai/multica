@@ -281,7 +281,10 @@ function MentionRow({
         className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
-        onClick={onSelect}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onSelect();
+        }}
       >
         {item.status && (
           <StatusIcon status={item.status} className="h-3.5 w-3.5 shrink-0" />
@@ -304,7 +307,10 @@ function MentionRow({
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
       }`}
-      onClick={onSelect}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onSelect();
+      }}
     >
       <ActorAvatar
         actorType={item.type === "all" ? "member" : item.type}
