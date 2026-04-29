@@ -25,7 +25,7 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueD
 import { inboxKeys } from "../inbox/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
-import { useChatStore } from "../chat/store";
+import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
