@@ -80,6 +80,8 @@ export interface ChatState {
   activeSessionId: string | null;
   selectedAgentId: string | null;
   showHistory: boolean;
+  /** Messages queued for sending after the current task finishes. */
+  queuedMessages: string[];
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /**
@@ -97,6 +99,8 @@ export interface ChatState {
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setShowHistory: (show: boolean) => void;
+  queueMessage: (content: string) => void;
+  dequeueMessages: () => string[];
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   clearInputDraft: (sessionId: string) => void;
@@ -123,6 +127,7 @@ export function createChatStore(options: ChatStoreOptions) {
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
     showHistory: false,
+    queuedMessages: [],
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     focusMode: storage.getItem(FOCUS_MODE_KEY) === "true",
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
@@ -154,6 +159,16 @@ export function createChatStore(options: ChatStoreOptions) {
     setShowHistory: (show) => {
       logger.debug("setShowHistory", { to: show });
       set({ showHistory: show });
+    },
+    queueMessage: (content: string) => {
+      logger.info("queueMessage", { length: content.length });
+      set({ queuedMessages: [...get().queuedMessages, content] });
+    },
+    dequeueMessages: () => {
+      const msgs = get().queuedMessages;
+      set({ queuedMessages: [] });
+      return msgs;
+
     },
     setInputDraft: (sessionId, draft) => {
       // Debug level — onUpdate fires on every keystroke.

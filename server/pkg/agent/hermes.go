@@ -99,11 +99,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
 		onMessage: func(msg Message) {
-			if msg.Type == MessageText {
-				outputMu.Lock()
+			outputMu.Lock()
+			if msg.Type == MessageText || msg.Type == MessageThinking {
 				output.WriteString(msg.Content)
-				outputMu.Unlock()
 			}
+			outputMu.Unlock()
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {

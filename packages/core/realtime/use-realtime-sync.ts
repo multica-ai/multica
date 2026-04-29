@@ -509,6 +509,12 @@ export function useRealtimeSync(
       invalidatePendingAggregate();
       // Assistant message just landed → has_unread may have flipped to true.
       invalidateSessionLists();
+      // Dequeue any queued messages — they will be sent by the chat page
+      // after the refetch confirms the task is no longer pending.
+      const queued = useChatStore.getState().dequeueMessages();
+      if (queued.length > 0) {
+        chatWsLogger.info("chat:done — dequeuing messages", { count: queued.length });
+      }
     });
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
