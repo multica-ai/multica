@@ -86,7 +86,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl">
         {step === "instructions" && (
           <InstructionsStep
             copied={copied}
@@ -115,20 +115,14 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 // Step 1: Installation instructions
 // ---------------------------------------------------------------------------
 
-const INSTALL_CMD =
-  'curl -fsSL https://multica.ai/install.sh | sh';
+const INSTALL_CMD = "curl -fsSL https://multica.ai/install.sh | sh";
 
-const CONFIG_CMDS = `# Configure Multica CLI
-multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
+const CONFIGURE_CMD = `multica config set server_url https://api.multica.ai
+multica config set app_url https://multica.ai`;
 
-# Login with a personal access token (create one in Settings → Tokens)
-multica login --token <YOUR_TOKEN>
+const LOGIN_CMD = "multica login --token <YOUR_TOKEN>";
 
-# Start the daemon — this registers the runtime with your workspace
-multica daemon start --device-name "my-ec2-instance"
-
-# Verify it's running
+const START_CMD = `multica daemon start --device-name "my-ec2-instance"
 multica daemon status`;
 
 function CodeBlock({
@@ -144,19 +138,19 @@ function CodeBlock({
 }) {
   const isCopied = copied === copyKey;
   return (
-    <div className="group relative rounded-lg border bg-muted/50">
-      <pre className="overflow-x-auto p-3 text-xs leading-relaxed font-mono text-foreground">
+    <div className="relative rounded-md border bg-muted/50">
+      <pre className="overflow-x-auto p-2.5 pr-10 font-mono text-xs leading-relaxed text-foreground">
         {code}
       </pre>
       <button
         type="button"
         onClick={() => onCopy(code, copyKey)}
-        className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-md border bg-background text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        className="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded border bg-background text-muted-foreground transition-colors hover:text-foreground"
       >
         {isCopied ? (
-          <Check className="h-3.5 w-3.5 text-success" />
+          <Check className="h-3 w-3 text-success" />
         ) : (
-          <Copy className="h-3.5 w-3.5" />
+          <Copy className="h-3 w-3" />
         )}
       </button>
     </div>
@@ -184,105 +178,123 @@ function InstructionsStep({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-4">
-        {/* Step 1: Install */}
-        <div>
-          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <Terminal className="h-3.5 w-3.5" />
-            1. Install the CLI
+      <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4">
+        <div className="space-y-3">
+          {/* Step 1: Install */}
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Terminal className="h-3.5 w-3.5" />
+              1. Install the CLI
+            </div>
+            <CodeBlock
+              code={INSTALL_CMD}
+              copyKey="install"
+              copied={copied}
+              onCopy={onCopy}
+            />
           </div>
-          <CodeBlock
-            code={INSTALL_CMD}
-            copyKey="install"
-            copied={copied}
-            onCopy={onCopy}
-          />
-        </div>
 
-        {/* Step 2: Configure + start */}
-        <div>
-          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <Server className="h-3.5 w-3.5" />
-            2. Configure, login, and start the daemon
+          {/* Step 2: Configure */}
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Server className="h-3.5 w-3.5" />
+              2. Configure
+            </div>
+            <CodeBlock
+              code={CONFIGURE_CMD}
+              copyKey="config"
+              copied={copied}
+              onCopy={onCopy}
+            />
           </div>
-          <CodeBlock
-            code={CONFIG_CMDS}
-            copyKey="config"
-            copied={copied}
-            onCopy={onCopy}
-          />
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Create a personal access token in{" "}
-            <span className="font-medium text-foreground">
-              Settings → Tokens
-            </span>{" "}
-            to log in without a browser.
-          </p>
-        </div>
 
-        {/* Security tips */}
-        <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
-          <div className="flex items-start gap-2">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-            <div className="text-xs text-muted-foreground">
-              <p className="font-medium text-foreground">Security tips</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>
-                  Use an EC2 IAM role or least-privilege credentials — never
-                  put root keys or production secrets into agent{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                    custom_env
-                  </code>.
-                </li>
-                <li>
-                  The daemon makes outbound connections to Multica — no inbound
-                  ports or SSH access required.
-                </li>
-              </ul>
+          {/* Step 3: Login */}
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              3. Login with a personal access token
+            </div>
+            <CodeBlock
+              code={LOGIN_CMD}
+              copyKey="login"
+              copied={copied}
+              onCopy={onCopy}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Create one in{" "}
+              <span className="font-medium text-foreground">
+                Settings → Tokens
+              </span>
+              .
+            </p>
+          </div>
+
+          {/* Step 4: Start daemon */}
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              4. Start the daemon
+            </div>
+            <CodeBlock
+              code={START_CMD}
+              copyKey="start"
+              copied={copied}
+              onCopy={onCopy}
+            />
+          </div>
+
+          {/* Security tips */}
+          <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5">
+            <div className="flex items-start gap-2">
+              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+              <div className="text-[11px] leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">Security: </span>
+                Use an EC2 IAM role or least-privilege credentials. Never put
+                root keys into agent{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  custom_env
+                </code>
+                . The daemon uses outbound connections only — no inbound ports
+                needed.
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Troubleshooting */}
-        <details className="group">
-          <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-            <Wrench className="h-3.5 w-3.5" />
-            Troubleshooting
-            <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
-          </summary>
-          <ul className="mt-2 list-disc space-y-1 pl-8 text-xs text-muted-foreground">
-            <li>
-              Check daemon status:{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                multica daemon status
-              </code>
-            </li>
-            <li>
-              View daemon logs:{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                multica daemon logs -f
-              </code>
-            </li>
-            <li>
-              Verify CLI provider is on PATH:{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                claude --version
-              </code>{" "}
-              or{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                codex --version
-              </code>
-            </li>
-            <li>
-              Desktop auto-scans only your local machine. Remote machines must
-              run{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                multica daemon
-              </code>{" "}
-              on the remote host.
-            </li>
-          </ul>
-        </details>
+          {/* Troubleshooting */}
+          <details className="group pb-1">
+            <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <Wrench className="h-3.5 w-3.5" />
+              Troubleshooting
+              <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+            </summary>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-8 text-[11px] text-muted-foreground">
+              <li>
+                Check status:{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  multica daemon status
+                </code>
+              </li>
+              <li>
+                View logs:{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  multica daemon logs -f
+                </code>
+              </li>
+              <li>
+                Verify provider:{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  claude --version
+                </code>
+              </li>
+              <li>
+                Desktop auto-scans only your local machine. Remote machines must
+                run{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                  multica daemon
+                </code>{" "}
+                separately.
+              </li>
+            </ul>
+          </details>
+        </div>
       </div>
 
       <DialogFooter>
