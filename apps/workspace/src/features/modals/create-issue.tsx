@@ -25,12 +25,12 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button";
 import { ContentEditor, type ContentEditorRef } from "@/features/editor";
 import { TitleEditor } from "@/features/editor";
-import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker } from "@/features/issues/components";
+import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, ParentIssuePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
+import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
-import { api } from "@/shared/api";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -81,6 +81,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
   const { getActorName } = useActorName();
+  const { createIssue } = useIssueMutations();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -89,10 +90,12 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [title, setTitle] = useState(draft.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
+  const projectId = typeof data?.project_id === "string" ? data.project_id : undefined;
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
+  const [parentIssueId, setParentIssueId] = useState<string | undefined>(draft.parentIssueId);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [endDate, setEndDate] = useState<string | null>(draft.endDate);
@@ -125,6 +128,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
   };
+  const updateParentIssue = (value?: string | null) => {
+    const nextValue = value ?? undefined;
+    setParentIssueId(nextValue);
+    setDraft({ parentIssueId: nextValue });
+  };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateEndDate = (v: string | null) => { setEndDate(v); setDraft({ endDate: v }); };
@@ -144,22 +152,23 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const issue = await api.createIssue({
+      const issue = await createIssue({
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
+        project_id: projectId,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
+        parent_issue_id: parentIssueId,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
         due_date: dueDate || undefined,
       });
-      useIssueStore.getState().addIssue(issue);
       clearDraft();
       onClose();
       toast.custom((t) => (
-        <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
+        <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-90">
           <div className="flex items-center gap-2 mb-2">
             <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
               <Check className="size-3" />
@@ -195,11 +204,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         showCloseButton={false}
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
-          "!top-1/2 !left-1/2 !-translate-x-1/2",
-          "!transition-all !duration-300 !ease-out",
+          "top-1/2! left-1/2! -translate-x-1/2!",
+          "transition-all! duration-300! ease-out!",
           isExpanded
-            ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-            : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+            ? "max-w-4xl! w-full! h-5/6! -translate-y-1/2!"
+            : "max-w-2xl! w-full! h-96! -translate-y-1/2!",
         )}
       >
         <DialogTitle className="sr-only">New Issue</DialogTitle>
@@ -398,6 +407,12 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
               </div>
             </PopoverContent>
           </Popover>
+
+          <ParentIssuePicker
+            parentIssueId={parentIssueId ?? null}
+            onUpdate={(updates) => updateParentIssue(updates.parent_issue_id)}
+            align="start"
+          />
 
           <IssueDateTimePicker
             field="start_date"

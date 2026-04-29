@@ -22,6 +22,33 @@ const DATETIME_FIELD_LABELS: Record<IssueDateTimeField, string> = {
 
 const HOURS = Array.from({ length: 24 }, (_, index) => 23 - index);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
+const DATE_SHORTCUTS = [
+  { label: "Today", getDate: () => new Date() },
+  {
+    label: "Tomorrow",
+    getDate: () => {
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + 1);
+      return nextDate;
+    },
+  },
+  {
+    label: "Next week",
+    getDate: () => {
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + 7);
+      return nextDate;
+    },
+  },
+  {
+    label: "Next month",
+    getDate: () => {
+      const nextDate = new Date();
+      nextDate.setMonth(nextDate.getMonth() + 1);
+      return nextDate;
+    },
+  },
+] as const;
 
 function buildIssueDateTimeUpdate(field: IssueDateTimeField, value: string | null): Partial<UpdateIssueRequest> {
   switch (field) {
@@ -39,6 +66,16 @@ function parseDateTimeValue(value: string | null): Date | undefined {
   if (Number.isNaN(date.getTime())) return undefined;
 
   return date;
+}
+
+function startOfDay(date: Date): Date {
+  const nextDate = new Date(date);
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
+function getDraftDate(value: string | null): Date {
+  return parseDateTimeValue(value) ?? startOfDay(new Date());
 }
 
 function formatDateTime(value: string | null): string {
@@ -86,12 +123,12 @@ export function IssueDateTimePicker({
   trigger?: React.ReactElement;
 }) {
   const [open, setOpen] = useState(false);
-  const [draftDate, setDraftDate] = useState<Date | undefined>(() => parseDateTimeValue(dateTimeValue));
-  const [timeInput, setTimeInput] = useState(() => formatTimeInput(parseDateTimeValue(dateTimeValue)));
+  const [draftDate, setDraftDate] = useState<Date | undefined>(() => getDraftDate(dateTimeValue));
+  const [timeInput, setTimeInput] = useState(() => formatTimeInput(getDraftDate(dateTimeValue)));
 
   useEffect(() => {
     if (!open) {
-      const nextDate = parseDateTimeValue(dateTimeValue);
+      const nextDate = getDraftDate(dateTimeValue);
       setDraftDate(nextDate);
       setTimeInput(formatTimeInput(nextDate));
     }
@@ -152,6 +189,16 @@ export function IssueDateTimePicker({
 
   const emptyLabel = DATETIME_FIELD_LABELS[field];
 
+  const handleShortcutSelect = (getShortcutDate: () => Date) => {
+    setDraftDate((current) => {
+      const nextDate = startOfDay(getShortcutDate());
+      if (current) {
+        nextDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
+      }
+      return nextDate;
+    });
+  };
+
   const handleApply = () => {
     onUpdate(buildIssueDateTimeUpdate(field, draftDate ? draftDate.toISOString() : null));
     setOpen(false);
@@ -163,7 +210,9 @@ export function IssueDateTimePicker({
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
         if (nextOpen) {
-          setDraftDate(parseDateTimeValue(dateTimeValue));
+          const nextDate = getDraftDate(dateTimeValue);
+          setDraftDate(nextDate);
+          setTimeInput(formatTimeInput(nextDate));
         }
       }}
     >
@@ -188,6 +237,19 @@ export function IssueDateTimePicker({
           onSelect={handleDateSelect}
           initialFocus
         />
+        <div className="grid grid-cols-2 gap-2 border-t p-2">
+          {DATE_SHORTCUTS.map((shortcut) => (
+            <Button
+              key={shortcut.label}
+              variant="ghost"
+              size="sm"
+              className="justify-start font-normal"
+              onClick={() => handleShortcutSelect(shortcut.getDate)}
+            >
+              {shortcut.label}
+            </Button>
+          ))}
+        </div>
         <div className="border-t p-2">
           <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
             <Clock className="h-4 w-4 text-primary" />

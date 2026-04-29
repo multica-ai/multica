@@ -72,11 +72,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
+import { useAgentMutations } from "@/features/agents/mutations";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useRuntimeStore } from "@/features/runtimes";
 import { useIssueStore } from "@/features/issues";
+import { api } from "@/shared/api";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { useRouter } from "@/shared/router";
@@ -263,7 +264,7 @@ function CreateAgentDialog({
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
               </PopoverTrigger>
-              <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto">
+              <PopoverContent align="start" className="w-(--anchor-width) max-h-60 overflow-y-auto p-1">
                 {runtimes.map((device) => (
                   <button
                     key={device.id}
@@ -413,7 +414,7 @@ function InstructionsTab({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={`Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
-        className="w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+        className="min-h-75 w-full resize-y rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
 
       <div className="flex items-center justify-between">
@@ -447,7 +448,7 @@ function SkillsTab({
   agent: Agent;
 }) {
   const workspaceSkills = useWorkspaceStore((s) => s.skills);
-  const refreshAgents = useWorkspaceStore((s) => s.refreshAgents);
+  const { setAgentSkills } = useAgentMutations();
   const [saving, setSaving] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
 
@@ -458,8 +459,7 @@ function SkillsTab({
     setSaving(true);
     try {
       const newIds = [...agent.skills.map((s) => s.id), skillId];
-      await api.setAgentSkills(agent.id, { skill_ids: newIds });
-      await refreshAgents();
+      await setAgentSkills(agent.id, { skill_ids: newIds });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add skill");
     } finally {
@@ -472,8 +472,7 @@ function SkillsTab({
     setSaving(true);
     try {
       const newIds = agent.skills.filter((s) => s.id !== skillId).map((s) => s.id);
-      await api.setAgentSkills(agent.id, { skill_ids: newIds });
-      await refreshAgents();
+      await setAgentSkills(agent.id, { skill_ids: newIds });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to remove skill");
     } finally {
@@ -1557,7 +1556,7 @@ export default function AgentsPage({
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const agents = useWorkspaceStore((s) => s.agents);
-  const refreshAgents = useWorkspaceStore((s) => s.refreshAgents);
+  const { createAgent, updateAgent, archiveAgent, restoreAgent } = useAgentMutations();
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string>("");
   const [showArchived, setShowArchived] = useState(false);
@@ -1611,15 +1610,13 @@ export default function AgentsPage({
   };
 
   const handleCreate = async (data: CreateAgentRequest) => {
-    const agent = await api.createAgent(data);
-    await refreshAgents();
+    const agent = await createAgent(data);
     selectAgent(agent.id);
   };
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     try {
-      await api.updateAgent(id, data as UpdateAgentRequest);
-      await refreshAgents();
+      await updateAgent(id, data as UpdateAgentRequest);
       toast.success("Agent updated");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update agent");
@@ -1629,8 +1626,7 @@ export default function AgentsPage({
 
   const handleArchive = async (id: string) => {
     try {
-      await api.archiveAgent(id);
-      await refreshAgents();
+      await archiveAgent(id);
       toast.success("Agent archived");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to archive agent");
@@ -1639,8 +1635,7 @@ export default function AgentsPage({
 
   const handleRestore = async (id: string) => {
     try {
-      await api.restoreAgent(id);
-      await refreshAgents();
+      await restoreAgent(id);
       toast.success("Agent restored");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to restore agent");

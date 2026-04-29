@@ -1,38 +1,30 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { IssueReaction } from "@/shared/types";
 import type {
   IssueReactionAddedPayload,
   IssueReactionRemovedPayload,
 } from "@/shared/types";
-import { api } from "@/shared/api";
 import { toast } from "sonner";
 import { useWSEvent, useWSReconnect } from "@/features/realtime";
+import { queryKeys } from "@/shared/query";
+import { useIssueReactionMutations } from "../mutations";
+import { useIssueReactionsQuery } from "../queries";
 
 export function useIssueReactions(issueId: string, userId?: string) {
-  const [reactions, setReactions] = useState<IssueReaction[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Initial fetch
-  useEffect(() => {
-    setReactions([]);
-    setLoading(true);
-    api
-      .getIssue(issueId)
-      .then((iss) => setReactions(iss.reactions ?? []))
-      .catch((e) => {
-        console.error(e);
-        toast.error("Failed to load reactions");
-      })
-      .finally(() => setLoading(false));
-  }, [issueId]);
+  const queryClient = useQueryClient();
+  const reactionsQuery = useIssueReactionsQuery(issueId);
+  const { toggleIssueReaction } = useIssueReactionMutations(issueId);
+  const reactions = reactionsQuery.data ?? [];
+  const loading = reactionsQuery.isPending;
 
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      api.getIssue(issueId).then((iss) => setReactions(iss.reactions ?? [])).catch(console.error);
-    }, [issueId]),
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.reactions(issueId) });
+    }, [issueId, queryClient]),
   );
 
   // --- WS event handlers ---
@@ -44,12 +36,12 @@ export function useIssueReactions(issueId: string, userId?: string) {
         const { reaction, issue_id } = payload as IssueReactionAddedPayload;
         if (issue_id !== issueId) return;
         if (reaction.actor_type === "member" && reaction.actor_id === userId) return;
-        setReactions((prev) => {
-          if (prev.some((r) => r.id === reaction.id)) return prev;
-          return [...prev, reaction];
+        queryClient.setQueryData<IssueReaction[]>(queryKeys.issues.reactions(issueId), (existing = []) => {
+          if (existing.some((item) => item.id === reaction.id)) return existing;
+          return [...existing, reaction];
         });
       },
-      [issueId, userId],
+      [issueId, queryClient, userId],
     ),
   );
 
@@ -60,17 +52,16 @@ export function useIssueReactions(issueId: string, userId?: string) {
         const p = payload as IssueReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
         if (p.actor_type === "member" && p.actor_id === userId) return;
-        setReactions((prev) =>
-          prev.filter(
-            (r) => !(r.emoji === p.emoji && r.actor_type === p.actor_type && r.actor_id === p.actor_id),
+        queryClient.setQueryData<IssueReaction[]>(queryKeys.issues.reactions(issueId), (existing = []) =>
+          existing.filter(
+            (reaction) =>
+              !(reaction.emoji === p.emoji && reaction.actor_type === p.actor_type && reaction.actor_id === p.actor_id),
           ),
         );
       },
-      [issueId, userId],
+      [issueId, queryClient, userId],
     ),
   );
-
-  // --- Mutation ---
 
   const toggleReaction = useCallback(
     async (emoji: string) => {
@@ -78,34 +69,13 @@ export function useIssueReactions(issueId: string, userId?: string) {
       const existing = reactions.find(
         (r) => r.emoji === emoji && r.actor_type === "member" && r.actor_id === userId,
       );
-      if (existing) {
-        setReactions((prev) => prev.filter((r) => r.id !== existing.id));
-        try {
-          await api.removeIssueReaction(issueId, emoji);
-        } catch {
-          setReactions((prev) => [...prev, existing]);
-          toast.error("Failed to remove reaction");
-        }
-      } else {
-        const temp: IssueReaction = {
-          id: `temp-${Date.now()}`,
-          issue_id: issueId,
-          actor_type: "member",
-          actor_id: userId,
-          emoji,
-          created_at: new Date().toISOString(),
-        };
-        setReactions((prev) => [...prev, temp]);
-        try {
-          const reaction = await api.addIssueReaction(issueId, emoji);
-          setReactions((prev) => prev.map((r) => (r.id === temp.id ? reaction : r)));
-        } catch {
-          setReactions((prev) => prev.filter((r) => r.id !== temp.id));
-          toast.error("Failed to add reaction");
-        }
+      try {
+        await toggleIssueReaction(emoji, existing?.id);
+      } catch {
+        toast.error(existing ? "Failed to remove reaction" : "Failed to add reaction");
       }
     },
-    [issueId, userId, reactions],
+    [reactions, toggleIssueReaction, userId],
   );
 
   return { reactions, loading, toggleReaction };

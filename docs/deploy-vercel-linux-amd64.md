@@ -4,7 +4,6 @@ This guide matches the current repository layout:
 
 - `apps/workspace` is the user-facing SPA
 - `server` is the Go backend
-- `apps/web` is the marketing site and is not required for the app deployment below
 
 ## 1. Deploy the frontend to Vercel
 
@@ -33,13 +32,14 @@ Run this from the repository root on your development machine:
 
 ```bash
 pnpm install
-bash scripts/package-backend-linux-amd64.sh
+RELEASE_TARGETS=linux/amd64 bash scripts/package-release-multi.sh dist/backend-linux-amd64
 ```
 
 This produces:
 
 - release directory: `dist/backend-linux-amd64/multica-backend-linux-amd64`
 - tarball: `dist/backend-linux-amd64/multica-backend-linux-amd64.tar.gz`
+- shared workspace directory: `dist/backend-linux-amd64/workspace`
 
 The package includes:
 
@@ -47,6 +47,8 @@ The package includes:
 - `migrate`
 - `migrations/`
 - `config/server.env.example`
+
+The shared `workspace/` directory is generated once by the multi-platform packaging flow. For this Vercel deployment path, you can ignore it because the frontend is already deployed separately.
 
 ## 3. Upload and run the backend on your Linux server
 
@@ -103,6 +105,6 @@ Your backend variables should then be:
 ## 5. Notes and constraints
 
 - This deployment path only covers the workspace SPA in `apps/workspace`.
-- If you also want the marketing site, deploy `apps/web` as a separate Vercel project.
+- The shared `workspace/` directory in the backend release output is only needed when the Go server serves the SPA directly.
 - The backend returns JWTs in JSON, so split-domain login works.
 - If you enable CloudFront signed cookies for private file delivery, keep `COOKIE_DOMAIN` and `CLOUDFRONT_DOMAIN` aligned with your final public domains.

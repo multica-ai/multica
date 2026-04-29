@@ -7,8 +7,8 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/shared/api";
 import type { RuntimeUpdateStatus } from "@/shared/types";
+import { useRuntimeMutations } from "@/features/runtimes/mutations";
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/multica-ai/multica/releases/latest";
@@ -85,6 +85,7 @@ export function UpdateSection({
   currentVersion,
   isOnline,
 }: UpdateSectionProps) {
+  const { initiateUpdate, getUpdateResult } = useRuntimeMutations();
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
   const [error, setError] = useState("");
@@ -115,11 +116,11 @@ export function UpdateSection({
     setOutput("");
 
     try {
-      const update = await api.initiateUpdate(runtimeId, latestVersion);
+      const update = await initiateUpdate(runtimeId, latestVersion);
 
       pollRef.current = setInterval(async () => {
         try {
-          const result = await api.getUpdateResult(runtimeId, update.id);
+          const result = await getUpdateResult(runtimeId, update.id);
           setStatus(result.status as RuntimeUpdateStatus);
 
           if (result.status === "completed") {

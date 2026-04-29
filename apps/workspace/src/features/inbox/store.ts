@@ -1,12 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { create } from "zustand";
 import type { InboxItem, IssueStatus } from "@/shared/types";
 import { toast } from "sonner";
-import { api } from "@/shared/api";
-import { createLogger } from "@/shared/logger";
-
-const logger = createLogger("inbox-store");
+import { getAppQueryClient, queryKeys } from "@/shared/query";
+import { useWorkspaceStore } from "@/features/workspace";
+import { inboxQueryOptions, useInboxItemsQuery } from "./queries";
 
 /**
  * Deduplicate inbox items by issue_id (one entry per issue, Linear-style),
@@ -59,61 +59,107 @@ interface InboxState {
   unreadCount: () => number;
 }
 
-export const useInboxStore = create<InboxState>((set, get) => ({
-  items: [],
-  loading: true,
+type InboxStoreSelector<T> = (state: InboxState) => T;
 
-  fetch: async () => {
-    logger.debug("fetch start");
-    const isInitialLoad = get().items.length === 0;
-    if (isInitialLoad) set({ loading: true });
-    try {
-      const data = await api.listInbox();
-      logger.info("fetched", data.length, "items");
-      set({ items: data, loading: false });
-    } catch (err) {
-      logger.error("fetch failed", err);
-      toast.error("Failed to load inbox");
-      if (isInitialLoad) set({ loading: false });
-    }
-  },
+interface InboxStoreHook {
+  <T>(selector: InboxStoreSelector<T>): T;
+  getState: () => InboxState;
+}
 
-  setItems: (items) => set({ items }),
-  addItem: (item) =>
-    set((s) => ({
-      items: s.items.some((i) => i.id === item.id)
-        ? s.items
-        : [item, ...s.items],
-    })),
-  markRead: (id) =>
-    set((s) => ({
-      items: s.items.map((i) => (i.id === id ? { ...i, read: true } : i)),
-    })),
-  archive: (id) =>
-    set((s) => ({
-      items: s.items.map((i) => (i.id === id ? { ...i, archived: true } : i)),
-    })),
-  markAllRead: () =>
-    set((s) => ({
-      items: s.items.map((i) => (!i.archived ? { ...i, read: true } : i)),
-    })),
-  archiveAll: () =>
-    set((s) => ({
-      items: s.items.map((i) => (!i.archived ? { ...i, archived: true } : i)),
-    })),
-  archiveAllRead: () =>
-    set((s) => ({
-      items: s.items.map((i) =>
-        i.read && !i.archived ? { ...i, archived: true } : i
-      ),
-    })),
-  updateIssueStatus: (issueId, status) =>
-    set((s) => ({
-      items: s.items.map((i) =>
-        i.issue_id === issueId ? { ...i, issue_status: status } : i
-      ),
-    })),
-  dedupedItems: () => deduplicateInboxItems(get().items),
-  unreadCount: () =>
-    get().dedupedItems().filter((i) => !i.read).length,
-}));
+function getInboxSnapshot(): InboxState {
+  const workspace = useWorkspaceStore.getState().workspace;
+  const items = workspace
+    ? getAppQueryClient().getQueryData<InboxItem[]>(queryKeys.inbox.all(workspace.id)) ?? []
+    : [];
+
+  return {
+    items,
+    loading: false,
+    fetch: async () => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      try {
+        await getAppQueryClient().fetchQuery(inboxQueryOptions(nextWorkspace.id));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load inbox");
+      }
+    },
+    setItems: (nextItems) => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData(queryKeys.inbox.all(nextWorkspace.id), nextItems);
+    },
+    addItem: (item) => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.some((entry) => entry.id === item.id) ? existing : [item, ...existing],
+      );
+    },
+    markRead: (id) => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) => (item.id === id ? { ...item, read: true } : item)),
+      );
+    },
+    archive: (id) => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) => (item.id === id ? { ...item, archived: true } : item)),
+      );
+    },
+    markAllRead: () => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) => (!item.archived ? { ...item, read: true } : item)),
+      );
+    },
+    archiveAll: () => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) => (!item.archived ? { ...item, archived: true } : item)),
+      );
+    },
+    archiveAllRead: () => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) => (item.read && !item.archived ? { ...item, archived: true } : item)),
+      );
+    },
+    updateIssueStatus: (issueId, status) => {
+      const nextWorkspace = useWorkspaceStore.getState().workspace;
+      if (!nextWorkspace) return;
+      getAppQueryClient().setQueryData<InboxItem[]>(queryKeys.inbox.all(nextWorkspace.id), (existing = []) =>
+        existing.map((item) =>
+          item.issue_id === issueId ? { ...item, issue_status: status } : item,
+        ),
+      );
+    },
+    dedupedItems: () => deduplicateInboxItems(items),
+    unreadCount: () => deduplicateInboxItems(items).filter((item) => !item.read).length,
+  };
+}
+
+export const useInboxStore = ((selector: InboxStoreSelector<unknown>) => {
+  const inboxQuery = useInboxItemsQuery();
+
+  const snapshot = useMemo<InboxState>(
+    () => ({
+      ...getInboxSnapshot(),
+      items: inboxQuery.data ?? [],
+      loading: inboxQuery.isPending,
+      dedupedItems: () => deduplicateInboxItems(inboxQuery.data ?? []),
+      unreadCount: () => deduplicateInboxItems(inboxQuery.data ?? []).filter((item) => !item.read).length,
+    }),
+    [inboxQuery.data, inboxQuery.isPending],
+  );
+
+  return selector(snapshot);
+}) as InboxStoreHook;
+
+useInboxStore.getState = getInboxSnapshot;

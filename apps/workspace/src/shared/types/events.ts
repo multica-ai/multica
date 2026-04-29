@@ -3,6 +3,7 @@ import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
+import type { Project } from "./project";
 import type { Workspace, MemberWithUser } from "./workspace";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -38,6 +39,9 @@ export type WSEventType =
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"
+  | "project:created"
+  | "project:updated"
+  | "project:deleted"
   | "subscriber:added"
   | "subscriber:removed"
   | "activity:created"
@@ -141,6 +145,18 @@ export interface MemberRemovedPayload {
   workspace_id: string;
 }
 
+export interface ProjectCreatedPayload {
+  project: Project;
+}
+
+export interface ProjectUpdatedPayload {
+  project: Project;
+}
+
+export interface ProjectDeletedPayload {
+  project_id: string;
+}
+
 export interface SubscriberAddedPayload {
   issue_id: string;
   user_type: string;
@@ -168,6 +184,19 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+}
+
+export interface TaskDispatchPayload {
+  task_id: string;
+  issue_id?: string;
+  runtime_id?: string;
+}
+
+export interface TaskProgressPayload {
+  task_id: string;
+  summary: string;
+  step?: number;
+  total?: number;
 }
 
 export interface TaskCompletedPayload {

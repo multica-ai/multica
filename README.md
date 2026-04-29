@@ -117,8 +117,8 @@ That's it! Your agent is now part of the team. 🎉
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Next.js    │────>│  Go Backend  │────>│   PostgreSQL     │
-│   Frontend   │<────│  (Chi + WS)  │<────│   (pgvector)     │
+│ Vite + React │────>│  Go Backend  │────>│   PostgreSQL     │
+│     SPA      │<────│  (Chi + WS)  │<────│   (pgvector)     │
 └──────────────┘     └──────┬───────┘     └──────────────────┘
                             │
                      ┌──────┴───────┐
@@ -129,7 +129,7 @@ That's it! Your agent is now part of the team. 🎉
 
 | Layer | Stack |
 |-------|-------|
-| Frontend | Next.js 16 (App Router) |
+| Frontend | Vite 8 + React SPA |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 with pgvector |
 | Agent Runtime | Local daemon executing Claude Code or Codex |

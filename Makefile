@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build release-build release-package test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -14,14 +14,12 @@ POSTGRES_PASSWORD ?= multica
 POSTGRES_PORT ?= 5432
 PORT ?= 8080
 FRONTEND_PORT ?= 3000
-MARKETING_PORT ?= 3001
 FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
 WORKSPACE_SITE_ORIGIN ?= $(FRONTEND_ORIGIN)
-MARKETING_SITE_ORIGIN ?= http://localhost:$(MARKETING_PORT)
 MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
-NEXT_PUBLIC_API_URL ?= http://localhost:$(PORT)
-NEXT_PUBLIC_WS_URL ?= ws://localhost:$(PORT)/ws
+VITE_API_URL ?=
+VITE_WS_URL ?=
 WORKSPACE_DIST_DIR ?= ../apps/workspace/dist
 GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
 MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
@@ -63,7 +61,6 @@ start:
 	@bash scripts/check-postgres.sh "$(ENV_FILE)"
 	@bash scripts/check-dev-ports.sh "$(ENV_FILE)" backend workspace
 	@echo "Starting backend and workspace SPA..."
-# pnpm dev:marketing & \
 	@trap 'kill 0' EXIT; \
 		(cd server && go run ./cmd/server) & \
 		pnpm dev:workspace & \
@@ -79,7 +76,6 @@ stop:
 	@echo "Stopping services..."
 	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
 	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
-	@-lsof -ti:$(MARKETING_PORT) | xargs kill -9 2>/dev/null
 	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:5432."
 
 # Full verification: typecheck + unit tests + Go tests + E2E
@@ -159,8 +155,14 @@ build:
 release-build:
 	bash scripts/build-release.sh
 
+release-build-multi:
+	RELEASE_TARGETS="$(RELEASE_TARGETS)" bash scripts/build-release-multi.sh
+
 release-package:
 	bash scripts/package-release.sh $(RELEASE_OUTPUT_DIR)
+
+release-package-multi:
+	RELEASE_TARGETS="$(RELEASE_TARGETS)" SKIP_BUILD="$(SKIP_BUILD)" bash scripts/package-release-multi.sh $(RELEASE_OUTPUT_DIR)
 
 test:
 	$(REQUIRE_ENV)

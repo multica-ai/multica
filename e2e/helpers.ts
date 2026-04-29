@@ -32,8 +32,12 @@ export async function loginAsDefault(page: Page, scope?: string | number) {
   await page.goto("/login");
   await page.evaluate(({ token, workspaceId }) => {
     localStorage.removeItem("multica_issues_view");
+    localStorage.removeItem("multica_issue_list_view");
     localStorage.removeItem("multica_issues_scope");
     localStorage.removeItem("multica_my_issues_view");
+    localStorage.removeItem("multica_backlog_view");
+    localStorage.removeItem("multica_today_view");
+    localStorage.removeItem("multica_upcoming_view");
     localStorage.setItem("multica_token", token);
     localStorage.setItem("multica_workspace_id", workspaceId);
   }, { token, workspaceId: workspace.id });

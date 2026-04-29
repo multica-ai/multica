@@ -1,6 +1,6 @@
 export { StatusIcon } from "./status-icon";
 export { PriorityIcon } from "./priority-icon";
-export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, DueDatePicker, IssueDateTimePicker } from "./pickers";
+export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, DueDatePicker, IssueDateTimePicker, ParentIssuePicker, LabelPicker, DependencyPicker } from "./pickers";
 export { IssueDetail } from "./issue-detail";
 export { IssuesPage } from "./issues-page";
 export { CommentCard } from "./comment-card";

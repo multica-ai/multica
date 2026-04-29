@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Loader2, CheckCircle2, XCircle, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/shared/api";
 import type { RuntimePingStatus } from "@/shared/types";
+import { useRuntimeMutations } from "@/features/runtimes/mutations";
 
 const pingStatusConfig: Record<
   RuntimePingStatus,
@@ -16,6 +16,7 @@ const pingStatusConfig: Record<
 };
 
 export function PingSection({ runtimeId }: { runtimeId: string }) {
+  const { pingRuntime, getPingResult } = useRuntimeMutations();
   const [status, setStatus] = useState<RuntimePingStatus | null>(null);
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
@@ -41,11 +42,11 @@ export function PingSection({ runtimeId }: { runtimeId: string }) {
     setDurationMs(null);
 
     try {
-      const ping = await api.pingRuntime(runtimeId);
+      const ping = await pingRuntime(runtimeId);
 
       pollRef.current = setInterval(async () => {
         try {
-          const result = await api.getPingResult(runtimeId, ping.id);
+          const result = await getPingResult(runtimeId, ping.id);
           setStatus(result.status as RuntimePingStatus);
 
           if (result.status === "completed") {

@@ -8,14 +8,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
-import { api } from "@/shared/api";
 import type { WorkspaceRepo } from "@/shared/types";
+import { useWorkspaceSettingsMutations } from "@/features/settings/mutations";
 
 export function RepositoriesTab() {
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const members = useWorkspaceStore((s) => s.members);
-  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const { updateWorkspace } = useWorkspaceSettingsMutations();
 
   const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
   const [saving, setSaving] = useState(false);
@@ -31,8 +31,7 @@ export function RepositoriesTab() {
     if (!workspace) return;
     setSaving(true);
     try {
-      const updated = await api.updateWorkspace(workspace.id, { repos });
-      updateWorkspace(updated);
+      await updateWorkspace({ repos });
       toast.success("Repositories saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save repositories");

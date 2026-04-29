@@ -59,6 +59,7 @@ export function BoardView({
   visibleStatuses,
   hiddenStatuses,
   onMoveIssue,
+  createIssueData,
 }: {
   issues: Issue[];
   allIssues: Issue[];
@@ -69,6 +70,7 @@ export function BoardView({
     newStatus: IssueStatus,
     newPosition?: number
   ) => void;
+  createIssueData?: Record<string, unknown> | null;
 }) {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
 
@@ -176,6 +178,7 @@ export function BoardView({
             key={status}
             status={status}
             issues={issues.filter((i) => i.status === status)}
+            createIssueData={createIssueData}
           />
         ))}
 
@@ -189,7 +192,7 @@ export function BoardView({
 
       <DragOverlay>
         {activeIssue ? (
-          <div className="w-[280px] rotate-1 cursor-grabbing opacity-95 shadow-md">
+          <div className="w-70 rotate-1 cursor-grabbing opacity-95 shadow-md">
             <BoardCardContent issue={activeIssue} />
           </div>
         ) : null}
@@ -207,7 +210,7 @@ function HiddenColumnsPanel({
 }) {
   const viewStoreApi = useViewStoreApi();
   return (
-    <div className="flex w-[240px] shrink-0 flex-col">
+    <div className="flex w-60 shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="text-sm font-medium text-muted-foreground">
           Hidden columns

@@ -10,6 +10,37 @@ export type IssueStatus =
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
+export type IssueDependencyType = "blocks" | "blocked_by" | "related";
+
+export interface IssueReference {
+  id: string;
+  workspace_id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  parent_issue_id: string | null;
+}
+
+export interface IssueLabel {
+  id: string;
+  workspace_id: string;
+  name: string;
+  color: string;
+}
+
+export interface IssueDependency {
+  id: string;
+  type: IssueDependencyType;
+  issue: IssueReference;
+}
+
+export interface IssueDependencyGroups {
+  blocks?: IssueDependency[];
+  blocked_by?: IssueDependency[];
+  related?: IssueDependency[];
+}
 
 export interface IssueReaction {
   id: string;
@@ -34,10 +65,15 @@ export interface Issue {
   creator_type: IssueAssigneeType;
   creator_id: string;
   parent_issue_id: string | null;
+  project_id: string | null;
   position: number;
   due_date: string | null;
   start_date: string | null;
   end_date: string | null;
+  parent_issue?: IssueReference | null;
+  child_issues?: IssueReference[];
+  labels?: IssueLabel[];
+  dependencies?: IssueDependencyGroups | null;
   reactions?: IssueReaction[];
   created_at: string;
   updated_at: string;

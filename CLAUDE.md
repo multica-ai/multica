@@ -12,23 +12,30 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 
 ## Architecture
 
-**Go backend + standalone Next.js frontend.**
+**Go backend + frontend monorepo.**
 
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
-- `apps/web/` — Next.js 16 frontend (App Router) — self-contained, no shared package dependencies
+- `apps/workspace/` — Vite + React product workspace app
 
-### Web App Structure (`apps/web/`)
+### Workspace App Structure (`apps/workspace/src/`)
 
-The frontend uses a **feature-based architecture** with four layers:
+The workspace frontend uses a feature-based architecture with most product code under `src/`.
 
 ```
-apps/web/
-├── app/          # Routing layer (thin shells — import from features/)
+apps/workspace/src/
+├── components/   # Reusable UI primitives and app-level components
 ├── features/     # Business logic, organized by domain
-├── shared/       # Cross-feature utilities (api client, types, logger)
+├── hooks/        # Reusable hooks
+├── lib/          # App-specific utilities
+├── shared/       # Shared API client, types, router, logger, utilities
+├── styles/       # Global and shared styles
+├── test/         # Shared test utilities and setup
+├── app-shell.tsx # Main authenticated shell
+├── main.tsx      # App bootstrap
+└── router.tsx    # Route tree and navigation setup
 ```
 
-**`app/`** — Next.js App Router pages. Route files should be thin: import and re-export from `features/`. Layout components and route-specific glue (redirects, auth guards) live here. Shared layout components (e.g. `app-sidebar`) stay in `app/(dashboard)/_components/`.
+`apps/workspace` uses `@/` alias mapping to `src/`.
 
 **`features/`** — Domain modules, each with its own components, hooks, stores, and config:
 
@@ -62,7 +69,7 @@ apps/web/
 
 ### Import Aliases
 
-Use `@/` alias (maps to `apps/web/`):
+Use `@/` alias (maps to `apps/workspace/src/`):
 ```typescript
 import { api } from "@/shared/api";
 import type { Issue } from "@/shared/types";
@@ -117,10 +124,11 @@ make db-down          # Stop the shared PostgreSQL container
 
 # Frontend
 pnpm install
-pnpm dev:web          # Next.js dev server (port 3000)
-pnpm build            # Build frontend
+pnpm dev:web          # Alias for the workspace SPA (port 3000)
+pnpm dev:workspace    # Workspace SPA dev server (port 3000)
+pnpm build            # Build the workspace frontend
 pnpm typecheck        # TypeScript check
-pnpm lint             # ESLint via Next.js
+pnpm lint             # TypeScript lint
 pnpm test             # TS tests (Vitest)
 
 # Backend (Go)
@@ -137,7 +145,7 @@ make migrate-down     # Rollback migrations
 cd server && go test ./internal/handler/ -run TestName
 
 # Run a single TS test
-pnpm --filter @multica/web exec vitest run src/path/to/file.test.ts
+pnpm --filter @multica/workspace exec vitest run src/path/to/file.test.ts
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts

@@ -1,23 +1,25 @@
 # TODO
 
-- [x] 阶段一：完成 VPS + OpenResty 部署方案的现状分析
-- [x] 阶段二：输出仅包含 workspace + 后端 的部署功能点与目标拓扑，等待用户确认
-- [x] 阶段三：输出以打包方式和必须配置文件为核心的风险、关键决策与实施边界，等待用户确认
-- [x] 阶段四：在用户显式确认 Spec 后开始实现部署相关改动
-- [x] 阶段五：执行部署验证并记录可验证证据
+- [x] 阶段一：复核 lessons、既有 OpenSpec 蓝图与第一批范围相关代码现状
+- [x] 阶段二：确认第一批实现范围为父子任务 UI、标签、依赖阻塞关系可视化
+- [x] 阶段三：补齐 `openspec/changes/issue-hierarchy-labels-dependencies/` 的 proposal / design / spec / tasks
+- [x] 阶段四：实现后端父子任务、标签、依赖关系 API、校验与事件补充
+- [x] 阶段五：实现 `apps/workspace` 的父子任务、标签、依赖关系 UI
+- [x] 阶段六：收口双前端历史残留，统一以 `apps/workspace` 为唯一前端
+- [x] 阶段七：补充后端、前端与 E2E 测试覆盖
+- [x] 阶段八：完成验证并记录可验证证据
 
 ## Review
 
-- 已完成现状分析，用户将范围收敛为 workspace + 后端，后续方案不再包含 marketing。
-- 已确认推荐拓扑：域名使用 multica.ali.chenjiaming.org，由 OpenResty 统一处理请求，workspace 走静态构建产物，后端走 Go server。
-- 用户进一步明确：OpenResty 配置由用户自行处理，本次方案与后续实现应重点覆盖打包产物、运行目录和必须配置文件。
-- 已新增发布构建脚本、发布目录组装脚本和生产环境模板文件。
-- 已执行 `bash scripts/build-release.sh`，确认 workspace、server、migrate 三类产物可以成功构建。
-- 已执行 `bash scripts/package-release.sh` 和 `SKIP_BUILD=1 make release-package RELEASE_OUTPUT_DIR=dist/release-make`，确认发布目录可成功组装。
-- 用户后续将采用 VPS 直接 clone 源码并本机编译的路径，发布包组装脚本保留为可选方案，主路径切换为源码部署。
-
-## Current Task
-
-- [ ] 阶段一：确认 workspace 构建产物位置与 server 前端分发入口
-- [ ] 阶段二：将 workspace 静态产物改为通过 `go:embed` 内嵌到 server
-- [ ] 阶段三：验证 server 在存在内嵌产物时可正常构建
+- 已确认本轮只做第一批切片：父子任务 UI、标签 / Tag、依赖阻塞关系可视化。
+- `openspec` CLI 当前在本地环境不可用，因此本轮将按仓库既有 OpenSpec 目录结构手工补齐 change 工件，并保持 proposal / design / spec / tasks 对齐。
+- 已落地 `openspec/changes/issue-hierarchy-labels-dependencies/`，补齐 proposal、design、tasks 与 delta spec。
+- 后端已新增 workspace labels API、issue labels API、issue dependencies API，并在 issue detail 中返回父任务、子任务、标签、依赖关系。
+- `apps/workspace` 已补齐父任务选择器、标签编辑器、依赖关系编辑器与详情展示，`apps/web` 已从仓库中移除。
+- 已补充后端 handler 测试、workspace mutation 测试、E2E 主流程测试。
+- 验证证据：
+  - `make setup-worktree`：成功安装依赖并完成 `.env.worktree` 环境初始化。
+  - `pnpm typecheck`：通过。
+  - `pnpm --filter @multica/workspace exec vitest run src/features/issues/mutations.test.tsx`：3 个测试通过。
+  - `cd server && export $(grep '^DATABASE_URL=' ../.env.worktree) && go test ./internal/handler/... ./cmd/server/...`：通过。
+  - `pnpm exec playwright test e2e/issues.spec.ts --grep "can create child issues and manage labels and dependencies"`：1 个测试通过。

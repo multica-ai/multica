@@ -55,23 +55,27 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { ActorAvatar } from "@/components/common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@/shared/types";
+import type { Issue, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, IssueDependencyType } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
-import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneePicker, canAssignAgent } from "@/features/issues/components";
+import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneePicker, canAssignAgent, ParentIssuePicker, LabelPicker, DependencyPicker } from "@/features/issues/components";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
-import { api } from "@/shared/api";
 import { useAuthStore } from "@/features/auth";
+import { useNavigationStore } from "@/features/navigation";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueStore } from "@/features/issues";
 import { useIssueTimeline } from "@/features/issues/hooks/use-issue-timeline";
 import { useIssueReactions } from "@/features/issues/hooks/use-issue-reactions";
 import { useIssueSubscribers } from "@/features/issues/hooks/use-issue-subscribers";
+import { useIssueMutations } from "@/features/issues/mutations";
+import { useIssueDetailQuery } from "@/features/issues/queries";
 import { ReactionBar } from "@/components/common/reaction-bar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { Link, useRouter } from "@/shared/router";
 import { timeAgo } from "@/shared/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -171,6 +175,270 @@ function PropRow({
   );
 }
 
+function RelationList({
+  items,
+  onRemove,
+}: {
+  items: { id: string; issue: { id: string; identifier: string; title: string } }[];
+  onRemove: (dependencyId: string) => Promise<unknown>;
+}) {
+  if (items.length === 0) {
+    return <span className="text-muted-foreground">None</span>;
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      {items.map((item) => (
+        <div key={item.id} className="flex min-w-0 items-center gap-2">
+          <Link href={`/issues/${item.issue.id}`} className="truncate hover:underline">
+            {item.issue.identifier} · {item.issue.title}
+          </Link>
+          <button
+            type="button"
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => void onRemove(item.id)}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IssueSidebarSections({
+  issue,
+  propertiesOpen,
+  detailsOpen,
+  onToggleProperties,
+  onToggleDetails,
+  onUpdateField,
+  onAddLabel,
+  onRemoveLabel,
+  onAddDependency,
+  onRemoveDependency,
+  getActorName,
+}: {
+  issue: Issue;
+  propertiesOpen: boolean;
+  detailsOpen: boolean;
+  onToggleProperties: () => void;
+  onToggleDetails: () => void;
+  onUpdateField: (updates: Partial<UpdateIssueRequest>) => void;
+  onAddLabel: (input: { labelId?: string; name?: string; color?: string }) => Promise<unknown>;
+  onRemoveLabel: (labelId: string) => Promise<unknown>;
+  onAddDependency: (dependencyIssueId: string, type: IssueDependencyType) => Promise<unknown>;
+  onRemoveDependency: (dependencyId: string) => Promise<unknown>;
+  getActorName: (type: string, id: string) => string;
+}) {
+  const labels = issue.labels ?? [];
+  const dependencies = issue.dependencies ?? null;
+  const childIssues = issue.child_issues ?? [];
+
+  return (
+    <>
+      <div>
+        <button
+          className={`mb-2 flex w-full items-center gap-1 text-xs font-medium transition-colors ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={onToggleProperties}
+        >
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+          Properties
+        </button>
+
+        {propertiesOpen ? (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Status">
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 overflow-hidden transition-colors hover:bg-accent/30">
+                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-44">
+                  {ALL_STATUSES.map((status) => (
+                    <DropdownMenuItem key={status} onClick={() => onUpdateField({ status })}>
+                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      {STATUS_CONFIG[status].label}
+                      {status === issue.status ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </PropRow>
+
+            <PropRow label="Priority">
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 overflow-hidden transition-colors hover:bg-accent/30">
+                  <PriorityIcon priority={issue.priority} className="shrink-0" />
+                  <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-44">
+                  {PRIORITY_ORDER.map((priority) => (
+                    <DropdownMenuItem key={priority} onClick={() => onUpdateField({ priority })}>
+                      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[priority].badgeBg} ${PRIORITY_CONFIG[priority].badgeText}`}>
+                        <PriorityIcon priority={priority} className="h-3 w-3" inheritColor />
+                        {PRIORITY_CONFIG[priority].label}
+                      </span>
+                      {priority === issue.priority ? <Check className="ml-auto h-3.5 w-3.5" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </PropRow>
+
+            <PropRow label="Assignee">
+              <AssigneePicker
+                assigneeType={issue.assignee_type}
+                assigneeId={issue.assignee_id}
+                onUpdate={onUpdateField}
+                align="start"
+              />
+            </PropRow>
+
+            <PropRow label="Project">
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={onUpdateField}
+                align="start"
+              />
+            </PropRow>
+
+            <PropRow label="Parent">
+              <ParentIssuePicker
+                issueId={issue.id}
+                parentIssueId={issue.parent_issue_id}
+                parentIssue={issue.parent_issue}
+                onUpdate={onUpdateField}
+                align="start"
+              />
+            </PropRow>
+
+            <PropRow label="Start date">
+              <IssueDateTimePicker
+                field="start_date"
+                dateTimeValue={issue.start_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+
+            <PropRow label="End date">
+              <IssueDateTimePicker
+                field="end_date"
+                dateTimeValue={issue.end_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+
+            <PropRow label="Due date">
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={onUpdateField}
+              />
+            </PropRow>
+
+            <div className="space-y-2 rounded-md px-2 py-2 -mx-2 hover:bg-accent/50 transition-colors">
+              <div className="text-xs text-muted-foreground">Labels</div>
+              <LabelPicker
+                labels={labels}
+                onAdd={onAddLabel}
+                onRemove={onRemoveLabel}
+                align="start"
+              />
+            </div>
+
+            <div className="space-y-2 rounded-md px-2 py-2 -mx-2 hover:bg-accent/50 transition-colors">
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>Dependencies</span>
+                <div className="flex flex-wrap items-center gap-1">
+                  <DependencyPicker
+                    issueId={issue.id}
+                    dependencies={dependencies}
+                    type="blocks"
+                    onAdd={onAddDependency}
+                  />
+                  <DependencyPicker
+                    issueId={issue.id}
+                    dependencies={dependencies}
+                    type="blocked_by"
+                    onAdd={onAddDependency}
+                  />
+                  <DependencyPicker
+                    issueId={issue.id}
+                    dependencies={dependencies}
+                    type="related"
+                    onAdd={onAddDependency}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="space-y-1">
+                  <div className="text-muted-foreground">Blocks</div>
+                  <RelationList items={dependencies?.blocks ?? []} onRemove={onRemoveDependency} />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-muted-foreground">Blocked by</div>
+                  <RelationList items={dependencies?.blocked_by ?? []} onRemove={onRemoveDependency} />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-muted-foreground">Related</div>
+                  <RelationList items={dependencies?.related ?? []} onRemove={onRemoveDependency} />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div>
+        <button
+          className={`mb-2 flex w-full items-center gap-1 text-xs font-medium transition-colors ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={onToggleDetails}
+        >
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+          Details
+        </button>
+
+        {detailsOpen ? (
+          <div className="space-y-0.5 pl-2">
+            <PropRow label="Created by">
+              <ActorAvatar
+                actorType={issue.creator_type}
+                actorId={issue.creator_id}
+                size={18}
+              />
+              <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+            </PropRow>
+            <PropRow label="Created">
+              <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
+            </PropRow>
+            <PropRow label="Updated">
+              <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
+            </PropRow>
+            <div className="space-y-1 rounded-md px-2 py-2 -mx-2 hover:bg-accent/50 transition-colors">
+              <div className="text-xs text-muted-foreground">Children</div>
+              {childIssues.length > 0 ? (
+                <div className="flex min-w-0 flex-col gap-1 text-xs">
+                  {childIssues.map((childIssue) => (
+                    <Link
+                      key={childIssue.id}
+                      href={`/issues/${childIssue.id}`}
+                      className="truncate hover:underline"
+                    >
+                      {childIssue.identifier} · {childIssue.title}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground">No child issues</span>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // Props
@@ -191,6 +459,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
+  const isMobile = useIsMobile();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -204,6 +473,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const prevIssue = currentIndex > 0 ? allIssues[currentIndex - 1] : null;
   const nextIssue = currentIndex < allIssues.length - 1 ? allIssues[currentIndex + 1] : null;
   const { getActorName } = useActorName();
+  const lastPath = useNavigationStore((state) => state.lastPath);
   const { uploadWithToast } = useFileUpload();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
@@ -218,29 +488,35 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
+  const issueDetailQuery = useIssueDetailQuery(id);
+  const {
+    updateIssue,
+    deleteIssue,
+    addIssueLabel,
+    removeIssueLabel,
+    addIssueDependency,
+    removeIssueDependency,
+  } = useIssueMutations();
+
+  useEffect(() => {
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!defaultSidebarOpen || isMobile) return;
+
+    const panel = sidebarRef.current;
+    if (!panel || !panel.isCollapsed()) return;
+
+    panel.expand();
+  }, [defaultSidebarOpen, isMobile, sidebarRef]);
 
   // Single source of truth: read issue directly from global store
-  const issue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? null;
-  const [issueLoading, setIssueLoading] = useState(!issue);
-
-  // If issue isn't in the store yet, fetch and upsert it
-  useEffect(() => {
-    if (issue) {
-      setIssueLoading(false);
-      return;
-    }
-    setIssueLoading(true);
-    api
-      .getIssue(id)
-      .then((iss) => {
-        useIssueStore.getState().addIssue(iss);
-      })
-      .catch((e) => {
-        console.error(e);
-        toast.error("Failed to load issue");
-      })
-      .finally(() => setIssueLoading(false));
-  }, [id, !!issue]);
+  const listedIssue = useIssueStore((s) => s.issues.find((i) => i.id === id)) ?? null;
+  const issue = issueDetailQuery.data ?? listedIssue ?? null;
+  const issueLoading = !issue && issueDetailQuery.isPending;
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
@@ -258,6 +534,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   } = useIssueSubscribers(id, user?.id);
 
   const loading = issueLoading;
+  const backHref = lastPath && !lastPath.startsWith("/issues/") ? lastPath : "/issues";
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
@@ -296,14 +573,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleUpdateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issue) return;
-      const prev = { ...issue };
-      useIssueStore.getState().updateIssue(id, updates);
-      api.updateIssue(id, updates).catch(() => {
-        useIssueStore.getState().updateIssue(id, prev);
-        toast.error("Failed to update issue");
+      void updateIssue(id, updates).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Failed to update issue");
       });
     },
-    [issue, id],
+    [id, issue, updateIssue],
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -315,16 +589,51 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await api.deleteIssue(issue!.id);
-      useIssueStore.getState().removeIssue(issue!.id);
+      await deleteIssue(issue!.id);
       toast.success("Issue deleted");
       if (onDelete) onDelete();
-      else router.push("/issues");
+      else router.push(backHref);
     } catch {
       toast.error("Failed to delete issue");
       setDeleting(false);
     }
   };
+
+  const handleAddIssueLabel = useCallback(
+    (input: { labelId?: string; name?: string; color?: string }) => {
+      return addIssueLabel(id, input).catch(() => {
+        toast.error("Failed to update labels");
+      });
+    },
+    [addIssueLabel, id],
+  );
+
+  const handleRemoveIssueLabel = useCallback(
+    (labelId: string) => {
+      return removeIssueLabel(id, labelId).catch(() => {
+        toast.error("Failed to update labels");
+      });
+    },
+    [id, removeIssueLabel],
+  );
+
+  const handleAddIssueDependency = useCallback(
+    (dependencyIssueId: string, type: IssueDependencyType) => {
+      return addIssueDependency(id, dependencyIssueId, type).catch((error: Error) => {
+        toast.error(error.message || "Failed to update dependencies");
+      });
+    },
+    [addIssueDependency, id],
+  );
+
+  const handleRemoveIssueDependency = useCallback(
+    (dependencyId: string) => {
+      return removeIssueDependency(id, dependencyId).catch(() => {
+        toast.error("Failed to update dependencies");
+      });
+    },
+    [id, removeIssueDependency],
+  );
 
   if (loading) {
     return (
@@ -382,7 +691,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <p>This issue does not exist or has been deleted in this workspace.</p>
         {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => router.push("/issues")}>
+          <Button variant="outline" size="sm" onClick={() => router.push(backHref)}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
             Back to Issues
           </Button>
@@ -402,7 +711,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {workspace && (
               <>
                 <Link
-                  href="/issues"
+                  href={backHref}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {workspace.name}
@@ -601,26 +910,28 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={sidebarOpen ? "secondary" : "ghost"}
-                    size="icon-xs"
-                    className={sidebarOpen ? "" : "text-muted-foreground"}
-                    onClick={() => {
-                      const panel = sidebarRef.current;
-                      if (!panel) return;
-                      if (panel.isCollapsed()) panel.expand();
-                      else panel.collapse();
-                    }}
-                  >
-                    <PanelRight className="h-4 w-4" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
-            </Tooltip>
+            {!isMobile ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant={sidebarOpen ? "secondary" : "ghost"}
+                      size="icon-xs"
+                      className={sidebarOpen ? "" : "text-muted-foreground"}
+                      onClick={() => {
+                        const panel = sidebarRef.current;
+                        if (!panel) return;
+                        if (panel.isCollapsed()) panel.expand();
+                        else panel.collapse();
+                      }}
+                    >
+                      <PanelRight className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Toggle sidebar</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
 
             {/* Delete confirmation dialog (controlled by state) */}
@@ -687,6 +998,22 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <FileUploadButton
               size="sm"
               onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+            />
+          </div>
+
+          <div className="mt-6 space-y-5 rounded-xl border bg-card p-4 md:hidden">
+            <IssueSidebarSections
+              issue={issue}
+              propertiesOpen={propertiesOpen}
+              detailsOpen={detailsOpen}
+              onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
+              onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+              onUpdateField={handleUpdateField}
+              onAddLabel={handleAddIssueLabel}
+              onRemoveLabel={handleRemoveIssueLabel}
+              onAddDependency={handleAddIssueDependency}
+              onRemoveDependency={handleRemoveIssueDependency}
+              getActorName={getActorName}
             />
           </div>
 
@@ -954,140 +1281,40 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
       </div>
       </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel
-        id="sidebar"
-        defaultSize={defaultSidebarOpen ? 320 : 0}
-        minSize={260}
-        maxSize={420}
-        collapsible
-        groupResizeBehavior="preserve-pixel-size"
-        panelRef={sidebarRef}
-        onResize={(size) => setSidebarOpen(size.inPixels > 0)}
-      >
-      {/* RIGHT: Properties sidebar */}
-      <div className="overflow-y-auto border-l h-full">
-        <div className="p-4 space-y-5">
-          {/* Properties section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setPropertiesOpen(!propertiesOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-              Properties
-            </button>
-
-            {propertiesOpen && <div className="space-y-0.5 pl-2">
-              {/* Status */}
-              <PropRow label="Status">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{STATUS_CONFIG[issue.status].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s })}>
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {s === issue.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Priority */}
-              <PropRow label="Priority">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-                    <PriorityIcon priority={issue.priority} className="shrink-0" />
-                    <span className="truncate">{PRIORITY_CONFIG[issue.priority].label}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p })}>
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {p === issue.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </PropRow>
-
-              {/* Assignee */}
-              <PropRow label="Assignee">
-                <AssigneePicker
-                  assigneeType={issue.assignee_type}
-                  assigneeId={issue.assignee_id}
-                  onUpdate={handleUpdateField}
-                  align="start"
-                />
-              </PropRow>
-
-              {/* Start date */}
-              <PropRow label="Start date">
-                <IssueDateTimePicker
-                  field="start_date"
-                  dateTimeValue={issue.start_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-
-              {/* End date */}
-              <PropRow label="End date">
-                <IssueDateTimePicker
-                  field="end_date"
-                  dateTimeValue={issue.end_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-
-              {/* Due date */}
-              <PropRow label="Due date">
-                <DueDatePicker
-                  dueDate={issue.due_date}
-                  onUpdate={handleUpdateField}
-                />
-              </PropRow>
-            </div>}
+      {!isMobile ? (
+        <>
+          <ResizableHandle />
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={defaultSidebarOpen ? 320 : 0}
+            minSize={260}
+            maxSize={420}
+            collapsible
+            groupResizeBehavior="preserve-pixel-size"
+            panelRef={sidebarRef}
+            onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+          >
+          {/* RIGHT: Properties sidebar */}
+          <div className="h-full overflow-y-auto border-l">
+            <div className="space-y-5 p-4">
+              <IssueSidebarSections
+                issue={issue}
+                propertiesOpen={propertiesOpen}
+                detailsOpen={detailsOpen}
+                onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
+                onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+                onUpdateField={handleUpdateField}
+                onAddLabel={handleAddIssueLabel}
+                onRemoveLabel={handleRemoveIssueLabel}
+                onAddDependency={handleAddIssueDependency}
+                onRemoveDependency={handleRemoveIssueDependency}
+                getActorName={getActorName}
+              />
+            </div>
           </div>
-
-          {/* Details section */}
-          <div>
-            <button
-              className={`flex w-full items-center gap-1 text-xs font-medium transition-colors mb-2 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setDetailsOpen(!detailsOpen)}
-            >
-              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
-              Details
-            </button>
-
-            {detailsOpen && <div className="space-y-0.5 pl-2">
-              <PropRow label="Created by">
-                <ActorAvatar
-                  actorType={issue.creator_type}
-                  actorId={issue.creator_id}
-                  size={18}
-                />
-                <span className="truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-              </PropRow>
-              <PropRow label="Created">
-                <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-              </PropRow>
-              <PropRow label="Updated">
-                <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-              </PropRow>
-            </div>}
-          </div>
-
-        </div>
-      </div>
-      </ResizablePanel>
+          </ResizablePanel>
+        </>
+      ) : null}
     </ResizablePanelGroup>
   );
 }

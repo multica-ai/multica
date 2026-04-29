@@ -35,6 +35,10 @@ import type {
   TimelineEntry,
   TaskMessagePayload,
   Attachment,
+  Project,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  ListProjectsResponse,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -168,11 +172,34 @@ export class ApiClient {
     if (params?.status) search.set("status", params.status);
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
+    if (params?.assignee_type) search.set("assignee_type", params.assignee_type);
+    if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.creator_type) search.set("creator_type", params.creator_type);
+    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.search) search.set("search", params.search);
+    if (params?.due_from) search.set("due_from", params.due_from);
+    if (params?.due_to) search.set("due_to", params.due_to);
+    if (params?.start_from) search.set("start_from", params.start_from);
+    if (params?.start_to) search.set("start_to", params.start_to);
+    if (params?.end_from) search.set("end_from", params.end_from);
+    if (params?.end_to) search.set("end_to", params.end_to);
+    if (params?.view) search.set("view", params.view);
     return this.fetch(`/api/issues?${search}`);
   }
 
   async getIssue(id: string): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`);
+  }
+
+  async listLabels(): Promise<{ labels: { id: string; workspace_id: string; name: string; color: string }[]; total: number }> {
+    return this.fetch("/api/labels");
+  }
+
+  async createLabel(data: { name: string; color?: string }): Promise<{ id: string; workspace_id: string; name: string; color: string }> {
+    return this.fetch("/api/labels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
@@ -193,6 +220,63 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async addIssueLabel(id: string, data: { label_id?: string; name?: string; color?: string }): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeIssueLabel(id: string, labelId: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/labels/${labelId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async addIssueDependency(id: string, data: { issue_id: string; type: string }): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/dependencies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeIssueDependency(id: string, dependencyId: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/dependencies/${dependencyId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Projects
+  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    return this.fetch(`/api/projects?${search}`);
+  }
+
+  async getProject(id: string): Promise<Project> {
+    return this.fetch(`/api/projects/${id}`);
+  }
+
+  async createProject(data: CreateProjectRequest): Promise<Project> {
+    const search = new URLSearchParams();
+    if (this.workspaceId) search.set("workspace_id", this.workspaceId);
+    return this.fetch(`/api/projects?${search}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
+    return this.fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {

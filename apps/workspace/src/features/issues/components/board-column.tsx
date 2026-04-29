@@ -23,9 +23,11 @@ import { DraggableBoardCard } from "./board-card";
 export function BoardColumn({
   status,
   issues,
+  createIssueData,
 }: {
   status: IssueStatus;
   issues: Issue[];
+  createIssueData?: Record<string, unknown> | null;
 }) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -44,7 +46,7 @@ export function BoardColumn({
   );
 
   return (
-    <div className={`flex w-[280px] shrink-0 flex-col rounded-xl ${cfg.columnBg} p-2`}>
+    <div className={`flex w-70 shrink-0 flex-col rounded-xl ${cfg.columnBg} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
         {/* Left: status badge + count */}
         <div className="flex items-center gap-2">
@@ -81,7 +83,12 @@ export function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
-                  onClick={() => useModalStore.getState().open("create-issue", { status })}
+                  onClick={() =>
+                    useModalStore.getState().open("create-issue", {
+                      ...createIssueData,
+                      status,
+                    })
+                  }
                 >
                   <Plus className="size-3.5" />
                 </Button>
@@ -93,7 +100,7 @@ export function BoardColumn({
       </div>
       <div
         ref={setNodeRef}
-        className={`min-h-[200px] flex-1 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
+        className={`min-h-50 flex-1 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
           isOver ? "bg-accent/60" : ""
         }`}
       >

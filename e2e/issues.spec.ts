@@ -6,6 +6,14 @@ test.describe("Issues", () => {
   let api: TestApiClient;
   let seedIssue: { id: string; title: string };
 
+  const applyDateFromPopover = async (page: import("@playwright/test").Page, dataDay: string) => {
+    const popover = page.locator('[data-slot="popover-content"]').last();
+    await popover.locator(`[data-day="${dataDay}"]`).last().click();
+    await popover.getByRole("button", { name: "Apply" }).click();
+  };
+
+  const normalizeIso = (value: string | null) => (value ? new Date(value).toISOString() : null);
+
   test.beforeEach(async ({ page }, testInfo) => {
     api = await createTestApi(testInfo.parallelIndex);
     seedIssue = await api.createIssue("E2E Seed Issue " + Date.now());
@@ -18,24 +26,24 @@ test.describe("Issues", () => {
     }
   });
 
-  test("issues page loads with board view", async ({ page }) => {
+  test("issues page loads with list view", async ({ page }) => {
     await expect(page).toHaveURL(/\/issues/);
     await expect(page.getByRole("link", { name: "Issues", exact: true })).toBeVisible();
-    await expect(page.getByText("Backlog").first()).toBeVisible();
-    await expect(page.getByText("Todo").first()).toBeVisible();
-    await expect(page.getByText("In Progress").first()).toBeVisible();
+    await expect(page.getByRole("link", { name: new RegExp(seedIssue.title) }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "View options" })).toHaveCount(0);
   });
 
-  test("can switch between board and list view", async ({ page }) => {
-    await expect(page.getByText("Backlog").first()).toBeVisible();
+  test("can search issues from the list page", async ({ page }) => {
+    const searchableTitle = "E2E Searchable Issue " + Date.now();
+    await api.createIssue(searchableTitle, {
+      description: "E2E searchable description",
+    });
 
-    await page.getByRole("button", { name: "View options" }).click();
-    await page.getByRole("menuitem", { name: "List" }).click();
-    await expect(page.getByText(seedIssue.title).first()).toBeVisible();
+    await page.reload();
+    await page.getByPlaceholder("Search by title, description, issue number, or issue ID").fill(searchableTitle);
 
-    await page.getByRole("button", { name: "View options" }).click();
-    await page.getByRole("menuitem", { name: "Board" }).click();
-    await expect(page.getByText("Backlog").first()).toBeVisible();
+    await expect(page.getByText(searchableTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(seedIssue.title).first()).not.toBeVisible();
   });
 
   test("can create a new issue", async ({ page }) => {
@@ -48,6 +56,84 @@ test.describe("Issues", () => {
     await expect(page.locator(`text=${title}`).first()).toBeVisible({
       timeout: 10000,
     });
+
+    await page.goto("/backlog");
+    await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test("backlog today and upcoming routes render derived issue views", async ({ page }) => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const backlogTitle = "E2E Backlog View " + Date.now();
+    const todayTitle = "E2E Today View " + Date.now();
+    const upcomingTitle = "E2E Upcoming View " + Date.now();
+
+    await api.createIssue(backlogTitle, { status: "backlog" });
+    await api.createIssue(todayTitle, {
+      status: "todo",
+      due_date: today.toISOString(),
+    });
+    await api.createIssue(upcomingTitle, {
+      status: "todo",
+      start_date: tomorrow.toISOString(),
+    });
+
+    await page.reload();
+
+    await page.goto("/backlog");
+    await expect(page.getByText(backlogTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(todayTitle).first()).not.toBeVisible();
+
+    await page.goto("/today");
+    await expect(page.getByText(todayTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(upcomingTitle).first()).not.toBeVisible();
+
+    await page.goto("/upcoming");
+    await expect(page.getByText(upcomingTitle).first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test("backlog view opens issue detail", async ({ page }) => {
+    const title = "E2E Backlog Detail " + Date.now();
+    const issue = await api.createIssue(title, { status: "backlog" });
+
+    await page.reload();
+    await page.goto("/backlog");
+
+    const issueLink = page.getByRole("link", { name: new RegExp(title) }).first();
+    await expect(issueLink).toBeVisible({ timeout: 10000 });
+    await issueLink.click();
+
+    await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
+    await expect(page.getByText("Properties")).toBeVisible();
+  });
+
+  test("project board shows only issues linked to that project", async ({ page }) => {
+    const project = await api.createProject({
+      title: "E2E Project Board " + Date.now(),
+      icon: "📁",
+    });
+
+    const linkedTitle = "E2E Project Board Linked " + Date.now();
+    const unrelatedTitle = "E2E Project Board Other " + Date.now();
+
+    await api.createIssue(linkedTitle, {
+      status: "todo",
+      project_id: project.id,
+    });
+    await api.createIssue(unrelatedTitle, {
+      status: "todo",
+    });
+
+    await page.reload();
+    await page.goto(`/projects/${project.id}/board`);
+
+    await expect(page.getByText(linkedTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(unrelatedTitle).first()).not.toBeVisible();
+    await expect(page.getByText(`${project.title} Board`).first()).toBeVisible();
   });
 
   test("can create and edit issue schedule dates", async ({ page }) => {
@@ -75,10 +161,10 @@ test.describe("Issues", () => {
     await page.getByLabel("Issue title").fill(title);
 
     await page.getByRole("button", { name: "Start date" }).click();
-    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.start.dataDay}"]`).last().click();
+    await applyDateFromPopover(page, schedule.start.dataDay);
 
     await page.getByRole("button", { name: "End date" }).click();
-    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.end.dataDay}"]`).last().click();
+    await applyDateFromPopover(page, schedule.end.dataDay);
 
     await page.getByRole("button", { name: "Create Issue" }).click();
 
@@ -98,8 +184,8 @@ test.describe("Issues", () => {
     await expect.poll(async () => {
       const issue = await api.getIssue(issueId);
       return {
-        start_date: issue.start_date,
-        end_date: issue.end_date,
+        start_date: normalizeIso(issue.start_date),
+        end_date: normalizeIso(issue.end_date),
       };
     }).toEqual({
       start_date: schedule.start.iso,
@@ -111,18 +197,63 @@ test.describe("Issues", () => {
     await expect(page.getByRole("button", { name: "Start date" })).toBeVisible();
 
     await page.getByRole("button", { name: schedule.end.label }).click();
-    await page.locator(`[data-slot="popover-content"] [data-day="${schedule.updatedEnd.dataDay}"]`).last().click();
+    await applyDateFromPopover(page, schedule.updatedEnd.dataDay);
     await expect(page.getByRole("button", { name: schedule.updatedEnd.label })).toBeVisible();
 
     await expect.poll(async () => {
       const issue = await api.getIssue(issueId);
       return {
-        start_date: issue.start_date,
-        end_date: issue.end_date,
+        start_date: normalizeIso(issue.start_date),
+        end_date: normalizeIso(issue.end_date),
       };
     }).toEqual({
       start_date: null,
       end_date: schedule.updatedEnd.iso,
+    });
+  });
+
+  test("can create child issues and manage labels and dependencies", async ({ page }) => {
+    const parent = await api.createIssue("E2E Parent " + Date.now());
+    const blocker = await api.createIssue("E2E Blocker " + Date.now());
+
+    await page.reload();
+    await page.getByRole("button", { name: "New issue" }).click();
+    const childTitle = "E2E Child " + Date.now();
+    await page.getByLabel("Issue title").fill(childTitle);
+    await page.getByRole("button", { name: "No parent" }).click();
+    await page.getByPlaceholder("Search parent issue...").fill(parent.title);
+    await page.getByRole("button", { name: new RegExp(parent.title) }).click();
+    await page.getByRole("button", { name: "Create Issue" }).click();
+
+    const childLink = page.getByRole("link", { name: new RegExp(childTitle) }).first();
+    await expect(childLink).toBeVisible({ timeout: 10000 });
+    await childLink.click();
+    await page.waitForURL(/\/issues\/[\w-]+/);
+
+    await page.getByRole("button", { name: "No labels" }).click();
+    await page.getByPlaceholder("Search or create label...").fill("Backend");
+    await page.getByRole("button", { name: /^Backend$/ }).click();
+
+    await page.getByRole("button", { name: "Blocked by" }).click();
+    await page.getByPlaceholder("Add blocked by issue...").fill(blocker.title);
+    await page.getByRole("button", { name: new RegExp(blocker.title) }).click();
+
+    const issueId = page.url().split("/").pop();
+    if (!issueId) {
+      throw new Error("Missing issue id from detail URL");
+    }
+
+    await expect.poll(async () => {
+      const issue = await api.getIssue(issueId);
+      return {
+        parent_issue_id: issue.parent_issue_id,
+        labels: issue.labels?.map((label: { name: string }) => label.name) ?? [],
+        blocked_by: issue.dependencies?.blocked_by?.map((entry: { issue: { id: string } }) => entry.issue.id) ?? [],
+      };
+    }).toEqual({
+      parent_issue_id: parent.id,
+      labels: ["Backend"],
+      blocked_by: [blocker.id],
     });
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { WSClient } from "@/shared/api";
 import { toast } from "sonner";
 import { useIssueStore } from "@/features/issues";
@@ -8,7 +9,16 @@ import { useInboxStore } from "@/features/inbox";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useAuthStore } from "@/features/auth";
 import { createLogger } from "@/shared/logger";
-import { api } from "@/shared/api";
+import { prepareQueryCacheForReconnect, queryKeys } from "@/shared/query";
+import { inboxQueryOptions } from "@/features/inbox/queries";
+import { issuesListQueryOptions } from "@/features/issues/queries";
+import { runtimesQueryOptions } from "@/features/runtimes/queries";
+import {
+  workspaceAgentsQueryOptions,
+  workspaceMembersQueryOptions,
+  workspaceSkillsQueryOptions,
+  workspacesQueryOptions,
+} from "@/features/workspace/queries";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -33,6 +43,8 @@ const logger = createLogger("realtime-sync");
  * by individual components via useWSEvent — not here.
  */
 export function useRealtimeSync(ws: WSClient | null) {
+  const queryClient = useQueryClient();
+
   // Main sync: onAny → refreshMap with debounce
   useEffect(() => {
     if (!ws) return;
@@ -43,23 +55,38 @@ export function useRealtimeSync(ws: WSClient | null) {
     ]);
 
     const refreshMap: Record<string, () => void> = {
-      inbox: () => void useInboxStore.getState().fetch(),
-      agent: () => void useWorkspaceStore.getState().refreshAgents(),
-      member: () => void useWorkspaceStore.getState().refreshMembers(),
-      workspace: () => {
-        // Lightweight: only re-fetch workspace list, don't hydrate everything.
-        // workspace:deleted is handled by a precise side-effect handler below.
-        api.listWorkspaces().then((wsList) => {
-          const current = useWorkspaceStore.getState().workspace;
-          const updated = current
-            ? wsList.find((w) => w.id === current.id)
-            : null;
-          if (updated) useWorkspaceStore.getState().updateWorkspace(updated);
-        }).catch((err) => {
-          logger.error("workspace refresh failed", err);
-        });
+      inbox: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
       },
-      skill: () => void useWorkspaceStore.getState().refreshSkills(),
+      agent: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workspace.agents(workspaceId) });
+      },
+      member: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workspace.members(workspaceId) });
+      },
+      workspace: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all() });
+      },
+      skill: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workspace.skills(workspaceId) });
+      },
+      project: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      },
+      daemon: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.runtimes.all(workspaceId) });
+      },
     };
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -167,12 +194,23 @@ export function useRealtimeSync(ws: WSClient | null) {
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
+        await prepareQueryCacheForReconnect(
+          queryClient,
+          useWorkspaceStore.getState().workspace?.id,
+        );
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
         await Promise.all([
-          useIssueStore.getState().fetch(),
-          useInboxStore.getState().fetch(),
-          useWorkspaceStore.getState().refreshAgents(),
-          useWorkspaceStore.getState().refreshMembers(),
-          useWorkspaceStore.getState().refreshSkills(),
+          queryClient.fetchQuery(workspacesQueryOptions()),
+          ...(workspaceId
+            ? [
+                queryClient.fetchQuery(issuesListQueryOptions(workspaceId)),
+                queryClient.fetchQuery(inboxQueryOptions(workspaceId)),
+                queryClient.fetchQuery(workspaceAgentsQueryOptions(workspaceId)),
+                queryClient.fetchQuery(workspaceMembersQueryOptions(workspaceId)),
+                queryClient.fetchQuery(workspaceSkillsQueryOptions(workspaceId)),
+                queryClient.fetchQuery(runtimesQueryOptions(workspaceId)),
+              ]
+            : []),
         ]);
       } catch (e) {
         logger.error("reconnect refetch failed", e);
@@ -180,5 +218,5 @@ export function useRealtimeSync(ws: WSClient | null) {
     });
 
     return unsub;
-  }, [ws]);
+  }, [queryClient, ws]);
 }

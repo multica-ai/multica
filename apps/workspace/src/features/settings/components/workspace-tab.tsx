@@ -20,15 +20,15 @@ import {
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
-import { api } from "@/shared/api";
+import { useWorkspaceSettingsMutations } from "@/features/settings/mutations";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const members = useWorkspaceStore((s) => s.members);
-  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
   const leaveWorkspace = useWorkspaceStore((s) => s.leaveWorkspace);
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
+  const { updateWorkspace } = useWorkspaceSettingsMutations();
 
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
@@ -56,12 +56,11 @@ export function WorkspaceTab() {
     if (!workspace) return;
     setSaving(true);
     try {
-      const updated = await api.updateWorkspace(workspace.id, {
+      await updateWorkspace({
         name,
         description,
         context,
       });
-      updateWorkspace(updated);
       toast.success("Workspace settings saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");

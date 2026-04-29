@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
-import { api } from "@/shared/api";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
+import { useAccountMutations } from "@/features/settings/mutations";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
-  const setUser = useAuthStore((s) => s.setUser);
+  const { updateMe } = useAccountMutations();
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -39,8 +39,7 @@ export function AccountTab() {
     try {
       const result = await upload(file);
       if (!result) return;
-      const updated = await api.updateMe({ avatar_url: result.link });
-      setUser(updated);
+      await updateMe({ avatar_url: result.link });
       toast.success("Avatar updated");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
@@ -50,8 +49,7 @@ export function AccountTab() {
   const handleProfileSave = async () => {
     setProfileSaving(true);
     try {
-      const updated = await api.updateMe({ name: profileName });
-      setUser(updated);
+      await updateMe({ name: profileName });
       toast.success("Profile updated");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update profile");

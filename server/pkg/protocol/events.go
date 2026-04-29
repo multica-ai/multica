@@ -58,6 +58,19 @@ const (
 	EventSkillUpdated = "skill:updated"
 	EventSkillDeleted = "skill:deleted"
 
+	// Chat events
+	EventChatMessage = "chat:message"
+	EventChatDone    = "chat:done"
+
+	// Project events
+	EventProjectCreated = "project:created"
+	EventProjectUpdated = "project:updated"
+	EventProjectDeleted = "project:deleted"
+
+	// Pin events
+	EventPinCreated = "pin:created"
+	EventPinDeleted = "pin:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"

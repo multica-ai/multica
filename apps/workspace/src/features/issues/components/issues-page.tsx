@@ -5,20 +5,25 @@ import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
 import type { IssueStatus } from "@/shared/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues/store";
 import { useIssueViewStore, initFilterWorkspaceSync } from "@/features/issues/stores/view-store";
 import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
-import { ViewStoreProvider } from "@/features/issues/stores/view-store-context";
+import {
+  ViewStoreProvider,
+  useViewStore,
+  useViewStoreApi,
+} from "@/features/issues/stores/view-store-context";
 import { filterIssues } from "@/features/issues/utils/filter";
 import { BOARD_STATUSES } from "@/features/issues/config";
 import { useWorkspaceStore } from "@/features/workspace";
 import { WorkspaceAvatar } from "@/features/workspace";
-import { api } from "@/shared/api";
 import { useIssueSelectionStore } from "@/features/issues/stores/selection-store";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import { IssueTaskStatusSync } from "./issue-task-status-sync";
 
 interface IssuesPageProps {
   breadcrumbLabel?: string;
@@ -26,27 +31,29 @@ interface IssuesPageProps {
   hideViewToggle?: boolean;
 }
 
-export function IssuesPage({
-  breadcrumbLabel = "Issues",
+function IssuesPageContent({
+  breadcrumbLabel,
   forcedViewMode,
-  hideViewToggle = false,
-}: IssuesPageProps = {}) {
+  hideViewToggle,
+}: {
+  breadcrumbLabel: string;
+  forcedViewMode?: "board" | "list";
+  hideViewToggle: boolean;
+}) {
   const allIssues = useIssueStore((s) => s.issues);
   const loading = useIssueStore((s) => s.loading);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const scope = useIssuesScopeStore((s) => s.scope);
-  const storeViewMode = useIssueViewStore((s) => s.viewMode);
-  const setViewMode = useIssueViewStore((s) => s.setViewMode);
-  const statusFilters = useIssueViewStore((s) => s.statusFilters);
-  const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useIssueViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
-  const viewMode = forcedViewMode ?? storeViewMode;
-
-  useEffect(() => {
-    initFilterWorkspaceSync();
-  }, []);
+  const viewStoreApi = useViewStoreApi();
+  const { updateIssue } = useIssueMutations();
+  const storeViewMode = useViewStore((s) => s.viewMode);
+  const setViewMode = useViewStore((s) => s.setViewMode);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const priorityFilters = useViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const viewMode = forcedViewMode || storeViewMode;
 
   useEffect(() => {
     if (forcedViewMode && storeViewMode !== forcedViewMode) {
@@ -58,23 +65,28 @@ export function IssuesPage({
     useIssueSelectionStore.getState().clear();
   }, [viewMode, scope]);
 
-  // Scope pre-filter: narrow by assignee type
   const scopedIssues = useMemo(() => {
-    if (scope === "members")
-      return allIssues.filter((i) => i.assignee_type === "member");
-    if (scope === "agents")
-      return allIssues.filter((i) => i.assignee_type === "agent");
+    if (scope === "members") return allIssues.filter((i) => i.assignee_type === "member");
+    if (scope === "agents") return allIssues.filter((i) => i.assignee_type === "agent");
     return allIssues;
   }, [allIssues, scope]);
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters }),
+    () =>
+      filterIssues(scopedIssues, {
+        statusFilters,
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+      }),
     [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters],
   );
 
   const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0)
+    if (statusFilters.length > 0) {
       return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    }
     return BOARD_STATUSES;
   }, [statusFilters]);
 
@@ -84,8 +96,7 @@ export function IssuesPage({
 
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      // Auto-switch to manual sort so drag ordering is preserved
-      const viewState = useIssueViewStore.getState();
+      const viewState = viewStoreApi.getState();
       if (viewState.sortBy !== "position") {
         viewState.setSortBy("position");
         viewState.setSortDirection("asc");
@@ -96,16 +107,11 @@ export function IssuesPage({
       };
       if (newPosition !== undefined) updates.position = newPosition;
 
-      useIssueStore.getState().updateIssue(issueId, updates);
-
-      api.updateIssue(issueId, updates).catch(() => {
+      void updateIssue(issueId, updates).catch(() => {
         toast.error("Failed to move issue");
-        api.listIssues({ limit: 200 }).then((res) => {
-          useIssueStore.getState().setIssues(res.issues);
-        }).catch(console.error);
       });
     },
-    []
+    [updateIssue, viewStoreApi],
   );
 
   if (loading) {
@@ -134,6 +140,8 @@ export function IssuesPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
+      <IssueTaskStatusSync />
+
       <div className="border-b px-4 py-4 md:hidden">
         <h1 className="text-base font-semibold">{breadcrumbLabel}</h1>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -155,30 +163,49 @@ export function IssuesPage({
         hideViewToggle={hideViewToggle || !!forcedViewMode}
       />
 
-      <ViewStoreProvider store={useIssueViewStore}>
-        {scopedIssues.length === 0 ? (
-          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">No issues yet</p>
-            <p className="text-xs">Create an issue to get started.</p>
-          </div>
-        ) : (
-          <div className="flex flex-col flex-1 min-h-0">
-            {viewMode === "board" ? (
-              <BoardView
-                issues={issues}
-                allIssues={scopedIssues}
-                visibleStatuses={visibleStatuses}
-                hiddenStatuses={hiddenStatuses}
-                onMoveIssue={handleMoveIssue}
-              />
-            ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} />
-            )}
-          </div>
-        )}
-        {viewMode === "list" && !forcedViewMode && <BatchActionToolbar />}
-      </ViewStoreProvider>
+      {scopedIssues.length === 0 ? (
+        <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
+          <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+          <p className="text-sm">No issues yet</p>
+          <p className="text-xs">Create an issue to get started.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col flex-1 min-h-0">
+          {viewMode === "board" ? (
+            <BoardView
+              issues={issues}
+              allIssues={scopedIssues}
+              visibleStatuses={visibleStatuses}
+              hiddenStatuses={hiddenStatuses}
+              onMoveIssue={handleMoveIssue}
+            />
+          ) : (
+            <ListView issues={issues} visibleStatuses={visibleStatuses} />
+          )}
+        </div>
+      )}
+
+      {viewMode === "list" && !forcedViewMode && <BatchActionToolbar />}
     </div>
+  );
+}
+
+export function IssuesPage({
+  breadcrumbLabel = "Issues",
+  forcedViewMode,
+  hideViewToggle = false,
+}: IssuesPageProps = {}) {
+  useEffect(() => {
+    initFilterWorkspaceSync();
+  }, []);
+
+  return (
+    <ViewStoreProvider store={useIssueViewStore}>
+      <IssuesPageContent
+        breadcrumbLabel={breadcrumbLabel}
+        forcedViewMode={forcedViewMode}
+        hideViewToggle={hideViewToggle}
+      />
+    </ViewStoreProvider>
   );
 }

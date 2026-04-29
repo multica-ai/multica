@@ -1,0 +1,1 @@
+export { ProjectsPage } from "./components/projects-page";

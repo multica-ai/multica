@@ -9,6 +9,7 @@ interface IssueDraft {
   priority: IssuePriority;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
+  parentIssueId?: string;
   dueDate: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -17,10 +18,11 @@ interface IssueDraft {
 const EMPTY_DRAFT: IssueDraft = {
   title: "",
   description: "",
-  status: "todo",
+  status: "backlog",
   priority: "none",
   assigneeType: undefined,
   assigneeId: undefined,
+  parentIssueId: undefined,
   dueDate: null,
   startDate: null,
   endDate: null,
