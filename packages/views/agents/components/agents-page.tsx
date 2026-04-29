@@ -279,10 +279,10 @@ export function AgentsPage() {
         // Surfaced softly; the agent itself is fine.
       }
     }
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     setShowCreate(false);
     setDuplicateTemplate(null);
     navigation.push(paths.agentDetail(agent.id));
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
   };
 
   const handleDuplicate = useCallback((agent: Agent) => {
