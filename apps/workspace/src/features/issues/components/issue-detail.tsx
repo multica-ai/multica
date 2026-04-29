@@ -206,6 +206,87 @@ function RelationList({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Labels + Dependencies section (main content area)
+// ---------------------------------------------------------------------------
+
+function IssueLabelsDepsSection({
+  issue,
+  onAddLabel,
+  onRemoveLabel,
+  onAddDependency,
+  onRemoveDependency,
+}: {
+  issue: Issue;
+  onAddLabel: (input: { labelId?: string; name?: string; color?: string }) => Promise<unknown>;
+  onRemoveLabel: (labelId: string) => Promise<unknown>;
+  onAddDependency: (dependencyIssueId: string, type: IssueDependencyType) => Promise<unknown>;
+  onRemoveDependency: (dependencyId: string) => Promise<unknown>;
+}) {
+  const labels = issue.labels ?? [];
+  const dependencies = issue.dependencies ?? null;
+
+  return (
+    <div className="rounded-xl border bg-card p-4 space-y-4">
+      {/* Labels */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-muted-foreground">Labels</div>
+        <LabelPicker
+          labels={labels}
+          onAdd={onAddLabel}
+          onRemove={onRemoveLabel}
+          align="start"
+        />
+      </div>
+
+      {/* Dependencies */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
+          <span>Dependencies</span>
+          <div className="flex flex-wrap items-center gap-1">
+            <DependencyPicker
+              issueId={issue.id}
+              dependencies={dependencies}
+              type="blocks"
+              onAdd={onAddDependency}
+            />
+            <DependencyPicker
+              issueId={issue.id}
+              dependencies={dependencies}
+              type="blocked_by"
+              onAdd={onAddDependency}
+            />
+            <DependencyPicker
+              issueId={issue.id}
+              dependencies={dependencies}
+              type="related"
+              onAdd={onAddDependency}
+            />
+          </div>
+        </div>
+        <div className="space-y-2 text-xs">
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Blocks</div>
+            <RelationList items={dependencies?.blocks ?? []} onRemove={onRemoveDependency} />
+          </div>
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Blocked by</div>
+            <RelationList items={dependencies?.blocked_by ?? []} onRemove={onRemoveDependency} />
+          </div>
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Related</div>
+            <RelationList items={dependencies?.related ?? []} onRemove={onRemoveDependency} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Properties sidebar sections (status, priority, assignee, dates, details)
+// ---------------------------------------------------------------------------
+
 function IssueSidebarSections({
   issue,
   propertiesOpen,
@@ -213,10 +294,6 @@ function IssueSidebarSections({
   onToggleProperties,
   onToggleDetails,
   onUpdateField,
-  onAddLabel,
-  onRemoveLabel,
-  onAddDependency,
-  onRemoveDependency,
   getActorName,
 }: {
   issue: Issue;
@@ -225,14 +302,8 @@ function IssueSidebarSections({
   onToggleProperties: () => void;
   onToggleDetails: () => void;
   onUpdateField: (updates: Partial<UpdateIssueRequest>) => void;
-  onAddLabel: (input: { labelId?: string; name?: string; color?: string }) => Promise<unknown>;
-  onRemoveLabel: (labelId: string) => Promise<unknown>;
-  onAddDependency: (dependencyIssueId: string, type: IssueDependencyType) => Promise<unknown>;
-  onRemoveDependency: (dependencyId: string) => Promise<unknown>;
   getActorName: (type: string, id: string) => string;
 }) {
-  const labels = issue.labels ?? [];
-  const dependencies = issue.dependencies ?? null;
   const childIssues = issue.child_issues ?? [];
 
   return (
@@ -335,56 +406,6 @@ function IssueSidebarSections({
                 onUpdate={onUpdateField}
               />
             </PropRow>
-
-            <div className="space-y-2 rounded-md px-2 py-2 -mx-2 hover:bg-accent/50 transition-colors">
-              <div className="text-xs text-muted-foreground">Labels</div>
-              <LabelPicker
-                labels={labels}
-                onAdd={onAddLabel}
-                onRemove={onRemoveLabel}
-                align="start"
-              />
-            </div>
-
-            <div className="space-y-2 rounded-md px-2 py-2 -mx-2 hover:bg-accent/50 transition-colors">
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>Dependencies</span>
-                <div className="flex flex-wrap items-center gap-1">
-                  <DependencyPicker
-                    issueId={issue.id}
-                    dependencies={dependencies}
-                    type="blocks"
-                    onAdd={onAddDependency}
-                  />
-                  <DependencyPicker
-                    issueId={issue.id}
-                    dependencies={dependencies}
-                    type="blocked_by"
-                    onAdd={onAddDependency}
-                  />
-                  <DependencyPicker
-                    issueId={issue.id}
-                    dependencies={dependencies}
-                    type="related"
-                    onAdd={onAddDependency}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2 text-xs">
-                <div className="space-y-1">
-                  <div className="text-muted-foreground">Blocks</div>
-                  <RelationList items={dependencies?.blocks ?? []} onRemove={onRemoveDependency} />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-muted-foreground">Blocked by</div>
-                  <RelationList items={dependencies?.blocked_by ?? []} onRemove={onRemoveDependency} />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-muted-foreground">Related</div>
-                  <RelationList items={dependencies?.related ?? []} onRemove={onRemoveDependency} />
-                </div>
-              </div>
-            </div>
           </div>
         ) : null}
       </div>
@@ -1009,11 +1030,17 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
               onToggleDetails={() => setDetailsOpen(!detailsOpen)}
               onUpdateField={handleUpdateField}
+              getActorName={getActorName}
+            />
+          </div>
+
+          <div className="mt-6">
+            <IssueLabelsDepsSection
+              issue={issue}
               onAddLabel={handleAddIssueLabel}
               onRemoveLabel={handleRemoveIssueLabel}
               onAddDependency={handleAddIssueDependency}
               onRemoveDependency={handleRemoveIssueDependency}
-              getActorName={getActorName}
             />
           </div>
 
@@ -1304,10 +1331,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 onToggleProperties={() => setPropertiesOpen(!propertiesOpen)}
                 onToggleDetails={() => setDetailsOpen(!detailsOpen)}
                 onUpdateField={handleUpdateField}
-                onAddLabel={handleAddIssueLabel}
-                onRemoveLabel={handleRemoveIssueLabel}
-                onAddDependency={handleAddIssueDependency}
-                onRemoveDependency={handleRemoveIssueDependency}
                 getActorName={getActorName}
               />
             </div>
