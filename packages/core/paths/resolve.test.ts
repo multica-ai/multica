@@ -15,6 +15,8 @@ function makeWs(slug: string): Workspace {
     issue_prefix: slug.toUpperCase(),
     created_at: "",
     updated_at: "",
+    channels_enabled: false,
+    channel_retention_days: null,
   };
 }
 

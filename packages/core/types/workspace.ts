@@ -16,6 +16,12 @@ export interface Workspace {
   issue_prefix: string;
   created_at: string;
   updated_at: string;
+  /** Whether the multi-participant Channels feature is exposed in this workspace.
+   * Defaults to false until an admin opts in via Settings. */
+  channels_enabled: boolean;
+  /** Workspace-level retention default for channel messages, in days.
+   * null = retain forever; per-channel overrides take precedence. */
+  channel_retention_days: number | null;
 }
 
 export interface Member {

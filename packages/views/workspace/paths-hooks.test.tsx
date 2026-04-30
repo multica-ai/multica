@@ -26,6 +26,8 @@ function makeWorkspace(over: Partial<Workspace>): Workspace {
     issue_prefix: "DEF",
     created_at: "",
     updated_at: "",
+    channels_enabled: false,
+    channel_retention_days: null,
     ...over,
   };
 }

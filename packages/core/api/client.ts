@@ -77,6 +77,15 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  Channel,
+  ChannelMembership,
+  ChannelMessage,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  AddChannelMemberRequest,
+  CreateChannelMessageRequest,
+  MarkChannelReadRequest,
+  CreateOrFetchDMRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1035,6 +1044,81 @@ export class ApiClient {
 
   async cancelTaskById(taskId: string): Promise<void> {
     await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+  }
+
+  // Channels (multi-participant chat). The handler responds 404 to every
+  // endpoint when workspace.channels_enabled is FALSE — callers should gate
+  // on that flag before invoking these.
+
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch(`/api/channels`);
+  }
+
+  async getChannel(id: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: UpdateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMembership[]> {
+    return this.fetch(`/api/channels/${channelId}/members`);
+  }
+
+  async addChannelMember(channelId: string, data: AddChannelMemberRequest): Promise<ChannelMembership> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeChannelMember(channelId: string, memberType: string, memberId: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/members/${memberType}/${memberId}`, { method: "DELETE" });
+  }
+
+  async listChannelMessages(channelId: string, params?: { before?: string; limit?: number; includeThreaded?: boolean }): Promise<ChannelMessage[]> {
+    const search = new URLSearchParams();
+    if (params?.before) search.set("before", params.before);
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.includeThreaded) search.set("include_threaded", "true");
+    const qs = search.toString();
+    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+  }
+
+  async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async markChannelRead(channelId: string, data: MarkChannelReadRequest): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/read`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createOrFetchDM(data: CreateOrFetchDMRequest): Promise<Channel> {
+    return this.fetch(`/api/dms`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {

@@ -30,6 +30,8 @@ export const mockWorkspace: Workspace = {
   issue_prefix: "TES",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  channels_enabled: false,
+  channel_retention_days: null,
 };
 
 // Mock members
