@@ -59,6 +59,7 @@ export type {
   ChannelMessageAttachment,
   ChannelReaction,
   ChannelMessageThread,
+  ChannelSearchHit,
   CreateChannelRequest,
   UpdateChannelRequest,
   AddChannelMemberRequest,

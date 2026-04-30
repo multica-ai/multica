@@ -94,6 +94,50 @@ SELECT * FROM channel_message_reaction
 WHERE channel_message_id = ANY($1::uuid[])
 ORDER BY created_at ASC;
 
+-- name: SearchChannelMessages :many
+-- Phase 5c — full-text search across the messages an actor can see.
+-- Uses the content_tsv GIN index from Phase 1's schema. Visibility is
+-- enforced inline so a member never gets hits from a private channel
+-- they don't belong to. The optional channel_id arg ($5) lets the UI
+-- scope a search to "this channel only" without a separate query.
+--
+-- websearch_to_tsquery accepts user-friendly syntax (quoted phrases,
+-- "or", "-exclude") so we don't need a custom parser.
+SELECT
+    m.id,
+    m.channel_id,
+    m.author_type,
+    m.author_id,
+    m.content,
+    m.parent_message_id,
+    m.edited_at,
+    m.deleted_at,
+    m.deletion_reason,
+    m.metadata,
+    m.created_at,
+    c.name AS channel_name,
+    c.display_name AS channel_display_name,
+    c.kind AS channel_kind,
+    ts_rank(m.content_tsv, websearch_to_tsquery('english', sqlc.arg('query')::text)) AS rank
+FROM channel_message m
+JOIN channel c ON c.id = m.channel_id
+WHERE c.workspace_id = sqlc.arg('workspace_id')
+  AND c.archived_at IS NULL
+  AND m.deleted_at IS NULL
+  AND m.content_tsv @@ websearch_to_tsquery('english', sqlc.arg('query')::text)
+  AND (
+    (c.kind = 'channel' AND c.visibility = 'public')
+    OR EXISTS (
+        SELECT 1 FROM channel_membership cm
+        WHERE cm.channel_id = c.id
+          AND cm.member_type = sqlc.arg('actor_type')::text
+          AND cm.member_id = sqlc.arg('actor_id')
+    )
+  )
+  AND (sqlc.narg('channel_id_filter')::uuid IS NULL OR m.channel_id = sqlc.narg('channel_id_filter')::uuid)
+ORDER BY rank DESC, m.created_at DESC
+LIMIT sqlc.arg('result_limit')::int4 OFFSET sqlc.arg('result_offset')::int4;
+
 -- name: SoftDeleteOldChannelMessages :execrows
 -- Retention sweep (Phase 2). Soft-deletes messages older than the cutoff in
 -- channels where retention applies, in batches. Returns the number of rows

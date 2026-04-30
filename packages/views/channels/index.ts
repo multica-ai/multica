@@ -9,6 +9,7 @@ export { ChannelSettingsDialog } from "./components/channel-settings-dialog";
 export { ThreadPanel } from "./components/thread-panel";
 export { MessageReactions } from "./components/message-reactions";
 export { MessageAttachments, PendingAttachmentsRow } from "./components/message-attachments";
+export { ChannelSearch } from "./components/channel-search";
 export { ChannelList } from "./components/channel-list";
 export { ChannelHeader } from "./components/channel-header";
 export { ChannelMessageList } from "./components/channel-message-list";

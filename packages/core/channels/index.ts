@@ -13,6 +13,7 @@ export {
   channelMembersOptions,
   channelMessagesOptions,
   channelMessageThreadOptions,
+  channelSearchOptions,
 } from "./queries";
 export {
   useCreateChannel,

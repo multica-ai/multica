@@ -471,6 +471,120 @@ func (h *Handler) CreateChannelMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// ChannelSearchResultMessage is one hit returned by /api/channels/search.
+// Carries enough channel context that the UI can render a "result row"
+// without a follow-up GetChannel call per hit.
+type ChannelSearchResultMessage struct {
+	ChannelMessageResponse
+	ChannelName        string  `json:"channel_name"`
+	ChannelDisplayName string  `json:"channel_display_name"`
+	ChannelKind        string  `json:"channel_kind"`
+	Rank               float32 `json:"rank"`
+}
+
+// SearchChannelMessages handles GET /api/channels/search?q=&channel_id=&limit=&offset=.
+//
+// Visibility is enforced inline by the SQL — a non-member never sees
+// hits from a private channel they don't belong to. Soft-deleted
+// messages are excluded (the existing `idx_channel_message_timeline`
+// partial index already excludes them, and the search query inherits).
+//
+// Phase 5 v1: text-only. Attachments / reactions are NOT hydrated on
+// hits to keep the search query cheap; clicking a result navigates to
+// the channel where the full row materializes.
+func (h *Handler) SearchChannelMessages(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter is required")
+		return
+	}
+
+	limit := int32(20)
+	offset := int32(0)
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > 100 {
+				n = 100
+			}
+			limit = int32(n)
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = int32(n)
+		}
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+
+	params := db.SearchChannelMessagesParams{
+		Query:        q,
+		WorkspaceID:  wsID,
+		ActorType:    actorType,
+		ActorID:      actorUUID,
+		ResultLimit:  limit,
+		ResultOffset: offset,
+	}
+	if v := r.URL.Query().Get("channel_id"); v != "" {
+		uid, ok := parseUUIDOrBadRequest(w, v, "channel_id")
+		if !ok {
+			return
+		}
+		params.ChannelIDFilter = uid
+	}
+
+	rows, err := h.Queries.SearchChannelMessages(r.Context(), params)
+	if err != nil {
+		slog.Warn("search channel messages failed",
+			"error", err,
+			"workspace_id", uuidToString(wsID),
+			"query", q,
+		)
+		writeError(w, http.StatusInternalServerError, "failed to search messages")
+		return
+	}
+
+	out := make([]ChannelSearchResultMessage, len(rows))
+	for i, row := range rows {
+		// Reconstruct the embedded ChannelMessage shape from the row's
+		// fields; sqlc emits a custom row type because of the JOIN +
+		// ts_rank.
+		msg := db.ChannelMessage{
+			ID:              row.ID,
+			ChannelID:       row.ChannelID,
+			AuthorType:      row.AuthorType,
+			AuthorID:        row.AuthorID,
+			Content:         row.Content,
+			ParentMessageID: row.ParentMessageID,
+			EditedAt:        row.EditedAt,
+			DeletedAt:       row.DeletedAt,
+			DeletionReason:  row.DeletionReason,
+			Metadata:        row.Metadata,
+			CreatedAt:       row.CreatedAt,
+		}
+		out[i] = ChannelSearchResultMessage{
+			ChannelMessageResponse: channelMessageToResponse(msg),
+			ChannelName:            row.ChannelName,
+			ChannelDisplayName:     row.ChannelDisplayName,
+			ChannelKind:            row.ChannelKind,
+			Rank:                   row.Rank,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // channelAgentDedupWindow returns the dedup window in seconds. Reads
 // CHANNEL_AGENT_DEDUP_WINDOW_SECONDS at call time so operators can adjust
 // without a deploy (config changes via env+restart of the API tier).

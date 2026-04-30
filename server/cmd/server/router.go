@@ -366,6 +366,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// — the gate lives inside each handler so the surface is invisible
 			// to anyone in a workspace that hasn't opted in.
 			r.Route("/api/channels", func(r chi.Router) {
+				// Phase 5c — full-text search. Mounted ahead of /{channelId}
+				// so chi doesn't try to interpret "search" as a UUID.
+				r.Get("/search", h.SearchChannelMessages)
 				r.Get("/", h.ListChannels)
 				r.Post("/", h.CreateChannel)
 				r.Route("/{channelId}", func(r chi.Router) {

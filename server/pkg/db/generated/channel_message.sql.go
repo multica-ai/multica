@@ -378,6 +378,123 @@ func (q *Queries) RemoveChannelMessageReaction(ctx context.Context, arg RemoveCh
 	return err
 }
 
+const searchChannelMessages = `-- name: SearchChannelMessages :many
+SELECT
+    m.id,
+    m.channel_id,
+    m.author_type,
+    m.author_id,
+    m.content,
+    m.parent_message_id,
+    m.edited_at,
+    m.deleted_at,
+    m.deletion_reason,
+    m.metadata,
+    m.created_at,
+    c.name AS channel_name,
+    c.display_name AS channel_display_name,
+    c.kind AS channel_kind,
+    ts_rank(m.content_tsv, websearch_to_tsquery('english', $1::text)) AS rank
+FROM channel_message m
+JOIN channel c ON c.id = m.channel_id
+WHERE c.workspace_id = $2
+  AND c.archived_at IS NULL
+  AND m.deleted_at IS NULL
+  AND m.content_tsv @@ websearch_to_tsquery('english', $1::text)
+  AND (
+    (c.kind = 'channel' AND c.visibility = 'public')
+    OR EXISTS (
+        SELECT 1 FROM channel_membership cm
+        WHERE cm.channel_id = c.id
+          AND cm.member_type = $3::text
+          AND cm.member_id = $4
+    )
+  )
+  AND ($5::uuid IS NULL OR m.channel_id = $5::uuid)
+ORDER BY rank DESC, m.created_at DESC
+LIMIT $7::int4 OFFSET $6::int4
+`
+
+type SearchChannelMessagesParams struct {
+	Query           string      `json:"query"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ActorType       string      `json:"actor_type"`
+	ActorID         pgtype.UUID `json:"actor_id"`
+	ChannelIDFilter pgtype.UUID `json:"channel_id_filter"`
+	ResultOffset    int32       `json:"result_offset"`
+	ResultLimit     int32       `json:"result_limit"`
+}
+
+type SearchChannelMessagesRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ChannelID          pgtype.UUID        `json:"channel_id"`
+	AuthorType         string             `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	Content            string             `json:"content"`
+	ParentMessageID    pgtype.UUID        `json:"parent_message_id"`
+	EditedAt           pgtype.Timestamptz `json:"edited_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	DeletionReason     pgtype.Text        `json:"deletion_reason"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ChannelName        string             `json:"channel_name"`
+	ChannelDisplayName string             `json:"channel_display_name"`
+	ChannelKind        string             `json:"channel_kind"`
+	Rank               float32            `json:"rank"`
+}
+
+// Phase 5c — full-text search across the messages an actor can see.
+// Uses the content_tsv GIN index from Phase 1's schema. Visibility is
+// enforced inline so a member never gets hits from a private channel
+// they don't belong to. The optional channel_id arg ($5) lets the UI
+// scope a search to "this channel only" without a separate query.
+//
+// websearch_to_tsquery accepts user-friendly syntax (quoted phrases,
+// "or", "-exclude") so we don't need a custom parser.
+func (q *Queries) SearchChannelMessages(ctx context.Context, arg SearchChannelMessagesParams) ([]SearchChannelMessagesRow, error) {
+	rows, err := q.db.Query(ctx, searchChannelMessages,
+		arg.Query,
+		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ChannelIDFilter,
+		arg.ResultOffset,
+		arg.ResultLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchChannelMessagesRow{}
+	for rows.Next() {
+		var i SearchChannelMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.ParentMessageID,
+			&i.EditedAt,
+			&i.DeletedAt,
+			&i.DeletionReason,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.ChannelName,
+			&i.ChannelDisplayName,
+			&i.ChannelKind,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteChannelMessage = `-- name: SoftDeleteChannelMessage :exec
 UPDATE channel_message
 SET deleted_at = now(), deletion_reason = $2

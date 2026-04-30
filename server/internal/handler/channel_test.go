@@ -608,6 +608,134 @@ func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
 	}
 }
 
+// Phase 5c — search ----------------------------------------------------------
+
+func TestSearchChannelMessages_RespectsVisibilityAndSoftDelete(t *testing.T) {
+	enableChannels(t)
+
+	// Public channel + private channel (no member added → invisible to agent).
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "search-pub", "display_name": "SearchPub", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	pub := decodeChannel(t, w)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels", map[string]any{
+		"name": "search-priv", "display_name": "SearchPriv", "visibility": "private",
+	})
+	testHandler.CreateChannel(w, req)
+	priv := decodeChannel(t, w)
+
+	// Three messages with the unique token "umbrellafish":
+	//   - pub: searchable
+	//   - priv: searchable by member (creator), not by non-member agent
+	//   - pub: soft-deleted → must NOT appear in any results
+	pubMsg := postChannelMessage(t, pub.ID, "the umbrellafish swims silently")
+	postChannelMessage(t, priv.ID, "umbrellafish meeting at noon")
+	doomed := postChannelMessage(t, pub.ID, "umbrellafish are going extinct (delete me)")
+
+	// Soft-delete the third one.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/channels/"+pub.ID+"/messages/"+doomed.ID, nil)
+	req = withURLParams(req, "channelId", pub.ID, "messageId", doomed.ID)
+	testHandler.DeleteChannelMessage(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d", w.Code)
+	}
+
+	// Member search — sees the public hit + the private hit (creator is member).
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/search?q=umbrellafish", nil)
+	testHandler.SearchChannelMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("member search: %d %s", w.Code, w.Body.String())
+	}
+	var memberHits []ChannelSearchResultMessage
+	json.NewDecoder(w.Body).Decode(&memberHits)
+	if len(memberHits) != 2 {
+		t.Fatalf("member: expected 2 hits (pub + priv, deleted excluded), got %d (%v)", len(memberHits), memberHits)
+	}
+	for _, h := range memberHits {
+		if h.ID == doomed.ID {
+			t.Fatalf("soft-deleted message leaked into results")
+		}
+	}
+	// At least one hit must be the public message (so we know the join works).
+	foundPub := false
+	for _, h := range memberHits {
+		if h.ID == pubMsg.ID {
+			foundPub = true
+		}
+	}
+	if !foundPub {
+		t.Fatalf("public hit missing from member results")
+	}
+
+	// Agent (non-member of priv) — only the public hit.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/search?q=umbrellafish", nil)
+	req.Header.Set("X-Agent-ID", testAgentID())
+	testHandler.SearchChannelMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent search: %d", w.Code)
+	}
+	var agentHits []ChannelSearchResultMessage
+	json.NewDecoder(w.Body).Decode(&agentHits)
+	if len(agentHits) != 1 {
+		t.Fatalf("agent: expected 1 hit (public only), got %d (%v)", len(agentHits), agentHits)
+	}
+	if agentHits[0].ChannelID != pub.ID {
+		t.Fatalf("agent saw a hit from a non-public channel: %+v", agentHits[0])
+	}
+
+	_ = priv
+}
+
+func TestSearchChannelMessages_ChannelScopeFilter(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "scope-a", "display_name": "ScopeA", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	a := decodeChannel(t, w)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels", map[string]any{
+		"name": "scope-b", "display_name": "ScopeB", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	b := decodeChannel(t, w)
+
+	postChannelMessage(t, a.ID, "snowballfighter in A")
+	postChannelMessage(t, b.ID, "snowballfighter in B")
+
+	// Without channel_id → both hits.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/search?q=snowballfighter", nil)
+	testHandler.SearchChannelMessages(w, req)
+	var all []ChannelSearchResultMessage
+	json.NewDecoder(w.Body).Decode(&all)
+	if len(all) != 2 {
+		t.Fatalf("unscoped: expected 2 hits, got %d", len(all))
+	}
+
+	// With channel_id=A → only A's hit.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/search?q=snowballfighter&channel_id="+a.ID, nil)
+	testHandler.SearchChannelMessages(w, req)
+	var scoped []ChannelSearchResultMessage
+	json.NewDecoder(w.Body).Decode(&scoped)
+	if len(scoped) != 1 {
+		t.Fatalf("scoped: expected 1 hit, got %d", len(scoped))
+	}
+	if scoped[0].ChannelID != a.ID {
+		t.Fatalf("scoped hit from wrong channel: %s want %s", scoped[0].ChannelID, a.ID)
+	}
+}
+
 // Phase 5b — attachments -----------------------------------------------------
 
 // seedTestAttachment writes a row directly via the queries layer. We

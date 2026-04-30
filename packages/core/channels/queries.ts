@@ -15,6 +15,8 @@ export const channelKeys = {
   // with reactions). Keyed by message id so the panel can be opened
   // independently of which channel the user is currently viewing.
   thread: (messageId: string) => ["channels", "thread", messageId] as const,
+  search: (wsId: string, q: string, channelId: string | null) =>
+    ["channels", "search", wsId, q, channelId ?? "all"] as const,
 };
 
 export function channelsListOptions(wsId: string, enabled: boolean) {
@@ -52,6 +54,28 @@ export function channelMessageThreadOptions(channelId: string, messageId: string
     queryFn: () => api.getChannelMessageThread(channelId, messageId),
     staleTime: Infinity,
     enabled: enabled && !!channelId && !!messageId,
+  });
+}
+
+export function channelSearchOptions(
+  wsId: string,
+  q: string,
+  channelId: string | null,
+  enabled: boolean,
+) {
+  return queryOptions({
+    queryKey: channelKeys.search(wsId, q, channelId),
+    queryFn: () =>
+      api.searchChannelMessages({
+        q,
+        ...(channelId ? { channelId } : {}),
+        limit: 50,
+      }),
+    // Search results aren't useful to retain across query changes; the
+    // user typing a new term should kick off a fresh fetch rather than
+    // hand back a stale page.
+    staleTime: 0,
+    enabled: enabled && q.trim().length > 0,
   });
 }
 

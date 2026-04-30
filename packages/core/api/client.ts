@@ -85,6 +85,7 @@ import type {
   ChannelMessage,
   ChannelReaction,
   ChannelMessageThread,
+  ChannelSearchHit,
   CreateChannelRequest,
   UpdateChannelRequest,
   AddChannelMemberRequest,
@@ -1155,6 +1156,20 @@ export class ApiClient {
     await this.fetch(`/api/channels/${channelId}/messages/${messageId}`, {
       method: "DELETE",
     });
+  }
+
+  async searchChannelMessages(params: {
+    q: string;
+    channelId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ChannelSearchHit[]> {
+    const search = new URLSearchParams();
+    search.set("q", params.q);
+    if (params.channelId) search.set("channel_id", params.channelId);
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.offset) search.set("offset", String(params.offset));
+    return this.fetch(`/api/channels/search?${search}`);
   }
 
   async getChannelMessageThread(channelId: string, messageId: string): Promise<ChannelMessageThread> {

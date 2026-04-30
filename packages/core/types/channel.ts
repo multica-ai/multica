@@ -90,6 +90,15 @@ export interface ChannelMessageThread {
   replies: ChannelMessage[];
 }
 
+/** Phase 5c — full-text search hit. Carries enough channel context that
+ * results can render with a "#channel" prefix without an extra fetch. */
+export interface ChannelSearchHit extends ChannelMessage {
+  channel_name: string;
+  channel_display_name: string;
+  channel_kind: ChannelKind;
+  rank: number;
+}
+
 // --- Request payloads ----------------------------------------------------
 
 export interface CreateChannelRequest {

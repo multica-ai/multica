@@ -112,6 +112,17 @@ Click the paperclip icon in the composer (or pick multiple files at once) to att
 
 Under the hood, the composer POSTs each file to `/api/upload-file` (workspace-scoped, no issue/comment link) and the resulting attachment ids are stamped into the message's `metadata.attachments` JSONB array on send. The list/get/thread endpoints hydrate the array back into the message response with one batched DB query.
 
+## Search
+
+Click **Search** in any channel header to open a popover-style search bar. Type a query and matching messages appear ranked by relevance. Clicking a result navigates to the channel where the match lives.
+
+- Visibility-respecting at the SQL level — a non-member never sees hits from a private channel they don't belong to. Same guarantee applies to DMs (only participants).
+- Soft-deleted messages are excluded.
+- The search bar in a channel header is **scoped to that channel** by default; the (future) global "Channels" page-level search will fan across all visible channels in the workspace.
+- Backed by the generated `content_tsv` GIN index on `channel_message`. The query parser is Postgres' `websearch_to_tsquery`, so `"exact phrase"`, `or`, and `-exclude` syntax all work.
+
+API: `GET /api/channels/search?q=<query>&channel_id=<optional>&limit=<≤100>&offset=<...>`. Returns an array of `ChannelSearchHit` objects (`ChannelMessage` plus `channel_name`, `channel_display_name`, `channel_kind`, and a `rank` float).
+
 ## Members
 
 Open the **Members** button in the channel header to see the full list and add or remove members. For private channels, this is also where you grant access. Adding an agent to a channel is the same flow — they appear with a robot avatar.
@@ -195,6 +206,9 @@ Private channels are invisible to non-members regardless of workspace role.
 | GET    | `/api/channels/{id}/messages/{messageId}/thread`              | Parent + replies for the side panel   |
 | POST   | `/api/channels/{id}/messages/{messageId}/reactions`           | Add reaction (idempotent)             |
 | DELETE | `/api/channels/{id}/messages/{messageId}/reactions`           | Remove reaction                       |
+| PATCH  | `/api/channels/{id}/messages/{messageId}`                     | Edit body (author only)               |
+| DELETE | `/api/channels/{id}/messages/{messageId}`                     | Soft delete (author or channel admin) |
+| GET    | `/api/channels/search?q=&channel_id=&limit=&offset=`          | Full-text search (visibility-respecting) |
 
 All endpoints require workspace membership and respond 404 when `workspace.channels_enabled` is `false`.
 

@@ -34,6 +34,7 @@ import { useRequiredWorkspaceSlug, paths, useCurrentWorkspace } from "@multica/c
 import type { Channel } from "@multica/core/types";
 import { MembersPanel } from "./members-panel";
 import { ChannelSettingsDialog } from "./channel-settings-dialog";
+import { ChannelSearch } from "./channel-search";
 
 interface ChannelHeaderProps {
   channel: Channel;
@@ -149,6 +150,11 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {/* Phase 5c — search scoped to this channel. The global
+            "Channels" page has its own header-level search; this one
+            is per-channel so users can find a message without leaving
+            the conversation. */}
+        <ChannelSearch channelId={channel.id} enabled={enabled} />
         <Button
           variant="outline"
           size="sm"
