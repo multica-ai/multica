@@ -161,8 +161,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		},
 	})
 
-	// Enqueue agent task via the existing flow.
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+	// Enqueue agent task with autopilot_run_id so SyncRunFromTask can fail the
+	// run when the task fails or times out.
+	if _, err := s.TaskSvc.EnqueueTaskForAutopilotIssue(ctx, issue, run.ID); err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
 
@@ -251,7 +252,8 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	}
 }
 
-// SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
+// SyncRunFromTask updates the autopilot run when its linked task completes or fails.
+// Handles both run_only tasks and create_issue tasks (which now carry autopilot_run_id).
 func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTaskQueue) {
 	if !task.AutopilotRunID.Valid {
 		return
@@ -259,6 +261,12 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 
 	run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
 	if err != nil {
+		return
+	}
+	// Guard against double-update: for create_issue runs, SyncRunFromIssue may
+	// have already transitioned the run to a terminal state when the issue status
+	// changed ahead of the task completion event.
+	if run.Status == "completed" || run.Status == "failed" {
 		return
 	}
 

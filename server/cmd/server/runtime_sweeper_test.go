@@ -7,8 +7,15 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// newSweepTaskSvc builds a minimal TaskService for sweeper tests. The
+// realtime hub is unused on the failure path so we pass nil.
+func newSweepTaskSvc(queries *db.Queries, bus *events.Bus) *service.TaskService {
+	return service.NewTaskService(queries, nil, bus)
+}
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
 // timestamps old enough to trigger the sweeper. Returns (issueID, agentID, taskID).
@@ -126,8 +133,8 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 		t.Fatalf("expected task %s to be in failed tasks list", taskID)
 	}
 
-	// Call broadcastFailedTasks — this is what we're testing
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	// Call handleSweptFailures — this is what we're testing
+	handleSweptFailures(context.Background(), queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
 
 	// Verify the event was published with WorkspaceID (the core of the bug fix)
 	mu.Lock()
@@ -195,7 +202,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 		t.Fatal("expected at least 1 stale task")
 	}
 
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	handleSweptFailures(context.Background(), queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
 
 	// Verify agent status is now "idle" in DB
 	var agentStatus string
@@ -256,7 +263,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 		t.Fatal("expected at least 1 stale dispatched task")
 	}
 
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	handleSweptFailures(context.Background(), queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
 
 	// Verify DB: task should be failed
 	var status string
@@ -343,10 +350,12 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	})
 
 	// Create a stale running task for the issue (3 hours old — beyond any timeout).
+	// attempt=max_attempts so the retry guard rejects it; this exercises the
+	// reset-stuck-issue branch in HandleTaskFailure rather than the retry branch.
 	var taskID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
-		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at, attempt, max_attempts)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours', 2, 2)
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID)
 	if err != nil {
@@ -377,8 +386,10 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 		t.Fatalf("expected task %s to be in failed tasks, got %v", taskID, failedTasks)
 	}
 
-	// This is what we're testing: issue must be reset from in_progress → todo.
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	// This is what we're testing: issue must be reset from in_progress → todo
+	// when no retry is scheduled. The fixture sets attempt=max_attempts so the
+	// retry guard rejects, leaving HandleTaskFailure to run the reset branch.
+	handleSweptFailures(ctx, queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
 
 	var issueStatus string
 	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
@@ -449,7 +460,7 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 		t.Fatalf("FailStaleTasks failed: %v", err)
 	}
 
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	handleSweptFailures(ctx, queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
 
 	// Issue should remain in_review — the sweeper must not clobber agent progress.
 	var issueStatus string
@@ -459,6 +470,74 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	}
 	if issueStatus != "in_review" {
 		t.Fatalf("expected issue status 'in_review' to be preserved, got '%s'", issueStatus)
+	}
+}
+
+// TestSweepSchedulesRetryForTransientFailure verifies that when the sweeper
+// fails a task with a transient class (timeout, runtime offline) and the
+// task still has retry budget, a fresh queued task is enqueued for the
+// same (issue, agent) pair and a task:retry_scheduled event fires.
+func TestSweepSchedulesRetryForTransientFailure(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, parentID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	queries := db.New(testPool)
+	bus := events.New()
+
+	var retryEvents []events.Event
+	var mu sync.Mutex
+	bus.Subscribe("task:retry_scheduled", func(e events.Event) {
+		mu.Lock()
+		retryEvents = append(retryEvents, e)
+		mu.Unlock()
+	})
+
+	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+
+	handleSweptFailures(context.Background(), queries, newSweepTaskSvc(queries, bus), failedTasks, "task timed out")
+
+	// Parent should still be 'failed', a fresh 'queued' child must exist for the same issue/agent.
+	var queuedCount int
+	err = testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND parent_task_id = $3
+	`, issueID, agentID, parentID).Scan(&queuedCount)
+	if err != nil {
+		t.Fatalf("count retry tasks: %v", err)
+	}
+	if queuedCount != 1 {
+		t.Fatalf("expected exactly 1 retry task chained to parent %s, got %d", parentID, queuedCount)
+	}
+
+	// task:retry_scheduled must have fired with parent_task_id = parentID and attempt=2.
+	mu.Lock()
+	defer mu.Unlock()
+	var found bool
+	for _, e := range retryEvents {
+		payload, _ := e.Payload.(map[string]any)
+		if payload["parent_task_id"] == parentID {
+			if attempt, _ := payload["attempt"].(int32); attempt != 2 {
+				t.Fatalf("expected retry attempt=2, got %v", payload["attempt"])
+			}
+			if e.WorkspaceID == "" {
+				t.Fatal("task:retry_scheduled event missing WorkspaceID")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected task:retry_scheduled for parent %s, got events: %v", parentID, retryEvents)
 	}
 }
 

@@ -26,9 +26,10 @@ const (
 	EventTaskDispatch  = "task:dispatch"
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed"
-	EventTaskFailed    = "task:failed"
-	EventTaskMessage   = "task:message"
-	EventTaskCancelled = "task:cancelled"
+	EventTaskFailed          = "task:failed"
+	EventTaskMessage         = "task:message"
+	EventTaskCancelled       = "task:cancelled"
+	EventTaskRetryScheduled  = "task:retry_scheduled"
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"

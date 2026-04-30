@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -28,13 +29,17 @@ const (
 	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
 	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
 	runningTimeoutSeconds = 9000.0
+	// autopilotRunTimeoutSeconds fails autopilot_run rows stuck in
+	// 'issue_created' or 'running' beyond this. 6 hours covers the longest
+	// realistic agent run with generous headroom.
+	autopilotRunTimeoutSeconds = 6 * 3600.0
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
 // This handles cases where the daemon crashes, is killed without calling
 // the deregister endpoint, or leaves tasks in a non-terminal state.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus, taskSvc *service.TaskService) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -43,8 +48,9 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sweepStaleRuntimes(ctx, queries, bus)
-			sweepStaleTasks(ctx, queries, bus)
+			sweepStaleRuntimes(ctx, queries, bus, taskSvc)
+			sweepStaleTasks(ctx, queries, bus, taskSvc)
+			sweepStaleAutopilotRuns(ctx, queries, bus)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -52,7 +58,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
 // then fails any tasks belonging to those offline runtimes.
-func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus, taskSvc *service.TaskService) {
 	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to mark stale runtimes offline", "error", err)
@@ -77,7 +83,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
 	} else if len(failedTasks) > 0 {
 		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
-		broadcastFailedTasks(ctx, queries, bus, failedTasks)
+		handleSweptFailures(ctx, queries, taskSvc, failedTasks, "runtime went offline")
 	}
 
 	// Notify frontend clients so they re-fetch runtime list.
@@ -130,7 +136,7 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // - The agent process hangs and the daemon is still heartbeating
 // - The daemon failed to report task completion/failure
 // - A server restart left tasks in a non-terminal state
-func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus, taskSvc *service.TaskService) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
@@ -144,107 +150,75 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) 
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	handleSweptFailures(ctx, queries, taskSvc, failedTasks, "task timed out")
 }
 
-// failedTask is a common interface for both sweeper result types.
-type failedTask struct {
-	ID      pgtype.UUID
-	AgentID pgtype.UUID
-	IssueID pgtype.UUID
-}
-
-// broadcastFailedTasks publishes task:failed events with the correct WorkspaceID
-// and reconciles agent status for all affected agents.
-func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks any) {
-	var items []failedTask
+// handleSweptFailures hands every freshly-failed task off to
+// TaskService.HandleTaskFailure, which broadcasts task:failed, attempts a
+// retry per the failure class, resets the issue when no retry is
+// scheduled, and reconciles agent status. defaultErrMsg seeds the
+// classifier when the row's free-form error column doesn't pin down the
+// reason on its own.
+func handleSweptFailures(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, tasks any, defaultErrMsg string) {
+	var ids []pgtype.UUID
 	switch ts := tasks.(type) {
 	case []db.FailStaleTasksRow:
 		for _, t := range ts {
-			items = append(items, failedTask{ID: t.ID, AgentID: t.AgentID, IssueID: t.IssueID})
+			ids = append(ids, t.ID)
 		}
 	case []db.FailTasksForOfflineRuntimesRow:
 		for _, t := range ts {
-			items = append(items, failedTask{ID: t.ID, AgentID: t.AgentID, IssueID: t.IssueID})
+			ids = append(ids, t.ID)
 		}
 	}
 
-	affectedAgents := make(map[string]pgtype.UUID)
-	processedIssues := make(map[string]bool)
-
-	for _, ft := range items {
-		// Look up workspace ID from the issue so the event reaches the right WS room.
-		workspaceID := ""
-		if issue, err := queries.GetIssue(ctx, ft.IssueID); err == nil {
-			workspaceID = util.UUIDToString(issue.WorkspaceID)
-			// If the issue is still in_progress and no other active tasks remain,
-			// reset it back to todo so the daemon can pick it up again.
-			issueKey := util.UUIDToString(ft.IssueID)
-			if issue.Status == "in_progress" && !processedIssues[issueKey] {
-				processedIssues[issueKey] = true
-				hasActive, checkErr := queries.HasActiveTaskForIssue(ctx, ft.IssueID)
-				if checkErr != nil {
-					slog.Warn("runtime sweeper: failed to check active tasks for issue",
-						"issue_id", issueKey,
-						"error", checkErr,
-					)
-				} else if !hasActive {
-					if _, updateErr := queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-						ID:     ft.IssueID,
-						Status: "todo",
-					}); updateErr != nil {
-						slog.Warn("runtime sweeper: failed to reset stuck issue to todo",
-							"issue_id", issueKey,
-							"error", updateErr,
-						)
-					}
-				}
-			}
+	for _, id := range ids {
+		task, err := queries.GetAgentTask(ctx, id)
+		if err != nil {
+			slog.Warn("sweeper: failed to load just-failed task", "task_id", util.UUIDToString(id), "error", err)
+			continue
 		}
+		errMsg := defaultErrMsg
+		if task.Error.Valid && task.Error.String != "" {
+			errMsg = task.Error.String
+		}
+		taskSvc.HandleTaskFailure(ctx, task, errMsg)
+	}
+}
 
+// sweepStaleAutopilotRuns fails autopilot runs stuck in 'issue_created' or
+// 'running' beyond autopilotRunTimeoutSeconds. This covers two cases:
+// - create_issue runs whose linked issue never reached a terminal status
+// - run_only runs whose task completion was never recorded (e.g. server restart)
+func sweepStaleAutopilotRuns(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+	rows, err := queries.FailStaleAutopilotRuns(ctx, autopilotRunTimeoutSeconds)
+	if err != nil {
+		slog.Warn("autopilot run sweeper: failed to sweep stale runs", "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+
+	slog.Info("autopilot run sweeper: failed stale runs", "count", len(rows))
+
+	// Publish one event per run so clients can update each row individually.
+	for _, row := range rows {
+		ap, err := queries.GetAutopilot(ctx, row.AutopilotID)
+		if err != nil {
+			slog.Warn("autopilot run sweeper: failed to load autopilot", "autopilot_id", util.UUIDToString(row.AutopilotID), "error", err)
+			continue
+		}
 		bus.Publish(events.Event{
-			Type:        protocol.EventTaskFailed,
-			WorkspaceID: workspaceID,
+			Type:        protocol.EventAutopilotRunDone,
+			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
 			ActorType:   "system",
 			Payload: map[string]any{
-				"task_id":  util.UUIDToString(ft.ID),
-				"agent_id": util.UUIDToString(ft.AgentID),
-				"issue_id": util.UUIDToString(ft.IssueID),
-				"status":   "failed",
+				"run_id":       util.UUIDToString(row.ID),
+				"autopilot_id": util.UUIDToString(row.AutopilotID),
+				"status":       "failed",
 			},
 		})
-
-		agentKey := util.UUIDToString(ft.AgentID)
-		affectedAgents[agentKey] = ft.AgentID
-	}
-
-	// Reconcile status for each affected agent.
-	for _, agentID := range affectedAgents {
-		reconcileAgentStatus(ctx, queries, bus, agentID)
 	}
 }
 
-// reconcileAgentStatus checks running task count and updates agent status.
-func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID pgtype.UUID) {
-	running, err := queries.CountRunningTasks(ctx, agentID)
-	if err != nil {
-		return
-	}
-	newStatus := "idle"
-	if running > 0 {
-		newStatus = "working"
-	}
-	agent, err := queries.UpdateAgentStatus(ctx, db.UpdateAgentStatusParams{
-		ID:     agentID,
-		Status: newStatus,
-	})
-	if err != nil {
-		return
-	}
-	bus.Publish(events.Event{
-		Type:        protocol.EventAgentStatus,
-		WorkspaceID: util.UUIDToString(agent.WorkspaceID),
-		ActorType:   "system",
-		Payload:     map[string]any{"agent_id": util.UUIDToString(agent.ID), "status": agent.Status},
-	})
-}

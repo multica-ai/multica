@@ -74,6 +74,43 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return task, nil
 }
 
+// EnqueueTaskForAutopilotIssue creates a task for an autopilot create_issue
+// dispatch. Identical to EnqueueTaskForIssue but also sets autopilot_run_id so
+// that SyncRunFromTask can fail the autopilot run when the task fails or times out.
+func (s *TaskService) EnqueueTaskForAutopilotIssue(ctx context.Context, issue db.Issue, autopilotRunID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if !issue.AssigneeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
+	}
+	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:        issue.AssigneeID,
+		RuntimeID:      agent.RuntimeID,
+		IssueID:        issue.ID,
+		Priority:       priorityToInt(issue.Priority),
+		AutopilotRunID: autopilotRunID,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+
+	slog.Info("autopilot task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"autopilot_run_id", util.UUIDToString(autopilotRunID),
+	)
+	return task, nil
+}
+
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
@@ -363,11 +400,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 	if errMsg != "" && task.IssueID.Valid {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
-	// Reconcile agent status
-	s.ReconcileAgentStatus(ctx, task.AgentID)
 
-	// Broadcast
-	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+	// HandleTaskFailure broadcasts task:failed, schedules retry when
+	// applicable, resets stuck issue when not, and reconciles agent status.
+	s.HandleTaskFailure(ctx, task, errMsg)
 
 	return &task, nil
 }
