@@ -360,7 +360,18 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	// Use a client that respects the context deadline for slow uploads
+	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client
+	// timeout shadows any longer context deadline.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			httpClient = &http.Client{Timeout: remaining}
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -375,12 +386,12 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", "", fmt.Errorf("decode upload response: %w", err)
 	}
-	if result.ID == "" {
-		return "", "", fmt.Errorf("upload response missing attachment id")
-	}
 	if result.URL == "" {
 		return "", "", fmt.Errorf("upload response missing attachment url")
 	}
+	// Allow empty ID: the server returns id="" in the fallback path where
+	// S3 upload succeeded but the attachment DB record failed. The file
+	// is still usable via its URL.
 	return result.ID, result.URL, nil
 }
 
