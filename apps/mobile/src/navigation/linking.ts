@@ -13,6 +13,7 @@ export const linking = {
         },
       },
       IssueDetail: "issues/:issueId",
+      IssueTaskTranscript: "issues/:issueId/runs/:taskId",
       ProjectDetail: "projects/:projectId",
       Search: "search",
     },

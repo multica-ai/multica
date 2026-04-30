@@ -16,6 +16,7 @@ import { EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
+import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcript-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
 import { ProjectsScreen } from "../screens/projects/projects-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
@@ -26,6 +27,7 @@ import { WorkspaceContext } from "./workspace-context";
 export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
+  IssueTaskTranscript: { issueId: string; taskId: string };
   CreateIssue: undefined;
   ProjectDetail: { projectId: string };
   Search: undefined;
@@ -67,6 +69,7 @@ export function RootNavigator() {
           >
             <Stack.Screen component={MainTabs} name="Main" />
             <Stack.Screen component={IssueDetailScreen} name="IssueDetail" />
+            <Stack.Screen component={IssueTaskTranscriptScreen} name="IssueTaskTranscript" />
             <Stack.Screen component={CreateIssueScreen} name="CreateIssue" />
             <Stack.Screen component={ProjectDetailScreen} name="ProjectDetail" />
             <Stack.Screen component={SearchScreen} name="Search" />

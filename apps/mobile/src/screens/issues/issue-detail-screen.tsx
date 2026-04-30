@@ -44,7 +44,6 @@ import {
   useIssueTaskRuns,
   useIssueTimelineEntries,
   useLiveIssueTasks,
-  useTaskMessagesQueries,
 } from "@multica/core/issues/hooks";
 import { ALL_STATUSES, PRIORITY_CONFIG, PRIORITY_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
 import {
@@ -73,6 +72,7 @@ import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
 } from "./comment-attachment-drafts";
+import { TaskMessageRow } from "./task-transcript-components";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
 type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
@@ -159,8 +159,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     cancelTask: cancelLiveTask,
   } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
-  const taskIds = useMemo(() => taskRuns.map((task) => task.id), [taskRuns]);
-  const taskMessageQueries = useTaskMessagesQueries(workspace.id, taskIds);
   const { data: timeline = [] } = useIssueTimelineEntries(workspace.id, issueId);
   const updateIssue = useUpdateIssue();
   const createComment = useCreateComment(issueId);
@@ -202,13 +200,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       .sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
-  const taskMessagesByTaskId = useMemo(() => {
-    const messagesByTaskId = new Map<string, TaskMessagePayload[]>();
-    taskRuns.forEach((task, index) => {
-      messagesByTaskId.set(task.id, taskMessageQueries[index]?.data ?? []);
-    });
-    return messagesByTaskId;
-  }, [taskMessageQueries, taskRuns]);
   const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
     section.title ? <StickySectionHeader section={section} /> : null
   ), []);
@@ -755,37 +746,17 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           ),
         },
       ]
-      : taskRuns.flatMap((task, taskIndex) => {
-        const messages = taskMessagesByTaskId.get(task.id) ?? [];
-        const taskItems: DetailListItem[] = [
-          {
-            key: `task-${task.id}`,
-            node: (
-              <TaskRunHeader
-                showTitle={taskIndex === 0}
-                task={task}
-              />
-            ),
-          },
-        ];
-
-        if (messages.length === 0) {
-          taskItems.push({
-            key: `task-${task.id}-empty`,
-            node: <Text style={styles.emptyText}>No transcript messages</Text>,
-          });
-          return taskItems;
-        }
-
-        taskItems.push(
-          ...messages.map((message) => ({
-            key: `task-${task.id}-message-${message.seq}`,
-            node: <TaskMessageRow message={message} />,
-          })),
-        );
-        return taskItems;
-      })
-  ), [taskMessagesByTaskId, taskRuns]);
+      : taskRuns.map((task, taskIndex) => ({
+        key: `task-${task.id}`,
+        node: (
+          <TaskRunHeader
+            onPress={() => navigation.push("IssueTaskTranscript", { issueId, taskId: task.id })}
+            showTitle={taskIndex === 0}
+            task={task}
+          />
+        ),
+      }))
+  ), [issueId, navigation, taskRuns]);
 
   const toggleCommentsCollapsed = useCallback(() => {
     setCommentsCollapsed((collapsed) => !collapsed);
@@ -1864,37 +1835,27 @@ function LiveElapsed({ task }: { task: AgentTask }) {
 }
 
 const TaskRunHeader = memo(function TaskRunHeader({
+  onPress,
   showTitle,
   task,
 }: {
+  onPress: () => void;
   showTitle: boolean;
   task: AgentTask;
 }) {
   return (
-    <View style={styles.taskCard}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.taskCard, pressed && styles.buttonPressed]}
+    >
       {showTitle ? <Text style={styles.sectionTitle}>Agent transcript</Text> : null}
       <View style={styles.timelineHeader}>
         <Text style={styles.timelineActor}>Run {task.id.slice(0, 8)}</Text>
         <Text style={styles.timelineDate}>{task.status}</Text>
       </View>
       {task.error ? <Text style={styles.errorText}>{task.error}</Text> : null}
-    </View>
-  );
-});
-
-const TaskMessageRow = memo(function TaskMessageRow({ message }: { message: TaskMessagePayload }) {
-  const content =
-    message.content ??
-    message.output ??
-    (message.input ? JSON.stringify(message.input) : "");
-
-  return (
-    <View style={styles.taskMessage}>
-      <Text style={styles.taskMessageType}>
-        #{message.seq} {message.type}{message.tool ? ` / ${message.tool}` : ""}
-      </Text>
-      {content ? <Text style={styles.timelineBody}>{content}</Text> : null}
-    </View>
+    </Pressable>
   );
 });
 
@@ -2609,17 +2570,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     padding: spacing.md,
-  },
-  taskMessage: {
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    gap: spacing.xs,
-    padding: spacing.sm,
-  },
-  taskMessageType: {
-    color: colors.mutedForeground,
-    fontSize: 12,
-    fontWeight: "500",
   },
   reactionRow: {
     flexDirection: "row",
