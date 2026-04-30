@@ -1,0 +1,51 @@
+# Standalone Multica daemon — run on a server (homelab, VPS) so agent
+# runtimes execute independently of any developer laptop.
+#
+# Usage:
+#   1. In the Multica web UI, create a personal access token (mul_...).
+#   2. Copy .env.daemon.example to .env.daemon and fill in MULTICA_SERVER_URL
+#      + MULTICA_TOKEN (and any provider API keys you want available).
+#   3. docker compose -f docker-compose.daemon.yml --env-file .env.daemon up -d
+#
+# This compose file is intentionally separate from docker-compose.selfhost.yml:
+# the daemon does not need to live on the same host as the backend, and most
+# operators will deploy backend + frontend in one place and one or more
+# daemons elsewhere (or scale daemons independently).
+
+name: multica-daemon
+
+services:
+  daemon:
+    image: ghcr.io/multica-ai/multica/daemon:${MULTICA_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon
+    restart: unless-stopped
+    environment:
+      # Required.
+      MULTICA_SERVER_URL: ${MULTICA_SERVER_URL:?MULTICA_SERVER_URL is required}
+      MULTICA_TOKEN: ${MULTICA_TOKEN:?MULTICA_TOKEN is required (create a PAT in the web UI)}
+      # Optional — runtime identity / display.
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-}
+      MULTICA_DAEMON_DEVICE_NAME: ${MULTICA_DAEMON_DEVICE_NAME:-multica-daemon-container}
+      MULTICA_AGENT_RUNTIME_NAME: ${MULTICA_AGENT_RUNTIME_NAME:-Cloud Daemon}
+      MULTICA_DAEMON_POLL_INTERVAL: ${MULTICA_DAEMON_POLL_INTERVAL:-3s}
+      MULTICA_DAEMON_HEARTBEAT_INTERVAL: ${MULTICA_DAEMON_HEARTBEAT_INTERVAL:-15s}
+      MULTICA_DAEMON_MAX_CONCURRENT_TASKS: ${MULTICA_DAEMON_MAX_CONCURRENT_TASKS:-5}
+      # Optional — provider auth, passed through to spawned agent CLIs.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - daemon_state:/home/multica/.multica
+      - daemon_workspaces:/home/multica/multica_workspaces
+    healthcheck:
+      # Daemon exposes /health on 19514 once it has registered with the server.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:19514/health | grep -q running"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  daemon_state:
+  daemon_workspaces:
