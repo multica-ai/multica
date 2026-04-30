@@ -51,35 +51,112 @@ const lowlight = createLowlight(common);
 
 type MermaidAPI = typeof import("mermaid").default;
 
+type MermaidLayout = {
+  width?: number;
+  height?: number;
+};
+
 let mermaidPromise: Promise<MermaidAPI> | null = null;
 
 function getMermaid(): Promise<MermaidAPI> {
-  mermaidPromise ??= import("mermaid").then(({ default: mermaid }) => {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      theme: "base",
-      themeVariables: {
-        primaryColor: "var(--muted)",
-        primaryBorderColor: "var(--primary)",
-        primaryTextColor: "var(--foreground)",
-        lineColor: "var(--muted-foreground)",
-        fontFamily: "inherit",
-      },
-    });
-    return mermaid;
-  });
+  mermaidPromise ??= import("mermaid").then(({ default: mermaid }) => mermaid);
 
   return mermaidPromise;
 }
 
-function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
+function resolveCssColor(
+  host: HTMLElement,
+  variableName: string,
+  fallback: string,
+): string {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${variableName})`;
+  probe.style.display = "none";
+  host.appendChild(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+
+  return color || fallback;
+}
+
+function getMermaidThemeVariables(host: HTMLElement | null) {
+  if (!host) {
+    return {
+      primaryColor: "rgb(245, 245, 245)",
+      primaryBorderColor: "rgb(59, 130, 246)",
+      primaryTextColor: "rgb(17, 24, 39)",
+      lineColor: "rgb(107, 114, 128)",
+      fontFamily: "inherit",
+    };
+  }
+
+  return {
+    primaryColor: resolveCssColor(host, "--muted", "rgb(245, 245, 245)"),
+    primaryBorderColor: resolveCssColor(host, "--primary", "rgb(59, 130, 246)"),
+    primaryTextColor: resolveCssColor(host, "--foreground", "rgb(17, 24, 39)"),
+    lineColor: resolveCssColor(host, "--muted-foreground", "rgb(107, 114, 128)"),
+    fontFamily: "inherit",
+  };
+}
+
+function getSandboxCssVariables(host: HTMLElement | null): string {
   const styles = host ? getComputedStyle(host) : null;
-  const cssVariables = ["--muted", "--primary", "--foreground", "--muted-foreground"]
+  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
     .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
     .join(" ");
+}
+
+function getMermaidLayout(svg: string): MermaidLayout {
+  const viewBoxMatch = svg.match(
+    /viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i,
+  );
+  const [, , , widthValue, heightValue] = viewBoxMatch ?? [];
+  const width = widthValue ? Number.parseFloat(widthValue) : undefined;
+  const height = heightValue ? Number.parseFloat(heightValue) : undefined;
+
+  if (width && height && width > 0 && height > 0) {
+    return {
+      width: Math.ceil(width),
+      height: Math.ceil(height),
+    };
+  }
+
+  return {};
+}
+
+function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
+  const cssVariables = getSandboxCssVariables(host);
 
   return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+}
+
+function useThemeVersion() {
+  const [themeVersion, setThemeVersion] = useState(0);
+
+  useEffect(() => {
+    const bumpThemeVersion = () => setThemeVersion((version) => version + 1);
+    const observer = new MutationObserver(bumpThemeVersion);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    if (document.body) {
+      observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-theme"],
+      });
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    mediaQuery.addEventListener("change", bumpThemeVersion);
+
+    return () => {
+      observer.disconnect();
+      mediaQuery.removeEventListener("change", bumpThemeVersion);
+    };
+  }, []);
+
+  return themeVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +275,9 @@ function MermaidDiagram({ chart }: { chart: string }) {
     () => `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
     [reactId],
   );
+  const themeVersion = useThemeVersion();
   const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
+  const [layout, setLayout] = useState<MermaidLayout>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -208,9 +287,17 @@ function MermaidDiagram({ chart }: { chart: string }) {
       try {
         setError(null);
         setSandboxedDocument(null);
+        setLayout({});
         const mermaid = await getMermaid();
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: "base",
+          themeVariables: getMermaidThemeVariables(containerRef.current),
+        });
         const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
         if (!cancelled) {
+          setLayout(getMermaidLayout(renderedSvg));
           setSandboxedDocument(
             buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
           );
@@ -227,7 +314,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart, diagramId]);
+  }, [chart, diagramId, themeVersion]);
 
   if (error) {
     return (
@@ -247,6 +334,10 @@ function MermaidDiagram({ chart }: { chart: string }) {
           className="mermaid-diagram-frame"
           sandbox=""
           srcDoc={sandboxedDocument}
+          style={{
+            height: layout.height ? `${layout.height}px` : undefined,
+            width: layout.width ? `${layout.width}px` : undefined,
+          }}
           title="Mermaid diagram"
         />
       ) : (

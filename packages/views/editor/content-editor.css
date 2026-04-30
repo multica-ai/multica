@@ -213,7 +213,7 @@
 .rich-text-editor .mermaid-diagram-frame {
   border: 0;
   display: block;
-  min-height: 320px;
+  height: auto;
   width: 100%;
 }
 
