@@ -17,8 +17,8 @@
 开源的 Managed Agents 平台。<br/>
 将编码 Agent 变成真正的队友——分配任务、跟踪进度、积累技能。
 
-[![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
+[![CI](https://github.com/TheophilusChinomona/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/TheophilusChinomona/multica/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/TheophilusChinomona/multica?style=flat)](https://github.com/TheophilusChinomona/multica/stargazers)
 
 [官网](https://multica.ai) · [云服务](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
 
