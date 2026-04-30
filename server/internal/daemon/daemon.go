@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -975,6 +976,9 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 	}
 }
 
+// newTaskSlotSemaphore returns a buffered channel pre-populated with stable
+// slot indices [0, n). Receive to acquire a slot, send the same slot back to
+// release. Used by pollLoop to expose MULTICA_TASK_SLOT to spawned tasks.
 func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 	sem := make(chan int, maxConcurrentTasks)
 	for i := 0; i < maxConcurrentTasks; i++ {
@@ -1187,6 +1191,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
+	// per-agent. When one daemon hosts multiple agents, slots index shared
+	// daemon-level resources such as GPUs.
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        d.client.Token(),
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
@@ -1195,7 +1202,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    fmt.Sprintf("%d", slot),
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
