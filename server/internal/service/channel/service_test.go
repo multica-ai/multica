@@ -838,6 +838,235 @@ func TestRunRetentionSweep_BatchedDrain(t *testing.T) {
 	}
 }
 
+// Phase 3 — agent mention selection ----------------------------------------
+
+// fakeMentionParser builds the inline `[@…](mention://type/id)` markdown
+// the production parser expects, so tests can assemble a content string
+// that exercises ParseMentions semantics without wiring util in.
+func mentionMarkdown(t string, id pgtype.UUID) string {
+	return "[@x](mention://" + t + "/" + uuidString(id) + ")"
+}
+
+// useUtilParser is the production-equivalent parser. We intentionally
+// avoid importing util here — see SelectAgentsForMentionParams.MentionParser
+// docstring for why — and parse minimally inline using the same
+// `mention://type/id` shape.
+func useUtilParser(content string) []ParsedMention {
+	// Tiny inline parser: matches our test markdown shape only.
+	// Production uses util.ParseMentions which accepts `@?` and other
+	// edge cases; this fixture is sufficient to exercise the selector.
+	var out []ParsedMention
+	rest := content
+	for {
+		i := indexOfPrefix(rest, "(mention://")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("(mention://"):]
+		// rest now starts with "type/id)"
+		slash := indexOfPrefix(rest, "/")
+		if slash < 0 {
+			break
+		}
+		ty := rest[:slash]
+		rest = rest[slash+1:]
+		closeP := indexOfPrefix(rest, ")")
+		if closeP < 0 {
+			break
+		}
+		id := rest[:closeP]
+		rest = rest[closeP+1:]
+		out = append(out, ParsedMention{Type: ty, ID: id})
+	}
+	return out
+}
+
+// indexOfPrefix is strings.Index without the standard library import in
+// this test file (we already use strings elsewhere in the file but
+// keeping the helpers self-contained).
+func indexOfPrefix(s, p string) int { return strings.Index(s, p) }
+
+func TestSelectAgentsForMention_TriggersMemberAgent(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "trig", DisplayName: "Trig",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	if _, err := testService.AddMember(ctx, ch.ID, AddMemberParams{
+		Member: agentActor(), Role: RoleMember,
+	}); err != nil {
+		t.Fatalf("AddMember(agent): %v", err)
+	}
+
+	content := "hello " + mentionMarkdown(ActorAgent, testAgentID) + " please respond"
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(cands))
+	}
+	if cands[0].AgentID.Bytes != testAgentID.Bytes {
+		t.Fatalf("unexpected candidate id")
+	}
+}
+
+func TestSelectAgentsForMention_NonMemberAgentSkipped(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "nomember", DisplayName: "NoMember",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	// Note: agent NOT added as a member.
+
+	content := "hi " + mentionMarkdown(ActorAgent, testAgentID)
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("expected 0 candidates (non-member agent skipped), got %d", len(cands))
+	}
+}
+
+func TestSelectAgentsForMention_SelfMentionSkipped(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "selfmen", DisplayName: "SelfMen",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	if _, err := testService.AddMember(ctx, ch.ID, AddMemberParams{
+		Member: agentActor(), Role: RoleMember,
+	}); err != nil {
+		t.Fatalf("AddMember(agent): %v", err)
+	}
+
+	// Author is the same agent as the mention target → self-mention guard.
+	content := "echo " + mentionMarkdown(ActorAgent, testAgentID)
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             agentActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("self-mention must be skipped, got %d candidates", len(cands))
+	}
+}
+
+func TestSelectAgentsForMention_DedupWindow(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "dedup", DisplayName: "Dedup",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	if _, err := testService.AddMember(ctx, ch.ID, AddMemberParams{
+		Member: agentActor(), Role: RoleMember,
+	}); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	// Pre-seed a queued task targeting this channel — simulates the first
+	// @-mention having already enqueued one. The dedup query should now
+	// suppress further candidates within the window.
+	contextJSON := []byte(`{"type":"channel_mention","channel_id":"` + uuidString(ch.ID) + `"}`)
+	var runtimeID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, testAgentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("lookup runtime: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+		VALUES ($1, $2, NULL, 'queued', 0, $3)
+	`, testAgentID, runtimeID, contextJSON); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID)
+	})
+
+	content := "ping " + mentionMarkdown(ActorAgent, testAgentID)
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("dedup must suppress further triggers, got %d", len(cands))
+	}
+
+	// Outside the window, the same call should produce a candidate.
+	cands, err = testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             memberActor(),
+		DedupWindowSeconds: 0.001, // microsecond — effectively "any older task is outside the window"
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention (window=0): %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("with zero window, dedup should not suppress; got %d", len(cands))
+	}
+}
+
+func TestSelectAgentsForMention_MemberMentionsIgnored(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "memmen", DisplayName: "MemMen",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+
+	// @member mentions are not the selector's job (Phase 1 inbox path
+	// handles those). The selector returns zero candidates regardless of
+	// channel membership for member mentions.
+	content := "ping " + mentionMarkdown(ActorMember, testUserID)
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            content,
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("member mentions must not produce agent triggers, got %d", len(cands))
+	}
+}
+
 func TestDMName_DeterministicAndOrderIndependent(t *testing.T) {
 	a := Actor{Type: ActorMember, ID: pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}}
 	b := Actor{Type: ActorAgent, ID: pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9}, Valid: true}}

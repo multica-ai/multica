@@ -2,9 +2,11 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -104,6 +106,145 @@ func (s *MessageService) ListThread(ctx context.Context, parentID pgtype.UUID) (
 // Count returns the number of non-deleted messages in a channel.
 func (s *MessageService) Count(ctx context.Context, channelID pgtype.UUID) (int64, error) {
 	return s.Queries.CountChannelMessages(ctx, channelID)
+}
+
+// MentionTriggerCandidate is one entry in the result of
+// SelectAgentsForMention — an agent the caller should enqueue a task
+// for. Carries enough context (agent record + the parsed mention) that
+// the handler can build a clean log line and call EnqueueTaskForChannelMention
+// without re-loading the agent.
+type MentionTriggerCandidate struct {
+	AgentID pgtype.UUID
+	Agent   db.Agent
+}
+
+// SelectAgentsForMentionParams is the input shape for the selector.
+type SelectAgentsForMentionParams struct {
+	ChannelID    pgtype.UUID
+	Content      string
+	Author       Actor
+	// DedupWindowSeconds is how recent a pending task counts as a
+	// "duplicate"; passed through to the SQL query. The handler reads
+	// this from CHANNEL_AGENT_DEDUP_WINDOW_SECONDS env (default 30).
+	DedupWindowSeconds float64
+	// MentionParser parses @member / @agent mentions out of markdown.
+	// Injected so the channel package doesn't import server/internal/util
+	// (sidecar portability — see Phase 1 service-handler split note).
+	// Caller passes util.ParseMentions in production.
+	MentionParser func(content string) []ParsedMention
+}
+
+// ParsedMention is the surface area the channel package uses from the
+// caller's mention parser. Mirrors util.Mention without requiring the
+// import. Type values: "member" | "agent" | "issue" | "all".
+type ParsedMention struct {
+	Type string
+	ID   string
+}
+
+// SelectAgentsForMention returns the agents that should be triggered
+// by a freshly-posted message. Applies, in order:
+//
+//  1. Parse @-mentions from the markdown content.
+//  2. Filter to type=="agent" mentions only — Phase 1's inbox writes
+//     handle @member.
+//  3. Self-mention guard: if the message was authored by an agent,
+//     skip mentions of that same agent (cycle protection).
+//  4. Channel-membership filter: agents must already be members of
+//     the channel — joining is a deliberate admin action, mentions
+//     of non-members render but produce no task. This is the spec's
+//     "agents-as-channel-members" model.
+//  5. Reachability filter: the agent must be non-archived and have a
+//     runtime attached. (Pre-flight here so the handler doesn't enqueue
+//     a task that will fail at the daemon.)
+//  6. Dedup guard: if the same agent already has an in-flight task for
+//     this channel within DedupWindowSeconds, skip — a rapid burst of
+//     @-mentions shouldn't enqueue a task per message.
+//
+// The order matters: cheap filters first, then the network-touching
+// queries (membership + agent + dedup), so a typical "no @mentions in
+// the message" message exits after step 1.
+func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAgentsForMentionParams) ([]MentionTriggerCandidate, error) {
+	if p.MentionParser == nil {
+		return nil, fmt.Errorf("%w: MentionParser required", ErrInvalid)
+	}
+	mentions := p.MentionParser(p.Content)
+	if len(mentions) == 0 {
+		return nil, nil
+	}
+
+	// Dedup mention list at the (type, id) tuple level so a message that
+	// @-mentions the same agent twice produces one trigger.
+	seen := make(map[string]struct{}, len(mentions))
+	candidates := make([]MentionTriggerCandidate, 0)
+	for _, m := range mentions {
+		if m.Type != ActorAgent {
+			continue
+		}
+		// Self-mention guard.
+		if p.Author.Type == ActorAgent && m.ID == uuidString(p.Author.ID) {
+			continue
+		}
+		key := m.Type + ":" + m.ID
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		agentUUID, err := parseUUIDString(m.ID)
+		if err != nil {
+			// Malformed mention id — skip silently rather than failing
+			// the whole message post.
+			continue
+		}
+
+		// Membership: agent must be in the channel.
+		if _, err := s.Queries.GetChannelMembership(ctx, db.GetChannelMembershipParams{
+			ChannelID:  p.ChannelID,
+			MemberType: ActorAgent,
+			MemberID:   agentUUID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return nil, fmt.Errorf("check membership: %w", err)
+		}
+
+		// Reachability.
+		agent, err := s.Queries.GetAgent(ctx, agentUUID)
+		if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+			continue
+		}
+
+		// Dedup against in-flight tasks for this channel.
+		hasPending, err := s.Queries.HasPendingChannelMentionForAgent(ctx, db.HasPendingChannelMentionForAgentParams{
+			AgentID:       agentUUID,
+			ChannelID:     uuidString(p.ChannelID),
+			WindowSeconds: p.DedupWindowSeconds,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("check dedup: %w", err)
+		}
+		if hasPending {
+			continue
+		}
+
+		candidates = append(candidates, MentionTriggerCandidate{
+			AgentID: agentUUID,
+			Agent:   agent,
+		})
+	}
+	return candidates, nil
+}
+
+// parseUUIDString is a lightweight UUID parser kept inside the channel
+// package to avoid a dependency on internal/util (sidecar portability).
+func parseUUIDString(s string) (pgtype.UUID, error) {
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return u, nil
 }
 
 // SoftDeleteOldMessages drains messages older than `before` from one

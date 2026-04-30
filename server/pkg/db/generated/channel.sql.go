@@ -128,6 +128,62 @@ func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (C
 	return i, err
 }
 
+const createChannelMentionTask = `-- name: CreateChannelMentionTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context
+) VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, trigger_summary, force_fresh_session
+`
+
+type CreateChannelMentionTaskParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	Priority  int32       `json:"priority"`
+	Context   []byte      `json:"context"`
+}
+
+// Phase 3 — task created when an agent is @-mentioned in a channel message.
+// Has neither issue_id nor chat_session_id; the daemon detects this variant
+// via context.type == "channel_mention" and fetches recent messages from the
+// channels API at execution time. Mirrors the QuickCreate-task pattern.
+func (q *Queries) CreateChannelMentionTask(ctx context.Context, arg CreateChannelMentionTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createChannelMentionTask,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.Priority,
+		arg.Context,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.LastHeartbeatAt,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+	)
+	return i, err
+}
+
 const getChannel = `-- name: GetChannel :one
 SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at FROM channel
 WHERE id = $1
@@ -248,6 +304,38 @@ func (q *Queries) GetChannelMembership(ctx context.Context, arg GetChannelMember
 		&i.NotificationLevel,
 	)
 	return i, err
+}
+
+const hasPendingChannelMentionForAgent = `-- name: HasPendingChannelMentionForAgent :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE agent_id = $1
+      AND status IN ('queued', 'dispatched', 'running')
+      AND context->>'channel_id' = $2::text
+      AND created_at > now() - make_interval(secs => $3::float8)
+)
+`
+
+type HasPendingChannelMentionForAgentParams struct {
+	AgentID       pgtype.UUID `json:"agent_id"`
+	ChannelID     string      `json:"channel_id"`
+	WindowSeconds float64     `json:"window_seconds"`
+}
+
+// Phase 3 dedup guard — returns TRUE if the given agent already has an
+// in-flight task for the same channel within the configured window
+// (default 30s). Used so a rapid burst of @mentions doesn't enqueue a
+// task per message.
+//
+// The JSONB filter on context->>'channel_id' is unindexed but
+// agent_task_queue stays small for active rows (terminal statuses are
+// archived elsewhere), so a sequential scan over `status IN (queued,
+// dispatched, running)` is cheap enough at the volumes we expect.
+func (q *Queries) HasPendingChannelMentionForAgent(ctx context.Context, arg HasPendingChannelMentionForAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingChannelMentionForAgent, arg.AgentID, arg.ChannelID, arg.WindowSeconds)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const listChannelMembers = `-- name: ListChannelMembers :many

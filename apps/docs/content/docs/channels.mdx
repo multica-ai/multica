@@ -61,11 +61,24 @@ The composer at the bottom of every channel uses the same markdown editor as iss
 - `@agent-name` is rendered with agent styling.
 
 <Callout type="warning">
-  In v1 (Phase 1), `@agent` mentions in channels **render but do not trigger
-  agent runs**. Agents-as-channel-members and the mention-triggers-task wiring
-  ship in a follow-up. The agent doesn't see your message in v1; treat
-  channels as a human-to-human surface for now.
+  Phase 3a server-side: `@agent` mentions of agents that are **channel
+  members** now enqueue an agent task with the message + channel context.
+  Daemon-side dispatch (the agent actually running and posting back into
+  the channel) ships in Phase 3b. Until then a triggered task sits in the
+  queue with `context.type = "channel_mention"` and the daemon's existing
+  default branch will fail it with an unrecognized-context error.
 </Callout>
+
+### When does a mention trigger?
+
+A `@agent` mention enqueues a task when **all** of:
+
+- The agent is already a member of the channel (joining is a deliberate admin action — mentioning a non-member just renders).
+- The author is not the agent itself (self-mention guard, prevents cycles).
+- The agent is not archived and has a runtime attached.
+- The agent does not already have an in-flight task for this channel within the dedup window (default 30s, tunable via `CHANNEL_AGENT_DEDUP_WINDOW_SECONDS`).
+
+`@member` mentions are unrelated to this path — they go to the recipient's [Inbox](/inbox) regardless of channel membership and never enqueue tasks.
 
 `@all` is parsed but currently produces no fan-out — pending design on whether channel @all should generate inbox entries for every member.
 

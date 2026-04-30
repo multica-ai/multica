@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/service/channel"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -200,11 +202,84 @@ func (h *Handler) CreateChannelMessage(w http.ResponseWriter, r *http.Request) {
 		"message":      resp,
 	})
 
-	// Mention → inbox. Best-effort: a failure to write inbox entries should
-	// not 500 the message-create. We log and move on.
+	// Mention fan-out (inbox + agent triggers). Best-effort: a failure
+	// here must not 500 the message-create. We log and move on.
+	authorUUID2 := actorUUID // capture for goroutine
 	go h.fanOutChannelMentions(context.Background(), wsID, ch, msg, actorType, actorID)
+	go h.triggerMentionedAgentTasks(context.Background(), wsID, ch, msg, channel.Actor{Type: actorType, ID: authorUUID2})
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// channelAgentDedupWindow returns the dedup window in seconds. Reads
+// CHANNEL_AGENT_DEDUP_WINDOW_SECONDS at call time so operators can adjust
+// without a deploy (config changes via env+restart of the API tier).
+// Default 30s matches the spec.
+func channelAgentDedupWindow() float64 {
+	if v := os.Getenv("CHANNEL_AGENT_DEDUP_WINDOW_SECONDS"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 30
+}
+
+// triggerMentionedAgentTasks runs the Phase 3 mention-triggers-agent flow.
+// Mirrors the existing `enqueueMentionedAgentTasks` in comment.go but
+// scoped to channels (no issue, no thread context — channels are
+// conversational, not historical).
+//
+// Selection logic lives in the channel service so it remains testable
+// against pure data; this handler glue only calls TaskService.Enqueue
+// for each candidate the service hands back.
+//
+// Concurrency: runs in a separate goroutine so the user's POST returns
+// 201 immediately. The cost is that the agent task may be enqueued a
+// few hundred ms later than the message lands — fine for a chat surface.
+func (h *Handler) triggerMentionedAgentTasks(ctx context.Context, workspaceID pgtype.UUID, ch db.Channel, msg db.ChannelMessage, author channel.Actor) {
+	candidates, err := h.ChannelMessageService.SelectAgentsForMention(ctx, channel.SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		Content:            msg.Content,
+		Author:             author,
+		DedupWindowSeconds: channelAgentDedupWindow(),
+		MentionParser: func(content string) []channel.ParsedMention {
+			parsed := util.ParseMentions(content)
+			out := make([]channel.ParsedMention, len(parsed))
+			for i, m := range parsed {
+				out[i] = channel.ParsedMention{Type: m.Type, ID: m.ID}
+			}
+			return out
+		},
+	})
+	if err != nil {
+		slog.Warn("channel mention: select candidates failed",
+			"channel_id", uuidToString(ch.ID),
+			"message_id", uuidToString(msg.ID),
+			"error", err,
+		)
+		return
+	}
+
+	for _, cand := range candidates {
+		_, err := h.TaskService.EnqueueTaskForChannelMention(ctx, service.EnqueueTaskForChannelMentionParams{
+			WorkspaceID:    workspaceID,
+			AgentID:        cand.AgentID,
+			ChannelID:      ch.ID,
+			ChannelName:    ch.Name,
+			ChannelKind:    ch.Kind,
+			MessageID:      msg.ID,
+			MessageContent: msg.Content,
+			AuthorType:     author.Type,
+			AuthorID:       uuidToString(author.ID),
+		})
+		if err != nil {
+			slog.Warn("channel mention: enqueue task failed",
+				"agent_id", uuidToString(cand.AgentID),
+				"channel_id", uuidToString(ch.ID),
+				"error", err,
+			)
+		}
+	}
 }
 
 // fanOutChannelMentions writes inbox_item rows for every @member mention in

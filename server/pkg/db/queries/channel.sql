@@ -104,6 +104,34 @@ UPDATE channel_membership
 SET notification_level = $4
 WHERE channel_id = $1 AND member_type = $2 AND member_id = $3;
 
+-- name: CreateChannelMentionTask :one
+-- Phase 3 — task created when an agent is @-mentioned in a channel message.
+-- Has neither issue_id nor chat_session_id; the daemon detects this variant
+-- via context.type == "channel_mention" and fetches recent messages from the
+-- channels API at execution time. Mirrors the QuickCreate-task pattern.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context
+) VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING *;
+
+-- name: HasPendingChannelMentionForAgent :one
+-- Phase 3 dedup guard — returns TRUE if the given agent already has an
+-- in-flight task for the same channel within the configured window
+-- (default 30s). Used so a rapid burst of @mentions doesn't enqueue a
+-- task per message.
+--
+-- The JSONB filter on context->>'channel_id' is unindexed but
+-- agent_task_queue stays small for active rows (terminal statuses are
+-- archived elsewhere), so a sequential scan over `status IN (queued,
+-- dispatched, running)` is cheap enough at the volumes we expect.
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE agent_id = $1
+      AND status IN ('queued', 'dispatched', 'running')
+      AND context->>'channel_id' = sqlc.arg('channel_id')::text
+      AND created_at > now() - make_interval(secs => sqlc.arg('window_seconds')::float8)
+);
+
 -- name: ListChannelsWithRetention :many
 -- Phase 2 retention sweep — returns every non-archived channel whose
 -- effective retention is finite (i.e. NOT "retain forever"). Effective

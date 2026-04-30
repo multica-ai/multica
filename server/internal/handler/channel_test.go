@@ -416,6 +416,72 @@ func TestAddRemoveChannelMember(t *testing.T) {
 	}
 }
 
+// TestCreateChannelMessage_TriggersAgentMention exercises the Phase 3a
+// fan-out: posting a message that @-mentions an agent who's a channel
+// member should enqueue a task with context.type="channel_mention". The
+// goroutine fan-out is async, so we poll briefly.
+func TestCreateChannelMessage_TriggersAgentMention(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	// Create a channel and add the test agent as a member.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "trig-handler", "display_name": "TrigHandler", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d", w.Code)
+	}
+	ch := decodeChannel(t, w)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/members", map[string]any{
+		"member_type": "agent", "member_id": testAgentID(), "role": "member",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.AddChannelMember(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add agent: %d %s", w.Code, w.Body.String())
+	}
+
+	// Drop any tasks left from prior tests so the dedup query starts clean.
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	})
+
+	// Post a message mentioning the agent.
+	mention := "[@bot](mention://agent/" + testAgentID() + ")"
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content": "hey " + mention + " can you take a look",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create message: %d %s", w.Code, w.Body.String())
+	}
+
+	// Poll for the task. Fan-out is async; 2s is generous.
+	deadline := time.Now().Add(2 * time.Second)
+	var taskCount int
+	for time.Now().Before(deadline) {
+		row := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE agent_id = $1
+			  AND context->>'type' = 'channel_mention'
+			  AND context->>'channel_id' = $2
+		`, testAgentID(), ch.ID)
+		_ = row.Scan(&taskCount)
+		if taskCount >= 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("expected at least 1 channel-mention task, got %d", taskCount)
+}
+
 // testAgentID returns the workspace's first agent id, lazily seeding one if
 // the shared fixture didn't include it. We don't add a workspace-test-agent
 // to setupHandlerTestFixture because most tests don't need one.

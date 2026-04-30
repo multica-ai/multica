@@ -217,6 +217,111 @@ type QuickCreateContext struct {
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
 
+// ChannelMentionContext is the JSON payload stored on a channel-mention
+// task's context column. The daemon detects this variant via
+// Type == "channel_mention" and renders a conversational prompt; on
+// completion the daemon POSTs the agent's reply back to the channel via
+// the existing /api/channels/{channelId}/messages endpoint authenticated
+// with X-Agent-ID + the task token.
+//
+// Recent message history is intentionally NOT embedded here — the daemon
+// fetches it from the channels API at execution time so the window stays
+// fresh (more messages may have arrived between enqueue and claim).
+type ChannelMentionContext struct {
+	Type           string `json:"type"`
+	WorkspaceID    string `json:"workspace_id"`
+	ChannelID      string `json:"channel_id"`
+	ChannelName    string `json:"channel_name"`
+	ChannelKind    string `json:"channel_kind"`
+	MessageID      string `json:"message_id"`
+	MessageContent string `json:"message_content"`
+	// AuthorType + AuthorID identify who triggered the mention so the
+	// daemon can address them by name in the agent's prompt.
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id"`
+}
+
+// ChannelMentionContextType marks a task as a channel-mention job.
+const ChannelMentionContextType = "channel_mention"
+
+// EnqueueTaskForChannelMentionParams is the input shape for
+// EnqueueTaskForChannelMention. Pulled into a struct because the caller
+// (handler) already has these values to hand and packing them into an
+// argument list four-deep would invite mismatch bugs.
+type EnqueueTaskForChannelMentionParams struct {
+	WorkspaceID    pgtype.UUID
+	AgentID        pgtype.UUID
+	ChannelID      pgtype.UUID
+	ChannelName    string
+	ChannelKind    string
+	MessageID      pgtype.UUID
+	MessageContent string
+	AuthorType     string
+	AuthorID       string
+}
+
+// EnqueueTaskForChannelMention creates a queued task for an agent
+// @-mentioned in a channel. The task carries the channel + triggering
+// message in its JSONB context (no issue_id, no chat_session_id) — the
+// daemon's channel-mention dispatcher (Phase 3b) recognizes the variant
+// via context.type == "channel_mention" and fetches recent message
+// history from the channels API at execution time.
+//
+// Pre-validates that the agent is reachable (not archived, has a runtime)
+// so the handler can fail fast instead of queueing a task that will never
+// claim. Self-mention and dedup guards live in the channel service —
+// this method assumes its caller has already filtered.
+func (s *TaskService) EnqueueTaskForChannelMention(ctx context.Context, p EnqueueTaskForChannelMentionParams) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, p.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := ChannelMentionContext{
+		Type:           ChannelMentionContextType,
+		WorkspaceID:    util.UUIDToString(p.WorkspaceID),
+		ChannelID:      util.UUIDToString(p.ChannelID),
+		ChannelName:    p.ChannelName,
+		ChannelKind:    p.ChannelKind,
+		MessageID:      util.UUIDToString(p.MessageID),
+		MessageContent: p.MessageContent,
+		AuthorType:     p.AuthorType,
+		AuthorID:       p.AuthorID,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal channel-mention context: %w", err)
+	}
+
+	task, err := s.Queries.CreateChannelMentionTask(ctx, db.CreateChannelMentionTaskParams{
+		AgentID:   p.AgentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create channel-mention task: %w", err)
+	}
+
+	slog.Info("channel-mention task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(p.AgentID),
+		"channel_id", util.UUIDToString(p.ChannelID),
+		"message_id", util.UUIDToString(p.MessageID),
+	)
+	// Match every other Enqueue* path: kick the daemon WS so the task
+	// gets claimed promptly instead of waiting for the next poll.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
