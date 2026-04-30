@@ -12,10 +12,12 @@ import { allChatSessionsOptions } from "@multica/core/chat/queries";
 import { useChatStore } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import type { ChatSession, Agent } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 
 export function ChatSessionHistory() {
+  const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const setShowHistory = useChatStore((s) => s.setShowHistory);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
@@ -56,9 +58,9 @@ export function ChatSessionHistory() {
           >
             <ArrowLeft />
           </TooltipTrigger>
-          <TooltipContent side="bottom">Back</TooltipContent>
+          <TooltipContent side="bottom">{t(($) => $.session_history.back_tooltip)}</TooltipContent>
         </Tooltip>
-        <span className="text-sm font-medium">Chat History</span>
+        <span className="text-sm font-medium">{t(($) => $.session_history.header)}</span>
       </div>
 
       {/* Session list */}
@@ -66,7 +68,7 @@ export function ChatSessionHistory() {
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
             <MessageSquare className="size-6" />
-            <span className="text-sm">No chat sessions yet</span>
+            <span className="text-sm">{t(($) => $.session_history.empty)}</span>
           </div>
         ) : (
           <div>
@@ -86,6 +88,24 @@ export function ChatSessionHistory() {
   );
 }
 
+function useFormatTimeAgo(): (dateStr: string) => string {
+  const { t } = useT("chat");
+  return (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return t(($) => $.session_history.time.just_now);
+    if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
+    if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
+    if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
+    return date.toLocaleDateString();
+  };
+}
+
 function SessionItem({
   session,
   agent,
@@ -97,6 +117,8 @@ function SessionItem({
   isActive: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useT("chat");
+  const formatTimeAgo = useFormatTimeAgo();
   const timeAgo = formatTimeAgo(session.updated_at);
 
   return (
@@ -116,7 +138,7 @@ function SessionItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">
-            {session.title || "Untitled"}
+            {session.title || t(($) => $.session_history.untitled)}
           </span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -130,19 +152,4 @@ function SessionItem({
       </div>
     </button>
   );
-}
-
-function formatTimeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
 }

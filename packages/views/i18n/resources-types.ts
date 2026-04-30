@@ -16,6 +16,7 @@ import type workspace from "../locales/en/workspace.json";
 import type projects from "../locales/en/projects.json";
 import type autopilots from "../locales/en/autopilots.json";
 import type skills from "../locales/en/skills.json";
+import type chat from "../locales/en/chat.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
@@ -46,6 +47,7 @@ declare module "i18next" {
       projects: typeof projects;
       autopilots: typeof autopilots;
       skills: typeof skills;
+      chat: typeof chat;
     };
     enableSelector: true;
   }

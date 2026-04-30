@@ -50,6 +50,15 @@ const TRANSLATED_FILES = [
   "skills/components/runtime-local-skill-import-panel.tsx",
   "skills/components/file-tree.tsx",
   "skills/components/file-viewer.tsx",
+  "chat/components/chat-fab.tsx",
+  "chat/components/chat-input.tsx",
+  "chat/components/chat-message-list.tsx",
+  "chat/components/chat-session-history.tsx",
+  "chat/components/chat-window.tsx",
+  "chat/components/context-anchor.tsx",
+  "chat/components/no-agent-banner.tsx",
+  "chat/components/offline-banner.tsx",
+  "chat/components/task-status-pill.tsx",
 ];
 
 export default [

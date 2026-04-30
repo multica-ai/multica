@@ -20,6 +20,7 @@ import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
+import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -193,7 +194,7 @@ function AssistantMessage({
         </div>
       )}
       {message.elapsed_ms != null && (
-        <ElapsedCaption verb="Replied in" elapsedMs={message.elapsed_ms} />
+        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
       )}
     </div>
   );
@@ -205,17 +206,22 @@ function AssistantMessage({
 // and devices. Skipped silently when null (legacy messages predating
 // migration 063 + user messages).
 function ElapsedCaption({
-  verb,
+  variant,
   elapsedMs,
   className,
 }: {
-  verb: string;
+  variant: "replied" | "failed";
   elapsedMs: number;
   className?: string;
 }) {
+  const { t } = useT("chat");
+  const text =
+    variant === "replied"
+      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
+      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
   return (
     <div className={cn("text-[11px] text-muted-foreground/80", className)}>
-      {verb} {formatElapsedMs(elapsedMs)}
+      {text}
     </div>
   );
 }
@@ -231,12 +237,14 @@ function FailureBubble({
   timeline: ChatTimelineItem[];
   elapsedMs?: number | null;
 }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   // Map the back-end enum to copy via the shared label table; an unknown
   // reason (e.g. a future enum value the front-end doesn't ship yet)
-  // falls back to a generic "Task failed" so we never render a bare slug.
+  // falls back to a generic translated label.
   const label =
-    failureReasonLabel[reason as TaskFailureReason] ?? "Task failed";
+    failureReasonLabel[reason as TaskFailureReason] ??
+    t(($) => $.message_list.task_failed_fallback);
 
   return (
     <div className="w-full space-y-1.5">
@@ -257,7 +265,7 @@ function FailureBubble({
                 ) : (
                   <ChevronRight className="size-3" />
                 )}
-                <span>Show details</span>
+                <span>{t(($) => $.message_list.show_details)}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
@@ -270,7 +278,7 @@ function FailureBubble({
       </div>
       {timeline.length > 0 && <TimelineView items={timeline} />}
       {elapsedMs != null && (
-        <ElapsedCaption verb="Failed after" elapsedMs={elapsedMs} />
+        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
       )}
     </div>
   );
@@ -346,9 +354,10 @@ function ToolGroupCollapsible({
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
 }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(defaultOpen ?? false);
   const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const label = `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  const label = t(($) => $.message_list.tools, { count: toolCount });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -443,11 +452,15 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
 
   const preview = output.length > 120 ? output.slice(0, 120) + "..." : output;
+  const labelPrefix = item.tool
+    ? t(($) => $.message_list.tool_result_named, { tool: item.tool })
+    : t(($) => $.message_list.tool_result_unnamed);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -456,7 +469,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {labelPrefix}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
