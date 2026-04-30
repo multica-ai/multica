@@ -26,6 +26,7 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	CustomerID  *string `json:"customer_id"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 	IssueCount  int64   `json:"issue_count"`
@@ -43,6 +44,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
+		CustomerID:  uuidToPtr(p.CustomerID),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
@@ -64,6 +66,7 @@ type CreateProjectRequest struct {
 	Priority    string                                `json:"priority"`
 	LeadType    *string                               `json:"lead_type"`
 	LeadID      *string                               `json:"lead_id"`
+	CustomerID  *string                               `json:"customer_id"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -85,6 +88,7 @@ type UpdateProjectRequest struct {
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	CustomerID  *string `json:"customer_id"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -199,6 +203,20 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var customerID pgtype.UUID
+	if req.CustomerID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.CustomerID, "customer_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetCustomerInWorkspace(r.Context(), db.GetCustomerInWorkspaceParams{
+			ID: id, WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusNotFound, "customer not found")
+			return
+		}
+		customerID = id
+	}
 
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work.
@@ -226,6 +244,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
+		CustomerID:  customerID,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -362,6 +381,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Icon:        prevProject.Icon,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
+		CustomerID:  prevProject.CustomerID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -402,6 +422,23 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["customer_id"]; ok {
+		if req.CustomerID != nil {
+			customerUUID, ok := parseUUIDOrBadRequest(w, *req.CustomerID, "customer_id")
+			if !ok {
+				return
+			}
+			if _, err := h.Queries.GetCustomerInWorkspace(r.Context(), db.GetCustomerInWorkspaceParams{
+				ID: customerUUID, WorkspaceID: wsUUID,
+			}); err != nil {
+				writeError(w, http.StatusNotFound, "customer not found")
+				return
+			}
+			params.CustomerID = customerUUID
+		} else {
+			params.CustomerID = pgtype.UUID{Valid: false}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
@@ -562,7 +599,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.customer_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
@@ -648,6 +685,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			&row.project.LeadID,
 			&row.project.CreatedAt,
 			&row.project.UpdatedAt,
+			&row.project.CustomerID,
 			&row.totalCount,
 			&row.matchSource,
 		); err != nil {

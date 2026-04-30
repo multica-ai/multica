@@ -11,6 +11,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { customerKeys } from "../customers/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -129,6 +130,13 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      customer: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: customerKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+        }
+      },
       label: () => {
         // label:created/updated/deleted — also refresh issues, since each
         // issue carries a denormalized snapshot of its labels (rename/recolor
@@ -139,6 +147,9 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: ["labels", wsId] });
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
         }
+      },
+      issue_timer: () => {
+        qc.invalidateQueries({ queryKey: ["issues", "timer"] });
       },
       pin: () => {
         const wsId = getCurrentWsId();
@@ -180,6 +191,9 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Agent task starts/completions create issue time entries, so timer
+        // summaries track AI work without a separate event type.
+        qc.invalidateQueries({ queryKey: ["issues", "timer"] });
       },
     };
 

@@ -15,11 +15,16 @@ import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { setCurrentWorkspace } from "./workspace-storage";
+import { ApiError } from "../api";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
 const logger = createLogger("auth");
+
+function isExpectedUnauthenticated(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
 
 export function AuthInitializer({
   children,
@@ -92,7 +97,9 @@ export function AuthInitializer({
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
         .catch((err) => {
-          logger.error("cookie auth init failed", err);
+          if (!isExpectedUnauthenticated(err)) {
+            logger.error("cookie auth init failed", err);
+          }
           onAuthFailure();
         });
       return;

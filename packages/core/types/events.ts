@@ -5,6 +5,7 @@ import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
+import type { Customer } from "./customer";
 import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -12,6 +13,7 @@ export type WSEventType =
   | "issue:created"
   | "issue:updated"
   | "issue:deleted"
+  | "issue_timer:changed"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
@@ -54,6 +56,9 @@ export type WSEventType =
   | "project:created"
   | "project:updated"
   | "project:deleted"
+  | "customer:created"
+  | "customer:updated"
+  | "customer:deleted"
   | "label:created"
   | "label:updated"
   | "label:deleted"
@@ -290,6 +295,18 @@ export interface ProjectUpdatedPayload {
 
 export interface ProjectDeletedPayload {
   project_id: string;
+}
+
+export interface CustomerCreatedPayload {
+  customer: Customer;
+}
+
+export interface CustomerUpdatedPayload {
+  customer: Customer;
+}
+
+export interface CustomerDeletedPayload {
+  customer_id: string;
 }
 
 export interface InvitationCreatedPayload {

@@ -45,6 +45,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { IssueTimerSection } from "./issue-timer-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -439,6 +440,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      <IssueTimerSection issueId={id} />
 
       {/* Details */}
       <div>

@@ -103,6 +103,7 @@ func buildChatPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	b.WriteString("If the user asks how long you have been working on an issue/task, do not estimate from chat timing or issue creation time. Use the Multica timer data: find the issue if needed, run `multica issue get <issue-id> --output json`, read `time_tracking.total_seconds`, and answer from that exact value. If `time_tracking` is missing, say the timer data is unavailable and mention that the daemon/server may need to be restarted.\n\n")
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	return b.String()
 }

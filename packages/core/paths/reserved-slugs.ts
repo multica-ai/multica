@@ -65,6 +65,7 @@ export const RESERVED_SLUGS = new Set([
   // workspace named "issues" makes `/issues/abc` mean two things).
   "issues",
   "projects",
+  "customers",
   "autopilots",
   "agents",
   "inbox",

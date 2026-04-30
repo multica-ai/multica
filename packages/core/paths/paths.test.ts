@@ -9,6 +9,8 @@ describe("paths.workspace(slug)", () => {
     expect(ws.issueDetail("abc-123")).toBe("/acme/issues/abc-123");
     expect(ws.projects()).toBe("/acme/projects");
     expect(ws.projectDetail("p1")).toBe("/acme/projects/p1");
+    expect(ws.customers()).toBe("/acme/customers");
+    expect(ws.customerDetail("c1")).toBe("/acme/customers/c1");
     expect(ws.autopilots()).toBe("/acme/autopilots");
     expect(ws.autopilotDetail("a1")).toBe("/acme/autopilots/a1");
     expect(ws.agents()).toBe("/acme/agents");

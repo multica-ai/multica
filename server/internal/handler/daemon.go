@@ -1146,6 +1146,8 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.startAgentTaskTimer(r, *task)
+
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
@@ -1213,6 +1215,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.stopAgentTaskTimer(r, *task)
 	h.emitIssueExecutedOnFirstCompletion(r, task)
 
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
@@ -1341,6 +1344,8 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	h.stopAgentTaskTimer(r, *task)
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
@@ -1533,6 +1538,8 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	h.stopAgentTaskTimer(r, *task)
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task))

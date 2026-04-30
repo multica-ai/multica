@@ -407,7 +407,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		if dueDate != "" && len(dueDate) >= 10 {
 			dueDate = dueDate[:10]
 		}
-		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE", "DESCRIPTION"}
+		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE", "TIME", "DESCRIPTION"}
 		rows := [][]string{{
 			truncateID(strVal(issue, "id")),
 			strVal(issue, "title"),
@@ -415,6 +415,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 			strVal(issue, "priority"),
 			assignee,
 			dueDate,
+			formatIssueTrackedTime(issue),
 			strVal(issue, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -422,6 +423,25 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, issue)
+}
+
+func formatIssueTrackedTime(issue map[string]any) string {
+	timeTracking, _ := issue["time_tracking"].(map[string]any)
+	if timeTracking == nil {
+		return ""
+	}
+	total, _ := timeTracking["total_seconds"].(float64)
+	seconds := int64(total)
+	if seconds <= 0 {
+		return "0m"
+	}
+	d := time.Duration(seconds) * time.Second
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
 }
 
 // isHTTPURL reports whether path is an http:// or https:// URL.

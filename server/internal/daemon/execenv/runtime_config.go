@@ -195,6 +195,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
 		b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
 		b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
+		b.WriteString("- If asked how long you have been working on an issue/task, use `multica issue get <id> --output json` and answer from `time_tracking.total_seconds`. Never estimate from chat timing, issue `created_at`, or `updated_at`.\n")
 		b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")

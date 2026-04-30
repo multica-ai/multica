@@ -7,6 +7,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const LEGACY_ROUTE_SEGMENTS = new Set([
   "issues",
   "projects",
+  "customers",
   "agents",
   "inbox",
   "my-issues",
@@ -70,6 +71,7 @@ export const config = {
     "/",
     "/issues/:path*",
     "/projects/:path*",
+    "/customers/:path*",
     "/agents/:path*",
     "/inbox/:path*",
     "/my-issues/:path*",

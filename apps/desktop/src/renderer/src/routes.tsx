@@ -8,12 +8,14 @@ import {
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { CustomerDetailPage } from "./pages/customer-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
+import { CustomersPage } from "@multica/views/customers/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
@@ -98,6 +100,16 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "customers",
+            element: <CustomersPage />,
+            handle: { title: "Customers" },
+          },
+          {
+            path: "customers/:id",
+            element: <CustomerDetailPage />,
+            handle: { title: "Customer" },
           },
           {
             path: "autopilots",

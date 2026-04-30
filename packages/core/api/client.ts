@@ -34,6 +34,7 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueTimerSummary,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -58,6 +59,10 @@ import type {
   ProjectResource,
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
+  Customer,
+  CreateCustomerRequest,
+  UpdateCustomerRequest,
+  ListCustomersResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -271,7 +276,8 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      const logLevel =
+        res.status === 401 || res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }
@@ -749,6 +755,22 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
 
+  async getIssueTimer(issueId: string): Promise<IssueTimerSummary> {
+    return this.fetch(`/api/issues/${issueId}/timer`);
+  }
+
+  async startIssueTimer(issueId: string): Promise<IssueTimerSummary> {
+    return this.fetch(`/api/issues/${issueId}/timer/start`, {
+      method: "POST",
+    });
+  }
+
+  async stopIssueTimer(issueId: string): Promise<IssueTimerSummary> {
+    return this.fetch(`/api/issues/${issueId}/timer/stop`, {
+      method: "POST",
+    });
+  }
+
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -1101,6 +1123,35 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  // Customers
+  async listCustomers(params?: { status?: string }): Promise<ListCustomersResponse> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    return this.fetch(`/api/customers?${search}`);
+  }
+
+  async getCustomer(id: string): Promise<Customer> {
+    return this.fetch(`/api/customers/${id}`);
+  }
+
+  async createCustomer(data: CreateCustomerRequest): Promise<Customer> {
+    return this.fetch("/api/customers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCustomer(id: string, data: UpdateCustomerRequest): Promise<Customer> {
+    return this.fetch(`/api/customers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCustomer(id: string): Promise<void> {
+    await this.fetch(`/api/customers/${id}`, { method: "DELETE" });
   }
 
   // Labels

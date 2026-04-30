@@ -22,6 +22,23 @@ export interface IssueReaction {
   created_at: string;
 }
 
+export interface IssueTimerEntry {
+  id: string;
+  actor_type: IssueAssigneeType;
+  actor_id: string;
+  source: "manual" | "agent_task";
+  task_id: string | null;
+  started_at: string;
+  stopped_at: string | null;
+}
+
+export interface IssueTimerSummary {
+  issue_id: string;
+  total_seconds: number;
+  entry_count: number;
+  active_timer: IssueTimerEntry | null;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -41,6 +58,7 @@ export interface Issue {
   due_date: string | null;
   reactions?: IssueReaction[];
   labels?: Label[];
+  time_tracking?: IssueTimerSummary;
   created_at: string;
   updated_at: string;
 }

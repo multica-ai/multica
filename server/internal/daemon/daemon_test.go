@@ -137,6 +137,25 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
+func TestBuildPromptChatTimerQuestionUsesTrackedTime(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		ChatSessionID: "chat-1",
+		ChatMessage:   "How long have you been working on greet the human?",
+	})
+
+	for _, want := range []string{
+		"multica issue get <issue-id> --output json",
+		"time_tracking.total_seconds",
+		"do not estimate",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("chat prompt missing timer instruction %q", want)
+		}
+	}
+}
+
 func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 

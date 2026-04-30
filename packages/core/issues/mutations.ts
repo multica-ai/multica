@@ -293,6 +293,36 @@ export function useBatchDeleteIssues() {
   });
 }
 
+export function useStartIssueTimer(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.startIssueTimer(issueId),
+    onSuccess: (summary) => {
+      qc.setQueryData(issueKeys.timer(issueId), summary);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timer(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
+export function useStopIssueTimer(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.stopIssueTimer(issueId),
+    onSuccess: (summary) => {
+      qc.setQueryData(issueKeys.timer(issueId), summary);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timer(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Comments / Timeline
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ describe("paths.workspace() shape", () => {
         "root",
         "issues",
         "projects",
+        "customers",
         "autopilots",
         "agents",
         "inbox",
@@ -37,6 +38,7 @@ describe("paths.workspace() shape", () => {
     const expectedSegments: Array<[string, string]> = [
       ["issues", "issues"],
       ["projects", "projects"],
+      ["customers", "customers"],
       ["autopilots", "autopilots"],
       ["agents", "agents"],
       ["inbox", "inbox"],

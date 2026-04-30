@@ -322,6 +322,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
+					r.Get("/timer", h.GetIssueTimer)
+					r.Post("/timer/start", h.StartIssueTimer)
+					r.Post("/timer/stop", h.StopIssueTimer)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
@@ -358,6 +361,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+				})
+			})
+
+			// Customers
+			r.Route("/api/customers", func(r chi.Router) {
+				r.Get("/", h.ListCustomers)
+				r.Post("/", h.CreateCustomer)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetCustomer)
+					r.Put("/", h.UpdateCustomer)
+					r.Delete("/", h.DeleteCustomer)
 				})
 			})
 

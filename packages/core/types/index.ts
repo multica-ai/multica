@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction, IssueTimerEntry, IssueTimerSummary } from "./issue";
 export type {
   Agent,
   AgentStatus,
@@ -37,6 +37,7 @@ export type {
   IssueUsageSummary,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type { Customer, CustomerStatus, CreateCustomerRequest, UpdateCustomerRequest, ListCustomersResponse } from "./customer";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";

@@ -52,6 +52,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useNavigation } from "../navigation";
+import { CustomerPicker } from "../customers/components/customer-picker";
 
 function PillButton({
   children,
@@ -93,6 +94,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -140,6 +142,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
+        customer_id: customerId ?? undefined,
         // Server attaches these in the same transaction as the project.
         resources:
           selectedRepos.length > 0
@@ -407,6 +410,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               </div>
             </PopoverContent>
           </Popover>
+
+          <CustomerPicker
+            customerId={customerId}
+            onUpdate={(data) => setCustomerId(data.customer_id ?? null)}
+            className="rounded-full border px-2.5 py-1 hover:bg-accent/60"
+          />
 
           <Popover open={repoPopoverOpen} onOpenChange={setRepoPopoverOpen}>
             <PopoverTrigger

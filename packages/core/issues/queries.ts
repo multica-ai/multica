@@ -22,6 +22,7 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  timer: (issueId: string) => ["issues", "timer", issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
@@ -154,5 +155,12 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueTimerOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.timer(issueId),
+    queryFn: () => api.getIssueTimer(issueId),
   });
 }

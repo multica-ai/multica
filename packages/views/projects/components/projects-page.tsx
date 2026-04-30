@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
+import { Plus, FolderKanban, UserMinus, Check, Building2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { customerListOptions } from "@multica/core/customers/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import {
   PROJECT_STATUS_CONFIG,
@@ -57,6 +58,8 @@ function ProjectRow({ project }: { project: Project }) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
+  const { data: customers = [] } = useQuery(customerListOptions(wsId));
+  const customer = project.customer_id ? customers.find((c) => c.id === project.customer_id) : undefined;
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -142,6 +145,18 @@ function ProjectRow({ project }: { project: Project }) {
           </>
         ) : (
           <span className="text-xs text-muted-foreground">--</span>
+        )}
+      </span>
+
+      {/* Customer (read-only) */}
+      <span className="flex w-32 min-w-0 shrink-0 items-center justify-center gap-1.5 text-xs text-muted-foreground">
+        {customer ? (
+          <>
+            <Building2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{customer.name}</span>
+          </>
+        ) : (
+          <span>--</span>
         )}
       </span>
 
@@ -260,6 +275,7 @@ export function ProjectsPage() {
               <Skeleton className="h-3 w-12 shrink-0" />
               <Skeleton className="h-3 w-12 shrink-0" />
               <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="h-3 w-12 shrink-0" />
               <Skeleton className="h-3 w-8 shrink-0" />
               <Skeleton className="h-3 w-12 shrink-0" />
             </div>
@@ -287,6 +303,7 @@ export function ProjectsPage() {
               <span className="w-24 text-center shrink-0">Priority</span>
               <span className="w-28 text-center shrink-0">Status</span>
               <span className="w-24 text-center shrink-0">Progress</span>
+              <span className="w-32 text-center shrink-0">Customer</span>
               <span className="w-10 text-center shrink-0">Lead</span>
               <span className="w-20 text-right shrink-0">Created</span>
             </div>
