@@ -10,6 +10,7 @@ import { ChannelHeader } from "./channel-header";
 import { ChannelMessageList } from "./channel-message-list";
 import { ChannelComposer } from "./channel-composer";
 import { ChannelCreateDialog } from "./channel-create-dialog";
+import { NewDMDialog } from "./new-dm-dialog";
 
 interface ChannelsPageProps {
   /** When non-null, the right pane shows that channel. When null, an empty
@@ -44,6 +45,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   const workspace = useCurrentWorkspace();
   const enabled = !!workspace?.channels_enabled;
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [dmDialogOpen, setDmDialogOpen] = useState(false);
 
   const { data: channel, isLoading: channelLoading } = useQuery(
     channelDetailOptions(wsId, activeChannelId ?? "", enabled && !!activeChannelId),
@@ -78,6 +80,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
       <ChannelList
         activeChannelId={activeChannelId}
         onCreateChannel={() => setCreateDialogOpen(true)}
+        onCreateDM={() => setDmDialogOpen(true)}
         enabled={enabled}
       />
       <main className="flex min-w-0 flex-1 flex-col">
@@ -103,6 +106,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
         )}
       </main>
       <ChannelCreateDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+      <NewDMDialog open={dmDialogOpen} onOpenChange={setDmDialogOpen} />
     </div>
   );
 }

@@ -1,17 +1,27 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
 import { useRequiredWorkspaceSlug, paths } from "@multica/core/paths";
-import { channelsListOptions } from "@multica/core/channels";
+import { channelsListOptions, channelMembersOptions } from "@multica/core/channels";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { AppLink } from "../../navigation";
 import { Button } from "@multica/ui/components/ui/button";
-import { Hash, Lock, MessageCircle, Plus } from "lucide-react";
-import type { Channel } from "@multica/core/types";
+import { Hash, Lock, MessageCircle, Plus, Bot } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
+import type {
+  Channel,
+  ChannelMembership,
+  MemberWithUser,
+  Agent,
+} from "@multica/core/types";
 
 interface ChannelListProps {
   activeChannelId: string | null;
   onCreateChannel: () => void;
+  onCreateDM: () => void;
   enabled: boolean;
 }
 
@@ -34,50 +44,132 @@ function rowIcon(c: Channel) {
 }
 
 /**
- * ChannelList is the left-pane sidebar inside the Channels page itself —
- * NOT to be confused with the global app sidebar (which has a single
- * "Channels" entry that lands on this page).
- *
- * Three sections: public channels, private channels (the caller is a
- * member of), and DMs. Empty sections are hidden so the list stays tidy
- * for newer workspaces.
+ * dmDisplayName picks the "other" participant from a DM's membership list
+ * and resolves them against the cached members + agents lists. Falls back
+ * to a placeholder when memberships haven't loaded yet — render flickers
+ * for ~50ms on first paint, which is acceptable for a sidebar.
  */
-export function ChannelList({ activeChannelId, onCreateChannel, enabled }: ChannelListProps) {
+function dmDisplayName(
+  selfUserId: string | null,
+  members: ChannelMembership[],
+  workspaceMembers: Map<string, MemberWithUser>,
+  agents: Map<string, Agent>,
+): { label: string; type: "member" | "agent" | "self" | "unknown"; avatarUrl?: string | null } {
+  if (members.length === 0) {
+    return { label: "Direct message", type: "unknown" };
+  }
+  // The "other" participant is anyone in the membership set who isn't the
+  // current user. For self-DMs (DM where the only participant is you) we
+  // fall through to the self branch below.
+  const others = members.filter(
+    (m) => !(m.member_type === "member" && m.member_id === selfUserId),
+  );
+  if (others.length === 0) {
+    return { label: "Notes to self", type: "self" };
+  }
+  const o = others[0]!;
+  if (o.member_type === "member") {
+    const wm = workspaceMembers.get(o.member_id);
+    return {
+      label: wm?.name || wm?.email || "Unknown member",
+      type: "member",
+      avatarUrl: wm?.avatar_url,
+    };
+  }
+  const a = agents.get(o.member_id);
+  return { label: a?.name || "Unknown agent", type: "agent" };
+}
+
+/**
+ * ChannelList is the left-pane sidebar inside the Channels page. Three
+ * sections (Channels / Private / Direct messages); each section header
+ * has its own `+` affordance so the create action sits next to the
+ * surface it creates into.
+ */
+export function ChannelList({
+  activeChannelId,
+  onCreateChannel,
+  onCreateDM,
+  enabled,
+}: ChannelListProps) {
   const wsId = useWorkspaceId();
   const slug = useRequiredWorkspaceSlug();
+  const selfUserId = useAuthStore((s) => s.user?.id ?? null);
   const { data: channels = [], isLoading } = useQuery(channelsListOptions(wsId, enabled));
+  const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
+  const { data: workspaceAgents = [] } = useQuery(agentListOptions(wsId));
   const { publicChannels, privateChannels, dms } = categorize(channels);
+
+  // Fetch members for every DM in parallel so the sidebar can resolve the
+  // "other participant" label. useQueries is fine for the small N we
+  // expect here; if a workspace ever has hundreds of DMs we should
+  // denormalize the participant info into the channel response instead.
+  const dmMembersResults = useQueries({
+    queries: dms.map((c) => channelMembersOptions(c.id, enabled)),
+  });
+
+  const memberById = useMemo(() => {
+    const m = new Map<string, MemberWithUser>();
+    for (const x of workspaceMembers) m.set(x.user_id, x);
+    return m;
+  }, [workspaceMembers]);
+  const agentById = useMemo(() => {
+    const m = new Map<string, Agent>();
+    for (const x of workspaceAgents) m.set(x.id, x);
+    return m;
+  }, [workspaceAgents]);
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-muted/20">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-sm font-semibold text-foreground">Channels</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onCreateChannel}
-          aria-label="Create channel"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
       </div>
       <div className="flex-1 overflow-y-auto py-2">
         {isLoading ? (
           <div className="px-3 py-2 text-sm text-muted-foreground">Loading…</div>
-        ) : channels.length === 0 ? (
-          <div className="px-3 py-2 text-sm text-muted-foreground">
-            No channels yet. Create one to get started.
-          </div>
         ) : (
           <>
-            {publicChannels.length > 0 && (
-              <Section title="Channels" channels={publicChannels} activeId={activeChannelId} slug={slug} />
+            <SectionHeader title="Channels" onAdd={onCreateChannel} addLabel="Create channel" />
+            {publicChannels.length > 0 ? (
+              <ChannelRows channels={publicChannels} activeId={activeChannelId} slug={slug} />
+            ) : (
+              <EmptyHint text="No public channels yet" />
             )}
+
             {privateChannels.length > 0 && (
-              <Section title="Private" channels={privateChannels} activeId={activeChannelId} slug={slug} />
+              <>
+                <SectionHeader title="Private" />
+                <ChannelRows channels={privateChannels} activeId={activeChannelId} slug={slug} />
+              </>
             )}
-            {dms.length > 0 && (
-              <Section title="Direct messages" channels={dms} activeId={activeChannelId} slug={slug} />
+
+            <SectionHeader title="Direct messages" onAdd={onCreateDM} addLabel="New direct message" />
+            {dms.length > 0 ? (
+              <ul className="flex flex-col gap-px">
+                {dms.map((c, i) => {
+                  const memQuery = dmMembersResults[i];
+                  const mems = memQuery?.data ?? [];
+                  const info = dmDisplayName(selfUserId, mems, memberById, agentById);
+                  const isActive = c.id === activeChannelId;
+                  return (
+                    <li key={c.id}>
+                      <AppLink
+                        href={paths.workspace(slug).channelDetail(c.id)}
+                        className={[
+                          "flex items-center gap-2 px-3 py-1.5 text-sm",
+                          "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
+                          isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "",
+                        ].join(" ")}
+                      >
+                        <DMAvatar info={info} />
+                        <span className="truncate">{info.label}</span>
+                      </AppLink>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <EmptyHint text="No direct messages yet" />
             )}
           </>
         )}
@@ -86,41 +178,93 @@ export function ChannelList({ activeChannelId, onCreateChannel, enabled }: Chann
   );
 }
 
-interface SectionProps {
+interface SectionHeaderProps {
   title: string;
+  onAdd?: () => void;
+  addLabel?: string;
+}
+
+function SectionHeader({ title, onAdd, addLabel }: SectionHeaderProps) {
+  return (
+    <div className="flex items-center justify-between px-3 pb-1 pt-3">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {title}
+      </span>
+      {onAdd ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 w-5 p-0"
+          onClick={onAdd}
+          aria-label={addLabel ?? "Add"}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyHint({ text }: { text: string }) {
+  return <div className="px-3 py-1 text-xs text-muted-foreground/70">{text}</div>;
+}
+
+interface ChannelRowsProps {
   channels: Channel[];
   activeId: string | null;
   slug: string;
 }
 
-function Section({ title, channels, activeId, slug }: SectionProps) {
+function ChannelRows({ channels, activeId, slug }: ChannelRowsProps) {
   return (
-    <div className="mb-4">
-      <div className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </div>
-      <ul className="flex flex-col gap-px">
-        {channels.map((c) => {
-          const Icon = rowIcon(c);
-          const isActive = c.id === activeId;
-          const label = c.display_name || c.name;
-          return (
-            <li key={c.id}>
-              <AppLink
-                href={paths.workspace(slug).channelDetail(c.id)}
-                className={[
-                  "flex items-center gap-2 px-3 py-1.5 text-sm",
-                  "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
-                  isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "",
-                ].join(" ")}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{label}</span>
-              </AppLink>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+    <ul className="flex flex-col gap-px">
+      {channels.map((c) => {
+        const Icon = rowIcon(c);
+        const isActive = c.id === activeId;
+        const label = c.display_name || c.name;
+        return (
+          <li key={c.id}>
+            <AppLink
+              href={paths.workspace(slug).channelDetail(c.id)}
+              className={[
+                "flex items-center gap-2 px-3 py-1.5 text-sm",
+                "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
+                isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "",
+              ].join(" ")}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{label}</span>
+            </AppLink>
+          </li>
+        );
+      })}
+    </ul>
   );
+}
+
+interface DMAvatarProps {
+  info: ReturnType<typeof dmDisplayName>;
+}
+
+function DMAvatar({ info }: DMAvatarProps) {
+  if (info.type === "agent") {
+    return (
+      <Avatar className="h-5 w-5 shrink-0">
+        <AvatarFallback className="bg-purple-100 text-purple-900">
+          <Bot className="h-3 w-3" />
+        </AvatarFallback>
+      </Avatar>
+    );
+  }
+  if (info.type === "member") {
+    return (
+      <Avatar className="h-5 w-5 shrink-0">
+        {info.avatarUrl ? <AvatarImage src={info.avatarUrl} alt={info.label} /> : null}
+        <AvatarFallback className="text-[10px]">
+          {info.label.charAt(0).toUpperCase() || "?"}
+        </AvatarFallback>
+      </Avatar>
+    );
+  }
+  return <MessageCircle className="h-4 w-4 shrink-0" />;
 }

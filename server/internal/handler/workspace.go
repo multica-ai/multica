@@ -33,16 +33,22 @@ func generateIssuePrefix(name string) string {
 }
 
 type WorkspaceResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	Slug                 string  `json:"slug"`
+	Description          *string `json:"description"`
+	Context              *string `json:"context"`
+	Settings             any     `json:"settings"`
+	Repos                any     `json:"repos"`
+	IssuePrefix          string  `json:"issue_prefix"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	// ChannelsEnabled gates the entire Channels feature surface — when false
+	// the sidebar entry hides and every /api/channels endpoint 404s.
+	ChannelsEnabled      bool    `json:"channels_enabled"`
+	// ChannelRetentionDays is the workspace-level default retention window
+	// for channel messages, in days. null/nil = retain forever.
+	ChannelRetentionDays *int32  `json:"channel_retention_days"`
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -60,17 +66,24 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if repos == nil {
 		repos = []any{}
 	}
+	var retention *int32
+	if w.ChannelRetentionDays.Valid {
+		v := w.ChannelRetentionDays.Int32
+		retention = &v
+	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:                   uuidToString(w.ID),
+		Name:                 w.Name,
+		Slug:                 w.Slug,
+		Description:          textToPtr(w.Description),
+		Context:              textToPtr(w.Context),
+		Settings:             settings,
+		Repos:                repos,
+		IssuePrefix:          w.IssuePrefix,
+		CreatedAt:            timestampToString(w.CreatedAt),
+		UpdatedAt:            timestampToString(w.UpdatedAt),
+		ChannelsEnabled:      w.ChannelsEnabled,
+		ChannelRetentionDays: retention,
 	}
 }
 

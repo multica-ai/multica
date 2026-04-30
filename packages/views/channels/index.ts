@@ -3,6 +3,7 @@
 // file is the contract.
 export { ChannelsPage } from "./components/channels-page";
 export { ChannelCreateDialog } from "./components/channel-create-dialog";
+export { NewDMDialog } from "./components/new-dm-dialog";
 export { ChannelList } from "./components/channel-list";
 export { ChannelHeader } from "./components/channel-header";
 export { ChannelMessageList } from "./components/channel-message-list";
