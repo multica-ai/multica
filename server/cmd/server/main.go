@@ -298,6 +298,7 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, taskSvc, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runDBStatsLogger(sweepCtx, pool)
+	go runTimeTrackingChecker(sweepCtx, queries, bus)
 
 	if metricsServer != nil {
 		go func() {

@@ -87,3 +87,8 @@ WHERE te.workspace_id = $1 AND te.user_id = $2
   AND te.spent_on >= $3 AND te.spent_on <= $4
 GROUP BY te.issue_id, i.number, i.title
 ORDER BY total_minutes DESC;
+
+-- name: GetUserTimeOnDate :one
+SELECT COALESCE(SUM(duration_minutes), 0)::int AS total_minutes
+FROM time_entry
+WHERE workspace_id = $1 AND user_id = $2 AND spent_on = $3;

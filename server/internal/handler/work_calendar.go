@@ -18,7 +18,6 @@ type WorkCalendarResponse struct {
 	Days         []CalendarDayResponse `json:"days"`
 	MonthlyHours []MonthlyHoursResponse `json:"monthly_hours"`
 	Source       string               `json:"source"`
-	Status       string               `json:"status"`
 	CreatedAt    string               `json:"created_at"`
 	UpdatedAt    string               `json:"updated_at"`
 }
@@ -40,7 +39,6 @@ func workCalendarToResponse(wc db.WorkCalendar) WorkCalendarResponse {
 		Days:         days,
 		MonthlyHours: monthly,
 		Source:       wc.Source,
-		Status:       wc.Status,
 		CreatedAt:    timestampToString(wc.CreatedAt),
 		UpdatedAt:    timestampToString(wc.UpdatedAt),
 	}
@@ -111,7 +109,6 @@ func (h *Handler) CreateWorkCalendar(w http.ResponseWriter, r *http.Request) {
 		Days:         daysJSON,
 		MonthlyHours: monthlyJSON,
 		Source:       "manual",
-		Status:       "active",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create work calendar")
@@ -144,7 +141,6 @@ func (h *Handler) UpdateWorkCalendar(w http.ResponseWriter, r *http.Request) {
 		Year:         req.Year,
 		Days:         daysJSON,
 		MonthlyHours: monthlyJSON,
-		Status:       "active",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update work calendar")
@@ -218,7 +214,6 @@ func (h *Handler) ImportWorkCalendarFromPDF(w http.ResponseWriter, r *http.Reque
 		Days:         daysJSON,
 		MonthlyHours: monthlyJSON,
 		Source:       "pdf_import",
-		Status:       "active",
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save work calendar")

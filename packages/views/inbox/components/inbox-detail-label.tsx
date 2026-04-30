@@ -23,6 +23,7 @@ const typeLabels: Record<InboxItemType, string> = {
   reaction_added: "Reacted",
   quick_create_done: "Created with agent",
   quick_create_failed: "Create with agent failed",
+  time_not_logged: "Time not logged",
 };
 
 export { typeLabels };

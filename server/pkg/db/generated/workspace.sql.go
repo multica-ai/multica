@@ -120,6 +120,43 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
+const listAllWorkspaces = `-- name: ListAllWorkspaces :many
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListAllWorkspaces(ctx context.Context) ([]Workspace, error) {
+	rows, err := q.db.Query(ctx, listAllWorkspaces)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Workspace{}
+	for rows.Next() {
+		var i Workspace
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Description,
+			&i.Settings,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Context,
+			&i.Repos,
+			&i.IssuePrefix,
+			&i.IssueCounter,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter FROM workspace w
 JOIN member m ON m.workspace_id = w.id

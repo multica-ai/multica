@@ -1,6 +1,6 @@
 -- name: CreateWorkCalendar :one
-INSERT INTO work_calendar (workspace_id, name, year, days, monthly_hours, source, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO work_calendar (workspace_id, name, year, days, monthly_hours, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetWorkCalendar :one
@@ -23,7 +23,6 @@ SET name          = $3,
     year          = $4,
     days          = $5,
     monthly_hours = $6,
-    status        = $7,
     updated_at    = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

@@ -14,32 +14,37 @@ const notificationGroups: {
   label: string;
   description: string;
 }[] = [
-  {
-    key: "assignments",
-    label: "Assignments",
-    description: "When you are assigned or unassigned from an issue",
-  },
-  {
-    key: "status_changes",
-    label: "Status changes",
-    description: "When an issue you follow changes status (e.g. todo, in progress, done)",
-  },
-  {
-    key: "comments",
-    label: "Comments & Mentions",
-    description: "New comments on issues you follow, or when someone @mentions you",
-  },
-  {
-    key: "updates",
-    label: "Priority & Due date",
-    description: "When priority or due date changes on issues you follow",
-  },
-  {
-    key: "agent_activity",
-    label: "Agent activity",
-    description: "When an agent task completes or fails",
-  },
-];
+    {
+      key: "assignments",
+      label: "Assignments",
+      description: "When you are assigned or unassigned from an issue",
+    },
+    {
+      key: "status_changes",
+      label: "Status changes",
+      description: "When an issue you follow changes status (e.g. todo, in progress, done)",
+    },
+    {
+      key: "comments",
+      label: "Comments & Mentions",
+      description: "New comments on issues you follow, or when someone @mentions you",
+    },
+    {
+      key: "updates",
+      label: "Priority & Due date",
+      description: "When priority or due date changes on issues you follow",
+    },
+    {
+      key: "agent_activity",
+      label: "Agent activity",
+      description: "When an agent task completes or fails",
+    },
+    {
+      key: "time_tracking",
+      label: "Time tracking reminders",
+      description: "Daily reminder when you haven't logged the required hours based on the work calendar",
+    },
+  ];
 
 export function NotificationsTab() {
   const wsId = useWorkspaceId();

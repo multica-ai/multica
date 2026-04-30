@@ -3,7 +3,8 @@ export type NotificationGroupKey =
   | "status_changes"
   | "comments"
   | "updates"
-  | "agent_activity";
+  | "agent_activity"
+  | "time_tracking";
 
 export type NotificationGroupValue = "all" | "muted";
 

@@ -283,6 +283,25 @@ func (q *Queries) GetTotalTimeByIssue(ctx context.Context, arg GetTotalTimeByIss
 	return total_minutes, err
 }
 
+const getUserTimeOnDate = `-- name: GetUserTimeOnDate :one
+SELECT COALESCE(SUM(duration_minutes), 0)::int AS total_minutes
+FROM time_entry
+WHERE workspace_id = $1 AND user_id = $2 AND spent_on = $3
+`
+
+type GetUserTimeOnDateParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	SpentOn     pgtype.Date `json:"spent_on"`
+}
+
+func (q *Queries) GetUserTimeOnDate(ctx context.Context, arg GetUserTimeOnDateParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getUserTimeOnDate, arg.WorkspaceID, arg.UserID, arg.SpentOn)
+	var total_minutes int32
+	err := row.Scan(&total_minutes)
+	return total_minutes, err
+}
+
 const listFailedTimeEntries = `-- name: ListFailedTimeEntries :many
 SELECT id, workspace_id, issue_id, user_id, duration_minutes, activity_name, redmine_activity_id, comment, spent_on, external_time_entry_id, sync_status, timer_started_at, timer_stopped_at, created_at, updated_at FROM time_entry
 WHERE workspace_id = $1 AND sync_status = 'failed'

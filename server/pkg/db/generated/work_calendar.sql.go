@@ -12,9 +12,9 @@ import (
 )
 
 const createWorkCalendar = `-- name: CreateWorkCalendar :one
-INSERT INTO work_calendar (workspace_id, name, year, days, monthly_hours, source, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at, status
+INSERT INTO work_calendar (workspace_id, name, year, days, monthly_hours, source)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at
 `
 
 type CreateWorkCalendarParams struct {
@@ -24,7 +24,6 @@ type CreateWorkCalendarParams struct {
 	Days         []byte      `json:"days"`
 	MonthlyHours []byte      `json:"monthly_hours"`
 	Source       string      `json:"source"`
-	Status       string      `json:"status"`
 }
 
 func (q *Queries) CreateWorkCalendar(ctx context.Context, arg CreateWorkCalendarParams) (WorkCalendar, error) {
@@ -35,7 +34,6 @@ func (q *Queries) CreateWorkCalendar(ctx context.Context, arg CreateWorkCalendar
 		arg.Days,
 		arg.MonthlyHours,
 		arg.Source,
-		arg.Status,
 	)
 	var i WorkCalendar
 	err := row.Scan(
@@ -48,7 +46,6 @@ func (q *Queries) CreateWorkCalendar(ctx context.Context, arg CreateWorkCalendar
 		&i.Source,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Status,
 	)
 	return i, err
 }
@@ -69,7 +66,7 @@ func (q *Queries) DeleteWorkCalendar(ctx context.Context, arg DeleteWorkCalendar
 }
 
 const getWorkCalendar = `-- name: GetWorkCalendar :one
-SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at, status FROM work_calendar
+SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at FROM work_calendar
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -91,13 +88,12 @@ func (q *Queries) GetWorkCalendar(ctx context.Context, arg GetWorkCalendarParams
 		&i.Source,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Status,
 	)
 	return i, err
 }
 
 const listWorkCalendars = `-- name: ListWorkCalendars :many
-SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at, status FROM work_calendar
+SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at FROM work_calendar
 WHERE workspace_id = $1
 ORDER BY year DESC, name ASC
 `
@@ -121,7 +117,6 @@ func (q *Queries) ListWorkCalendars(ctx context.Context, workspaceID pgtype.UUID
 			&i.Source,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -134,7 +129,7 @@ func (q *Queries) ListWorkCalendars(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listWorkCalendarsByYear = `-- name: ListWorkCalendarsByYear :many
-SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at, status FROM work_calendar
+SELECT id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at FROM work_calendar
 WHERE workspace_id = $1 AND year = $2
 ORDER BY name ASC
 `
@@ -163,7 +158,6 @@ func (q *Queries) ListWorkCalendarsByYear(ctx context.Context, arg ListWorkCalen
 			&i.Source,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -181,10 +175,9 @@ SET name          = $3,
     year          = $4,
     days          = $5,
     monthly_hours = $6,
-    status        = $7,
     updated_at    = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at, status
+RETURNING id, workspace_id, name, year, days, monthly_hours, source, created_at, updated_at
 `
 
 type UpdateWorkCalendarParams struct {
@@ -194,7 +187,6 @@ type UpdateWorkCalendarParams struct {
 	Year         int32       `json:"year"`
 	Days         []byte      `json:"days"`
 	MonthlyHours []byte      `json:"monthly_hours"`
-	Status       string      `json:"status"`
 }
 
 func (q *Queries) UpdateWorkCalendar(ctx context.Context, arg UpdateWorkCalendarParams) (WorkCalendar, error) {
@@ -205,7 +197,6 @@ func (q *Queries) UpdateWorkCalendar(ctx context.Context, arg UpdateWorkCalendar
 		arg.Year,
 		arg.Days,
 		arg.MonthlyHours,
-		arg.Status,
 	)
 	var i WorkCalendar
 	err := row.Scan(
@@ -218,7 +209,6 @@ func (q *Queries) UpdateWorkCalendar(ctx context.Context, arg UpdateWorkCalendar
 		&i.Source,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Status,
 	)
 	return i, err
 }
