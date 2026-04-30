@@ -914,10 +914,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 }
 
 // appendContextBlock joins agent instructions with an additional context
-// section. Empty inputs are handled cleanly so the output never starts with
-// stray whitespace.
+// section. Empty inputs are handled cleanly so the output never starts or
+// ends with stray whitespace.
 func appendContextBlock(instructions, extra string) string {
 	instructions = strings.TrimRight(instructions, " \t\n")
+	if extra == "" {
+		return instructions
+	}
 	if instructions == "" {
 		return extra
 	}
