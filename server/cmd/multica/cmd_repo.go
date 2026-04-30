@@ -25,7 +25,10 @@ var repoCheckoutCmd = &cobra.Command{
 	RunE:  runRepoCheckout,
 }
 
+var branchFlag string
+
 func init() {
+	repoCheckoutCmd.Flags().StringVarP(&branchFlag, "branch", "b", "", "branch to check out (default: auto-generated agent branch)")
 	repoCmd.AddCommand(repoCheckoutCmd)
 }
 
@@ -53,6 +56,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"workdir":      workDir,
 		"agent_name":   agentName,
 		"task_id":      taskID,
+		"branch":       branchFlag,
 	}
 
 	data, err := json.Marshal(reqBody)

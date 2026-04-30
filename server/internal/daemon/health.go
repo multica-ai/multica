@@ -50,6 +50,7 @@ type repoCheckoutRequest struct {
 	WorkDir     string `json:"workdir"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
+	Branch      string `json:"branch"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -187,4 +188,3 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		d.logger.Warn("health server error", "error", err)
 	}
 }
-
