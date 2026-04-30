@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { ChevronDown, Filter } from "lucide-react-native";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG, PRIORITY_ORDER } from "@multica/core/issues/config/priority";
 import { useIssueList } from "@multica/core/issues/hooks";
@@ -72,22 +74,26 @@ export function IssuesScreen() {
     ],
   );
 
-  const actorLabels = useMemo(() => {
-    const labels = new Map<string, string>();
-    for (const member of members) labels.set(`member:${member.user_id}`, member.name);
-    for (const agent of agents) labels.set(`agent:${agent.id}`, agent.name);
-    return labels;
-  }, [members, agents]);
-
-  const projectLabels = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.title])),
-    [projects],
-  );
-
   return (
     <Screen>
       <View style={styles.headerRow}>
         <WorkspaceHeader centered />
+        <Pressable
+          accessibilityLabel="Filter issues"
+          accessibilityRole="button"
+          onPress={(event: GestureResponderEvent) => {
+            event.stopPropagation();
+            setFilterOpen(true);
+          }}
+          style={({ pressed }) => [styles.headerFilterButton, pressed && styles.pressed]}
+        >
+          <Filter color={colors.foreground} size={18} strokeWidth={2} />
+          {activeFilterCount > 0 ? (
+            <View style={styles.headerFilterBadge}>
+              <Text style={styles.headerFilterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
       <View style={styles.statusTabs}>
         {BOARD_STATUSES.map((item) => (
@@ -102,37 +108,6 @@ export function IssuesScreen() {
           </Pressable>
         ))}
       </View>
-      <View style={styles.toolbar}>
-        <Pressable
-          accessibilityLabel="Filter issues"
-          accessibilityRole="button"
-          onPress={() => setFilterOpen(true)}
-          style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.filterButtonText}>Filter</Text>
-          {activeFilterCount > 0 ? (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-        {activeFilterCount > 0 ? (
-          <Pressable
-            accessibilityLabel="Clear issue filters"
-            accessibilityRole="button"
-            onPress={clearFilters}
-            style={({ pressed }) => [styles.clearButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.clearButtonText}>Clear</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {activeFilterCount > 0 ? (
-        <FilterChips
-          actorLabels={actorLabels}
-          projectLabels={projectLabels}
-        />
-      ) : null}
       {isLoading ? <LoadingState /> : null}
       {isError ? (
         <EmptyState detail="Pull to retry once the connection is available." title="Unable to load issues" />
@@ -197,86 +172,15 @@ function actorKey(actor: ActorFilterValue) {
   return `${actor.type}:${actor.id}`;
 }
 
-function actorLabel(actor: ActorFilterValue, labels: Map<string, string>) {
-  return labels.get(actorKey(actor)) ?? `Unknown ${actor.type}`;
-}
-
-function FilterChips({
-  actorLabels,
-  projectLabels,
-}: {
-  actorLabels: Map<string, string>;
-  projectLabels: Map<string, string>;
-}) {
-  const priorityFilters = useMobileIssuesFilterStore((s) => s.priorityFilters);
-  const assigneeFilters = useMobileIssuesFilterStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useMobileIssuesFilterStore((s) => s.includeNoAssignee);
-  const creatorFilters = useMobileIssuesFilterStore((s) => s.creatorFilters);
-  const projectFilters = useMobileIssuesFilterStore((s) => s.projectFilters);
-  const includeNoProject = useMobileIssuesFilterStore((s) => s.includeNoProject);
-  const togglePriorityFilter = useMobileIssuesFilterStore((s) => s.togglePriorityFilter);
-  const toggleAssigneeFilter = useMobileIssuesFilterStore((s) => s.toggleAssigneeFilter);
-  const toggleNoAssignee = useMobileIssuesFilterStore((s) => s.toggleNoAssignee);
-  const toggleCreatorFilter = useMobileIssuesFilterStore((s) => s.toggleCreatorFilter);
-  const toggleProjectFilter = useMobileIssuesFilterStore((s) => s.toggleProjectFilter);
-  const toggleNoProject = useMobileIssuesFilterStore((s) => s.toggleNoProject);
-
-  return (
-    <ScrollView
-      contentContainerStyle={styles.chips}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-    >
-      {priorityFilters.map((priority) => (
-        <FilterChip
-          key={`priority-${priority}`}
-          label={`Priority: ${PRIORITY_CONFIG[priority].label}`}
-          onRemove={() => togglePriorityFilter(priority)}
-        />
-      ))}
-      {includeNoAssignee ? (
-        <FilterChip label="Assignee: No assignee" onRemove={toggleNoAssignee} />
-      ) : null}
-      {assigneeFilters.map((assignee) => (
-        <FilterChip
-          key={`assignee-${actorKey(assignee)}`}
-          label={`Assignee: ${actorLabel(assignee, actorLabels)}`}
-          onRemove={() => toggleAssigneeFilter(assignee)}
-        />
-      ))}
-      {creatorFilters.map((creator) => (
-        <FilterChip
-          key={`creator-${actorKey(creator)}`}
-          label={`Creator: ${actorLabel(creator, actorLabels)}`}
-          onRemove={() => toggleCreatorFilter(creator)}
-        />
-      ))}
-      {includeNoProject ? (
-        <FilterChip label="Project: No project" onRemove={toggleNoProject} />
-      ) : null}
-      {projectFilters.map((projectId) => (
-        <FilterChip
-          key={`project-${projectId}`}
-          label={`Project: ${projectLabels.get(projectId) ?? "Unknown project"}`}
-          onRemove={() => toggleProjectFilter(projectId)}
-        />
-      ))}
-    </ScrollView>
-  );
-}
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <Pressable
-      accessibilityLabel={`Remove ${label} filter`}
-      accessibilityRole="button"
-      onPress={onRemove}
-      style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
-    >
-      <Text numberOfLines={1} style={styles.chipText}>{label}</Text>
-      <Text style={styles.chipRemove}>x</Text>
-    </Pressable>
-  );
+function fuzzyMatch(label: string, query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  let index = 0;
+  for (const char of label.toLowerCase()) {
+    if (char === normalized[index]) index += 1;
+    if (index === normalized.length) return true;
+  }
+  return false;
 }
 
 function IssueListEmpty({
@@ -331,6 +235,39 @@ function IssueFilterSheet({
   const toggleNoProject = useMobileIssuesFilterStore((s) => s.toggleNoProject);
   const clearFilters = useMobileIssuesFilterStore((s) => s.clearFilters);
   const activeAgents = agents.filter((agent) => !agent.archived_at);
+  const assigneeSelectedKeys = useMemo(
+    () => new Set(assigneeFilters.map(actorKey)),
+    [assigneeFilters],
+  );
+  const creatorSelectedKeys = useMemo(
+    () => new Set(creatorFilters.map(actorKey)),
+    [creatorFilters],
+  );
+  const projectSelectedKeys = useMemo(
+    () => new Set(projectFilters),
+    [projectFilters],
+  );
+  const assigneeOptions = useMemo(
+    () => [
+      ...members.map((member) => ({
+        id: member.user_id,
+        type: "member" as const,
+        label: member.name,
+        meta: "Member",
+      })),
+      ...activeAgents.map((agent) => ({
+        id: agent.id,
+        type: "agent" as const,
+        label: agent.name,
+        meta: "Agent",
+      })),
+    ],
+    [activeAgents, members],
+  );
+  const projectOptions = useMemo(
+    () => projects.map((project) => ({ id: project.id, label: project.title })),
+    [projects],
+  );
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
@@ -354,68 +291,49 @@ function IssueFilterSheet({
             ))}
           </FilterSection>
 
-          <FilterSection title="Assignee">
-            <FilterOption
-              label="No assignee"
-              onPress={toggleNoAssignee}
-              selected={includeNoAssignee}
-            />
-            {members.map((member) => (
+          <FilterDroplistSection
+            emptyLabel="Any assignee"
+            footer={
               <FilterOption
-                key={`assignee-member-${member.user_id}`}
-                label={member.name}
-                meta="Member"
-                onPress={() => toggleAssigneeFilter({ type: "member", id: member.user_id })}
-                selected={assigneeFilters.some((f) => f.type === "member" && f.id === member.user_id)}
+                label="No assignee"
+                onPress={toggleNoAssignee}
+                selected={includeNoAssignee}
               />
-            ))}
-            {activeAgents.map((agent) => (
-              <FilterOption
-                key={`assignee-agent-${agent.id}`}
-                label={agent.name}
-                meta="Agent"
-                onPress={() => toggleAssigneeFilter({ type: "agent", id: agent.id })}
-                selected={assigneeFilters.some((f) => f.type === "agent" && f.id === agent.id)}
-              />
-            ))}
-          </FilterSection>
+            }
+            options={assigneeOptions}
+            placeholder="Search assignees..."
+            selectedKeys={assigneeSelectedKeys}
+            title="Assignee"
+            toKey={(value) => actorKey(value)}
+            onToggle={(value) => toggleAssigneeFilter({ type: value.type, id: value.id })}
+          />
 
-          <FilterSection title="Creator">
-            {members.map((member) => (
-              <FilterOption
-                key={`creator-member-${member.user_id}`}
-                label={member.name}
-                meta="Member"
-                onPress={() => toggleCreatorFilter({ type: "member", id: member.user_id })}
-                selected={creatorFilters.some((f) => f.type === "member" && f.id === member.user_id)}
-              />
-            ))}
-            {activeAgents.map((agent) => (
-              <FilterOption
-                key={`creator-agent-${agent.id}`}
-                label={agent.name}
-                meta="Agent"
-                onPress={() => toggleCreatorFilter({ type: "agent", id: agent.id })}
-                selected={creatorFilters.some((f) => f.type === "agent" && f.id === agent.id)}
-              />
-            ))}
-          </FilterSection>
+          <FilterDroplistSection
+            emptyLabel="Any creator"
+            options={assigneeOptions}
+            placeholder="Search creators..."
+            selectedKeys={creatorSelectedKeys}
+            title="Creator"
+            toKey={(value) => actorKey(value)}
+            onToggle={(value) => toggleCreatorFilter({ type: value.type, id: value.id })}
+          />
 
-          <FilterSection title="Project">
-            <FilterOption
-              label="No project"
-              onPress={toggleNoProject}
-              selected={includeNoProject}
-            />
-            {projects.map((project) => (
+          <FilterDroplistSection
+            emptyLabel="Any project"
+            footer={
               <FilterOption
-                key={project.id}
-                label={project.title}
-                onPress={() => toggleProjectFilter(project.id)}
-                selected={projectFilters.includes(project.id)}
+                label="No project"
+                onPress={toggleNoProject}
+                selected={includeNoProject}
               />
-            ))}
-          </FilterSection>
+            }
+            options={projectOptions}
+            placeholder="Search projects..."
+            selectedKeys={projectSelectedKeys}
+            title="Project"
+            toKey={(value) => value.id}
+            onToggle={(value) => toggleProjectFilter(value.id)}
+          />
         </ScrollView>
         <View style={styles.sheetFooter}>
           <Pressable accessibilityRole="button" onPress={clearFilters} style={styles.resetButton}>
@@ -432,6 +350,93 @@ function FilterSection({ children, title }: { children: ReactNode; title: string
     <View style={styles.filterSection}>
       <Text style={styles.filterSectionTitle}>{title}</Text>
       <View style={styles.filterOptions}>{children}</View>
+    </View>
+  );
+}
+
+function FilterDroplistSection<T extends { id: string; label: string; meta?: string }>({
+  emptyLabel,
+  footer,
+  options,
+  placeholder,
+  selectedKeys,
+  title,
+  toKey,
+  onToggle,
+}: {
+  emptyLabel: string;
+  footer?: ReactNode;
+  options: T[];
+  placeholder: string;
+  selectedKeys: Set<string>;
+  title: string;
+  toKey: (value: T) => string;
+  onToggle: (value: T) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState("");
+  const visibleOptions = useMemo(() => {
+    const matched = options.filter((option) => fuzzyMatch(option.label, query));
+    return matched.sort((a, b) => {
+      const aSelected = selectedKeys.has(toKey(a));
+      const bSelected = selectedKeys.has(toKey(b));
+      if (aSelected === bSelected) return a.label.localeCompare(b.label);
+      return aSelected ? -1 : 1;
+    });
+  }, [options, query, selectedKeys, toKey]);
+  const summary = selectedKeys.size > 0
+    ? `${selectedKeys.size} selected`
+    : emptyLabel;
+
+  return (
+    <View style={styles.filterSection}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setExpanded((value) => !value)}
+        style={({ pressed }) => [styles.droplistHeader, pressed && styles.pressed]}
+      >
+        <View style={styles.optionTextGroup}>
+          <Text style={styles.filterSectionTitle}>{title}</Text>
+          <Text style={styles.droplistSummary}>{summary}</Text>
+        </View>
+        <ChevronDown
+          color={colors.mutedForeground}
+          size={18}
+          style={expanded ? styles.droplistChevronOpen : undefined}
+        />
+      </Pressable>
+      {expanded ? (
+        <View style={styles.filterOptions}>
+          {footer}
+          <View style={styles.searchWrap}>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={setQuery}
+              placeholder={placeholder}
+              placeholderTextColor={colors.mutedForeground}
+              style={styles.searchInput}
+              value={query}
+            />
+          </View>
+          {visibleOptions.length > 0 ? (
+            visibleOptions.map((option) => {
+              const key = toKey(option);
+              return (
+                <FilterOption
+                  key={key}
+                  label={option.label}
+                  meta={option.meta}
+                  onPress={() => onToggle(option)}
+                  selected={selectedKeys.has(key)}
+                />
+              );
+            })
+          ) : (
+            <Text style={styles.noResultsText}>No results</Text>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -486,7 +491,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 44,
     position: "relative",
-    zIndex: 20,
+    zIndex: 100,
+  },
+  headerFilterButton: {
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderRadius: radii.md,
+    elevation: 100,
+    height: 36,
+    justifyContent: "center",
+    position: "absolute",
+    right: 0,
+    top: 4,
+    width: 36,
+    zIndex: 1000,
+  },
+  headerFilterBadge: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 9,
+    height: 18,
+    justifyContent: "center",
+    minWidth: 18,
+    paddingHorizontal: 3,
+    position: "absolute",
+    right: 1,
+    top: 1,
+  },
+  headerFilterBadgeText: {
+    color: colors.primaryForeground,
+    fontSize: 10,
+    fontWeight: "700",
   },
   floatingButton: {
     alignItems: "center",
@@ -540,79 +575,8 @@ const styles = StyleSheet.create({
   statusTextActive: {
     color: colors.primaryForeground,
   },
-  toolbar: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  filterButton: {
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.sm,
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
-  },
-  filterButtonText: {
-    color: colors.foreground,
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  filterBadge: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    height: 20,
-    justifyContent: "center",
-    minWidth: 20,
-    paddingHorizontal: spacing.xs,
-  },
-  filterBadgeText: {
-    color: colors.primaryForeground,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  clearButton: {
-    minHeight: 36,
-    justifyContent: "center",
-    paddingHorizontal: spacing.sm,
-  },
-  clearButtonText: {
-    color: colors.mutedForeground,
-    fontSize: 13,
-    fontWeight: "500",
-  },
   pressed: {
     opacity: 0.72,
-  },
-  chips: {
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
-  },
-  chip: {
-    alignItems: "center",
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    flexDirection: "row",
-    gap: spacing.xs,
-    maxWidth: 220,
-    minHeight: 32,
-    paddingHorizontal: spacing.sm,
-  },
-  chipText: {
-    color: colors.foreground,
-    flexShrink: 1,
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  chipRemove: {
-    color: colors.mutedForeground,
-    fontSize: 16,
-    lineHeight: 18,
   },
   list: {
     flexGrow: 1,
@@ -735,12 +699,53 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textTransform: "uppercase",
   },
+  droplistHeader: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 56,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  droplistSummary: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  droplistChevronOpen: {
+    transform: [{ rotate: "180deg" }],
+  },
   filterOptions: {
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
+  },
+  searchWrap: {
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    padding: spacing.sm,
+  },
+  searchInput: {
+    backgroundColor: colors.muted,
+    borderRadius: radii.sm,
+    color: colors.foreground,
+    fontSize: 15,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 0,
+  },
+  noResultsText: {
+    color: colors.mutedForeground,
+    fontSize: 14,
+    padding: spacing.lg,
+    textAlign: "center",
   },
   filterOption: {
     alignItems: "center",

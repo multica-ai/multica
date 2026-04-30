@@ -31,6 +31,8 @@ catalog:
 
   # Icons
   lucide-react: "^1.0.1"
+  lucide-react-native: "^1.0.1"
+  react-native-svg: "15.15.3"
 
   # Product analytics
   posthog-js: "^1.176.1"
