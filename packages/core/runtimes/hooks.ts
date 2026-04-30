@@ -41,6 +41,10 @@ function runtimeNeedsUpdate(
   return isNewer(latestVersion, cliVersion);
 }
 
+export function useRuntimeList(wsId: string, owner?: "me") {
+  return useQuery(runtimeListOptions(wsId, owner));
+}
+
 /**
  * Returns true if the current user has any local runtime with an outdated CLI version.
  * Accepts wsId as parameter so callers outside WorkspaceIdProvider can use it safely.

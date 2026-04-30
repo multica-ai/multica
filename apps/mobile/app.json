@@ -7,7 +7,9 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "android": {
       "package": "com.wujieai.multica",
       "adaptiveIcon": {
@@ -17,7 +19,10 @@
     },
     "extra": {
       "apiBaseUrl": "https://multica.wujieai.com",
-      "wsUrl": "wss://multica.wujieai.com/ws"
+      "wsUrl": "wss://multica.wujieai.com/ws",
+      "eas": {
+        "projectId": "a4140277-7ff1-4282-b21e-5fc2fd9e5eea"
+      }
     }
   }
 }

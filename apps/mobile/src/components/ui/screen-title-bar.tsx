@@ -1,12 +1,16 @@
+import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ChevronLeft } from "lucide-react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 export function ScreenTitleBar({
   onBack,
+  right,
   title,
 }: {
   onBack: () => void;
+  right?: ReactNode;
   title: string;
 }) {
   const insets = useSafeAreaInsets();
@@ -23,14 +27,14 @@ export function ScreenTitleBar({
             pressed && styles.buttonPressed,
           ]}
         >
-          <Text style={styles.titleBarBackIcon}>←</Text>
+          <ChevronLeft color={colors.foreground} size={22} />
         </Pressable>
         <View pointerEvents="none" style={styles.titleBarTitleWrap}>
           <Text numberOfLines={1} style={styles.titleBarTitle}>
             {title}
           </Text>
         </View>
-        <View style={styles.titleBarSideSpacer} />
+        <View style={styles.titleBarSideSpacer}>{right}</View>
       </View>
     </View>
   );
@@ -58,12 +62,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 40,
   },
-  titleBarBackIcon: {
-    color: colors.foreground,
-    fontSize: 24,
-    fontWeight: "500",
-    lineHeight: 28,
-  },
   titleBarTitleWrap: {
     alignItems: "center",
     bottom: 0,
@@ -81,7 +79,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   titleBarSideSpacer: {
-    width: 40,
+    alignItems: "flex-end",
+    minWidth: 40,
   },
   buttonPressed: {
     opacity: 0.7,

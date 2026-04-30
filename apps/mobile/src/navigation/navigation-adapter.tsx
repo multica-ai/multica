@@ -7,12 +7,6 @@ export function createMobileNavigationAdapter(
   return {
     push(path: string) {
       if (!navigationRef.current) return;
-      if (path.includes("/projects/")) {
-        navigationRef.current.navigate("ProjectDetail", {
-          projectId: path.split("/").at(-1) ?? "",
-        });
-        return;
-      }
       if (path.includes("/issues/")) {
         navigationRef.current.navigate("IssueDetail", {
           issueId: path.split("/").at(-1) ?? "",

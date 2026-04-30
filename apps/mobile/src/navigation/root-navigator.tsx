@@ -12,14 +12,17 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
 import type { Workspace } from "@multica/core/types";
+import { CircleUserRound, ListTodo } from "lucide-react-native";
 import { EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
 import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcript-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
-import { ProjectsScreen } from "../screens/projects/projects-screen";
+import { InboxDetailScreen } from "../screens/mine/inbox-detail-screen";
+import { InboxScreen } from "../screens/mine/inbox-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
+import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { colors, spacing } from "../theme/tokens";
 import { linking } from "./linking";
 import { WorkspaceContext } from "./workspace-context";
@@ -29,13 +32,15 @@ export type RootStackParamList = {
   IssueDetail: { issueId: string };
   IssueTaskTranscript: { issueId: string; taskId: string };
   CreateIssue: undefined;
-  ProjectDetail: { projectId: string };
   Search: undefined;
+  Runtimes: undefined;
+  Agents: undefined;
+  Inbox: undefined;
+  InboxDetail: { inboxItemId: string };
 };
 
 type TabParamList = {
   Issues: undefined;
-  Projects: undefined;
   Mine: undefined;
 };
 
@@ -71,8 +76,11 @@ export function RootNavigator() {
             <Stack.Screen component={IssueDetailScreen} name="IssueDetail" />
             <Stack.Screen component={IssueTaskTranscriptScreen} name="IssueTaskTranscript" />
             <Stack.Screen component={CreateIssueScreen} name="CreateIssue" />
-            <Stack.Screen component={ProjectDetailScreen} name="ProjectDetail" />
             <Stack.Screen component={SearchScreen} name="Search" />
+            <Stack.Screen component={RuntimesScreen} name="Runtimes" />
+            <Stack.Screen component={AgentsScreen} name="Agents" />
+            <Stack.Screen component={InboxScreen} name="Inbox" />
+            <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
           </Stack.Navigator>
         </WorkspaceGate>
       </NavigationContainer>
@@ -112,23 +120,26 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: colors.foreground,
         tabBarInactiveTintColor: colors.mutedForeground,
+        tabBarLabelPosition: "below-icon",
         tabBarLabelStyle: styles.tabLabel,
         tabBarStyle: styles.tabBar,
       }}
     >
-      <Tabs.Screen component={IssuesScreen} name="Issues" />
-      <Tabs.Screen component={ProjectsScreen} name="Projects" />
-      <Tabs.Screen component={MineScreen} name="Mine" />
+      <Tabs.Screen
+        component={IssuesScreen}
+        name="Issues"
+        options={{
+          tabBarIcon: ({ color, size }) => <ListTodo color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        component={MineScreen}
+        name="Mine"
+        options={{
+          tabBarIcon: ({ color, size }) => <CircleUserRound color={color} size={size} />,
+        }}
+      />
     </Tabs.Navigator>
-  );
-}
-
-function ProjectDetailScreen() {
-  return (
-    <Screen>
-      <Text style={styles.title}>Project detail</Text>
-      <Text style={styles.muted}>Project summary and issue progress will reuse the project detail API.</Text>
-    </Screen>
   );
 }
 
@@ -137,6 +148,19 @@ function SearchScreen() {
     <Screen>
       <Text style={styles.title}>Search</Text>
       <Text style={styles.muted}>Issue and project search entry point.</Text>
+    </Screen>
+  );
+}
+
+function AgentsScreen() {
+  return <ReadOnlyPlaceholderScreen title="Agents" />;
+}
+
+function ReadOnlyPlaceholderScreen({ title }: { title: string }) {
+  return (
+    <Screen>
+      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.muted}>Read-only mobile view entry point.</Text>
     </Screen>
   );
 }

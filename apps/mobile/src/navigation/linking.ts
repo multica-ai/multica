@@ -8,14 +8,16 @@ export const linking = {
       Main: {
         screens: {
           Issues: "issues",
-          Projects: "projects",
           Mine: "mine",
         },
       },
       IssueDetail: "issues/:issueId",
       IssueTaskTranscript: "issues/:issueId/runs/:taskId",
-      ProjectDetail: "projects/:projectId",
       Search: "search",
+      Runtimes: "runtimes",
+      Agents: "agents",
+      Inbox: "inbox",
+      InboxDetail: "inbox/:inboxItemId",
     },
   },
 };
