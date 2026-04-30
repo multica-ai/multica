@@ -1056,16 +1056,60 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
+	hasChannelMention := false
 	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
-		var qc service.QuickCreateContext
-		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
-			hasQuickCreate = true
-			resp.QuickCreatePrompt = qc.Prompt
-			resp.WorkspaceID = qc.WorkspaceID
-			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+		// Lightweight type sniff before committing to a full unmarshal —
+		// we have two no-issue/no-chat task shapes today (quick-create and
+		// channel-mention) and a malformed payload shouldn't pollute either
+		// branch.
+		var probe struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(task.Context, &probe)
+		switch probe.Type {
+		case service.QuickCreateContextType:
+			var qc service.QuickCreateContext
+			if json.Unmarshal(task.Context, &qc) == nil {
+				hasQuickCreate = true
+				resp.QuickCreatePrompt = qc.Prompt
+				resp.WorkspaceID = qc.WorkspaceID
+				if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
+				}
+			}
+		case service.ChannelMentionContextType:
+			// Phase 3b: hydrate channel-mention fields onto the wire so
+			// the daemon's prompt + context renderers can see them. The
+			// recent-message window is intentionally NOT fetched here —
+			// the daemon pulls the latest 50 (configurable via
+			// CHANNEL_AGENT_CONTEXT_MESSAGES) at execution time so the
+			// window stays fresh between enqueue and claim.
+			var cm service.ChannelMentionContext
+			if json.Unmarshal(task.Context, &cm) == nil {
+				hasChannelMention = true
+				resp.WorkspaceID = cm.WorkspaceID
+				resp.ChannelID = cm.ChannelID
+				resp.ChannelName = cm.ChannelName
+				resp.ChannelKind = cm.ChannelKind
+				resp.ChannelMessageID = cm.MessageID
+				resp.ChannelMessageContent = cm.MessageContent
+				resp.TriggerAuthorType = cm.AuthorType
+				// Resolve author display name for the agent prompt.
+				if cm.AuthorID != "" {
+					authorUUID := parseUUID(cm.AuthorID)
+					switch cm.AuthorType {
+					case "member":
+						if u, err := h.Queries.GetUser(r.Context(), authorUUID); err == nil {
+							resp.TriggerAuthorName = u.Name
+						}
+					case "agent":
+						if a, err := h.Queries.GetAgent(r.Context(), authorUUID); err == nil {
+							resp.TriggerAuthorName = a.Name
+						}
+					}
 				}
 			}
 		}
@@ -1090,6 +1134,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_channel_mention", hasChannelMention,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",

@@ -172,7 +172,15 @@ type AgentTaskResponse struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// Channels Phase 3b — populated when the daemon claims a task whose
+	// JSONB context.type == "channel_mention". Hydrated by ClaimTaskByRuntime
+	// from service.ChannelMentionContext.
+	ChannelID             string `json:"channel_id,omitempty"`
+	ChannelName           string `json:"channel_name,omitempty"`
+	ChannelKind           string `json:"channel_kind,omitempty"`
+	ChannelMessageID      string `json:"channel_message_id,omitempty"`
+	ChannelMessageContent string `json:"channel_message_content,omitempty"`
+	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "channel_mention" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

@@ -60,6 +60,16 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	// Channel-mention task fields (Phase 3b). Mutually exclusive with the
+	// other variants — populated by the daemon when ChannelID is non-empty
+	// on the wire Task.
+	ChannelID             string
+	ChannelName           string
+	ChannelKind           string
+	ChannelMessageID      string
+	ChannelMessageContent string
+	ChannelAuthorType     string
+	ChannelAuthorName     string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

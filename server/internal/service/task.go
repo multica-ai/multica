@@ -823,6 +823,77 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		s.broadcastChatDone(ctx, task)
 	}
 
+	// Channels Phase 3b: when a channel-mention task completes, post the
+	// agent's output back to the channel as a `channel_message` from the
+	// agent. Detection is by JSONB context.type — the task row itself has
+	// no channel_id column. The reply goes through the same INSERT path
+	// the user-facing handler uses, so it inherits all of channel_message's
+	// invariants (timeline index, fts trigger, etc.) for free.
+	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(task.Context, &probe) == nil && probe.Type == ChannelMentionContextType {
+			var cm ChannelMentionContext
+			if err := json.Unmarshal(task.Context, &cm); err == nil && cm.ChannelID != "" {
+				var payload protocol.TaskCompletedPayload
+				if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
+					body := util.UnescapeBackslashEscapes(payload.Output)
+					channelUUID, perr := util.ParseUUID(cm.ChannelID)
+					if perr != nil {
+						slog.Warn("channel-mention completion: invalid channel id",
+							"task_id", util.UUIDToString(task.ID),
+							"channel_id", cm.ChannelID,
+							"error", perr,
+						)
+					} else {
+						// metadata carries the originating task id so the
+						// frontend can show "this reply was triggered by
+						// the @-mention task and surface a link to the
+						// task transcript / cancel button if desired.
+						metaJSON, _ := json.Marshal(map[string]any{
+							"task_id":              util.UUIDToString(task.ID),
+							"trigger_message_id":   cm.MessageID,
+							"trigger_author_type":  cm.AuthorType,
+						})
+						if _, err := s.Queries.CreateChannelMessage(ctx, db.CreateChannelMessageParams{
+							ChannelID:  channelUUID,
+							AuthorType: "agent",
+							AuthorID:   task.AgentID,
+							Content:    redact.Text(body),
+							Metadata:   metaJSON,
+						}); err != nil {
+							slog.Error("channel-mention completion: failed to post reply",
+								"task_id", util.UUIDToString(task.ID),
+								"channel_id", cm.ChannelID,
+								"error", err,
+							)
+						} else {
+							slog.Info("channel-mention reply posted",
+								"task_id", util.UUIDToString(task.ID),
+								"channel_id", cm.ChannelID,
+								"agent_id", util.UUIDToString(task.AgentID),
+							)
+							// Notify all channel subscribers — same event
+							// the user-facing CreateChannelMessage handler
+							// publishes.
+							s.Bus.Publish(events.Event{
+								Type:        protocol.EventChannelMessage,
+								WorkspaceID: cm.WorkspaceID,
+								ActorType:   "agent",
+								ActorID:     util.UUIDToString(task.AgentID),
+								Payload: map[string]any{
+									"channel_id": cm.ChannelID,
+									"message_triggered_by_task_id": util.UUIDToString(task.ID),
+								},
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 

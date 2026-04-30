@@ -1253,6 +1253,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:         task.AutopilotSource,
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
+		// Channels Phase 3b — populated by the server claim path when the
+		// task's JSONB context.type == "channel_mention". Propagated into
+		// the env so renderChannelMentionContext can build issue_context.md.
+		// ChannelAuthorType + ChannelAuthorName re-use the existing wire
+		// fields (TriggerAuthorType / TriggerAuthorName) rather than
+		// adding parallel ones; the hydrator on the server populates those.
+		ChannelID:             task.ChannelID,
+		ChannelName:           task.ChannelName,
+		ChannelKind:           task.ChannelKind,
+		ChannelMessageID:      task.ChannelMessageID,
+		ChannelMessageContent: task.ChannelMessageContent,
+		ChannelAuthorType:     task.TriggerAuthorType,
+		ChannelAuthorName:     task.TriggerAuthorName,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop

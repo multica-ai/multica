@@ -482,6 +482,128 @@ func TestCreateChannelMessage_TriggersAgentMention(t *testing.T) {
 	t.Fatalf("expected at least 1 channel-mention task, got %d", taskCount)
 }
 
+// TestCompleteChannelMentionTask_PostsReply exercises Phase 3b end to end:
+// post a channel message with @agent mention → task gets enqueued (3a) →
+// simulate the daemon completing the task with output → verify a new
+// channel_message lands with author_type='agent' and author_id matching.
+func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	// Create the channel and add the test agent as a member.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "complete-test", "display_name": "CompleteTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d %s", w.Code, w.Body.String())
+	}
+	ch := decodeChannel(t, w)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/members", map[string]any{
+		"member_type": "agent", "member_id": testAgentID(), "role": "member",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.AddChannelMember(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add agent: %d", w.Code)
+	}
+
+	// Clean any prior tasks to avoid dedup interference.
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	})
+
+	// Post a message that mentions the agent → enqueues a task.
+	mention := "[@bot](mention://agent/" + testAgentID() + ")"
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content": "hey " + mention + " please respond",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create message: %d", w.Code)
+	}
+
+	// Wait for the async fan-out to enqueue the task.
+	var taskID string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		row := testPool.QueryRow(ctx, `
+			SELECT id::text FROM agent_task_queue
+			WHERE agent_id = $1
+			  AND context->>'type' = 'channel_mention'
+			  AND context->>'channel_id' = $2
+			LIMIT 1
+		`, testAgentID(), ch.ID)
+		_ = row.Scan(&taskID)
+		if taskID != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if taskID == "" {
+		t.Fatalf("no channel-mention task was enqueued")
+	}
+
+	// Mark the task as 'running' so CompleteTask's state-machine
+	// guard accepts it (the prod path always goes queued → dispatched →
+	// running → completed).
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'running',
+		    started_at = now(),
+		    dispatched_at = now()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	// Simulate the daemon's CompleteTask call. The result payload mirrors
+	// the daemon's protocol.TaskCompletedPayload.
+	taskUUID := parseUUID(taskID)
+	resultJSON, _ := json.Marshal(map[string]any{
+		"output": "Hi! I'm the agent — thanks for tagging me.",
+	})
+	if _, err := testHandler.TaskService.CompleteTask(ctx, taskUUID, resultJSON, "" /*sessionID*/, "" /*workDir*/); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	// Verify the agent's reply landed as a channel_message.
+	var (
+		count       int
+		authorType  string
+		authorID    string
+		content     string
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM channel_message
+		WHERE channel_id = $1 AND author_type = 'agent'
+	`, ch.ID).Scan(&count); err != nil {
+		t.Fatalf("count agent messages: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 agent reply, got %d", count)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT author_type, author_id::text, content FROM channel_message
+		WHERE channel_id = $1 AND author_type = 'agent'
+		ORDER BY created_at DESC LIMIT 1
+	`, ch.ID).Scan(&authorType, &authorID, &content); err != nil {
+		t.Fatalf("fetch agent reply: %v", err)
+	}
+	if authorID != testAgentID() {
+		t.Fatalf("author_id = %q, want agent id %q", authorID, testAgentID())
+	}
+	if !strings.Contains(content, "Hi! I'm the agent") {
+		t.Fatalf("reply content unexpected: %q", content)
+	}
+}
+
 // testAgentID returns the workspace's first agent id, lazily seeding one if
 // the shared fixture didn't include it. We don't add a workspace-test-agent
 // to setupHandlerTestFixture because most tests don't need one.

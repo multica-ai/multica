@@ -205,6 +205,9 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv) error {
 
 // renderIssueContext builds the markdown content for issue_context.md.
 func renderIssueContext(provider string, ctx TaskContextForEnv) string {
+	if ctx.ChannelID != "" {
+		return renderChannelMentionContext(ctx)
+	}
 	if ctx.AutopilotRunID != "" {
 		return renderAutopilotContext(ctx)
 	}
@@ -304,6 +307,55 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// renderChannelMentionContext renders issue_context.md for tasks
+// triggered by an @-mention in a channel message. Channel tasks have
+// no issue, no commits, and no branches — they're conversational. The
+// agent's reply is captured as the agent CLI's stdout and posted back
+// as a `channel_message` by the server's CompleteTask handler.
+func renderChannelMentionContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Channel Mention\n\n")
+	if ctx.ChannelName != "" {
+		fmt.Fprintf(&b, "**Channel:** #%s\n", ctx.ChannelName)
+	}
+	if ctx.ChannelKind != "" {
+		fmt.Fprintf(&b, "**Kind:** %s\n", ctx.ChannelKind)
+	}
+	if ctx.ChannelMessageID != "" {
+		fmt.Fprintf(&b, "**Message ID:** %s\n", ctx.ChannelMessageID)
+	}
+	if ctx.ChannelAuthorName != "" {
+		who := ctx.ChannelAuthorName
+		if ctx.ChannelAuthorType == "agent" {
+			who += " (agent)"
+		}
+		fmt.Fprintf(&b, "**Mentioned by:** %s\n", who)
+	}
+	b.WriteString("\n")
+
+	if ctx.ChannelMessageContent != "" {
+		b.WriteString("## Triggering message\n\n")
+		b.WriteString("> ")
+		b.WriteString(strings.ReplaceAll(ctx.ChannelMessageContent, "\n", "\n> "))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## What to do\n\n")
+	b.WriteString("Respond conversationally as a teammate. Your final stdout is captured ")
+	b.WriteString("as your reply and posted to the channel as a `channel_message` from your ")
+	b.WriteString("agent identity. There is no separate `multica` command to call.\n\n")
+	b.WriteString("Do NOT run `multica issue ...` commands — there is no issue here.\n")
+
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("\n## Available skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
 	}
 
 	return b.String()

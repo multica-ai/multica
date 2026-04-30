@@ -58,6 +58,18 @@ type Task struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	// Channels Phase 3b — populated when the task was enqueued by an
+	// @-mention in a channel message. Mutually exclusive with
+	// IssueID / ChatSessionID / QuickCreatePrompt: the daemon detects
+	// channel-mention tasks via ChannelID != "" and routes through
+	// buildChannelMentionPrompt + renderChannelContext. The agent's
+	// reply is posted back as a `channel_message` by the server's
+	// CompleteTask handler (no separate daemon call needed).
+	ChannelID             string `json:"channel_id,omitempty"`
+	ChannelName           string `json:"channel_name,omitempty"`
+	ChannelKind           string `json:"channel_kind,omitempty"`
+	ChannelMessageID      string `json:"channel_message_id,omitempty"`
+	ChannelMessageContent string `json:"channel_message_content,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

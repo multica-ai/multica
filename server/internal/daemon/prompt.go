@@ -11,6 +11,13 @@ import (
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig.
 func BuildPrompt(task Task) string {
+	// Channel-mention check goes FIRST: a channel-mention task has neither
+	// IssueID nor ChatSessionID, but it shouldn't fall through to the
+	// quick-create or default-issue branches. The hydrator on the server
+	// only populates ChannelID when context.type == "channel_mention".
+	if task.ChannelID != "" {
+		return buildChannelMentionPrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -140,5 +147,48 @@ func buildAutopilotPrompt(task Task) string {
 		b.WriteString("Complete the instructions above.\n")
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	return b.String()
+}
+
+// buildChannelMentionPrompt constructs a prompt for tasks triggered by an
+// @-mention in a channel message. The agent is acting as a conversational
+// participant — there is NO issue, NO branch, NO commit; the agent's
+// reply is posted back as a `channel_message` from its identity.
+//
+// The triggering message is embedded inline so the agent doesn't have to
+// re-fetch it; recent message history is fetchable via
+// `multica channel history` (CLI extension TBD; for now the agent has the
+// triggering message and channel name only).
+func buildChannelMentionPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a chat participant in a Multica workspace channel.\n\n")
+	if task.ChannelName != "" {
+		fmt.Fprintf(&b, "**Channel:** #%s\n", task.ChannelName)
+	}
+	if task.Agent != nil && task.Agent.Name != "" {
+		fmt.Fprintf(&b, "**You are:** %s\n", task.Agent.Name)
+	}
+	if task.TriggerAuthorName != "" {
+		who := task.TriggerAuthorName
+		if task.TriggerAuthorType == "agent" {
+			who += " (agent)"
+		}
+		fmt.Fprintf(&b, "**Mentioned by:** %s\n", who)
+	}
+	b.WriteString("\n")
+	if task.ChannelMessageContent != "" {
+		b.WriteString("Triggering message:\n\n> ")
+		b.WriteString(strings.ReplaceAll(task.ChannelMessageContent, "\n", "\n> "))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Respond conversationally as if you were a teammate in the channel. ")
+	b.WriteString("Your reply will be posted as a single `channel_message` from your agent identity ")
+	b.WriteString("once you finish — there is no separate `multica` command to call. Just produce ")
+	b.WriteString("your reply as your final output and exit.\n\n")
+	b.WriteString("Constraints:\n")
+	b.WriteString("- This is NOT an issue task. Do not call `multica issue ...` commands.\n")
+	b.WriteString("- Do not @-mention other agents in your reply unless absolutely necessary — repeated cross-agent mentions can produce notification storms.\n")
+	b.WriteString("- Keep replies concise. Markdown (code blocks, lists, links) renders correctly in the channel.\n")
+	b.WriteString("- If the request is ambiguous, ask one clarifying question rather than guessing.\n")
 	return b.String()
 }

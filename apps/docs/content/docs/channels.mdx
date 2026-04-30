@@ -60,13 +60,15 @@ The composer at the bottom of every channel uses the same markdown editor as iss
 - `@member-name` notifies that member via the [Inbox](/inbox).
 - `@agent-name` is rendered with agent styling.
 
-<Callout type="warning">
-  Phase 3a server-side: `@agent` mentions of agents that are **channel
-  members** now enqueue an agent task with the message + channel context.
-  Daemon-side dispatch (the agent actually running and posting back into
-  the channel) ships in Phase 3b. Until then a triggered task sits in the
-  queue with `context.type = "channel_mention"` and the daemon's existing
-  default branch will fail it with an unrecognized-context error.
+<Callout type="info">
+  Phase 3 ships agent triggering end-to-end: `@agent` mentions of channel
+  members enqueue a task, the daemon picks it up, runs the agent with a
+  conversational prompt + channel context, and posts the agent's reply
+  back to the channel as a `channel_message` with `author_type='agent'`.
+  Recent message history fetching (so the agent sees more than just the
+  triggering message) is a follow-up — the v1 prompt embeds the
+  triggering message and the channel name and asks the agent to respond
+  conversationally.
 </Callout>
 
 ### When does a mention trigger?
