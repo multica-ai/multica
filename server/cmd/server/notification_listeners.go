@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"slices"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/ntfy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -272,7 +275,7 @@ func notifyMentionedMembers(
 // NOTE: uses context.Background() because the event bus dispatches synchronously
 // within the HTTP request goroutine. Adding per-handler timeouts is a bus-level
 // concern — see events.Bus for future improvements.
-func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
+func registerNotificationListeners(bus *events.Bus, queries *db.Queries, sender *ntfy.Sender) {
 	ctx := context.Background()
 
 	// issue:created — Direct notification to assignee if assignee != actor
@@ -646,6 +649,81 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			emptyDetails)
 	})
+
+	// inbox:new — forward to ntfy if the recipient has an ntfy URL configured.
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		item, ok := payload["item"].(map[string]any)
+		if !ok {
+			return
+		}
+		if item["recipient_type"] != "member" {
+			return
+		}
+		recipientID, _ := item["recipient_id"].(string)
+		if recipientID == "" {
+			return
+		}
+		maybeSendNtfy(ctx, queries, sender, recipientID, item)
+	})
+}
+
+// maybeSendNtfy looks up the recipient's notification preference and dispatches
+// a push notification to their configured ntfy topic, if enabled. The ntfy
+// send is always non-blocking (launched in a goroutine).
+func maybeSendNtfy(
+	ctx context.Context,
+	queries *db.Queries,
+	sender *ntfy.Sender,
+	recipientUserID string,
+	item map[string]any,
+) {
+	pref, err := queries.GetNotificationPreference(ctx, parseUUID(recipientUserID))
+	if err != nil {
+		// No preference row — ntfy not configured for this user.
+		return
+	}
+	if !pref.NtfyUrl.Valid || pref.NtfyUrl.String == "" {
+		return
+	}
+
+	notifType, _ := item["type"].(string)
+	if slices.Contains(pref.DisabledTypes, notifType) {
+		return
+	}
+
+	title, _ := item["title"].(string)
+	body := ""
+	if b, ok := item["body"].(*string); ok && b != nil {
+		body = *b
+	}
+	severity, _ := item["severity"].(string)
+
+	clickURL := ""
+	if appURL := os.Getenv("MULTICA_APP_URL"); appURL != "" {
+		if issueID, ok := item["issue_id"].(*string); ok && issueID != nil {
+			clickURL = appURL + "/issues/" + *issueID
+		}
+	}
+
+	token := ""
+	if pref.NtfyToken.Valid {
+		token = pref.NtfyToken.String
+	}
+
+	go func() {
+		if err := sender.Send(ctx, pref.NtfyUrl.String, token, ntfy.Message{
+			Title:    title,
+			Body:     body,
+			Severity: severity,
+			ClickURL: clickURL,
+		}); err != nil {
+			slog.Warn("ntfy send failed", "recipient_id", recipientUserID, "error", err)
+		}
+	}()
 }
 
 // inboxItemToResponse converts a db.InboxItem into a map suitable for

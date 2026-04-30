@@ -355,6 +355,21 @@ func TestIssueHierarchyLabelsAndDependencies(t *testing.T) {
 	if dependencyIssue.Dependencies == nil || len(dependencyIssue.Dependencies.BlockedBy) != 1 || dependencyIssue.Dependencies.BlockedBy[0].Issue.ID != parent.ID {
 		t.Fatalf("AddIssueDependency: expected blocked_by parent issue, got %#v", dependencyIssue.Dependencies)
 	}
+
+	copyRecorder := httptest.NewRecorder()
+	copyReq := withURLParam(newRequest("POST", "/api/issues/"+child.ID+"/dependencies", map[string]any{
+		"issue_id": parent.ID,
+		"type":     "copy",
+	}), "id", child.ID)
+	testHandler.AddIssueDependency(copyRecorder, copyReq)
+	if copyRecorder.Code != http.StatusOK {
+		t.Fatalf("AddIssueDependency copy: expected 200, got %d: %s", copyRecorder.Code, copyRecorder.Body.String())
+	}
+
+	json.NewDecoder(copyRecorder.Body).Decode(&dependencyIssue)
+	if dependencyIssue.Dependencies == nil || len(dependencyIssue.Dependencies.Copy) != 1 || dependencyIssue.Dependencies.Copy[0].Issue.ID != parent.ID {
+		t.Fatalf("AddIssueDependency copy: expected copy parent issue, got %#v", dependencyIssue.Dependencies)
+	}
 }
 
 func TestProjectCRUDAndIssueLinking(t *testing.T) {
@@ -1624,4 +1639,71 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "workspace not found") {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
 	}
+}
+
+func TestBulkCreateIssues(t *testing.T) {
+t.Run("success", func(t *testing.T) {
+w := httptest.NewRecorder()
+req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
+Issues: []BulkCreateIssueItem{
+{Title: "Bulk Issue One"},
+{Title: "Bulk Issue Two", Status: "todo", Priority: "high"},
+},
+})
+testHandler.BulkCreateIssues(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("BulkCreateIssues: expected 201, got %d: %s", w.Code, w.Body.String())
+}
+var result map[string][]IssueResponse
+json.NewDecoder(w.Body).Decode(&result)
+issues := result["issues"]
+if len(issues) != 2 {
+t.Fatalf("BulkCreateIssues: expected 2 issues, got %d", len(issues))
+}
+if issues[0].Title != "Bulk Issue One" {
+t.Fatalf("BulkCreateIssues: unexpected title %q", issues[0].Title)
+}
+if issues[1].Status != "todo" {
+t.Fatalf("BulkCreateIssues: expected status 'todo', got %q", issues[1].Status)
+}
+// cleanup
+for _, issue := range issues {
+cw := httptest.NewRecorder()
+cr := newRequest("DELETE", "/api/issues/"+issue.ID, nil)
+cr = withURLParam(cr, "id", issue.ID)
+testHandler.DeleteIssue(cw, cr)
+}
+})
+
+t.Run("empty_title_rejected", func(t *testing.T) {
+w := httptest.NewRecorder()
+req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
+Issues: []BulkCreateIssueItem{
+{Title: "Valid Title"},
+{Title: "   "},
+},
+})
+testHandler.BulkCreateIssues(w, req)
+if w.Code != http.StatusUnprocessableEntity {
+t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
+}
+var result map[string]any
+json.NewDecoder(w.Body).Decode(&result)
+if result["errors"] == nil {
+t.Fatalf("BulkCreateIssues: expected 'errors' in response")
+}
+})
+
+t.Run("over_limit_rejected", func(t *testing.T) {
+items := make([]BulkCreateIssueItem, bulkCreateIssuesLimit+1)
+for i := range items {
+items[i] = BulkCreateIssueItem{Title: fmt.Sprintf("Issue %d", i+1)}
+}
+w := httptest.NewRecorder()
+req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{Issues: items})
+testHandler.BulkCreateIssues(w, req)
+if w.Code != http.StatusUnprocessableEntity {
+t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
+}
+})
 }

@@ -3,9 +3,10 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated = "issue:created"
-	EventIssueUpdated = "issue:updated"
-	EventIssueDeleted = "issue:deleted"
+	EventIssueCreated     = "issue:created"
+	EventIssueUpdated     = "issue:updated"
+	EventIssueDeleted     = "issue:deleted"
+	EventIssueBulkCreated = "issue:bulk_created"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"

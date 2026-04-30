@@ -76,6 +76,7 @@ type IssueDependencyGroupsResponse struct {
 	Blocks    []IssueDependencyEntryResponse `json:"blocks,omitempty"`
 	BlockedBy []IssueDependencyEntryResponse `json:"blocked_by,omitempty"`
 	Related   []IssueDependencyEntryResponse `json:"related,omitempty"`
+	Copy      []IssueDependencyEntryResponse `json:"copy,omitempty"`
 }
 
 type issueListView string
@@ -1109,4 +1110,118 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+const bulkCreateIssuesLimit = 100
+
+type BulkCreateIssueItem struct {
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	Status      string  `json:"status"`
+	Priority    string  `json:"priority"`
+}
+
+type BulkCreateIssuesRequest struct {
+	Issues []BulkCreateIssueItem `json:"issues"`
+}
+
+type BulkCreateIssueError struct {
+	Index  int    `json:"index"`
+	Reason string `json:"reason"`
+}
+
+func (h *Handler) BulkCreateIssues(w http.ResponseWriter, r *http.Request) {
+	var req BulkCreateIssuesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.Issues) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "issues array must not be empty")
+		return
+	}
+	if len(req.Issues) > bulkCreateIssuesLimit {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("too many issues: limit is %d", bulkCreateIssuesLimit))
+		return
+	}
+
+	// Validate all rows before touching the DB.
+	var rowErrors []BulkCreateIssueError
+	for i, item := range req.Issues {
+		if strings.TrimSpace(item.Title) == "" {
+			rowErrors = append(rowErrors, BulkCreateIssueError{Index: i, Reason: "title is required"})
+		}
+	}
+	if len(rowErrors) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{"errors": rowErrors})
+		return
+	}
+
+	workspaceID := resolveWorkspaceID(r)
+	creatorID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	created := make([]IssueResponse, 0, len(req.Issues))
+
+	for _, item := range req.Issues {
+		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			slog.Warn("bulk create: increment issue counter failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create issues")
+			return
+		}
+
+		status := item.Status
+		if status == "" {
+			status = "backlog"
+		}
+		priority := item.Priority
+		if priority == "" {
+			priority = "none"
+		}
+
+		issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			WorkspaceID: parseUUID(workspaceID),
+			Title:       strings.TrimSpace(item.Title),
+			Description: ptrToText(item.Description),
+			Status:      status,
+			Priority:    priority,
+			CreatorType: creatorType,
+			CreatorID:   parseUUID(actualCreatorID),
+			Position:    0,
+			Number:      issueNumber,
+		})
+		if err != nil {
+			slog.Warn("bulk create issue failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create issues")
+			return
+		}
+
+		resp := issueToResponse(issue, "")
+		created = append(created, resp)
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
+
+	slog.Info("bulk issues created", append(logger.RequestAttrs(r), "count", len(created), "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueBulkCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issues": created})
+
+	writeJSON(w, http.StatusCreated, map[string]any{"issues": created})
 }

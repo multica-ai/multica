@@ -11,6 +11,7 @@ export type WSEventType =
   | "issue:created"
   | "issue:updated"
   | "issue:deleted"
+  | "issue:bulk_created"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
@@ -58,6 +59,10 @@ export interface WSMessage<T = unknown> {
 
 export interface IssueCreatedPayload {
   issue: Issue;
+}
+
+export interface IssueBulkCreatedPayload {
+  issues: Issue[];
 }
 
 export interface IssueUpdatedPayload {

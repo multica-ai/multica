@@ -157,6 +157,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
+				r.Post("/bulk", h.BulkCreateIssues)
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
@@ -262,8 +263,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 			})
+
+			// Notification preferences
+			r.Route("/api/notification-preferences", func(r chi.Router) {
+				r.Get("/", h.GetNotificationPreference)
+				r.Put("/", h.UpsertNotificationPreference)
+				r.Post("/test", h.TestNotificationPreference)
+			})
 		})
 	})
+
+	if err := registerSwaggerRoutes(r); err != nil {
+		panic(err)
+	}
 
 	r.NotFound(newFrontendHandler().ServeHTTP)
 

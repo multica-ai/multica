@@ -57,6 +57,22 @@ export interface ListIssuesResponse {
   total: number;
 }
 
+export interface BulkCreateIssueItem {
+  title: string;
+  description?: string;
+  status?: IssueStatus;
+  priority?: IssuePriority;
+}
+
+export interface BulkCreateIssueError {
+  index: number;
+  reason: string;
+}
+
+export interface BulkCreateIssuesResponse {
+  issues: Issue[];
+}
+
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;

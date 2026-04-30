@@ -1,7 +1,7 @@
 import { createLogger } from "@/shared/logger";
 import { ApiClient } from "./client";
 
-export { ApiClient } from "./client";
+export { ApiClient, BulkCreateApiError } from "./client";
 export type { LoginResponse } from "./client";
 export { WSClient } from "./ws-client";
 

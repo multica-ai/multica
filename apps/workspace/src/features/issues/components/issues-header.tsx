@@ -43,6 +43,7 @@ import {
   PRIORITY_CONFIG,
 } from "@/features/issues/config";
 import { StatusIcon, PriorityIcon } from "@/features/issues/components";
+import { BulkImportButton } from "./bulk-import-modal";
 import { useWorkspaceStore } from "@/features/workspace";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import {
@@ -340,6 +341,10 @@ export function IssuesHeader({
       </div>
 
       <div className="flex items-center gap-1 self-start md:self-auto">
+        <Tooltip>
+          <TooltipTrigger render={<BulkImportButton />} />
+          <TooltipContent side="bottom">Import Issues</TooltipContent>
+        </Tooltip>
         <DropdownMenu>
           <Tooltip>
             <DropdownMenuTrigger

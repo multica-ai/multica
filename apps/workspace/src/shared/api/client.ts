@@ -39,12 +39,23 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  BulkCreateIssueItem,
+  BulkCreateIssueError,
+  BulkCreateIssuesResponse,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export class BulkCreateApiError extends Error {
+  errors: BulkCreateIssueError[];
+  constructor(errors: BulkCreateIssueError[]) {
+    super("Some rows have validation errors");
+    this.errors = errors;
+  }
 }
 
 export class ApiClient {
@@ -209,6 +220,37 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async bulkCreateIssues(items: BulkCreateIssueItem[]): Promise<BulkCreateIssuesResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.authHeaders(),
+    };
+    const res = await fetch(`${this.baseUrl}/api/issues/bulk`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ issues: items }),
+    });
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 422) {
+        try {
+          const data = await res.json() as { errors?: BulkCreateIssueError[]; error?: string };
+          if (Array.isArray(data.errors) && data.errors.length > 0) {
+            throw new BulkCreateApiError(data.errors);
+          }
+          if (data.error) throw new Error(data.error);
+        } catch (e) {
+          if (e instanceof BulkCreateApiError) throw e;
+          throw new Error("Validation failed");
+        }
+      }
+      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      throw new Error(message);
+    }
+    return res.json() as Promise<BulkCreateIssuesResponse>;
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {

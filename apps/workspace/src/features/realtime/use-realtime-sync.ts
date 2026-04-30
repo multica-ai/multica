@@ -25,6 +25,7 @@ import type {
   MemberRemovedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
+  IssueBulkCreatedPayload,
   IssueDeletedPayload,
   InboxNewPayload,
 } from "@/shared/types";
@@ -51,7 +52,7 @@ export function useRealtimeSync(ws: WSClient | null) {
 
     // Event types handled by specific handlers below — skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "inbox:new",
+      "issue:updated", "issue:created", "issue:bulk_created", "issue:deleted", "inbox:new",
     ]);
 
     const refreshMap: Record<string, () => void> = {
@@ -130,6 +131,11 @@ export function useRealtimeSync(ws: WSClient | null) {
       if (issue) useIssueStore.getState().addIssue(issue);
     });
 
+    const unsubIssueBulkCreated = ws.on("issue:bulk_created", (p) => {
+      const { issues } = p as IssueBulkCreatedPayload;
+      if (issues) issues.forEach((issue) => useIssueStore.getState().addIssue(issue));
+    });
+
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
       const { issue_id } = p as IssueDeletedPayload;
       if (issue_id) useIssueStore.getState().removeIssue(issue_id);
@@ -177,6 +183,7 @@ export function useRealtimeSync(ws: WSClient | null) {
       unsubAny();
       unsubIssueUpdated();
       unsubIssueCreated();
+      unsubIssueBulkCreated();
       unsubIssueDeleted();
       unsubInboxNew();
       unsubWsDeleted();
