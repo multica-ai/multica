@@ -76,6 +76,7 @@ export type AutopilotDialogProps =
       onOpenChange: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialTriggerConfig?: Partial<TriggerConfig>;
+      intent?: "create" | "duplicate";
     }
   | {
       mode: "edit";
@@ -248,6 +249,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
+  const isDuplicate = isCreate && props.intent === "duplicate";
   const initial: Partial<AutopilotInitial> = isCreate
     ? props.initial ?? {}
     : props.initial;
@@ -322,7 +324,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           scheduleOk = false;
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success("Autopilot created");
+        if (scheduleOk) toast.success(isDuplicate ? "Autopilot copied" : "Autopilot created");
         else toast.error("Autopilot created, but schedule failed to save");
       } else {
         await updateAutopilot.mutateAsync({
@@ -382,7 +384,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         )}
       >
         <DialogTitle className="sr-only">
-          {isCreate ? "New Autopilot" : "Edit Autopilot"}
+          {isCreate ? (isDuplicate ? "Duplicate Autopilot" : "New Autopilot") : "Edit Autopilot"}
         </DialogTitle>
 
         {/* Header */}
@@ -393,11 +395,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 <Rocket className="size-3" />
               </span>
               <span className="font-medium text-foreground">
-                {isCreate ? "New autopilot" : "Edit autopilot"}
+                {isCreate ? (isDuplicate ? "Duplicate autopilot" : "New autopilot") : "Edit autopilot"}
               </span>
             </div>
             <span className="text-muted-foreground/60">·</span>
-            <span className="text-muted-foreground">A recurring AI task</span>
+            <span className="text-muted-foreground">
+              {isDuplicate ? "Review copied settings before saving" : "A recurring AI task"}
+            </span>
             {workspaceName && (
               <>
                 <ChevronRight className="size-3 text-muted-foreground/40" />
@@ -514,10 +518,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
               {submitting
                 ? isCreate
-                  ? "Creating..."
+                  ? isDuplicate
+                    ? "Copying..."
+                    : "Creating..."
                   : "Saving..."
                 : isCreate
-                ? "Create autopilot"
+                ? isDuplicate
+                  ? "Create copy"
+                  : "Create autopilot"
                 : "Save"}
             </Button>
           </div>
