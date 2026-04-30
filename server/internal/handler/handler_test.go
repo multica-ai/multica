@@ -679,6 +679,174 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
 }
 
+func TestRetryAgentComment_UsesRetryRequesterAsTriggerActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Retry Requester", "retry-requester@multica.ai").Scan(&otherUserID); err != nil {
+		t.Fatalf("setup: create other user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, parseUUID(otherUserID)) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("setup: add other member: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_id, assignee_type, number, position
+		)
+		VALUES ($1, 'retry trigger actor issue', 'in_progress', 'medium', $2, 'member', $3, 'agent', 92001, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var ancestorCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'ancestor member comment', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&ancestorCommentID); err != nil {
+		t.Fatalf("setup: create ancestor comment: %v", err)
+	}
+
+	var agentCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'agent reply', 'comment', $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID, ancestorCommentID).Scan(&agentCommentID); err != nil {
+		t.Fatalf("setup: create agent comment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/comments/"+agentCommentID+"/retry", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "commentId", agentCommentID)
+
+	testHandler.RetryAgentComment(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("RetryAgentComment: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotSource, gotActorType, gotActorID, gotTriggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_source, trigger_actor_type, trigger_actor_id::text, trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&gotSource, &gotActorType, &gotActorID, &gotTriggerCommentID); err != nil {
+		t.Fatalf("read queued retry task: %v", err)
+	}
+
+	if gotSource != "retry" {
+		t.Fatalf("expected trigger_source retry, got %q", gotSource)
+	}
+	if gotActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", gotActorType)
+	}
+	if gotActorID != otherUserID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", otherUserID, gotActorID)
+	}
+	if gotTriggerCommentID != ancestorCommentID {
+		t.Fatalf("expected trigger_comment_id %q, got %q", ancestorCommentID, gotTriggerCommentID)
+	}
+}
+
+func TestTriggerAutopilot_UsesManualRequesterAsTriggerActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Autopilot Trigger User", "autopilot-trigger@multica.ai").Scan(&otherUserID); err != nil {
+		t.Fatalf("setup: create other user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, parseUUID(otherUserID)) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("setup: add other member: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode, status,
+			created_by_type, created_by_id, priority
+		)
+		VALUES ($1, 'manual trigger actor test', $2, 'run_only', 'active', 'member', $3, 'medium')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("setup: create autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "id", autopilotID)
+
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotSource, gotActorType, gotActorID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT q.trigger_source, q.trigger_actor_type, q.trigger_actor_id::text
+		FROM agent_task_queue q
+		JOIN autopilot_run r ON r.id = q.autopilot_run_id
+		WHERE r.autopilot_id = $1
+		ORDER BY q.created_at DESC
+		LIMIT 1
+	`, autopilotID).Scan(&gotSource, &gotActorType, &gotActorID); err != nil {
+		t.Fatalf("read autopilot task: %v", err)
+	}
+
+	if gotSource != "autopilot_manual" {
+		t.Fatalf("expected trigger_source autopilot_manual, got %q", gotSource)
+	}
+	if gotActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", gotActorType)
+	}
+	if gotActorID != otherUserID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", otherUserID, gotActorID)
+	}
+}
+
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents", map[string]any{

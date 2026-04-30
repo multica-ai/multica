@@ -40,6 +40,7 @@ func (s *AutopilotService) DispatchAutopilot(
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
+	trigger TriggerActor,
 ) (*db.AutopilotRun, error) {
 	// Determine initial status based on execution mode.
 	initialStatus := "issue_created"
@@ -60,12 +61,12 @@ func (s *AutopilotService) DispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, trigger); err != nil {
 			s.failRun(ctx, run.ID, err.Error())
 			return &run, fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
-		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
+		if err := s.dispatchRunOnly(ctx, autopilot, &run, trigger); err != nil {
 			s.failRun(ctx, run.ID, err.Error())
 			return &run, fmt.Errorf("dispatch run_only: %w", err)
 		}
@@ -94,7 +95,7 @@ func (s *AutopilotService) DispatchAutopilot(
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, trigger TriggerActor) error {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -162,7 +163,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 
 	// Enqueue agent task via the existing flow.
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue, trigger); err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
 
@@ -175,7 +176,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 }
 
 // dispatchRunOnly enqueues a direct agent task without creating an issue.
-func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, trigger TriggerActor) error {
 	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
 	if err != nil {
 		return fmt.Errorf("load agent: %w", err)
@@ -192,6 +193,9 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       priorityToInt(ap.Priority),
 		AutopilotRunID: run.ID,
+		TriggerSource:  trigger.sourceText(),
+		TriggerActorType: trigger.actorTypeText(),
+		TriggerActorID: trigger.ActorID,
 	})
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)

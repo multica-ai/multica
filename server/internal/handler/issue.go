@@ -925,7 +925,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_create", "member", creatorID))
 		}
 	}
 
@@ -1123,7 +1123,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_update", actorType, actorID))
 		}
 	}
 
@@ -1133,7 +1133,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged && !assigneeChanged && actorType == "member" &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_update", actorType, actorID))
 		}
 	}
 
@@ -1432,7 +1432,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_batch_update", actorType, actorID))
 			}
 		}
 
@@ -1440,7 +1440,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if statusChanged && !assigneeChanged && actorType == "member" &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_batch_update", actorType, actorID))
 			}
 		}
 

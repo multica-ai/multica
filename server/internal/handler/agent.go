@@ -157,6 +157,9 @@ type AgentTaskResponse struct {
 	PriorWorkDir          string         `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSource         string         `json:"trigger_source,omitempty"`
+	TriggerActorType      string         `json:"trigger_actor_type,omitempty"`
+	TriggerActorID        string         `json:"trigger_actor_id,omitempty"`
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
 }
@@ -166,6 +169,8 @@ type AgentTaskResponse struct {
 type TaskAgentData struct {
 	ID           string                   `json:"id"`
 	Name         string                   `json:"name"`
+	Visibility   string                   `json:"visibility"`
+	OwnerID      string                   `json:"owner_id"`
 	Instructions string                   `json:"instructions"`
 	Skills       []service.AgentSkillData `json:"skills,omitempty"`
 	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
@@ -193,6 +198,9 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		TriggerSource:    t.TriggerSource.String,
+		TriggerActorType: t.TriggerActorType.String,
+		TriggerActorID:   uuidToString(t.TriggerActorID),
 	}
 }
 

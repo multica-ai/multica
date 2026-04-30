@@ -826,6 +826,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
+	if err := preflightPrivateAgentGate(task); err != nil {
+		taskLog.Warn("private agent gate rejected task", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
+			taskLog.Error("fail task after private gate rejection failed", "error", failErr)
+		}
+		return
+	}
+
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", ""); failErr != nil {
@@ -925,6 +933,22 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}
+}
+
+func preflightPrivateAgentGate(task Task) error {
+	if task.Agent == nil {
+		return nil
+	}
+	if task.Agent.Visibility != "private" {
+		return nil
+	}
+	if task.TriggerActorType != "member" || task.TriggerActorID == "" {
+		return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
+	}
+	if task.Agent.OwnerID != "" && task.TriggerActorID == task.Agent.OwnerID {
+		return nil
+	}
+	return fmt.Errorf("private agent execution denied: only the agent owner can run this task")
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {

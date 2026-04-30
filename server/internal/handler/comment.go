@@ -294,7 +294,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// thread grouping) is handled downstream by createAgentComment,
 		// which resolves parent_id to the thread root before posting. This
 		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("comment", "member", uuidToString(comment.AuthorID)), comment.ID); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
@@ -447,7 +447,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		// Always use the current comment as the trigger so the agent reads the
 		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, buildTriggerActor("mention", "member", uuidToString(comment.AuthorID)), comment.ID); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}
@@ -704,16 +704,16 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 
 	if isAssigneeAgent {
 		if triggerID.Valid {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, triggerID)
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("retry", "member", userID), triggerID)
 		} else {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("retry", "member", userID))
 		}
 	} else {
 		if !triggerID.Valid {
 			writeError(w, http.StatusBadRequest, "cannot retry: no member message in thread to use as context")
 			return
 		}
-		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, triggerID)
+		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, buildTriggerActor("retry", "member", userID), triggerID)
 	}
 	if err != nil {
 		slog.Warn("retry agent comment: enqueue failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentID)...)
