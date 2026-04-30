@@ -401,7 +401,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const {
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(issueResourceId, user?.id);
+  } = useIssueTimeline(wsId, issueResourceId, user?.id);
 
   const commentById = useMemo(() => {
     const m = new Map<string, TimelineEntry>();
@@ -416,14 +416,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(issueResourceId, user?.id);
+  } = useIssueReactions(wsId, issueResourceId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(issueResourceId, user?.id);
+  } = useIssueSubscribers(wsId, issueResourceId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(issueResourceId));
+  const { data: usage } = useQuery(issueUsageOptions(wsId, issueResourceId));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
@@ -1361,6 +1361,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     return (
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <CommentCard
+                          wsId={wsId}
                           issueId={issue.id}
                           entry={entry}
                           allReplies={repliesByParent}

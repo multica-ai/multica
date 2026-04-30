@@ -310,6 +310,7 @@ export function useBatchDeleteIssues() {
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       content,
@@ -324,7 +325,7 @@ export function useCreateComment(issueId: string) {
     }) => api.createComment(issueId, content, type, parentId, attachmentIds),
     onSuccess: (comment) => {
       qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
+        issueKeys.timeline(wsId, issueId),
         (old) => {
           if (!old) return old;
           const entry: TimelineEntry = {
@@ -346,21 +347,22 @@ export function useCreateComment(issueId: string) {
       );
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
 
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ commentId, content }: { commentId: string; content: string }) =>
       api.updateComment(commentId, content),
     onMutate: async ({ commentId, content }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId));
       qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
+        issueKeys.timeline(wsId, issueId),
         (old) =>
           old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
       );
@@ -368,21 +370,22 @@ export function useUpdateComment(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev)
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        qc.setQueryData(issueKeys.timeline(wsId, issueId), ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
 
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(wsId, issueId));
 
       // Cascade: collect all child comment IDs
       const toRemove = new Set<string>([commentId]);
@@ -400,25 +403,26 @@ export function useDeleteComment(issueId: string) {
       }
 
       qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
+        issueKeys.timeline(wsId, issueId),
         (old) => old?.filter((e) => !toRemove.has(e.id)),
       );
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev)
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        qc.setQueryData(issueKeys.timeline(wsId, issueId), ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
 
 export function useToggleCommentReaction(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
-    mutationKey: ["toggleCommentReaction", issueId] as const,
+    mutationKey: ["toggleCommentReaction", wsId, issueId] as const,
     mutationFn: async ({
       commentId,
       emoji,
@@ -431,7 +435,7 @@ export function useToggleCommentReaction(issueId: string) {
       return api.addReaction(commentId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
@@ -442,8 +446,9 @@ export function useToggleCommentReaction(issueId: string) {
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
-    mutationKey: ["toggleIssueReaction", issueId] as const,
+    mutationKey: ["toggleIssueReaction", wsId, issueId] as const,
     mutationFn: async ({
       emoji,
       existing,
@@ -455,7 +460,7 @@ export function useToggleIssueReaction(issueId: string) {
       return api.addIssueReaction(issueId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
     },
   });
 }
@@ -466,6 +471,7 @@ export function useToggleIssueReaction(issueId: string) {
 
 export function useToggleIssueSubscriber(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: async ({
       userId,
@@ -483,14 +489,14 @@ export function useToggleIssueSubscriber(issueId: string) {
       }
     },
     onMutate: async ({ userId, userType, subscribed }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.subscribers(issueId) });
+      await qc.cancelQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
       const prev = qc.getQueryData<IssueSubscriber[]>(
-        issueKeys.subscribers(issueId),
+        issueKeys.subscribers(wsId, issueId),
       );
 
       if (subscribed) {
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) =>
             old?.filter(
               (s) => !(s.user_id === userId && s.user_type === userType),
@@ -505,7 +511,7 @@ export function useToggleIssueSubscriber(issueId: string) {
           created_at: new Date().toISOString(),
         };
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) => {
             if (
               old?.some(
@@ -521,10 +527,10 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev)
-        qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
+        qc.setQueryData(issueKeys.subscribers(wsId, issueId), ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
     },
   });
 }

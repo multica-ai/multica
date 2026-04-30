@@ -28,8 +28,8 @@ export function useOptionalIssueDetail(workspaceId: string, issueId: string | nu
   });
 }
 
-export function useIssueTimelineEntries(issueId: string) {
-  return useQuery(issueTimelineOptions(issueId));
+export function useIssueTimelineEntries(workspaceId: string, issueId: string) {
+  return useQuery(issueTimelineOptions(workspaceId, issueId));
 }
 
 export function useChildIssues(workspaceId: string, issueId: string) {
@@ -40,24 +40,24 @@ export function useChildIssueProgress(workspaceId: string) {
   return useQuery(childIssueProgressOptions(workspaceId));
 }
 
-export function useIssueReactions(issueId: string) {
-  return useQuery(issueReactionsOptions(issueId));
+export function useIssueReactions(workspaceId: string, issueId: string) {
+  return useQuery(issueReactionsOptions(workspaceId, issueId));
 }
 
-export function useIssueAttachments(issueId: string) {
-  return useQuery(issueAttachmentsOptions(issueId));
+export function useIssueAttachments(workspaceId: string, issueId: string) {
+  return useQuery(issueAttachmentsOptions(workspaceId, issueId));
 }
 
-export function useIssueTaskRuns(issueId: string) {
-  return useQuery(issueTaskRunsOptions(issueId));
+export function useIssueTaskRuns(workspaceId: string, issueId: string) {
+  return useQuery(issueTaskRunsOptions(workspaceId, issueId));
 }
 
-export function useTaskMessages(taskId: string) {
-  return useQuery(taskMessagesOptions(taskId));
+export function useTaskMessages(workspaceId: string, taskId: string) {
+  return useQuery(taskMessagesOptions(workspaceId, taskId));
 }
 
-export function useTaskMessagesQueries(taskIds: string[]) {
+export function useTaskMessagesQueries(workspaceId: string, taskIds: string[]) {
   return useQueries({
-    queries: taskIds.map((taskId) => taskMessagesOptions(taskId)),
+    queries: taskIds.map((taskId) => taskMessagesOptions(workspaceId, taskId)),
   });
 }

@@ -17,14 +17,20 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
-  reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
-  subscribers: (issueId: string) =>
-    ["issues", "subscribers", issueId] as const,
-  usage: (issueId: string) => ["issues", "usage", issueId] as const,
-  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
-  taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
-  taskMessages: (taskId: string) => ["tasks", "messages", taskId] as const,
+  timeline: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "timeline", issueId] as const,
+  reactions: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "reactions", issueId] as const,
+  subscribers: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "subscribers", issueId] as const,
+  usage: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "usage", issueId] as const,
+  attachments: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "attachments", issueId] as const,
+  taskRuns: (wsId: string, issueId: string) =>
+    [...issueKeys.all(wsId), "task-runs", issueId] as const,
+  taskMessages: (wsId: string, taskId: string) =>
+    [...issueKeys.all(wsId), "task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
@@ -123,16 +129,16 @@ export function childIssuesOptions(wsId: string, id: string) {
   });
 }
 
-export function issueTimelineOptions(issueId: string) {
+export function issueTimelineOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.timeline(issueId),
+    queryKey: issueKeys.timeline(wsId, issueId),
     queryFn: () => api.listTimeline(issueId),
   });
 }
 
-export function issueReactionsOptions(issueId: string) {
+export function issueReactionsOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.reactions(issueId),
+    queryKey: issueKeys.reactions(wsId, issueId),
     queryFn: async () => {
       const issue = await api.getIssue(issueId);
       return issue.reactions ?? [];
@@ -140,39 +146,39 @@ export function issueReactionsOptions(issueId: string) {
   });
 }
 
-export function issueSubscribersOptions(issueId: string) {
+export function issueSubscribersOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.subscribers(issueId),
+    queryKey: issueKeys.subscribers(wsId, issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
   });
 }
 
-export function issueUsageOptions(issueId: string) {
+export function issueUsageOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.usage(issueId),
+    queryKey: issueKeys.usage(wsId, issueId),
     queryFn: () => api.getIssueUsage(issueId),
   });
 }
 
-export function issueAttachmentsOptions(issueId: string) {
+export function issueAttachmentsOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.attachments(issueId),
+    queryKey: issueKeys.attachments(wsId, issueId),
     queryFn: () => api.listAttachments(issueId),
     enabled: !!issueId,
   });
 }
 
-export function issueTaskRunsOptions(issueId: string) {
+export function issueTaskRunsOptions(wsId: string, issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.taskRuns(issueId),
+    queryKey: issueKeys.taskRuns(wsId, issueId),
     queryFn: () => api.listTasksByIssue(issueId),
     enabled: !!issueId,
   });
 }
 
-export function taskMessagesOptions(taskId: string) {
+export function taskMessagesOptions(wsId: string, taskId: string) {
   return queryOptions({
-    queryKey: issueKeys.taskMessages(taskId),
+    queryKey: issueKeys.taskMessages(wsId, taskId),
     queryFn: () => api.listTaskMessages(taskId),
     enabled: !!taskId,
   });

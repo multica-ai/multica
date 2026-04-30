@@ -1,7 +1,9 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Clipboard,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -106,6 +108,34 @@ const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 8;
 const TEXT_PREVIEW_MAX_BYTES = 1_000_000;
 
+function useKeyboardHeight(enabled: boolean) {
+  const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setKeyboardHeight(0);
+      return undefined;
+    }
+
+    const showEvent = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(Math.max(0, windowHeight - event.endCoordinates.screenY));
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [enabled, windowHeight]);
+
+  return keyboardHeight;
+}
+
 export function IssueDetailScreen({ navigation, route }: Props) {
   const { issueId } = route.params;
   const insets = useSafeAreaInsets();
@@ -120,11 +150,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
   const { data: children = [] } = useChildIssues(workspace.id, issueId);
   const { data: childProgress } = useChildIssueProgress(workspace.id);
-  const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(issueId);
-  const { data: issueReactions = [] } = useIssueReactions(issueId);
-  const { data: taskRuns = [] } = useIssueTaskRuns(issueId);
-  const taskMessageQueries = useTaskMessagesQueries(taskRuns.map((task) => task.id));
-  const { data: timeline = [] } = useIssueTimelineEntries(issueId);
+  const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
+  const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
+  const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
+  const taskIds = useMemo(() => taskRuns.map((task) => task.id), [taskRuns]);
+  const taskMessageQueries = useTaskMessagesQueries(workspace.id, taskIds);
+  const { data: timeline = [] } = useIssueTimelineEntries(workspace.id, issueId);
   const updateIssue = useUpdateIssue();
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
@@ -134,16 +165,21 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
-  const [replyContent, setReplyContent] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
+  const previewAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => {
+    previewAbortRef.current?.abort();
+  }, []);
 
   const comments = useMemo(
     () => timeline
@@ -170,21 +206,40 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     section.title ? <StickySectionHeader section={section} /> : null
   ), []);
 
-  async function changeStatus(status: IssueStatus) {
+  const changeStatus = useCallback(async (status: IssueStatus) => {
     if (!issue || status === issue.status) return;
     await updateIssue.mutateAsync({ id: issue.id, status });
-  }
+  }, [issue, updateIssue]);
 
-  async function changePriority(priority: IssuePriority) {
+  const changePriority = useCallback(async (priority: IssuePriority) => {
     if (!issue || priority === issue.priority) return;
     await updateIssue.mutateAsync({ id: issue.id, priority });
-  }
+  }, [issue, updateIssue]);
 
-  async function submitComment() {
+  const openCommentComposer = useCallback(() => {
+    setReplyTargetId(null);
+    setComment("");
+    setCommentAttachments([]);
+    setUploadError(null);
+    setCommentError(null);
+    setCommentSheetOpen(true);
+  }, []);
+
+  const openReplyComposer = useCallback((parentId: string) => {
+    setReplyTargetId(parentId);
+    setComment("");
+    setCommentAttachments([]);
+    setUploadError(null);
+    setCommentError(null);
+    setCommentSheetOpen(true);
+  }, []);
+
+  const submitComment = useCallback(async () => {
     const content = comment.trim();
     if (!content || createComment.isPending || uploading) return;
     setUploading(true);
     setUploadError(null);
+    setCommentError(null);
     const uploadedAttachments: Attachment[] = [];
     try {
       for (const draft of commentAttachments) {
@@ -193,60 +248,66 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       }
       await createComment.mutateAsync({
         content,
+        parentId: replyTargetId ?? undefined,
         attachmentIds: uploadedAttachments.map((attachment) => attachment.id),
       });
       setComment("");
       setCommentAttachments([]);
+      setReplyTargetId(null);
       await refetchAttachments();
       setCommentSheetOpen(false);
     } catch (err) {
       await Promise.allSettled(uploadedAttachments.map((attachment) => api.deleteAttachment(attachment.id)));
       setUploadError(err instanceof Error ? err.message : "Unable to send comment");
+      setCommentError(err instanceof Error ? err.message : "Unable to send comment");
       await refetchAttachments();
     } finally {
       setUploading(false);
     }
-  }
+  }, [comment, commentAttachments, createComment, issueId, refetchAttachments, replyTargetId, uploading]);
 
-  async function submitReply(parentId: string) {
-    const content = replyContent.trim();
-    if (!content || createComment.isPending) return;
-    await createComment.mutateAsync({ content, parentId });
-    setReplyTargetId(null);
-    setReplyContent("");
-  }
-
-  async function saveCommentEdit(commentId: string) {
+  const saveCommentEdit = useCallback(async (commentId: string) => {
     const content = editingContent.trim();
     if (!content || updateComment.isPending) return;
-    await updateComment.mutateAsync({ commentId, content });
-    setEditingCommentId(null);
-    setEditingContent("");
-  }
+    setCommentError(null);
+    try {
+      await updateComment.mutateAsync({ commentId, content });
+      setEditingCommentId(null);
+      setEditingContent("");
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "Unable to save comment");
+    }
+  }, [editingContent, updateComment]);
 
-  async function removeComment(commentId: string) {
+  const removeComment = useCallback(async (commentId: string) => {
     if (deleteComment.isPending) return;
-    await deleteComment.mutateAsync(commentId);
-  }
+    setCommentError(null);
+    try {
+      await deleteComment.mutateAsync(commentId);
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "Unable to delete comment");
+    }
+  }, [deleteComment]);
 
-  function closeCommentSheet() {
+  const closeCommentSheet = useCallback(() => {
     setCommentSheetOpen(false);
+    setReplyTargetId(null);
     setCommentAttachments([]);
     setUploadError(null);
-  }
+  }, []);
 
-  function addCommentAttachment(asset: MobileUploadAsset) {
+  const addCommentAttachment = useCallback((asset: MobileUploadAsset) => {
     setCommentAttachments((items) => [
       ...items,
       createDraftCommentAttachment(asset, items.length),
     ]);
-  }
+  }, []);
 
-  function removeCommentAttachment(attachmentId: string) {
+  const removeCommentAttachment = useCallback((attachmentId: string) => {
     setCommentAttachments((items) => items.filter((attachment) => attachment.id !== attachmentId));
-  }
+  }, []);
 
-  async function uploadAttachment(asset: MobileUploadAsset, target: "issue" | "comment") {
+  const uploadAttachment = useCallback(async (asset: MobileUploadAsset, target: "issue" | "comment") => {
     if (target === "comment") {
       addCommentAttachment(asset);
       return;
@@ -262,9 +323,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     } finally {
       setUploading(false);
     }
-  }
+  }, [addCommentAttachment, issueId, refetchAttachments]);
 
-  async function pickDocument(target: "issue" | "comment") {
+  const pickDocument = useCallback(async (target: "issue" | "comment") => {
     setUploadError(null);
 
     let DocumentPicker: DocumentPickerModule;
@@ -299,9 +360,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       },
       target,
     );
-  }
+  }, [uploadAttachment]);
 
-  async function pickImage(target: "issue" | "comment") {
+  const pickImage = useCallback(async (target: "issue" | "comment") => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       quality: 1,
@@ -318,28 +379,46 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       },
       target,
     );
-  }
+  }, [uploadAttachment]);
 
-  function handleIssueReaction(emoji: string) {
+  const handleIssueReaction = useCallback((emoji: string) => {
     if (!userId) return;
     const existing = issueReactions.find((reaction) => isOwnReaction(reaction, emoji, userId));
     toggleIssueReaction.mutate({ emoji, existing });
-  }
+  }, [issueReactions, toggleIssueReaction, userId]);
 
-  function handleCommentReaction(entry: TimelineEntry, emoji: string) {
+  const handleCommentReaction = useCallback((entry: TimelineEntry, emoji: string) => {
     if (!userId) return;
     const existing = (entry.reactions ?? []).find((reaction) =>
       isOwnReaction(reaction, emoji, userId),
     );
     toggleCommentReaction.mutate({ commentId: entry.id, emoji, existing });
-  }
+  }, [toggleCommentReaction, userId]);
 
-  function startCommentEdit(commentId: string, content: string) {
+  const startCommentEdit = useCallback((commentId: string, content: string) => {
     setEditingCommentId(commentId);
     setEditingContent(content);
-  }
+  }, []);
 
-  async function openAttachmentPreview(attachment: Attachment) {
+  const copyCommentContent = useCallback(async (content: string) => {
+    setCommentError(null);
+    try {
+      Clipboard.setString(content);
+    } catch (err) {
+      setCommentError(formatClipboardError(err));
+    }
+  }, []);
+
+  const closeAttachmentPreview = useCallback(() => {
+    previewAbortRef.current?.abort();
+    previewAbortRef.current = null;
+    setAttachmentPreview(null);
+  }, []);
+
+  const openAttachmentPreview = useCallback(async (attachment: Attachment) => {
+    previewAbortRef.current?.abort();
+    previewAbortRef.current = null;
+
     if (isImageAttachment(attachment)) {
       setAttachmentPreview({ attachment });
       return;
@@ -359,20 +438,30 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
 
     setAttachmentPreview({ attachment, loading: true });
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
     try {
-      const response = await fetch(attachment.download_url || attachment.url);
+      const response = await fetch(attachment.download_url || attachment.url, {
+        signal: controller.signal,
+      });
       if (!response.ok) {
         throw new Error(`Unable to load preview (${response.status})`);
       }
       const textContent = await response.text();
+      if (controller.signal.aborted) return;
       setAttachmentPreview({ attachment, textContent });
     } catch (err) {
+      if (controller.signal.aborted) return;
       setAttachmentPreview({
         attachment,
         error: err instanceof Error ? err.message : "Unable to load preview",
       });
+    } finally {
+      if (previewAbortRef.current === controller) {
+        previewAbortRef.current = null;
+      }
     }
-  }
+  }, []);
 
   const renderListItem = useCallback(({ item }: { item: DetailListItem }) => {
     if ("node" in item) return item.node;
@@ -380,25 +469,17 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     if (item.kind === "footer") {
       return (
         <ThreadReplyFooter
-          isReplying={replyTargetId === item.rootId}
-          mentionTargets={mentionTargets}
-          onCancelReply={() => {
-            setReplyTargetId(null);
-            setReplyContent("");
-          }}
-          onChangeReply={setReplyContent}
-          onReply={() => setReplyTargetId(item.rootId)}
-          onSubmitReply={() => void submitReply(item.rootId)}
-          replyContent={replyContent}
+          onReply={() => openReplyComposer(item.rootId)}
         />
       );
     }
 
+    const isEditingEntry = editingCommentId === item.entry.id;
     return (
       <TimelineItem
         entry={item.entry}
-        editingCommentId={editingCommentId}
-        editingContent={editingContent}
+        editingCommentId={isEditingEntry ? editingCommentId : null}
+        editingContent={isEditingEntry ? editingContent : ""}
         onToggleReaction={handleCommentReaction}
         onOpenAttachment={openAttachmentPreview}
         onCancelEdit={() => {
@@ -407,9 +488,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         }}
         onChangeEdit={setEditingContent}
         onDelete={(commentId) => void removeComment(commentId)}
-        onReply={item.kind === "root" ? (commentId) => setReplyTargetId(commentId) : undefined}
+        onReply={item.kind === "root" ? openReplyComposer : undefined}
         onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
         onStartEdit={startCommentEdit}
+        onCopyComment={(content) => void copyCommentContent(content)}
         resolveActorName={getActorName}
         userId={userId}
         mentionTargets={mentionTargets}
@@ -424,20 +506,17 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     handleCommentReaction,
     mentionTargets,
     openAttachmentPreview,
+    openReplyComposer,
+    copyCommentContent,
     removeComment,
-    replyContent,
-    replyTargetId,
     saveCommentEdit,
     startCommentEdit,
-    submitReply,
     userId,
   ]);
 
-  if (isLoading) return <LoadingState />;
-  if (isError || !issue) return <EmptyState title="Unable to load issue" />;
-
-  const overviewItems: DetailListItem[] = [
-    {
+  const overviewItems = useMemo<DetailListItem[]>(() => {
+    if (!issue) return [];
+    return [{
       key: "issue-summary",
       node: (
         <View style={styles.section}>
@@ -595,20 +674,48 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
         </View>
       ),
-    },
-  ];
+    }];
+  }, [
+    attachments,
+    changePriority,
+    changeStatus,
+    childProgress,
+    children,
+    getActorName,
+    handleIssueReaction,
+    issue,
+    issueReactions,
+    metadataOpen,
+    navigation,
+    openAttachmentPreview,
+    parentIssue,
+    parentIssueLoading,
+    pickDocument,
+    pickImage,
+    uploadError,
+    uploading,
+    userId,
+  ]);
 
-  const commentItems: DetailListItem[] = commentsCollapsed
-    ? []
-    : comments.length === 0
-      ? [{ key: "comments-empty", node: <Text style={styles.emptyText}>No comments yet</Text> }]
-      : commentRows;
+  const commentItems = useMemo<DetailListItem[]>(() => {
+    if (commentsCollapsed) return [];
+    const items: DetailListItem[] = commentError
+      ? [{ key: "comments-error", node: <Text style={styles.errorText}>{commentError}</Text> }]
+      : [];
+    if (comments.length === 0) {
+      items.push({ key: "comments-empty", node: <Text style={styles.emptyText}>No comments yet</Text> });
+      return items;
+    }
+    items.push(...commentRows);
+    return items;
+  }, [commentError, commentRows, comments.length, commentsCollapsed]);
 
-  const timelineItems: DetailListItem[] = timelineCollapsed
-    ? []
-    : activities.length === 0
-      ? [{ key: "timeline-empty", node: <Text style={styles.emptyText}>No activity yet</Text> }]
-      : activities.map((entry) => ({
+  const timelineItems = useMemo<DetailListItem[]>(() => (
+    timelineCollapsed
+      ? []
+      : activities.length === 0
+        ? [{ key: "timeline-empty", node: <Text style={styles.emptyText}>No activity yet</Text> }]
+        : activities.map((entry) => ({
           key: entry.id,
           node: (
             <TimelineItem
@@ -616,10 +723,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               resolveActorName={getActorName}
             />
           ),
-        }));
+        }))
+  ), [activities, getActorName, timelineCollapsed]);
 
-  const transcriptItems: DetailListItem[] = taskRuns.length === 0
-    ? [
+  const transcriptItems = useMemo<DetailListItem[]>(() => (
+    taskRuns.length === 0
+      ? [
         {
           key: "agent-transcript-empty",
           node: (
@@ -630,7 +739,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           ),
         },
       ]
-    : taskRuns.flatMap((task, taskIndex) => {
+      : taskRuns.flatMap((task, taskIndex) => {
         const messages = taskMessagesByTaskId.get(task.id) ?? [];
         const taskItems: DetailListItem[] = [
           {
@@ -659,16 +768,24 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           })),
         );
         return taskItems;
-      });
+      })
+  ), [taskMessagesByTaskId, taskRuns]);
 
-  const sections: DetailSection[] = [
+  const toggleCommentsCollapsed = useCallback(() => {
+    setCommentsCollapsed((collapsed) => !collapsed);
+  }, []);
+  const toggleTimelineCollapsed = useCallback(() => {
+    setTimelineCollapsed((collapsed) => !collapsed);
+  }, []);
+
+  const sections = useMemo<DetailSection[]>(() => [
     { key: "overview", data: overviewItems },
     {
       key: "comments",
       title: "Comments",
       count: comments.length,
       collapsed: commentsCollapsed,
-      onToggle: () => setCommentsCollapsed((collapsed) => !collapsed),
+      onToggle: toggleCommentsCollapsed,
       data: commentItems,
     },
     {
@@ -676,11 +793,25 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       title: "Timeline",
       count: activities.length,
       collapsed: timelineCollapsed,
-      onToggle: () => setTimelineCollapsed((collapsed) => !collapsed),
+      onToggle: toggleTimelineCollapsed,
       data: timelineItems,
     },
     { key: "transcript", data: transcriptItems },
-  ];
+  ], [
+    activities.length,
+    commentItems,
+    comments.length,
+    commentsCollapsed,
+    overviewItems,
+    timelineCollapsed,
+    timelineItems,
+    toggleCommentsCollapsed,
+    toggleTimelineCollapsed,
+    transcriptItems,
+  ]);
+
+  if (isLoading) return <LoadingState />;
+  if (isError || !issue) return <EmptyState title="Unable to load issue" />;
 
   return (
     <Screen padded={false} safeArea={false}>
@@ -712,7 +843,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           <Pressable
             accessibilityLabel="Add a comment"
             accessibilityRole="button"
-            onPress={() => setCommentSheetOpen(true)}
+            onPress={openCommentComposer}
             style={({ pressed }) => [
               styles.floatingButton,
               {
@@ -742,9 +873,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         uploading={uploading}
         attachments={commentAttachments}
         mentionTargets={mentionTargets}
+        placeholder={replyTargetId ? "Reply in thread" : "Add a comment"}
+        submitLabel={replyTargetId ? "Send reply" : "Send"}
+        title={replyTargetId ? "Reply in thread" : "Add a comment"}
       />
       <AttachmentPreviewModal
-        onClose={() => setAttachmentPreview(null)}
+        onClose={closeAttachmentPreview}
         open={Boolean(attachmentPreview)}
         preview={attachmentPreview}
       />
@@ -765,6 +899,9 @@ function CommentSheet({
   onRemoveAttachment,
   onSubmit,
   open,
+  placeholder,
+  submitLabel,
+  title,
   uploadError,
   uploading,
 }: {
@@ -780,10 +917,14 @@ function CommentSheet({
   onRemoveAttachment: (attachmentId: string) => void;
   onSubmit: () => void;
   open: boolean;
+  placeholder: string;
+  submitLabel: string;
+  title: string;
   uploadError: string | null;
   uploading: boolean;
 }) {
   const canSubmit = comment.trim().length > 0 && !createPending && !uploading;
+  const keyboardHeight = useKeyboardHeight(open);
 
   return (
     <Modal
@@ -792,15 +933,18 @@ function CommentSheet({
       transparent
       visible={open}
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.sheetKeyboardView}
-      >
+      <View style={styles.sheetKeyboardView}>
         <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(bottomInset, spacing.md) }]}>
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            paddingBottom: Math.max(bottomInset, spacing.md),
+          },
+        ]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Add a comment</Text>
+            <Text style={styles.sheetTitle}>{title}</Text>
             <Button onPress={onClose} variant="ghost">
               Close
             </Button>
@@ -810,7 +954,7 @@ function CommentSheet({
             mentionTargets={mentionTargets}
             multiline
             onChangeText={onChangeComment}
-            placeholder="Add a comment"
+            placeholder={placeholder}
             placeholderTextColor={colors.mutedForeground}
             scrollEnabled
             style={styles.sheetCommentInput}
@@ -830,11 +974,11 @@ function CommentSheet({
               </Button>
             </View>
             <Button disabled={!canSubmit} onPress={onSubmit}>
-              Send
+              {submitLabel}
             </Button>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -1060,67 +1204,35 @@ function Chip({
 }
 
 function ThreadReplyFooter({
-  isReplying,
-  mentionTargets,
-  onCancelReply,
-  onChangeReply,
   onReply,
-  onSubmitReply,
-  replyContent,
 }: {
-  isReplying: boolean;
-  mentionTargets?: WorkspaceMentionTarget[];
-  onCancelReply?: () => void;
-  onChangeReply?: (content: string) => void;
   onReply: () => void;
-  onSubmitReply?: () => void;
-  replyContent?: string;
 }) {
   return (
     <View style={styles.threadReplyFooter}>
-      {isReplying ? (
-        <View style={styles.replyBox}>
-          <MentionTextInput
-            autoFocus
-            mentionTargets={mentionTargets ?? []}
-            multiline
-            onChangeText={onChangeReply ?? (() => {})}
-            placeholder="Reply in thread"
-            placeholderTextColor={colors.mutedForeground}
-            style={styles.commentInput}
-            value={replyContent ?? ""}
-          />
-          <View style={styles.inlineActions}>
-            <Button onPress={onSubmitReply}>Send reply</Button>
-            <Button onPress={onCancelReply} variant="secondary">
-              Cancel
-            </Button>
-          </View>
-        </View>
-      ) : (
-        <Pressable
-          accessibilityLabel="Reply in thread"
-          accessibilityRole="button"
-          onPress={onReply}
-          style={({ pressed }) => [
-            styles.threadReplyButton,
-            pressed && styles.buttonPressed,
-          ]}
-        >
-          <Text style={styles.threadReplyButtonText}>Reply in thread</Text>
-        </Pressable>
-      )}
+      <Pressable
+        accessibilityLabel="Reply in thread"
+        accessibilityRole="button"
+        onPress={onReply}
+        style={({ pressed }) => [
+          styles.threadReplyButton,
+          pressed && styles.buttonPressed,
+        ]}
+      >
+        <Text style={styles.threadReplyButtonText}>Reply in thread</Text>
+      </Pressable>
     </View>
   );
 }
 
-function TimelineItem({
+const TimelineItem = memo(function TimelineItem({
   editingCommentId,
   editingContent,
   entry,
   isLastReply,
   onCancelEdit,
   onChangeEdit,
+  onCopyComment,
   onDelete,
   onOpenAttachment,
   onReply,
@@ -1137,6 +1249,7 @@ function TimelineItem({
   entry: TimelineEntry;
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
+  onCopyComment?: (content: string) => void;
   onDelete?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment) => void;
   onReply?: (commentId: string) => void;
@@ -1159,8 +1272,22 @@ function TimelineItem({
     ? entry.content
     : formatActivity(entry, resolveActorName);
   const isComment = entry.type === "comment";
-  const hasCommentActions = Boolean(onReply || isOwnComment);
-  const reactionOptions = Array.from(new Set([...DEFAULT_REACTIONS, ...(entry.reactions ?? []).map((r) => r.emoji)]));
+  const hasCommentActions = isComment;
+  const reactionSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    const own = new Set<string>();
+    for (const reaction of entry.reactions ?? []) {
+      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
+      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
+        own.add(reaction.emoji);
+      }
+    }
+    return {
+      counts,
+      options: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
+      own,
+    };
+  }, [entry.reactions, userId]);
 
   function openActionsMenuAtPress(event: GestureResponderEvent) {
     if (!isComment || isEditing || !hasCommentActions) return;
@@ -1188,6 +1315,13 @@ function TimelineItem({
             }}
           />
         ) : null}
+        <DropdownItem
+          label="Copy"
+          onPress={() => {
+            onCopyComment?.(entry.content ?? "");
+            closeActionsMenu();
+          }}
+        />
         {isOwnComment ? (
           <>
             <DropdownItem
@@ -1214,7 +1348,7 @@ function TimelineItem({
   function renderActionsMenuModal() {
     if (openMenu !== "actions" || !actionsMenuAnchor) return null;
     const menuWidth = 132;
-    const menuHeight = (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
+    const menuHeight = 44 + (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
     const left = Math.max(spacing.md, Math.min(actionsMenuAnchor.x - menuWidth / 2, windowWidth - menuWidth - spacing.md));
     const top = Math.max(spacing.md, Math.min(actionsMenuAnchor.y + spacing.xs, windowHeight - menuHeight - spacing.md));
 
@@ -1274,9 +1408,9 @@ function TimelineItem({
             </View>
             {openMenu === "reactions" ? (
               <View style={styles.commentDropdown}>
-                {reactionOptions.map((emoji) => {
-                  const count = (entry.reactions ?? []).filter((reaction) => reaction.emoji === emoji).length;
-                  const active = Boolean(userId && (entry.reactions ?? []).some((reaction) => isOwnReaction(reaction, emoji, userId)));
+                {reactionSummary.options.map((emoji) => {
+                  const count = reactionSummary.counts.get(emoji) ?? 0;
+                  const active = reactionSummary.own.has(emoji);
                   return (
                     <DropdownItem
                       active={active}
@@ -1352,7 +1486,7 @@ function TimelineItem({
       ) : content}
     </Pressable>
   );
-}
+});
 
 function HeaderIconButton({
   children,
@@ -1619,7 +1753,7 @@ const TaskMessageRow = memo(function TaskMessageRow({ message }: { message: Task
   );
 });
 
-function ReactionRow({
+const ReactionRow = memo(function ReactionRow({
   compact,
   onToggle,
   reactions,
@@ -1630,13 +1764,27 @@ function ReactionRow({
   reactions: ReactionLike[];
   userId?: string;
 }) {
-  const emojis = Array.from(new Set([...DEFAULT_REACTIONS, ...reactions.map((r) => r.emoji)]));
+  const reactionSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    const own = new Set<string>();
+    for (const reaction of reactions) {
+      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
+      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
+        own.add(reaction.emoji);
+      }
+    }
+    return {
+      counts,
+      emojis: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
+      own,
+    };
+  }, [reactions, userId]);
 
   return (
     <View style={styles.reactionRow}>
-      {emojis.map((emoji) => {
-        const count = reactions.filter((reaction) => reaction.emoji === emoji).length;
-        const active = Boolean(userId && reactions.some((reaction) => isOwnReaction(reaction, emoji, userId)));
+      {reactionSummary.emojis.map((emoji) => {
+        const count = reactionSummary.counts.get(emoji) ?? 0;
+        const active = reactionSummary.own.has(emoji);
         return (
           <Pressable
             disabled={!userId}
@@ -1660,7 +1808,7 @@ function ReactionRow({
       })}
     </View>
   );
-}
+});
 
 function isOwnReaction(reaction: ReactionLike, emoji: string, userId: string) {
   return reaction.emoji === emoji && reaction.actor_type === "member" && reaction.actor_id === userId;
@@ -1714,6 +1862,11 @@ function formatDocumentPickerError(err: unknown) {
     return "File picker is unavailable in this app build. Rebuild and reinstall the mobile app so expo-document-picker is included.";
   }
   return message || "File picker unavailable";
+}
+
+function formatClipboardError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return message || "Unable to copy comment";
 }
 
 function statusLabel(status: string) {
@@ -2083,12 +2236,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   editBox: {
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  replyBox: {
     backgroundColor: colors.muted,
     borderRadius: radii.md,
     gap: spacing.sm,
