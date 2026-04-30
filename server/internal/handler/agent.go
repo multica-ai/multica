@@ -564,7 +564,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		AvatarUrl:                sourceAgent.AvatarUrl,
 		RuntimeMode:              sourceAgent.RuntimeMode,
 		RuntimeConfig:            rc,
-		RuntimeID:                sourceAgent.RuntimeID,
+		RuntimeID:                pgtype.UUID{Valid: false},
 		Visibility:               sourceAgent.Visibility,
 		MaxConcurrentTasks:       sourceAgent.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(userID),
