@@ -162,6 +162,15 @@ const (
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
+	// A task currently running on this env root must never be reclaimed —
+	// not even on the done/cancelled or orphan-404 paths. A new comment on
+	// an already-done issue can dispatch a follow-up task that reuses the
+	// prior workdir without bumping the issue's updated_at, so the regular
+	// TTL check alone wouldn't notice the resumed activity.
+	if d.isActiveEnvRoot(taskDir) {
+		return gcActionSkip
+	}
+
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
 		// No .gc_meta.json — check mtime for orphan cleanup.
@@ -210,13 +219,12 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	}
 
 	// Artifact-only cleanup: issue is still open but the task itself completed
-	// long enough ago that its build artifacts are unlikely to be reused. Skip
-	// when a task is currently running on this env root, when artifact GC is
-	// disabled, or when the meta is missing a completed_at (defensive — means
-	// the task crashed before WriteGCMeta).
+	// long enough ago that its build artifacts are unlikely to be reused.
+	// Active-root protection is handled by the early return above; skip here
+	// only when artifact GC is disabled or the meta has no completed_at
+	// (defensive — that means the task crashed before WriteGCMeta).
 	if d.cfg.GCArtifactTTL > 0 && len(d.cfg.GCArtifactPatterns) > 0 &&
-		!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL &&
-		!d.isActiveEnvRoot(taskDir) {
+		!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
 		d.logger.Info("gc: eligible for artifact cleanup",
 			"dir", filepath.Base(taskDir),
 			"issue", meta.IssueID,
@@ -245,8 +253,9 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 //   - patterns are basename-only; entries with a path separator are dropped.
 //   - .git subtrees are never descended into, so the agent's git history stays
 //     intact even if a pattern would otherwise match.
-//   - symlinks are not followed; if a matching name is a symlink, only the
-//     link is removed.
+//   - symlinks are skipped entirely — neither the link nor its target is
+//     touched, so a malicious or stale link can't redirect the GC outside the
+//     workdir.
 //   - every removal target is verified to live inside taskDir, so a tampered
 //     .gc_meta.json can't trick the daemon into deleting outside its sandbox.
 func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed int, bytes int64, perPattern map[string]int) {

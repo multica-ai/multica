@@ -380,6 +380,79 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsArtifactCleanup(t *testing.T) {
 	}
 }
 
+func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
+	t.Parallel()
+	issueID := "99999999-9999-9999-9999-999999999999"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Done long enough ago to satisfy GCTTL — this would normally return
+		// gcActionClean. But the env root is in use (e.g. follow-up comment
+		// dispatched a task that reuses the prior workdir), and CreateComment
+		// does not bump issue.updated_at. Active-root guard must override.
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-done", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
+	})
+
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip on active env root with done+stale issue, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_ActiveEnvRootSkipsOrphan404(t *testing.T) {
+	t.Parallel()
+	issueID := "99999999-9999-9999-9999-99999999999a"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = 0 // would normally make this an immediate orphan delete
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-404", &execenv.GCMeta{
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now(),
+	})
+
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip on active env root with 404 issue, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_ActiveEnvRootSkipsNoMetaOrphan(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-no-meta", nil)
+
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip on active env root with no-meta orphan, got %d", action)
+	}
+}
+
 func TestShouldCleanTaskDir_ArtifactTTLDisabled(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-88888888888b"
