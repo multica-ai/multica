@@ -150,18 +150,6 @@ make selfhost-stop
 multica daemon stop
 ```
 
-## Switching to Multica Cloud
-
-If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
-
-```bash
-multica setup
-```
-
-This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
-
-> Your local Docker services are unaffected. Stop them separately if you no longer need them.
-
 ## Upgrading
 
 ```bash

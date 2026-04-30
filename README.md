@@ -2,6 +2,8 @@
   <img src="docs/assets/banner.jpg" alt="Multica — humans and agents, side by side" width="100%">
 </p>
 
+> **Self-hosting fork.** This fork strips the "Multica Cloud" CLI/UI from upstream and never points at multica.ai by default. Suitable for hosting Multica for your own clients on your own infrastructure. See [FORK.md](FORK.md) for the merge model and what's intentionally changed vs. upstream.
+
 <div align="center">
 
 <picture>
@@ -20,7 +22,7 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
 
-[Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
+[Website](https://multica.ai) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
 **English | [简体中文](README.zh-CN.md)**
 
