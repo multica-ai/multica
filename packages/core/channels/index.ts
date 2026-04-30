@@ -24,6 +24,8 @@ export {
   useMarkChannelRead,
   useCreateOrFetchDM,
   useToggleChannelReaction,
+  useUpdateChannelMessage,
+  useDeleteChannelMessage,
 } from "./mutations";
 
 import type { createChannelsStore as CreateChannelsStoreFn } from "./store";

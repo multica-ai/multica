@@ -383,6 +383,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// requireChannelAccess inside each handler. The
 					// {messageId} URL param is shared across all three.
 					r.Route("/messages/{messageId}", func(r chi.Router) {
+						// Phase 5 — author / admin edits + soft delete.
+						r.Patch("/", h.UpdateChannelMessage)
+						r.Delete("/", h.DeleteChannelMessage)
 						r.Get("/thread", h.ListChannelMessageThread)
 						r.Post("/reactions", h.AddChannelReaction)
 						r.Delete("/reactions", h.RemoveChannelReaction)

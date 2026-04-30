@@ -79,6 +79,12 @@ const (
 	EventChannelMemberAdded   = "channel:member_added"
 	EventChannelMemberRemoved = "channel:member_removed"
 	EventChannelRead          = "channel:read"
+	// Phase 5 — author-driven edits / soft-deletes propagate via these
+	// per-message events. Distinct from channel:message (the new-message
+	// signal) so the frontend can patch the cache surgically rather than
+	// invalidate the whole timeline.
+	EventChannelMessageUpdated = "channel:message_updated"
+	EventChannelMessageDeleted = "channel:message_deleted"
 	// Channel-message reactions (Phase 4). Separate from EventReactionAdded
 	// (which targets issue comments) and EventIssueReactionAdded (issues)
 	// because the payload shape differs — channel reactions carry channel_id

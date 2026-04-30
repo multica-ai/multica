@@ -55,6 +55,8 @@ export type WSEventType =
   | "channel:updated"
   | "channel:archived"
   | "channel:message"
+  | "channel:message_updated"
+  | "channel:message_deleted"
   | "channel:member_added"
   | "channel:member_removed"
   | "channel:read"

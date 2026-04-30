@@ -1144,6 +1144,19 @@ export class ApiClient {
 
   // Phase 4: threads + reactions
 
+  async updateChannelMessage(channelId: string, messageId: string, content: string): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async deleteChannelMessage(channelId: string, messageId: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  }
+
   async getChannelMessageThread(channelId: string, messageId: string): Promise<ChannelMessageThread> {
     return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
   }

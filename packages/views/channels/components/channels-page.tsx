@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useDefaultLayout } from "react-resizable-panels";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@multica/ui/components/ui/resizable";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
@@ -58,6 +64,12 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   useEffect(() => {
     setThreadParentId(null);
   }, [activeChannelId]);
+
+  // Persist the thread vs. messages split between sessions. Same hook the
+  // inbox / project pages use; layouts are stored in localStorage keyed
+  // by `id`.
+  const { defaultLayout: threadLayout, onLayoutChanged: onThreadLayoutChanged } =
+    useDefaultLayout({ id: "multica_channels_thread_layout" });
 
   const { data: channel, isLoading: channelLoading } = useQuery(
     channelDetailOptions(wsId, activeChannelId ?? "", enabled && !!activeChannelId),
@@ -120,8 +132,40 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
         ) : (
           <>
             <ChannelHeader channel={channel} enabled={enabled} />
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col">
+            {threadParentId ? (
+              // Resizable split when a thread is open. Drag the divider to
+              // give more room to either pane; the layout is persisted in
+              // localStorage so it survives page reloads. Without a thread
+              // open we render the messages pane full-width — there's no
+              // second pane to size against.
+              <ResizablePanelGroup
+                orientation="horizontal"
+                className="flex-1 min-h-0"
+                defaultLayout={threadLayout}
+                onLayoutChanged={onThreadLayoutChanged}
+              >
+                <ResizablePanel id="messages" minSize="35%">
+                  <div className="flex h-full min-w-0 flex-col">
+                    <ChannelMessageList
+                      channelId={channel.id}
+                      enabled={enabled}
+                      onOpenThread={setThreadParentId}
+                    />
+                    <ChannelComposer channel={channel} />
+                  </div>
+                </ResizablePanel>
+                <ResizableHandle />
+                <ResizablePanel id="thread" defaultSize={420} minSize={300} maxSize={720} groupResizeBehavior="preserve-pixel-size">
+                  <ThreadPanel
+                    channelId={channel.id}
+                    parentMessageId={threadParentId}
+                    onClose={() => setThreadParentId(null)}
+                    enabled={enabled}
+                  />
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
                 <ChannelMessageList
                   channelId={channel.id}
                   enabled={enabled}
@@ -129,15 +173,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
                 />
                 <ChannelComposer channel={channel} />
               </div>
-              {threadParentId ? (
-                <ThreadPanel
-                  channelId={channel.id}
-                  parentMessageId={threadParentId}
-                  onClose={() => setThreadParentId(null)}
-                  enabled={enabled}
-                />
-              ) : null}
-            </div>
+            )}
           </>
         )}
       </main>

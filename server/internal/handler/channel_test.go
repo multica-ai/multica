@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -601,6 +602,184 @@ func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
 	}
 	if !strings.Contains(content, "Hi! I'm the agent") {
 		t.Fatalf("reply content unexpected: %q", content)
+	}
+}
+
+// Phase 5 — edits + deletes -------------------------------------------------
+
+func TestEditChannelMessage_AuthorOnly(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "edit-test", "display_name": "EditTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d", w.Code)
+	}
+	ch := decodeChannel(t, w)
+
+	// Post a message as the test member.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content": "original",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create message: %d", w.Code)
+	}
+	var msg ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&msg)
+
+	// Author edits — 200.
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/channels/"+ch.ID+"/messages/"+msg.ID, map[string]any{
+		"content": "edited body",
+	})
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.UpdateChannelMessage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("author edit: want 200, got %d %s", w.Code, w.Body.String())
+	}
+	var updated ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.Content != "edited body" {
+		t.Fatalf("content not updated: %q", updated.Content)
+	}
+	if updated.EditedAt == nil {
+		t.Fatalf("edited_at not stamped")
+	}
+
+	// As the test agent (different actor), edit attempt → 403.
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/channels/"+ch.ID+"/messages/"+msg.ID, map[string]any{
+		"content": "agent tries",
+	})
+	req.Header.Set("X-Agent-ID", testAgentID())
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.UpdateChannelMessage(w, req)
+	// Note: agent isn't a member, so requireChannelAccess fires first
+	// and returns 404 (don't leak that the message exists). Either 403
+	// or 404 is acceptable as "you can't edit this"; we accept both.
+	if w.Code != http.StatusForbidden && w.Code != http.StatusNotFound {
+		t.Fatalf("non-author edit: want 403 or 404, got %d", w.Code)
+	}
+
+	// DB row is unchanged.
+	var content string
+	if err := testPool.QueryRow(ctx, `SELECT content FROM channel_message WHERE id = $1`, msg.ID).Scan(&content); err != nil {
+		t.Fatalf("query content: %v", err)
+	}
+	if content != "edited body" {
+		t.Fatalf("DB content drifted: %q", content)
+	}
+}
+
+func TestDeleteChannelMessage_ByAuthor(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "delete-author", "display_name": "DA", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	ch := decodeChannel(t, w)
+	msg := postChannelMessage(t, ch.ID, "delete me")
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/channels/"+ch.ID+"/messages/"+msg.ID, nil)
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.DeleteChannelMessage(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete: want 204, got %d %s", w.Code, w.Body.String())
+	}
+
+	// Soft-deleted row: deleted_at stamped, deletion_reason='user'.
+	var (
+		deletedAt sql.NullTime
+		reason    sql.NullString
+	)
+	if err := testPool.QueryRow(ctx, `SELECT deleted_at, deletion_reason FROM channel_message WHERE id = $1`, msg.ID).Scan(&deletedAt, &reason); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !deletedAt.Valid {
+		t.Fatalf("deleted_at not set")
+	}
+	if reason.String != "user" {
+		t.Fatalf("deletion_reason = %q, want 'user'", reason.String)
+	}
+
+	// List excludes the soft-deleted row from the timeline view.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	var listed []ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&listed)
+	for _, m := range listed {
+		if m.ID == msg.ID {
+			t.Fatalf("soft-deleted message leaked into top-level list: %+v", m)
+		}
+	}
+}
+
+func TestDeleteChannelMessage_ByChannelAdmin(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	// Create the channel as the test member (becomes admin via creator role).
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "admin-delete", "display_name": "AD", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	ch := decodeChannel(t, w)
+
+	// Add the agent as a regular member.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/members", map[string]any{
+		"member_type": "agent", "member_id": testAgentID(), "role": "member",
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.AddChannelMember(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add agent: %d", w.Code)
+	}
+
+	// The agent posts a message via the API (X-Agent-ID header).
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content": "agent message",
+	})
+	req.Header.Set("X-Agent-ID", testAgentID())
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent post: %d %s", w.Code, w.Body.String())
+	}
+	var msg ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&msg)
+
+	// The test member (admin) deletes the agent's message.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/channels/"+ch.ID+"/messages/"+msg.ID, nil)
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.DeleteChannelMessage(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("admin delete: want 204, got %d %s", w.Code, w.Body.String())
+	}
+
+	// deletion_reason='admin'.
+	var reason sql.NullString
+	if err := testPool.QueryRow(ctx, `SELECT deletion_reason FROM channel_message WHERE id = $1`, msg.ID).Scan(&reason); err != nil {
+		t.Fatalf("query reason: %v", err)
+	}
+	if reason.String != "admin" {
+		t.Fatalf("deletion_reason = %q, want 'admin' (was admin-deletion)", reason.String)
 	}
 }
 

@@ -137,6 +137,67 @@ export function useCreateOrFetchDM() {
   });
 }
 
+// Phase 5 — edit a channel message in place. Optimistic patch in the
+// timeline cache so the new content shows instantly; rollback on error.
+// edited_at is filled by the server return value, so the optimistic
+// path leaves it null and the settle phase fixes it up.
+export function useUpdateChannelMessage(channelId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { messageId: string; content: string }) =>
+      api.updateChannelMessage(channelId, params.messageId, params.content),
+    onMutate: async (params) => {
+      await qc.cancelQueries({ queryKey: channelKeys.messages(channelId) });
+      const prev = qc.getQueryData<ChannelMessage[]>(channelKeys.messages(channelId));
+      qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>
+        old?.map((m) =>
+          m.id === params.messageId ? { ...m, content: params.content } : m,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _params, ctx) => {
+      if (ctx?.prev) qc.setQueryData(channelKeys.messages(channelId), ctx.prev);
+    },
+    onSettled: (_data, _err, params) => {
+      qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
+      qc.invalidateQueries({ queryKey: channelKeys.thread(params.messageId) });
+    },
+  });
+}
+
+// Phase 5 — soft-delete a channel message (author or channel admin).
+// Optimistic update flips deleted_at on the cached row so the timeline
+// renders the "[message deleted]" placeholder instantly. The thread
+// cache (if any) is also flipped so a panel that's currently displaying
+// the message gets the placeholder treatment.
+export function useDeleteChannelMessage(channelId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) => api.deleteChannelMessage(channelId, messageId),
+    onMutate: async (messageId) => {
+      await qc.cancelQueries({ queryKey: channelKeys.messages(channelId) });
+      const prev = qc.getQueryData<ChannelMessage[]>(channelKeys.messages(channelId));
+      const stamp = new Date().toISOString();
+      qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>
+        old?.filter((m) => m.id !== messageId).concat(
+          (old ?? [])
+            .filter((m) => m.id === messageId)
+            .map((m) => ({ ...m, deleted_at: stamp })),
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _messageId, ctx) => {
+      if (ctx?.prev) qc.setQueryData(channelKeys.messages(channelId), ctx.prev);
+    },
+    onSettled: (_data, _err, messageId) => {
+      qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
+      qc.invalidateQueries({ queryKey: channelKeys.thread(messageId) });
+    },
+  });
+}
+
 // Phase 4 reaction mutations. Optimistic toggle: reaction immediately
 // appears/disappears on the message in the cache; a server failure
 // reverts and surfaces a toast.

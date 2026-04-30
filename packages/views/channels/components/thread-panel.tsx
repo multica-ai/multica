@@ -30,9 +30,9 @@ interface ThreadPanelProps {
  * with parent_message_id set, so replies live under the parent rather
  * than landing in the top-level view.
  *
- * Width: 380px is conservative — narrow enough that the main timeline
- * stays readable on a 1280px window, wide enough for code blocks not
- * to wrap awkwardly. A future iteration could make this draggable.
+ * Width: sized by the enclosing ResizablePanel in channels-page.tsx,
+ * so the panel takes whatever width its parent allocates. Defaults
+ * to 420px and the user can drag the divider to shrink or grow.
  */
 export function ThreadPanel({ channelId, parentMessageId, onClose, enabled }: ThreadPanelProps) {
   const wsId = useWorkspaceId();
@@ -57,7 +57,7 @@ export function ThreadPanel({ channelId, parentMessageId, onClose, enabled }: Th
   };
 
   return (
-    <aside className="flex w-[380px] shrink-0 flex-col border-l border-border bg-background">
+    <aside className="flex h-full min-w-0 flex-col border-l border-border bg-background">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <span className="text-sm font-semibold text-foreground">Thread</span>
         <Button

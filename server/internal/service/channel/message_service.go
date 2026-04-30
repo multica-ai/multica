@@ -97,6 +97,92 @@ func (s *MessageService) List(ctx context.Context, p ListMessagesParams) ([]db.C
 	})
 }
 
+// UpdateContent edits the body of an existing message. Phase 5 contract:
+// only the original author may edit, the caller must already be the
+// resolved actor (member or agent) — admins cannot edit someone else's
+// message even if they could delete it. Sets edited_at = now() so the
+// UI can render an "(edited)" hint.
+//
+// Returns ErrForbidden when the actor isn't the author, ErrNotFound
+// when the message doesn't exist, ErrInvalid when content is empty,
+// ErrChannelClosed when the message has already been soft-deleted.
+func (s *MessageService) UpdateContent(ctx context.Context, messageID pgtype.UUID, author Actor, content string) (db.ChannelMessage, error) {
+	if content == "" {
+		return db.ChannelMessage{}, fmt.Errorf("%w: content must not be empty", ErrInvalid)
+	}
+	existing, err := s.Get(ctx, messageID)
+	if err != nil {
+		return db.ChannelMessage{}, err
+	}
+	if existing.DeletedAt.Valid {
+		return db.ChannelMessage{}, ErrChannelClosed
+	}
+	if existing.AuthorType != author.Type || existing.AuthorID.Bytes != author.ID.Bytes {
+		return db.ChannelMessage{}, ErrForbidden
+	}
+	updated, err := s.Queries.UpdateChannelMessage(ctx, db.UpdateChannelMessageParams{
+		ID:      messageID,
+		Content: content,
+	})
+	return updated, translateNotFound(err)
+}
+
+// IsChannelAdmin reports whether the given actor has admin role on
+// the given channel. Used by Delete to allow channel admins to
+// remove others' messages (the spec calls out moderation as a
+// distinct role from authorship).
+func (s *MessageService) IsChannelAdmin(ctx context.Context, channelID pgtype.UUID, actor Actor) (bool, error) {
+	mem, err := s.Queries.GetChannelMembership(ctx, db.GetChannelMembershipParams{
+		ChannelID:  channelID,
+		MemberType: actor.Type,
+		MemberID:   actor.ID,
+	})
+	if err != nil {
+		// pgx.ErrNoRows here means "not a member" — treat as not-admin.
+		return false, nil
+	}
+	return mem.Role == RoleAdmin, nil
+}
+
+// Delete soft-deletes a message. Allowed when the actor is the
+// original author OR holds RoleAdmin on the channel. The deletion
+// reason is stamped into the row so audit / moderation tooling can
+// distinguish self-deletes from admin removals.
+//
+// Returns ErrForbidden when neither condition holds, ErrNotFound when
+// the message doesn't exist. Already-deleted messages are silently
+// idempotent (returns the existing row's state).
+func (s *MessageService) Delete(ctx context.Context, messageID pgtype.UUID, actor Actor) (db.ChannelMessage, error) {
+	existing, err := s.Get(ctx, messageID)
+	if err != nil {
+		return db.ChannelMessage{}, err
+	}
+	if existing.DeletedAt.Valid {
+		// Idempotent: already soft-deleted.
+		return existing, nil
+	}
+	isAuthor := existing.AuthorType == actor.Type && existing.AuthorID.Bytes == actor.ID.Bytes
+	reason := DeletedByUser
+	if !isAuthor {
+		isAdmin, err := s.IsChannelAdmin(ctx, existing.ChannelID, actor)
+		if err != nil {
+			return db.ChannelMessage{}, err
+		}
+		if !isAdmin {
+			return db.ChannelMessage{}, ErrForbidden
+		}
+		reason = DeletedByAdmin
+	}
+	if err := s.Queries.SoftDeleteChannelMessage(ctx, db.SoftDeleteChannelMessageParams{
+		ID:              messageID,
+		DeletionReason:  pgtype.Text{String: reason, Valid: true},
+	}); err != nil {
+		return db.ChannelMessage{}, err
+	}
+	// Return the post-delete state.
+	return s.Get(ctx, messageID)
+}
+
 // ListThread returns the replies under a parent message in chronological
 // order. Soft-deleted replies are excluded.
 func (s *MessageService) ListThread(ctx context.Context, parentID pgtype.UUID) ([]db.ChannelMessage, error) {

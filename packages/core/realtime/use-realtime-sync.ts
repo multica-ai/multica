@@ -232,6 +232,8 @@ export function useRealtimeSync(
       // the per-channel message cache (the prefix handler only touches the
       // workspace-wide channels tree, not individual message caches).
       "channel:message",
+      "channel:message_updated",
+      "channel:message_deleted",
       // Same reasoning for reactions: the per-message reaction list lives
       // inside the channel-messages cache, not under the channels tree.
       "channel_reaction:added",
@@ -572,6 +574,27 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
       }
     });
+    // Phase 5 — author edits / soft-deletes. Same dual invalidation
+    // (timeline + thread) as reactions, since an edit/delete on a
+    // thread reply needs to reflect inside an open ThreadPanel.
+    const unsubChannelMessageUpdated = ws.on("channel:message_updated", (p) => {
+      const payload = p as { channel_id?: string; message?: { id?: string } };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message?.id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message.id) });
+      }
+    });
+    const unsubChannelMessageDeleted = ws.on("channel:message_deleted", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
 
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
@@ -715,6 +738,8 @@ export function useRealtimeSync(
       unsubChannelMessage();
       unsubChannelReactionAdded();
       unsubChannelReactionRemoved();
+      unsubChannelMessageUpdated();
+      unsubChannelMessageDeleted();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

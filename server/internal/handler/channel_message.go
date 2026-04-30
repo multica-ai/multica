@@ -516,6 +516,132 @@ func (h *Handler) ListChannelMessageThread(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// UpdateChannelMessageRequest is the body for PATCH
+// /api/channels/{channelId}/messages/{messageId}.
+type UpdateChannelMessageRequest struct {
+	Content string `json:"content"`
+}
+
+// UpdateChannelMessage handles PATCH
+// /api/channels/{channelId}/messages/{messageId}. Author-only;
+// admins can delete others' messages but not edit them (the spec
+// calls out moderation as deletion, not rewriting words in someone
+// else's mouth). Sets edited_at = now() and broadcasts
+// EventChannelMessageUpdated.
+func (h *Handler) UpdateChannelMessage(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID}); !ok {
+		return
+	}
+	// Cross-channel guard.
+	msg, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || msg.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	var req UpdateChannelMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated, err := h.ChannelMessageService.UpdateContent(r.Context(), messageUUID, channel.Actor{Type: actorType, ID: actorUUID}, req.Content)
+	if err != nil {
+		status, msgStr := channelErrorStatus(err)
+		writeError(w, status, msgStr)
+		return
+	}
+
+	resp := channelMessageToResponse(updated)
+	// Hydrate the chip row so the WS subscriber doesn't need a refetch
+	// just to keep reactions visible after an edit.
+	if rs := h.groupChannelReactions(r, []pgtype.UUID{updated.ID}); rs != nil {
+		if items, ok := rs[uuidToString(updated.ID)]; ok && len(items) > 0 {
+			resp.Reactions = items
+		}
+	}
+
+	h.publish(protocol.EventChannelMessageUpdated, uuidToString(wsID), actorType, actorID, map[string]any{
+		"channel_id": uuidToString(channelUUID),
+		"message":    resp,
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DeleteChannelMessage handles DELETE
+// /api/channels/{channelId}/messages/{messageId}. Author or channel
+// admin. Soft-deletes (sets deleted_at + deletion_reason). The row
+// stays in the timeline so thread continuity isn't broken — the UI
+// renders a "[message deleted]" placeholder.
+func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID}); !ok {
+		return
+	}
+	// Cross-channel guard.
+	msg, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || msg.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	deleted, err := h.ChannelMessageService.Delete(r.Context(), messageUUID, channel.Actor{Type: actorType, ID: actorUUID})
+	if err != nil {
+		status, msgStr := channelErrorStatus(err)
+		writeError(w, status, msgStr)
+		return
+	}
+
+	h.publish(protocol.EventChannelMessageDeleted, uuidToString(wsID), actorType, actorID, map[string]any{
+		"channel_id": uuidToString(channelUUID),
+		"message_id": uuidToString(messageUUID),
+		"deleted_at": timestampToString(deleted.DeletedAt),
+		"reason":     deleted.DeletionReason.String,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // AddChannelReactionRequest is the body for POST
 // /api/channels/{channelId}/messages/{messageId}/reactions.
 type AddChannelReactionRequest struct {
