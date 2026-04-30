@@ -21,26 +21,78 @@ export function HowItWorksSection() {
           <span className="text-white/40">{t.howItWorks.headlineFaded}</span>
         </h2>
 
-        <div className="mt-20 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Desktop: horizontal step flow with large serif numerals + connecting rule */}
+        <ol className="mt-20 hidden lg:grid lg:grid-cols-4 lg:gap-10">
           {t.howItWorks.steps.map((step, i) => (
-            <div
-              key={i}
-              className="flex flex-col bg-[#05070b] p-8 lg:p-10"
-            >
-              <span className="text-[13px] font-semibold tabular-nums text-white/28">
-                {String(i + 1).padStart(2, "0")}
+            <li key={i} className="relative flex flex-col">
+              <span className="font-[family-name:var(--font-serif)] text-[5rem] leading-none tracking-[-0.04em] text-white/72">
+                {i + 1}
               </span>
-              <h3 className="mt-4 text-[17px] font-semibold leading-snug text-white sm:text-[18px]">
+              <div className="mt-6 flex items-center gap-3">
+                <span className="h-px flex-1 bg-white/14" />
+                {i < t.howItWorks.steps.length - 1 ? (
+                  <svg
+                    aria-hidden="true"
+                    width="14"
+                    height="10"
+                    viewBox="0 0 14 10"
+                    fill="none"
+                    className="text-white/30"
+                  >
+                    <path
+                      d="M9 1l4 4-4 4M0 5h13"
+                      stroke="currentColor"
+                      strokeWidth="1"
+                      strokeLinecap="square"
+                    />
+                  </svg>
+                ) : (
+                  <span className="size-1.5 shrink-0 rounded-full bg-white/40" />
+                )}
+              </div>
+              <h3 className="mt-6 text-[18px] font-semibold leading-snug text-white">
                 {step.title}
               </h3>
-              <p className="mt-3 text-[14px] leading-[1.7] text-white/50 sm:text-[15px]">
+              <p className="mt-3 text-[15px] leading-[1.7] text-white/56">
                 {step.description}
               </p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
 
-        <div className="mt-14 flex flex-wrap items-center gap-4">
+        {/* Mobile / tablet: vertical timeline with continuous left rail */}
+        <ol className="mt-16 lg:hidden">
+          {t.howItWorks.steps.map((step, i) => {
+            const isLast = i === t.howItWorks.steps.length - 1;
+            return (
+              <li key={i} className="relative grid grid-cols-[3.25rem_1fr] gap-x-5">
+                {/* Left rail + numeral */}
+                <div className="relative flex flex-col items-start">
+                  <span className="font-[family-name:var(--font-serif)] text-[3rem] leading-none tracking-[-0.03em] text-white/80">
+                    {i + 1}
+                  </span>
+                  {!isLast && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-[1.05rem] top-[3.5rem] bottom-[-2.5rem] w-px bg-white/14"
+                    />
+                  )}
+                </div>
+                {/* Right content */}
+                <div className={isLast ? "pb-0" : "pb-12"}>
+                  <h3 className="text-[17px] font-semibold leading-snug text-white sm:text-[18px]">
+                    {step.title}
+                  </h3>
+                  <p className="mt-2.5 text-[14px] leading-[1.7] text-white/56 sm:text-[15px]">
+                    {step.description}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="mt-14 flex flex-wrap items-center gap-4 lg:mt-20">
           <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
