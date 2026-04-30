@@ -192,6 +192,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
+		// Snapshot the autopilot title so task rows self-describe later
+		// without joining back to autopilot. Truncated for the same
+		// transmission-cost reason as comment-driven summaries.
+		TriggerSummary: pgtype.Text{
+			String: truncateForSummary(ap.Title, triggerSummaryMaxLen),
+			Valid:  ap.Title != "",
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)

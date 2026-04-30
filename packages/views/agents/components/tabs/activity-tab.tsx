@@ -1,14 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleHelp,
   Hash,
   MessageSquare,
   Workflow,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Tooltip,
   TooltipContent,
@@ -28,6 +30,7 @@ import {
   summarizeActivityWindow,
   useWorkspaceActivityMap,
 } from "@multica/core/agents";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -35,11 +38,16 @@ import { timeAgo } from "@multica/core/utils";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "../../presence";
+import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const RECENT_LIMIT = 5;
+// Recent work pagination: small initial cohort to keep the section
+// scannable, then "Show more" reveals 20 at a time. Tasks are already
+// fully cached client-side (one listAgentTasks for the whole agent), so
+// "more" is a pure state flip — zero extra fetches.
+const RECENT_INITIAL = 5;
+const RECENT_PAGE = 20;
 
 interface ActivityTabProps {
   agent: Agent;
@@ -66,10 +74,19 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
 
+  const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
+
+  // Chat tasks are intentionally hidden across every Agent-scoped surface
+  // (list / detail / activity). They have their own UI in the chat
+  // experience; mixing them in here muddies "what is this agent doing
+  // for the team" with "what is this agent doing in private chat".
+  const isWorkflowTask = (t: AgentTask) => !t.chat_session_id;
+
   const activeTasks = useMemo(() => {
     return snapshot.filter(
       (t) =>
         t.agent_id === agent.id &&
+        isWorkflowTask(t) &&
         (t.status === "running" ||
           t.status === "queued" ||
           t.status === "dispatched"),
@@ -78,11 +95,12 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   // Most recent terminal tasks. Includes cancelled — users searching
   // "what just happened" want to see cancellations alongside completions
-  // and failures.
-  const recentTasks = useMemo(() => {
+  // and failures. Chat sessions filtered out for the same reason as above.
+  const recentTasksAll = useMemo(() => {
     return [...agentTasks]
       .filter(
         (t) =>
+          isWorkflowTask(t) &&
           !!t.completed_at &&
           (t.status === "completed" ||
             t.status === "failed" ||
@@ -92,9 +110,14 @@ export function ActivityTab({ agent }: ActivityTabProps) {
         (a, b) =>
           new Date(b.completed_at!).getTime() -
           new Date(a.completed_at!).getTime(),
-      )
-      .slice(0, RECENT_LIMIT);
+      );
   }, [agentTasks]);
+
+  const recentTasks = useMemo(
+    () => recentTasksAll.slice(0, recentDisplayLimit),
+    [recentTasksAll, recentDisplayLimit],
+  );
+  const hasMoreRecent = recentTasksAll.length > recentTasks.length;
 
   const avgDurationMs = useMemo(
     () => deriveAvgDurationLast30d(agentTasks, Date.now()),
@@ -133,6 +156,11 @@ export function ActivityTab({ agent }: ActivityTabProps) {
       <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
       <RecentWorkSection
         tasks={recentTasks}
+        totalCount={recentTasksAll.length}
+        hasMore={hasMoreRecent}
+        onShowMore={() =>
+          setRecentDisplayLimit((n) => n + RECENT_PAGE)
+        }
         issueMap={issueMap}
         agent={agent}
       />
@@ -244,31 +272,52 @@ function Last30dSection({
 
 function RecentWorkSection({
   tasks,
+  totalCount,
+  hasMore,
+  onShowMore,
   issueMap,
   agent,
 }: {
   tasks: AgentTask[];
+  totalCount: number;
+  hasMore: boolean;
+  onShowMore: () => void;
   issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
+  // Subtitle phrasing: "5 of 47" once we know the total is bigger than
+  // what we're rendering, otherwise "5 latest". Total comes from
+  // recentTasksAll (already filtered for chat / terminals) so it
+  // accurately reflects what would appear if the user kept clicking
+  // "Show more" — not the raw on-the-wire row count.
+  const subtitle =
+    tasks.length === 0
+      ? "Nothing finished yet"
+      : totalCount > tasks.length
+        ? `${tasks.length} of ${totalCount}`
+        : `${tasks.length} latest`;
   return (
-    <Section
-      title="Recent work"
-      subtitle={
-        tasks.length === 0
-          ? "Nothing finished yet"
-          : `${tasks.length} latest`
-      }
-    >
+    <Section title="Recent work" subtitle={subtitle}>
       {tasks.length === 0 ? (
         <EmptyText>This agent hasn&apos;t completed anything yet.</EmptyText>
       ) : (
-        <TaskList
-          tasks={tasks}
-          issueMap={issueMap}
-          timeMode="completed"
-          agent={agent}
-        />
+        <>
+          <TaskList
+            tasks={tasks}
+            issueMap={issueMap}
+            timeMode="completed"
+            agent={agent}
+          />
+          {hasMore && (
+            <button
+              type="button"
+              onClick={onShowMore}
+              className="mt-2 self-start rounded text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Show more →
+            </button>
+          )}
+        </>
       )}
     </Section>
   );
@@ -312,6 +361,7 @@ function TaskRow({
   agent: Agent;
 }) {
   const paths = useWorkspacePaths();
+  const [cancelling, setCancelling] = useState(false);
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
   const Icon = cfg.icon;
   const hasIssue = task.issue_id !== "";
@@ -320,13 +370,47 @@ function TaskRow({
   // Queued tasks have no messages yet — hiding the transcript button avoids
   // a guaranteed "No execution data recorded." dialog open.
   const showTranscript = task.status !== "queued";
+  // Cancel only makes sense for the three active states. Terminal rows
+  // (completed / failed / cancelled) hide the button entirely.
+  const showCancel =
+    timeMode === "active" &&
+    (task.status === "queued" ||
+      task.status === "dispatched" ||
+      task.status === "running");
 
+  const handleCancel = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await api.cancelTaskById(task.id);
+      // No manual invalidate needed — the task:cancelled WS event flows
+      // through useRealtimeSync's `task:` prefix path which already
+      // invalidates snapshot + per-agent + per-issue task lists.
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      setCancelling(false);
+    }
+  };
+
+  // Terminal states never use active wording. The server links the new
+  // issue back to a quick-create task on completion (so most successful
+  // rows transition to kind=direct on next refetch), but rows whose link
+  // write failed — or whose agent never created the issue at all — would
+  // otherwise sit on "Creating issue" forever.
+  const isTerminalStatus =
+    task.status === "completed" ||
+    task.status === "failed" ||
+    task.status === "cancelled";
   const sourceFallback = !hasIssue
-    ? task.chat_session_id
-      ? "Chat session"
-      : task.autopilot_run_id
-        ? "Autopilot run"
-        : "Untracked"
+    ? task.kind === "quick_create"
+      ? isTerminalStatus
+        ? "Quick create"
+        : "Creating issue"
+      : task.chat_session_id
+        ? "Chat session"
+        : task.autopilot_run_id
+          ? "Autopilot run"
+          : "Untracked"
     : null;
 
   // Origin marker — issue / chat / autopilot / untracked. The issue
@@ -375,7 +459,7 @@ function TaskRow({
   }
 
   const rowClass = `group flex items-center gap-3 rounded-md border px-3 py-2.5 ${
-    isRunning ? "border-success/40 bg-success/5" : ""
+    isRunning ? "border-brand/40 bg-brand/5" : ""
   }`;
 
   return (
@@ -396,12 +480,40 @@ function TaskRow({
               {issue.identifier}
             </span>
           )}
-          <span className="truncate text-sm">
-            {issue?.title ??
-              (hasIssue
-                ? `Issue ${task.issue_id.slice(0, 8)}…`
-                : (sourceFallback ?? "Untracked"))}
-          </span>
+          {task.trigger_summary ? (
+            // Hover surfaces "why this task ran" — the snapshot lets the
+            // agent-side row stay anchored on issue.title (the
+            // identification axis here) while still letting the user
+            // dwell to see the trigger context. Same pattern as
+            // GitHub Actions surfacing the commit message on hover.
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="truncate text-sm">
+                    {issue?.title ??
+                      (hasIssue
+                        ? `Issue ${task.issue_id.slice(0, 8)}…`
+                        : (sourceFallback ?? "Untracked"))}
+                  </span>
+                }
+              />
+              <TooltipContent className="max-w-md">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+                  Triggered by
+                </div>
+                <div className="mt-0.5 whitespace-pre-wrap text-xs">
+                  {task.trigger_summary}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="truncate text-sm">
+              {issue?.title ??
+                (hasIssue
+                  ? `Issue ${task.issue_id.slice(0, 8)}…`
+                  : (sourceFallback ?? "Untracked"))}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
           <span>{timeText}</span>
@@ -444,6 +556,26 @@ function TaskRow({
             isLive={isRunning}
             title="View transcript"
           />
+        )}
+        {showCancel && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  aria-label="Cancel task"
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>
+              {cancelling ? "Cancelling…" : "Cancel task"}
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
     </div>

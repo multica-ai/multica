@@ -12,6 +12,7 @@ import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { pinKeys } from "@multica/core/pins";
 import { projectKeys } from "@multica/core/projects";
 import { issueKeys } from "@multica/core/issues/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -76,9 +77,21 @@ export function StarterContentPrompt() {
       // publishes `pin:created` / `project:created` / `issue:created` for
       // OTHER sessions; on this session both paths run and the second
       // invalidate is a no-op.
-      qc.invalidateQueries({ queryKey: pinKeys.all(workspace.id, user.id) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(workspace.id) });
-      qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });
+      //
+      // Agents are invalidated too: the server picks the welcome issue's
+      // assignee from its own agent list, and the issue-detail page we
+      // navigate to immediately resolves that ID through the cached agent
+      // list. If the cache is stale (or never populated since
+      // onboarding-flow created the agent without invalidating), the
+      // assignee renders as "Unknown Agent". Awaiting Promise.all
+      // guarantees every relevant query is at least marked stale before
+      // the navigation kicks in, so the next mount refetches.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: pinKeys.all(workspace.id, user.id) }),
+        qc.invalidateQueries({ queryKey: projectKeys.all(workspace.id) }),
+        qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) }),
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(workspace.id) }),
+      ]);
 
       // Sync the new starter_content_state into the auth store so this
       // component unmounts cleanly on the next render.

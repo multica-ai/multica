@@ -20,10 +20,51 @@ func BuildPrompt(task Task) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
+	if task.QuickCreatePrompt != "" {
+		return buildQuickCreatePrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	return b.String()
+}
+
+// buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
+// user typed a single natural-language sentence in the create-issue modal;
+// the agent's job is to translate it into one `multica issue create` CLI
+// invocation, using its judgment to decide whether fetching referenced URLs
+// would produce a better issue. No issue exists yet, so the agent must NOT
+// call `multica issue get` or attempt to comment — there's nothing to read
+// or reply to.
+func buildQuickCreatePrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a quick-create assistant for a Multica workspace.\n\n")
+	b.WriteString("A user pressed the quick-create shortcut and typed a one-line description. There is NO existing issue. Your job is to create a well-formed issue from the user's input with a single `multica issue create` command.\n\n")
+	fmt.Fprintf(&b, "User input:\n> %s\n\n", task.QuickCreatePrompt)
+	b.WriteString("Field rules:\n")
+	b.WriteString("- title: required. A concise but semantically rich summary that lets a reader understand what the issue is about at a glance. If the user input references external resources (PRs, issues, URLs, etc.), use your judgment to decide whether fetching the resource would produce a meaningfully better title — if so, fetch it and incorporate the relevant context. For example, \"review PR #123\" is much less useful than \"Review PR #123: Refactor auth module to OAuth2\". Strip filler words but preserve key semantic information.\n")
+	b.WriteString("- description: stay faithful to the user's original input — do NOT invent requirements, design decisions, implementation plans, or constraints that the user did not express. The description should enrich the user's input with factual context only: if the input contains URLs or references (PRs, issues, docs), fetch them and summarize the relevant parts. Restate the user's intent clearly so the executing agent understands the task, but do not expand scope or add made-up details. Keep it concise. Never echo the title here.\n")
+	b.WriteString("- priority: one of `urgent`, `high`, `medium`, `low`, or omit. Map P0/P1 → urgent/high; \"asap\" → urgent. If unspecified, omit.\n")
+	b.WriteString("- assignee:\n")
+	b.WriteString("    - When the user names someone (\"assign to X\" / \"@X\"), call `multica workspace members --output json` and find the matching member by display name (case-insensitive substring match is fine). On a clean match, pass `--assignee <name>`. On no match or ambiguous match, do NOT pass `--assignee` — instead append a final line to the description: `Unrecognized assignee: X`.\n")
+	agentName := ""
+	if task.Agent != nil {
+		agentName = task.Agent.Name
+	}
+	if agentName != "" {
+		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned.\n", agentName)
+	} else {
+		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n")
+	}
+	b.WriteString("- project: omit. The platform will route the issue to the workspace default.\n")
+	b.WriteString("- status: omit (defaults to `todo`).\n")
+	b.WriteString("- attachments: do NOT pass `--attachment`. The flag only accepts LOCAL file paths, and any image URL embedded in the user input is already part of the description as markdown — keep it inline in `--description` instead of trying to re-attach it. (Trying to pass `https://…` to `--attachment` will fail and look like a create error to you, but the issue may already exist; never retry `issue create` on that signal.)\n\n")
+	b.WriteString("Output format:\n")
+	b.WriteString("- Run exactly one `multica issue create` invocation. Do not retry it for any reason — even on a non-zero exit. The issue may already exist; another attempt would create a duplicate.\n")
+	b.WriteString("- After it succeeds, print exactly one line: `Created MUL-<n>: <title>` and exit. No commentary, no follow-up tool calls.\n")
+	b.WriteString("- Do NOT call `multica issue get` or `multica issue comment add` for this task — there is no issue to query or comment on prior to creation.\n")
+	b.WriteString("- If the CLI returns an error, exit with that error as the only output. The platform writes a failure notification automatically; do not retry.\n")
 	return b.String()
 }
 

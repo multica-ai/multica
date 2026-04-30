@@ -83,6 +83,37 @@
   animation: chat-impulse 1.6s ease-in-out infinite;
 }
 
+/* ChatGPT-style "thinking" shimmer for inline text — a soft light sweep
+ * runs across the glyphs, signalling "the agent is doing something" without
+ * a separate spinner. Pure CSS: linear-gradient clipped to the text shape,
+ * the gradient slid across via background-position. Uses the same muted →
+ * foreground tokens chat copy normally uses, so the effect adapts to light
+ * and dark mode without per-mode overrides.
+ *
+ * Apply to a <span> wrapping the label only — not the whole pill, since
+ * the timer counter and Cancel button shouldn't shimmer. */
+@keyframes chat-text-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-chat-text-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 35%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 65%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: chat-text-shimmer 2.5s linear infinite;
+}
+
 /* Sidebar: open triggers (dropdown/popover) get active background */
 [data-sidebar="menu-button"][data-popup-open] {
   background-color: var(--sidebar-accent);

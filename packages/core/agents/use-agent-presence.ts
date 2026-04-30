@@ -110,7 +110,7 @@ export function useWorkspacePresenceMap(wsId: string | undefined): {
 // skeleton spinning forever.
 const MISSING_AGENT_DETAIL: AgentPresenceDetail = {
   availability: "offline",
-  lastTask: "idle",
+  workload: "idle",
   runningCount: 0,
   queuedCount: 0,
   capacity: 0,

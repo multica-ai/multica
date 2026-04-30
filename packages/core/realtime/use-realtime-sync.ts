@@ -14,7 +14,12 @@ import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
-import { agentTaskSnapshotKeys, agentActivityKeys, agentRunCountsKeys } from "../agents/queries";
+import {
+  agentTaskSnapshotKeys,
+  agentActivityKeys,
+  agentRunCountsKeys,
+  agentTasksKeys,
+} from "../agents/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -46,9 +51,13 @@ import type {
   SubscriberAddedPayload,
   SubscriberRemovedPayload,
   TaskMessagePayload,
+  TaskQueuedPayload,
+  TaskDispatchPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
+  TaskCancelledPayload,
   ChatDonePayload,
+  ChatPendingTask,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -162,6 +171,15 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
         // 30-day run count likewise increments per task lifecycle event.
         qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+        // Per-agent task list (Activity tab "Recent work"). Prefix match
+        // catches every agent's list — the per-agent detail key sits
+        // under agentTasks/<wsId>/<agentId>.
+        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+        // Per-issue task list (issue-detail Execution log). Prefix match
+        // across all issues — keeps the contract "any task: event makes
+        // every list-of-tasks query stale" so cache stays fresh even
+        // when the relevant component isn't currently mounted.
+        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
       },
     };
 
@@ -511,6 +529,64 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
+    // synchronized with the server state machine via setQueryData rather than
+    // invalidate-refetch. Same pattern as task:message — the WS payload
+    // carries everything we need, and an HTTP roundtrip just to read what we
+    // already know would add latency to every stage transition.
+    //
+    // task:queued is emitted by EnqueueChatTask. The optimistic seed in
+    // chat-window.tsx may have already populated the cache with a temporary
+    // id; this handler upgrades it to the real task_id (and reaffirms status
+    // when reconnect replays the event for an already-running task).
+    const unsubTaskQueued = ws.on("task:queued", (p) => {
+      const payload = p as TaskQueuedPayload;
+      if (!payload.chat_session_id) return;
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => ({
+          ...(old ?? {}),
+          task_id: payload.task_id,
+          status: "queued",
+        }),
+      );
+      invalidatePendingAggregate();
+    });
+
+    // task:dispatch fires when the daemon claims the queued task. The daemon
+    // immediately follows with StartTask, so dispatched→running is sub-second.
+    // We collapse that window by writing "running" directly — the pill jumps
+    // from "Queued" straight to "Thinking", skipping a meaningless "Starting"
+    // frame. Stage decision in TaskStatusPill maps "running" + empty
+    // taskMessages → "Thinking · Ns".
+    const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
+      const payload = p as TaskDispatchPayload;
+      if (!payload.chat_session_id) return;
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => {
+          if (!old || old.task_id !== payload.task_id) return old;
+          return { ...old, status: "running" };
+        },
+      );
+    });
+
+    // task:cancelled reaches us when:
+    //   1. handleStop already cleared the cache locally (this is a no-op confirm)
+    //   2. another tab / admin / system cancels — this is the only path that
+    //      drops the pending pill in those cases. Without it the pill spins
+    //      forever in the second-tab scenario.
+    const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
+      const payload = p as TaskCancelledPayload;
+      if (!payload.chat_session_id) return;
+      chatWsLogger.info("task:cancelled (global, chat)", {
+        task_id: payload.task_id,
+        chat_session_id: payload.chat_session_id,
+      });
+      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      invalidatePendingAggregate();
+    });
+
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
       if (!payload.chat_session_id) return; // issue tasks handled elsewhere
@@ -531,8 +607,14 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // No new message; just flip the pending signal.
+      // FailTask writes a failure chat_message (mirroring CompleteTask's
+      // success message), so this path mirrors the task:completed handler:
+      // clear the pending signal AND invalidate the messages list so the
+      // failure bubble shows up without requiring a page refresh. Pre-#1823
+      // this branch only flipped pending — the comment "No new message"
+      // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -570,6 +652,9 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubTaskQueued();
+      unsubTaskDispatch();
+      unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();

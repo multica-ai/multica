@@ -327,11 +327,12 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
-	WorkDir     string // parent directory for the worktree (e.g. task workdir)
-	AgentName   string // for branch naming
-	TaskID      string // for branch naming uniqueness
+	WorkspaceID        string // workspace that owns the repo
+	RepoURL            string // remote URL to look up in the cache
+	WorkDir            string // parent directory for the worktree (e.g. task workdir)
+	AgentName          string // for branch naming
+	TaskID             string // for branch naming uniqueness
+	CoAuthoredByEnabled bool  // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -401,6 +402,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			_ = excludeFromGit(worktreePath, pattern)
 		}
 
+		// Install Co-authored-by hook for Multica Agent attribution (if enabled).
+		if params.CoAuthoredByEnabled {
+			if err := installCoAuthoredByHook(worktreePath); err != nil {
+				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+			}
+		}
+
 		c.logger.Info("repo checkout: existing worktree updated",
 			"url", params.RepoURL,
 			"path", worktreePath,
@@ -424,6 +432,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// Exclude agent context files from git tracking.
 	for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".config/opencode"} {
 		_ = excludeFromGit(worktreePath, pattern)
+	}
+
+	// Install Co-authored-by hook for Multica Agent attribution (if enabled).
+	if params.CoAuthoredByEnabled {
+		if err := installCoAuthoredByHook(worktreePath); err != nil {
+			c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+		}
 	}
 
 	c.logger.Info("repo checkout: worktree created",
@@ -648,6 +663,58 @@ func bareHeadBranch(barePath string) string {
 		return ""
 	}
 	return ref
+}
+
+// prepareCommitMsgHook is the prepare-commit-msg hook script that appends a
+// Co-authored-by trailer for the Multica Agent to every commit message.
+const prepareCommitMsgHook = `#!/bin/sh
+# Multica: add Co-authored-by trailer for the Multica Agent.
+# Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Skip merge and squash commits.
+case "$COMMIT_SOURCE" in
+  merge|squash) exit 0 ;;
+esac
+
+TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+
+# Don't add if already present.
+if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+# Use git interpret-trailers for proper formatting.
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
+`
+
+// installCoAuthoredByHook installs a prepare-commit-msg git hook that appends
+// a Co-authored-by trailer for the Multica Agent. The hook is installed in the
+// git common directory (the bare repo for worktrees) so it applies to all
+// worktrees created from this cache.
+func installCoAuthoredByHook(worktreePath string) error {
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("resolve git common dir: %w", err)
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+
+	hooksDir := filepath.Join(commonDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return fmt.Errorf("create hooks dir: %w", err)
+	}
+
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(hookPath, []byte(prepareCommitMsgHook), 0o755); err != nil {
+		return fmt.Errorf("write prepare-commit-msg hook: %w", err)
+	}
+	return nil
 }
 
 // excludeFromGit adds a pattern to the worktree's .git/info/exclude file.

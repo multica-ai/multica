@@ -554,7 +554,7 @@ func TestEnsureRepoReadyFastPathDoesNotRefresh(t *testing.T) {
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
@@ -576,7 +576,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	// URL with trailing whitespace should still hit the fast path.
 	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
@@ -604,7 +604,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 			ReposVersion: "v2",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
@@ -627,7 +627,7 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 			ReposVersion: "v1",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
 	if !errors.Is(err, ErrRepoNotConfigured) {
@@ -646,7 +646,7 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 			ReposVersion: "v1",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
@@ -674,7 +674,7 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 			ReposVersion: "v2",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	const concurrency = 8
 	var wg sync.WaitGroup
@@ -698,5 +698,41 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	// must serialize them so the server is only called once.
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
+	}
+}
+
+func TestShellArgsFromEnv(t *testing.T) {
+	t.Setenv("MULTICA_CLAUDE_ARGS", `--max-turns 60 --append-system-prompt "multi word"`)
+	got, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	want := []string{"--max-turns", "60", "--append-system-prompt", "multi word"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestShellArgsFromEnvEmptyIsNil(t *testing.T) {
+	t.Setenv("MULTICA_CODEX_ARGS", "   ")
+	got, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil for empty env, got %#v", got)
+	}
+}
+
+func TestDefaultArgsForProvider(t *testing.T) {
+	cfg := Config{ClaudeArgs: []string{"--max-turns", "60"}, CodexArgs: []string{"--sandbox", "workspace-write"}}
+	if got := defaultArgsForProvider(cfg, "claude"); strings.Join(got, " ") != "--max-turns 60" {
+		t.Fatalf("unexpected claude args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
+		t.Fatalf("unexpected codex args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }

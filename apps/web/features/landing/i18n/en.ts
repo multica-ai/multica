@@ -284,6 +284,29 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.20",
+        date: "2026-04-29",
+        title: "Create Issue by Agent, Agent Presence v3 & Daemon WebSocket Heartbeat",
+        changes: [],
+        features: [
+          "Create Issue by Agent — press `c`, write one line, pick an agent; issue creation runs async and the result lands in your inbox",
+          "Agent Presence v3 — availability and last-task split into clearer signals, with an execution log on the issue panel showing active and recent runs",
+          "Daemon ↔ server heartbeat now flows over WebSocket with HTTP fallback, cutting task wakeup latency",
+          "Mention picker ranks suggestions by your local recency",
+        ],
+        improvements: [
+          "Server caches PAT / daemon token lookups in Redis, so large fleets stop hammering the database on every request",
+          "Backend default agent CLI args via `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` env vars",
+          "Manual and agent create-issue flows share one dialog shell, and picker agents become the default assignee",
+        ],
+        fixes: [
+          "Create-issue-by-agent no longer leaves tasks stuck queued, and no longer duplicates the issue when an attachment upload fails",
+          "Agent comments respect newlines instead of rendering literal `\\n`, and multi-line replies keep their formatting",
+          "Agent-authored root comments no longer inherit parent @mentions, breaking accidental agent loops",
+          "Cursor agent on Windows preserves multi-line prompts",
+        ],
+      },
+      {
         version: "0.2.19",
         date: "2026-04-28",
         title: "Kiro CLI Runtime, Desktop Notifications & Issue Label Filter",

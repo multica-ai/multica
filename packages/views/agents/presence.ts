@@ -1,21 +1,18 @@
 import {
   AlertCircle,
-  CheckCircle2,
   CircleDot,
   CircleSlash,
+  Clock,
   Loader2,
-  PauseCircle,
   PlugZap,
-  XCircle,
   type LucideIcon,
 } from "lucide-react";
-import type { AgentAvailability, LastTaskState } from "@multica/core/agents";
-import type { TaskFailureReason } from "@multica/core/types";
+import type { AgentAvailability, Workload } from "@multica/core/agents";
 
 // Visual mapping for the two presence dimensions, kept in matching shape
 // so consumers can pick which to render. The two are independent — the
-// dot reads only from availabilityConfig, the last-task chip reads only
-// from taskStateConfig.
+// dot reads only from availabilityConfig, the workload chip reads only
+// from workloadConfig.
 //
 // Color tokens map to project semantic tokens (no hardcoded Tailwind colors):
 //
@@ -24,16 +21,17 @@ import type { TaskFailureReason } from "@multica/core/types";
 //     unstable  → warning         (amber) — pairs with the runtime card's amber
 //     offline   → muted-foreground (gray)
 //
-//   LAST TASK STATE (drives the optional last-task chip on focused surfaces):
-//     running   → brand           (blue)  has activity
-//     completed → success         (green) all good
-//     failed    → destructive     (red)
-//     cancelled → muted           (gray)
-//     idle      → muted           (gray)  no history
+//   WORKLOAD (drives the optional workload chip on focused surfaces):
+//     working   → brand           (blue)  has activity
+//     queued    → warning         (amber) anomaly: nothing running but tasks
+//                                          waiting (typically stuck on offline
+//                                          runtime; brief flash on online is
+//                                          a harmless race)
+//     idle      → muted           (gray)  nothing on the plate
 //
-// Critically: `failed` colour appears ONLY in the last-task chip, never
-// on the dot. A runtime-healthy agent whose last task failed shows a
-// green dot + a red "Failed" chip — the dot stops being sticky-red.
+// `failed` / `completed` / `cancelled` deliberately have no top-level visual
+// — those are historical context, surfaced via Recent Work + Inbox, not
+// list-level summary state.
 
 export interface AvailabilityVisual {
   label: string;
@@ -74,7 +72,7 @@ export const availabilityOrder: AgentAvailability[] = [
   "offline",
 ];
 
-export interface TaskStateVisual {
+export interface WorkloadVisual {
   label: string;
   // Foreground colour for icon + label text.
   textClass: string;
@@ -82,26 +80,19 @@ export interface TaskStateVisual {
   icon: LucideIcon;
 }
 
-export const taskStateConfig: Record<LastTaskState, TaskStateVisual> = {
-  running: {
-    label: "Running",
+export const workloadConfig: Record<Workload, WorkloadVisual> = {
+  working: {
+    label: "Working",
     textClass: "text-brand",
     icon: Loader2,
   },
-  completed: {
-    label: "Completed",
-    textClass: "text-success",
-    icon: CheckCircle2,
-  },
-  failed: {
-    label: "Failed",
-    textClass: "text-destructive",
-    icon: XCircle,
-  },
-  cancelled: {
-    label: "Cancelled",
-    textClass: "text-muted-foreground",
-    icon: PauseCircle,
+  queued: {
+    // Amber chip: nothing running but tasks waiting. On an offline runtime
+    // this is the "stuck" signal we explicitly surface (replacing the old
+    // misleading "Running 0/N +Mq" copy).
+    label: "Queued",
+    textClass: "text-warning",
+    icon: Clock,
   },
   idle: {
     label: "Idle",
@@ -110,22 +101,5 @@ export const taskStateConfig: Record<LastTaskState, TaskStateVisual> = {
   },
 };
 
-// Order used by last-run filter chips. Actionable signals first
-// (running / failed) before passive ones (idle / cancelled).
-export const lastTaskOrder: LastTaskState[] = [
-  "running",
-  "failed",
-  "completed",
-  "cancelled",
-  "idle",
-];
-
-// Human-readable copy for the back-end task failure reason enum. Surfaced
-// in the hover card and detail header when lastTask === "failed".
-export const failureReasonLabel: Record<TaskFailureReason, string> = {
-  agent_error: "Agent execution error",
-  timeout: "Task timed out",
-  runtime_offline: "Daemon offline",
-  runtime_recovery: "Daemon restarted",
-  manual: "Cancelled by user",
-};
+// Order used in any future workload chip group; actionable signals first.
+export const workloadOrder: Workload[] = ["working", "queued", "idle"];

@@ -8,7 +8,7 @@ import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { Toaster } from "sonner";
+import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { PageviewTracker } from "./components/pageview-tracker";
@@ -113,18 +113,19 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Onboarding and zero-workspace both resolve to an overlay, but
-  // onboarding wins: a user who hasn't completed it gets the onboarding
-  // overlay regardless of how many workspaces already exist.
+  // Workspace presence wins over onboarding state: a user invited into an
+  // existing workspace must enter that workspace, not be trapped in the
+  // onboarding overlay just because their personal `onboarded_at` is null.
+  // Onboarding is only the right destination when the account has zero
+  // workspaces AND has never onboarded.
   useEffect(() => {
     if (!user || !workspaceListFetched) return;
     const { overlay, open } = useWindowOverlayStore.getState();
     if (overlay) return;
+    if (wsCount > 0) return;
     if (!hasOnboarded) {
       open({ type: "onboarding" });
-      return;
-    }
-    if (wsCount === 0) {
+    } else {
       open({ type: "new-workspace" });
     }
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded]);

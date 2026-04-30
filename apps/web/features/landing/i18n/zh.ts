@@ -284,6 +284,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.20",
+        date: "2026-04-29",
+        title: "Create Issue by Agent、Agent Presence v3 与 Daemon WebSocket 心跳",
+        changes: [],
+        features: [
+          "Create Issue by Agent —— 按 `c` 输入一句话并选 Agent，Issue 异步创建，结果回执送达 Inbox",
+          "Agent Presence v3 —— 可用性与最近任务拆成两条更清晰的信号；Issue 详情右侧新增 Execution Log，可看到当前 active run 与历史 run",
+          "Daemon ↔ Server 心跳改走 WebSocket，HTTP 自动 fallback，任务起跑延迟更低",
+          "Mention 选择器按本机最近使用排序",
+        ],
+        improvements: [
+          "Server 用 Redis 缓存 PAT / Daemon Token 校验，大型团队不再让 DB 抗下每次请求",
+          "后端支持通过 `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` 配置 Agent CLI 默认参数",
+          "Manual 与 Agent 创建 Issue 共享同一个 Dialog 外壳，picker Agent 会被默认设为 assignee",
+        ],
+        fixes: [
+          "Create Issue by Agent 不再卡住 queued 任务，也不再因附件上传失败而重复创建 Issue",
+          "Agent 评论保留换行，不再渲染成字面量 `\\n`，多行回复的格式也被完整保留",
+          "Agent 自身发出的根评论不再继承父评论的 @mention，避免互相唤起的死循环",
+          "Windows 下 Cursor Agent 启动时保留多行 prompt",
+        ],
+      },
+      {
         version: "0.2.19",
         date: "2026-04-28",
         title: "Kiro CLI Runtime、桌面通知红点与 Issue 标签过滤",

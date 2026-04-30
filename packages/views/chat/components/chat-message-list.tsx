@@ -9,36 +9,46 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
-import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
+import type { AgentAvailability } from "@multica/core/agents";
+import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { TaskStatusPill } from "./task-status-pill";
+import { formatElapsedMs } from "../lib/format";
 
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
-  /** When set, streams the live timeline for this task from task-messages cache. */
-  pendingTaskId: string | null;
-  isWaiting: boolean;
+  /**
+   * Server-authoritative pending-task snapshot. `null` / undefined means
+   * no in-flight task — list renders without StatusPill.
+   */
+  pendingTask: ChatPendingTask | null | undefined;
+  /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
+  availability: AgentAvailability | undefined;
 }
 
 export function ChatMessageList({
   messages,
-  pendingTaskId,
-  isWaiting,
+  pendingTask,
+  availability,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
 
+  const pendingTaskId = pendingTask?.task_id ?? null;
+
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
-  // timeline to avoid rendering the same content in two places during the
-  // invalidate → refetch window.
+  // timeline (and pill) to avoid rendering the same content in two places
+  // during the invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
@@ -52,6 +62,7 @@ export function ChatMessageList({
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
   return (
     <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
@@ -68,8 +79,12 @@ export function ChatMessageList({
             <TimelineView items={liveTimeline} />
           </div>
         )}
-        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        {showStatusPill && pendingTask && (
+          <TaskStatusPill
+            pendingTask={pendingTask}
+            taskMessages={liveTaskMessages ?? []}
+            availability={availability}
+          />
         )}
       </div>
     </div>
@@ -153,6 +168,21 @@ function AssistantMessage({
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
 
+  // Failure bubble path: when the server's FailTask wrote a failure
+  // chat_message (failure_reason set), render a destructive bubble with the
+  // human-readable reason label + collapsible raw errMsg + the same timeline
+  // so the user can see exactly where the run broke.
+  if (message.failure_reason) {
+    return (
+      <FailureBubble
+        reason={message.failure_reason}
+        rawError={message.content}
+        timeline={timeline}
+        elapsedMs={message.elapsed_ms}
+      />
+    );
+  }
+
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
@@ -161,6 +191,86 @@ function AssistantMessage({
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown>{message.content}</Markdown>
         </div>
+      )}
+      {message.elapsed_ms != null && (
+        <ElapsedCaption verb="Replied in" elapsedMs={message.elapsed_ms} />
+      )}
+    </div>
+  );
+}
+
+// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
+// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
+// it once at task completion, so this caption is identical across reloads
+// and devices. Skipped silently when null (legacy messages predating
+// migration 063 + user messages).
+function ElapsedCaption({
+  verb,
+  elapsedMs,
+  className,
+}: {
+  verb: string;
+  elapsedMs: number;
+  className?: string;
+}) {
+  return (
+    <div className={cn("text-[11px] text-muted-foreground/80", className)}>
+      {verb} {formatElapsedMs(elapsedMs)}
+    </div>
+  );
+}
+
+function FailureBubble({
+  reason,
+  rawError,
+  timeline,
+  elapsedMs,
+}: {
+  reason: string;
+  rawError: string;
+  timeline: ChatTimelineItem[];
+  elapsedMs?: number | null;
+}) {
+  const [open, setOpen] = useState(false);
+  // Map the back-end enum to copy via the shared label table; an unknown
+  // reason (e.g. a future enum value the front-end doesn't ship yet)
+  // falls back to a generic "Task failed" so we never render a bare slug.
+  const label =
+    failureReasonLabel[reason as TaskFailureReason] ?? "Task failed";
+
+  return (
+    <div className="w-full space-y-1.5">
+      {/* Failure read as an inline, low-key note — not a destructive
+       *  alert. Intentionally borderless / no background tint: a chat
+       *  failure is informational ("this didn't work"), not a system
+       *  error. The icon + muted destructive text are signal enough,
+       *  the rest stays in the normal reply rhythm. */}
+      <div className="flex items-start gap-1.5 text-sm">
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive/80 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-destructive/90">{label}</div>
+          {rawError.trim() && (
+            <Collapsible open={open} onOpenChange={setOpen}>
+              <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+                {open ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                <span>Show details</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                  {rawError}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
+      </div>
+      {timeline.length > 0 && <TimelineView items={timeline} />}
+      {elapsedMs != null && (
+        <ElapsedCaption verb="Failed after" elapsedMs={elapsedMs} />
       )}
     </div>
   );

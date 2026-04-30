@@ -54,8 +54,8 @@ UPDATE chat_session SET updated_at = now()
 WHERE id = $1;
 
 -- name: CreateChatMessage :one
-INSERT INTO chat_message (chat_session_id, role, content, task_id)
-VALUES ($1, $2, $3, sqlc.narg(task_id))
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
+VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
 RETURNING *;
 
 -- name: ListChatMessages :many
@@ -88,7 +88,10 @@ LIMIT 1;
 -- name: GetPendingChatTask :one
 -- Returns the most recent in-flight task for a chat session, if any.
 -- Used by the frontend to recover pending state after refresh / reopen.
-SELECT id, status FROM agent_task_queue
+-- created_at is the anchor for the chat StatusPill timer (it computes
+-- elapsed = now - task.created_at), so the pill survives refresh / reopen
+-- without "resetting to 0s".
+SELECT id, status, created_at FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC
 LIMIT 1;

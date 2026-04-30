@@ -15,6 +15,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
 import type {
   Issue,
@@ -28,6 +30,11 @@ import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { IssueStatus } from "@multica/core/types";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import {
+  getRecencyMap,
+  recordMentionUsage,
+  sortUserItemsByRecency,
+} from "./mention-recency";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -187,7 +194,10 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     const selectItem = useCallback(
       (index: number) => {
         const item = displayItems[index];
-        if (item) command(item);
+        if (!item) return;
+        const wsId = getCurrentWsId();
+        if (wsId) recordMentionUsage(wsId, item);
+        command(item);
       },
       [displayItems, command],
     );
@@ -369,6 +379,15 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
+    // Read current user identity imperatively — this factory runs outside
+    // React render so we can't useAuthStore() as a hook here. The Proxy in
+    // packages/core/auth/index.ts forwards `.getState()` to the registered
+    // store. Used to gate personal agents in the @mention list so members
+    // don't see (or auto-complete) agents they couldn't assign anyway.
+    const userId = useAuthStore.getState().user?.id ?? null;
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
+
     const q = query.toLowerCase();
 
     const allItem: MentionItem[] =
@@ -385,8 +404,22 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       }));
 
     const agentItems: MentionItem[] = agents
-      .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
+      .filter(
+        (a) =>
+          !a.archived_at &&
+          a.name.toLowerCase().includes(q) &&
+          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+      )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
+
+    // Members and agents share a single ranked list — recently mentioned
+    // targets come first regardless of type, with an alphabetical fallback
+    // for everyone the user hasn't mentioned yet on this device.
+    const recency = getRecencyMap(wsId);
+    const userItems = sortUserItemsByRecency(
+      [...memberItems, ...agentItems],
+      recency,
+    );
 
     // Cached issues give an instant first paint; MentionList adds server
     // matches for done/cancelled and any other issues not in this cache.
@@ -398,7 +431,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    return [...allItem, ...memberItems, ...agentItems, ...issueItems];
+    return [...allItem, ...userItems, ...issueItems];
   }
 
   return {

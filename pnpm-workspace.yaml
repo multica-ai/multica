@@ -16,6 +16,7 @@ catalog:
   # State Management
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
+  "@tanstack/react-table": "^8.21.3"
 
   # UI & Styling
   tailwindcss: "^4"
@@ -36,6 +37,9 @@ catalog:
   react-i18next: "^17.0.6"
   "@formatjs/intl-localematcher": "^0.8.4"
   eslint-plugin-i18next: "^6.1.4"
+
+  # Loading animations (chat StatusPill)
+  unicode-animations: "^1.0.3"
 
   # Product analytics
   posthog-js: "^1.176.1"
