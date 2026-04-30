@@ -76,6 +76,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -109,22 +110,34 @@ type NavKey =
   | "skills"
   | "settings";
 
-const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "inbox", label: "Inbox", icon: Inbox },
-  { key: "myIssues", label: "My Issues", icon: CircleUser },
+// Static schema (key + icon) — labels resolved at render via useT("layout").
+type NavLabelKey =
+  | "inbox"
+  | "my_issues"
+  | "issues"
+  | "projects"
+  | "autopilots"
+  | "agents"
+  | "runtimes"
+  | "skills"
+  | "settings";
+
+const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "inbox", labelKey: "inbox", icon: Inbox },
+  { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
-const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "issues", label: "Issues", icon: ListTodo },
-  { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "autopilots", label: "Autopilot", icon: Zap },
-  { key: "agents", label: "Agents", icon: Bot },
+const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "projects", labelKey: "projects", icon: FolderKanban },
+  { key: "autopilots", labelKey: "autopilots", icon: Zap },
+  { key: "agents", labelKey: "agents", icon: Bot },
 ];
 
-const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "runtimes", label: "Runtimes", icon: Monitor },
-  { key: "skills", label: "Skills", icon: BookOpenText },
-  { key: "settings", label: "Settings", icon: Settings },
+const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+  { key: "skills", labelKey: "skills", icon: BookOpenText },
+  { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
 function DraftDot() {
@@ -154,6 +167,7 @@ function SortablePinItem({
   label: string;
   iconNode: React.ReactNode;
 }) {
+  const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
   const wasDragged = useRef(false);
 
@@ -208,7 +222,7 @@ function SortablePinItem({
           >
             <X className="size-1" />
           </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={4}>Unpin</TooltipContent>
+          <TooltipContent side="top" sideOffset={4}>{t(($) => $.sidebar.unpin_tooltip)}</TooltipContent>
         </Tooltip>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -308,6 +322,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
+  const { t } = useT("layout");
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
@@ -589,8 +604,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Inbox" && unreadCount > 0 && (
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        {item.key === "inbox" && unreadCount > 0 && (
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
@@ -653,7 +668,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -677,8 +692,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Runtimes" && hasRuntimeUpdates && (
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        {item.key === "runtimes" && hasRuntimeUpdates && (
                           <span className="ml-auto size-1.5 rounded-full bg-destructive" />
                         )}
                       </SidebarMenuButton>

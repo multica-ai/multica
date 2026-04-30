@@ -82,6 +82,9 @@ const TRANSLATED_FILES = [
   "runtimes/components/runtime-detail-page.tsx",
   "runtimes/components/runtime-detail.tsx",
   "runtimes/components/shared.tsx",
+  "layout/app-sidebar.tsx",
+  "layout/help-launcher.tsx",
+  "layout/workspace-loader.tsx",
 ];
 
 export default [

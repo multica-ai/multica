@@ -1,0 +1,26 @@
+{
+  "nav": {
+    "inbox": "Inbox",
+    "my_issues": "My Issues",
+    "issues": "Issues",
+    "projects": "Projects",
+    "autopilots": "Autopilot",
+    "agents": "Agents",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Settings"
+  },
+  "help": {
+    "trigger": "Help",
+    "docs": "Docs",
+    "changelog": "Change log",
+    "feedback": "Feedback"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Loading workspace…",
+    "loading_named_prefix": "Loading"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Unpin"
+  }
+}

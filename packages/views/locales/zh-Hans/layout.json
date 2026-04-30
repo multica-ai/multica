@@ -1,0 +1,26 @@
+{
+  "nav": {
+    "inbox": "收件箱",
+    "my_issues": "我的 issue",
+    "issues": "issue",
+    "projects": "project",
+    "autopilots": "autopilot",
+    "agents": "智能体",
+    "runtimes": "运行时",
+    "skills": "skill",
+    "settings": "设置"
+  },
+  "help": {
+    "trigger": "帮助",
+    "docs": "文档",
+    "changelog": "更新日志",
+    "feedback": "反馈"
+  },
+  "workspace_loader": {
+    "loading_workspace": "正在加载工作区…",
+    "loading_named_prefix": "正在加载"
+  },
+  "sidebar": {
+    "unpin_tooltip": "取消固定"
+  }
+}
