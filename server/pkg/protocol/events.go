@@ -7,6 +7,17 @@ const (
 	EventIssueUpdated = "issue:updated"
 	EventIssueDeleted = "issue:deleted"
 
+	// EventIssueResolved fires when an approval-style issue transitions to
+	// a terminal status. The WorkflowEngine listens for it to advance an
+	// agent_workflow_run that is parked on a human gate.
+	//
+	// Payload:
+	//   { "issue_id": "<uuid>",
+	//     "resolution": "approved" | "rejected",
+	//     "workflow_run_id": "<uuid>" (optional — engine falls back to
+	//                                  agent_workflow_run.last_issue_id) }
+	EventIssueResolved = "issue:resolved"
+
 	// Comment events
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
