@@ -64,19 +64,35 @@ function getMermaid(): Promise<MermaidAPI> {
   return mermaidPromise;
 }
 
+function toLegacyColor(color: string, fallback: string, ownerDocument: Document): string {
+  const canvas = ownerDocument.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return fallback;
+
+  context.fillStyle = fallback;
+  context.fillStyle = color;
+  const normalized = context.fillStyle || fallback;
+  const hexMatch = normalized.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
+  if (hexMatch?.[1] && hexMatch[2] && hexMatch[3]) {
+    return `rgb(${Number.parseInt(hexMatch[1], 16)}, ${Number.parseInt(hexMatch[2], 16)}, ${Number.parseInt(hexMatch[3], 16)})`;
+  }
+
+  return normalized;
+}
+
 function resolveCssColor(
   host: HTMLElement,
   variableName: string,
   fallback: string,
 ): string {
-  const probe = document.createElement("span");
+  const probe = host.ownerDocument.createElement("span");
   probe.style.color = `var(${variableName})`;
   probe.style.display = "none";
   host.appendChild(probe);
   const color = getComputedStyle(probe).color;
   probe.remove();
 
-  return color || fallback;
+  return toLegacyColor(color || fallback, fallback, host.ownerDocument);
 }
 
 function getMermaidThemeVariables(host: HTMLElement | null) {

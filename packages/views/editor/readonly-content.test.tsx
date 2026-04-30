@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -31,6 +31,21 @@ vi.mock("./utils/link-handler", () => ({
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({
+      svg: '<svg viewBox="0 0 123 45"><g><text>mock diagram</text></g></svg>',
+    }),
+  },
+}));
+
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  value: () => ({
+    fillStyle: "rgb(1, 2, 3)",
+  }),
+});
 
 import { ReadonlyContent } from "./readonly-content";
 
@@ -74,7 +89,7 @@ describe("ReadonlyContent line breaks", () => {
 });
 
 describe("ReadonlyContent Mermaid rendering", () => {
-  it("renders mermaid code fences as diagram containers instead of code blocks", () => {
+  it("renders mermaid code fences in a sized sandbox iframe", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
@@ -83,5 +98,14 @@ describe("ReadonlyContent Mermaid rendering", () => {
 
     expect(container.querySelector(".mermaid-diagram")).not.toBeNull();
     expect(container.querySelector("pre code.language-mermaid")).toBeNull();
+
+    await waitFor(() => {
+      const iframe = container.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
+      expect(iframe).not.toBeNull();
+      expect(iframe?.getAttribute("sandbox")).toBe("");
+      expect(iframe?.srcdoc).toContain("mock diagram");
+      expect(iframe?.style.width).toBe("123px");
+      expect(iframe?.style.height).toBe("45px");
+    });
   });
 });
