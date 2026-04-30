@@ -291,7 +291,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         features: [
           "Quick Capture 取代旧的 New Issue 弹窗 —— 支持连续创建、文件上传，并能根据粘贴的 URL 自动丰富标题与描述",
           "Markdown 内联渲染 Mermaid 图表，复杂图支持全屏 lightbox",
-          "Typed project resources 直接注入 Agent runtime；项目级 `github_repo` 覆盖 workspace 默认 repo",
+          "Project 支持单独绑定 repo，无需依赖 workspace 默认配置",
           "Agent / 评论 / Runtime / Skill 全面接入权限感知 UI，没有权限的操作不再展示",
         ],
         improvements: [

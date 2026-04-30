@@ -291,7 +291,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         features: [
           "Quick Capture replaces the old New Issue dialog — continuous-create mode, file uploads, and automatic enrichment from pasted URLs",
           "Mermaid diagrams render inline in markdown, with a fullscreen lightbox for complex graphs",
-          "Typed project resources are injected into the agent runtime; project-level `github_repo` overrides the workspace repo",
+          "Projects can bind their own repo, separate from the workspace default",
           "Permission-aware UI across agents, comments, runtimes, and skills — actions you can't take are no longer offered",
         ],
         improvements: [
