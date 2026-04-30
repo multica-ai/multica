@@ -12,6 +12,7 @@ import { ReactRenderer } from "@tiptap/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
+import { useAuthStore } from "@multica/core/auth";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
@@ -260,6 +261,10 @@ function sortByMentionFrequency(items: MentionItem[], freq: MentionFrequencyEntr
   });
 }
 
+function canMentionAgent(agent: Agent, currentUserId: string | null): boolean {
+  return agent.visibility !== "private" || agent.owner_id === currentUserId;
+}
+
 export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
@@ -284,6 +289,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const mentionFreq: MentionFrequencyEntry[] = qc.getQueryData(workspaceKeys.mentionFrequency(wsId)) ?? [];
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
+    const currentUserId = useAuthStore.getState?.().user?.id ?? null;
 
     const q = query.toLowerCase();
 
@@ -301,7 +307,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       }));
 
     const agentItems: MentionItem[] = agents
-      .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
+      .filter((a) => !a.archived_at && canMentionAgent(a, currentUserId) && a.name.toLowerCase().includes(q))
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
     // Cached issues give an instant first paint; the server search below
