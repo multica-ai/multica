@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -137,5 +137,38 @@ describe("ReadonlyContent Mermaid rendering", () => {
         }),
       }),
     );
+  });
+
+  it("opens a fullscreen lightbox when the toolbar button is clicked", async () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
+      />,
+    );
+
+    const button = await waitFor(() => {
+      const found = container.querySelector<HTMLButtonElement>(
+        ".mermaid-diagram-toolbar button",
+      );
+      expect(found).not.toBeNull();
+      return found!;
+    });
+
+    expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+
+    fireEvent.click(button);
+
+    const lightboxFrame = document.querySelector<HTMLIFrameElement>(
+      ".mermaid-diagram-lightbox-frame",
+    );
+    expect(lightboxFrame).not.toBeNull();
+    expect(lightboxFrame?.getAttribute("sandbox")).toBe("");
+    expect(lightboxFrame?.srcdoc).toContain("mock diagram");
+    expect(lightboxFrame?.srcdoc).toContain("max-height: 100%");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+    });
   });
 });

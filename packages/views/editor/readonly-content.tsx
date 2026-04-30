@@ -17,6 +17,7 @@
  */
 
 import { isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -146,6 +147,12 @@ function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): s
   const cssVariables = getSandboxCssVariables(host);
 
   return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+}
+
+function buildExpandedMermaidDocument(svg: string, host: HTMLElement | null): string {
+  const cssVariables = getSandboxCssVariables(host);
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { width: 100%; height: 100%; } body { margin: 0; display: flex; align-items: center; justify-content: center; background: transparent; } svg { max-width: 100%; max-height: 100%; width: auto; height: auto; }</style></head><body>${svg}</body></html>`;
 }
 
 function useThemeVersion() {
@@ -286,6 +293,41 @@ function ReadonlyLink({
   );
 }
 
+function MermaidLightbox({
+  srcDoc,
+  onClose,
+}: {
+  srcDoc: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="mermaid-diagram-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mermaid diagram fullscreen view"
+      onClick={onClose}
+    >
+      <iframe
+        className="mermaid-diagram-lightbox-frame"
+        sandbox=""
+        srcDoc={srcDoc}
+        title="Mermaid diagram fullscreen"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>,
+    document.body,
+  );
+}
+
 function MermaidDiagram({ chart }: { chart: string }) {
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -295,8 +337,10 @@ function MermaidDiagram({ chart }: { chart: string }) {
   );
   const themeVersion = useThemeVersion();
   const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
+  const [expandedDocument, setExpandedDocument] = useState<string | null>(null);
   const [layout, setLayout] = useState<MermaidLayout>({});
   const [error, setError] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -305,6 +349,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
       try {
         setError(null);
         setSandboxedDocument(null);
+        setExpandedDocument(null);
         setLayout({});
         const mermaid = await getMermaid();
         mermaid.initialize({
@@ -318,6 +363,9 @@ function MermaidDiagram({ chart }: { chart: string }) {
           setLayout(getMermaidLayout(renderedSvg));
           setSandboxedDocument(
             buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
+          );
+          setExpandedDocument(
+            buildExpandedMermaidDocument(renderedSvg, containerRef.current),
           );
         }
       } catch (err) {
@@ -348,16 +396,34 @@ function MermaidDiagram({ chart }: { chart: string }) {
   return (
     <div ref={containerRef} className="mermaid-diagram" aria-label="Mermaid diagram">
       {sandboxedDocument ? (
-        <iframe
-          className="mermaid-diagram-frame"
-          sandbox=""
-          srcDoc={sandboxedDocument}
-          style={{
-            height: layout.height ? `${layout.height}px` : undefined,
-            width: layout.width ? `${layout.width}px` : undefined,
-          }}
-          title="Mermaid diagram"
-        />
+        <>
+          <iframe
+            className="mermaid-diagram-frame"
+            sandbox=""
+            srcDoc={sandboxedDocument}
+            style={{
+              height: layout.height ? `${layout.height}px` : undefined,
+              width: layout.width ? `${layout.width}px` : undefined,
+            }}
+            title="Mermaid diagram"
+          />
+          <div className="mermaid-diagram-toolbar">
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              title="Open fullscreen"
+              aria-label="Open Mermaid diagram fullscreen"
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          </div>
+          {lightboxOpen && expandedDocument && (
+            <MermaidLightbox
+              srcDoc={expandedDocument}
+              onClose={() => setLightboxOpen(false)}
+            />
+          )}
+        </>
       ) : (
         <div className="mermaid-diagram-loading">Rendering diagram…</div>
       )}
