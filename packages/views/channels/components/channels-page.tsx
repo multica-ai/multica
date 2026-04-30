@@ -127,10 +127,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
                   enabled={enabled}
                   onOpenThread={setThreadParentId}
                 />
-                <ChannelComposer
-                  channelId={channel.id}
-                  channelName={channel.display_name || channel.name}
-                />
+                <ChannelComposer channel={channel} />
               </div>
               {threadParentId ? (
                 <ThreadPanel
