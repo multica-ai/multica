@@ -38,6 +38,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -395,23 +396,32 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
-  // Global "C" shortcut to open create-issue modal (like Linear)
+  // Global "C" shortcut: opens whichever create mode the user landed on last
+  // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
+  // inside both modal footers so users can flip without remembering which
+  // shortcut goes where — `c` always means "open the create flow I prefer".
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "c" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        const tag = (e.target as HTMLElement)?.tagName;
-        const isEditable =
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT" ||
-          (e.target as HTMLElement)?.isContentEditable;
-        if (isEditable) return;
-        if (useModalStore.getState().modal) return;
-        e.preventDefault();
-        // Auto-fill project when on a project detail page
+      if (e.key !== "c" && e.key !== "C") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isEditable =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        (e.target as HTMLElement)?.isContentEditable;
+      if (isEditable) return;
+      if (useModalStore.getState().modal) return;
+      e.preventDefault();
+      const lastMode = useCreateModeStore.getState().lastMode;
+      if (lastMode === "manual") {
+        // Auto-fill project when on a project detail page (manual form only —
+        // agent mode lets the agent infer project from the prompt).
         const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
         const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
         useModalStore.getState().open("create-issue", data);
+      } else {
+        useModalStore.getState().open("quick-create-issue");
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -550,7 +560,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("create-issue")}
+                onClick={() => useModalStore.getState().open("quick-create-issue")}
               >
                 <span className="relative">
                   <SquarePen />

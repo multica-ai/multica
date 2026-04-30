@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-shellwords"
 )
 
 const (
@@ -23,7 +25,16 @@ const (
 	DefaultGCInterval                     = 1 * time.Hour
 	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
 	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
 )
+
+// DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
+// regenerable build artifacts. Kept conservative: only directories that are
+// always cheap to recreate (`pnpm install`, `next build`, `turbo build`). Things
+// like `dist/`, `build/`, `.cache/` or `.venv/` may legitimately hold source or
+// release output in some repos and are NOT included by default — set
+// MULTICA_GC_ARTIFACT_PATTERNS to extend the list per deployment.
+var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo"}
 
 // Config holds all daemon configuration.
 type Config struct {
@@ -42,12 +53,16 @@ type Config struct {
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL                          time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 24h)
-	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta older than this (default: 72h). Dirs whose issue returned 404 are cleaned immediately.
+	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
+	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
+	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
+	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
+	ClaudeArgs                     []string
+	CodexArgs                      []string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -161,6 +176,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+	}
+
+	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	codexArgs, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		return Config{}, err
 	}
 
 	// Host info
@@ -305,6 +329,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcArtifactTTL, err := durationFromEnv("MULTICA_GC_ARTIFACT_TTL", DefaultGCArtifactTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
@@ -320,12 +349,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCInterval:                     gcInterval,
 		GCTTL:                          gcTTL,
 		GCOrphanTTL:                    gcOrphanTTL,
+		GCArtifactTTL:                  gcArtifactTTL,
+		GCArtifactPatterns:             gcArtifactPatterns,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
 		PollInterval:                   pollInterval,
 		HeartbeatInterval:              heartbeatInterval,
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
+		ClaudeArgs:                     claudeArgs,
+		CodexArgs:                      codexArgs,
 	}, nil
 }
 
@@ -351,4 +384,39 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// patternsFromEnv reads a comma-separated list from env. Patterns containing
+// path separators are silently dropped — the GC artifact cleanup only matches
+// directory basenames, never paths, so a pattern like "foo/bar" is meaningless
+// and accepting it would just be a footgun.
+func patternsFromEnv(name string, defaults []string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		out := make([]string, len(defaults))
+		copy(out, defaults)
+		return out
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.ContainsAny(p, "/\\") {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func shellArgsFromEnv(name string) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil, nil
+	}
+	args, err := shellwords.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return args, nil
 }

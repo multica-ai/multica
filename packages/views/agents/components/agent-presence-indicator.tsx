@@ -2,7 +2,7 @@
 
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { AgentPresenceDetail } from "@multica/core/agents";
-import { availabilityConfig, taskStateConfig } from "../presence";
+import { availabilityConfig, workloadConfig } from "../presence";
 
 interface PresenceIndicatorProps {
   // null/undefined = still loading. Caller passes the detail computed at
@@ -10,16 +10,16 @@ interface PresenceIndicatorProps {
   // views). Keeping this as a prop avoids per-row hook subscriptions in
   // long lists.
   detail: AgentPresenceDetail | null | undefined;
-  // Compact = dot only, no label / no last-task chip. Used in dense rows.
+  // Compact = dot only, no label / no workload chip. Used in dense rows.
   compact?: boolean;
 }
 
 /**
  * Renders an agent's two-dimension presence: an availability dot + an
- * optional last-task chip. The dot's colour reads only from the
+ * optional workload chip. The dot's colour reads only from the
  * availability dimension (3 colours), so a runtime-healthy agent whose
- * last task failed shows a green dot + a red "Failed" chip — the dot
- * stops being sticky-red.
+ * last task failed shows a green dot — workload no longer carries
+ * historical state at all.
  *
  * Compact mode collapses to dot-only — used in dense surfaces where the
  * full chip would crowd the row.
@@ -42,15 +42,24 @@ export function AgentPresenceIndicator({
   }
 
   const av = availabilityConfig[detail.availability];
-  const ts = taskStateConfig[detail.lastTask];
-  const isRunning = detail.lastTask === "running";
-  const showQueueBadge = isRunning && detail.queuedCount > 0;
+  const wl = workloadConfig[detail.workload];
+  const isWorking = detail.workload === "working";
+  const isQueued = detail.workload === "queued";
+  const showQueueBadge = isWorking && detail.queuedCount > 0;
+  // Queued's amber comes from workloadConfig as the *severe* tone — meant
+  // for "stuck on offline runtime", which is the dominant cause. But on a
+  // healthy runtime, queued is just a brief race between enqueue and the
+  // daemon's claim, and amber there reads as a warning that isn't there.
+  // Compose with availability: online ⇒ muted (transient), otherwise ⇒
+  // keep amber (genuine stuck signal).
+  const queuedTone =
+    detail.availability === "online" ? "text-muted-foreground" : wl.textClass;
 
   if (compact) {
     return (
       <span
         className="inline-flex items-center"
-        title={`${av.label}${detail.lastTask !== "idle" ? ` · ${ts.label}` : ""}`}
+        title={`${av.label}${detail.workload !== "idle" ? ` · ${wl.label}` : ""}`}
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
       </span>
@@ -65,24 +74,39 @@ export function AgentPresenceIndicator({
         <span className={`text-xs ${av.textClass}`}>{av.label}</span>
       </span>
 
-      {/* Last task — separator + label, with running counts when active.
-          Hidden for `idle` to keep brand-new agents clean. */}
-      {detail.lastTask !== "idle" && (
-        <span className="inline-flex items-center gap-1">
-          <span className="text-xs text-muted-foreground">·</span>
-          <span className={`text-xs ${ts.textClass}`}>{ts.label}</span>
-          {isRunning && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground">
-              {detail.runningCount} / {detail.capacity}
-            </span>
-          )}
-          {showQueueBadge && (
-            <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
-              +{detail.queuedCount} queued
-            </span>
-          )}
+      {/* Workload — separator + label, with counts when working/queued.
+          All three workload states render here for symmetry: idle gets
+          its own "Idle" label so the difference between "no presence
+          data" (no chip at all) and "agent is idle" (explicit Idle chip)
+          is visible. */}
+      <span className="inline-flex items-center gap-1">
+        <span className="text-xs text-muted-foreground">·</span>
+        <span
+          className={`text-xs ${
+            isQueued ? queuedTone : wl.textClass
+          }`}
+        >
+          {wl.label}
         </span>
-      )}
+        {isWorking && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {detail.runningCount} / {detail.capacity}
+          </span>
+        )}
+        {showQueueBadge && (
+          <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
+            +{detail.queuedCount} queued
+          </span>
+        )}
+        {/* Queued (no running) — show the queued count directly, since
+            there's no running/capacity ratio to anchor on. Honestly
+            surfaces "stuck" on offline runtimes. */}
+        {isQueued && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {detail.queuedCount}
+          </span>
+        )}
+      </span>
     </span>
   );
 }

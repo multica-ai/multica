@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,6 +52,15 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 		}
 	}
 
+	// Project resources are best-effort: a write failure logs but does not
+	// block task startup. Missing resources surface as the agent simply not
+	// seeing the file, which matches the "scoped, not dumped" design (the
+	// meta skill content always lists what the agent should expect).
+	if err := writeProjectResources(workDir, ctx); err != nil {
+		// Caller logs warnings; avoid noisy returns for non-fatal context.
+		return fmt.Errorf("write project resources: %w", err)
+	}
+
 	return nil
 }
 
@@ -86,6 +96,64 @@ var (
 	blankIssueCommandPattern = regexp.MustCompile(`multica issue get\s+--output json`)
 	blankIssueLabelPattern   = regexp.MustCompile(`\*\*Issue ID:\*\*\s*(?:\n|$)`)
 )
+
+// projectResourceFile is the on-disk JSON written into the agent's working
+// directory. Schema is intentionally a thin pass-through of the API response
+// so consumers (skills, future tooling) don't need a separate parser.
+type projectResourceFile struct {
+	ProjectID    string                  `json:"project_id,omitempty"`
+	ProjectTitle string                  `json:"project_title,omitempty"`
+	Resources    []ProjectResourceForEnv `json:"resources"`
+}
+
+// MarshalJSON renders the resource_ref field as raw JSON instead of a base64
+// blob. The struct's other fields are simple strings.
+func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		ID           string          `json:"id"`
+		ResourceType string          `json:"resource_type"`
+		ResourceRef  json.RawMessage `json:"resource_ref"`
+		Label        string          `json:"label,omitempty"`
+	}
+	ref := p.ResourceRef
+	if len(ref) == 0 {
+		ref = json.RawMessage("{}")
+	}
+	return json.Marshal(alias{
+		ID:           p.ID,
+		ResourceType: p.ResourceType,
+		ResourceRef:  ref,
+		Label:        p.Label,
+	})
+}
+
+// writeProjectResources writes .multica/project/resources.json into the
+// working directory when the task carries project context. The file is
+// always written when a project is attached (even with zero resources) so
+// agents can rely on its presence as a signal that a project exists.
+func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
+	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+		return nil
+	}
+	dir := filepath.Join(workDir, ".multica", "project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	resources := ctx.ProjectResources
+	if resources == nil {
+		resources = []ProjectResourceForEnv{}
+	}
+	payload := projectResourceFile{
+		ProjectID:    ctx.ProjectID,
+		ProjectTitle: ctx.ProjectTitle,
+		Resources:    resources,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "resources.json"), data, 0o644)
+}
 
 // resolveSkillsDir returns the directory where skills should be written
 // based on the agent provider.
@@ -179,6 +247,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.AutopilotRunID != "" {
 		return renderAutopilotContext(ctx)
 	}
+	if ctx.QuickCreatePrompt != "" {
+		return renderQuickCreateContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -204,6 +275,35 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+// renderQuickCreateContext renders issue_context.md for quick-create tasks.
+// There is no issue yet, so we explicitly tell the agent NOT to call
+// `multica issue get` / `status` / `comment add` — those would either error
+// (empty IssueID) or silently target an unrelated issue.
+func renderQuickCreateContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Quick Create\n\n")
+	b.WriteString("**Trigger:** Quick-create modal\n\n")
+	b.WriteString("There is NO existing Multica issue for this run. Translate the user input below into a single `multica issue create` invocation, then exit.\n\n")
+	b.WriteString("## User input\n\n")
+	b.WriteString("> ")
+	b.WriteString(ctx.QuickCreatePrompt)
+	b.WriteString("\n\n")
+	b.WriteString("## Rules\n\n")
+	b.WriteString("- Run exactly one `multica issue create` invocation. No retries.\n")
+	b.WriteString("- After it succeeds, print `Created MUL-<n>: <title>` and exit.\n")
+	b.WriteString("- Do NOT run `multica issue get`, `multica issue status`, or `multica issue comment add` — there is nothing to query, transition, or comment on.\n")
+	b.WriteString("- The platform writes the user's success/failure inbox notification automatically based on the CLI exit status.\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		b.WriteString("The following skills are available, but for quick-create they are usually unnecessary:\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

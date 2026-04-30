@@ -13,10 +13,13 @@ import (
 	"time"
 	"unicode"
 
+	"errors"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -848,6 +851,196 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// QuickCreateIssueRequest is the body for POST /api/issues/quick-create. The
+// user picks an agent in the modal and types one line of natural language;
+// the server validates the agent's reachability up front, queues a quick-
+// create task, and returns 202 immediately. The agent translates the prompt
+// into a `multica issue create` invocation in the background; success and
+// failure both surface as inbox notifications to the requester.
+type QuickCreateIssueRequest struct {
+	AgentID string `json:"agent_id"`
+	Prompt  string `json:"prompt"`
+}
+
+// QuickCreateIssueResponse echoes the queued task id so the frontend can
+// correlate the eventual inbox item, even though completion is fully async.
+type QuickCreateIssueResponse struct {
+	TaskID string `json:"task_id"`
+}
+
+func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
+	var req QuickCreateIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" {
+		writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+	if !ok {
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	requesterID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	requesterUUID, ok := parseUUIDOrBadRequest(w, requesterID, "requester_id")
+	if !ok {
+		return
+	}
+
+	// Reuse the same workspace-membership / archived / private-agent
+	// ownership rules as `validateAssigneePair` so a user can't POST a
+	// private agent_id they shouldn't be able to dispatch (the frontend
+	// filters them out, but the handler is the trust boundary).
+	if status, msg := h.validateAssigneePair(
+		r.Context(), r, workspaceID,
+		pgtype.Text{String: "agent", Valid: true},
+		agentUUID,
+	); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
+	// Re-load the agent for the runtime liveness check below. Safe by
+	// construction: validateAssigneePair just confirmed it exists in this
+	// workspace and the caller has visibility.
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeAgentUnavailable(w, "agent has no runtime")
+		return
+	}
+	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
+		writeAgentUnavailable(w, "agent's runtime is offline")
+		return
+	}
+
+	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
+	// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
+	// handling, no-retry on partial failure). Older daemons either
+	// double-create issues on partial CLI failures or mishandle pasted
+	// screenshot URLs; fail closed before enqueuing rather than surface
+	// the breakage as an inbox failure twenty seconds later.
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
+		writeJSON(w, status, payload)
+		return
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt)
+	if err != nil {
+		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID)})
+}
+
+// writeAgentUnavailable returns 422 with a stable error code so the modal
+// can show a "switch agent" hint without parsing the human-readable reason.
+func writeAgentUnavailable(w http.ResponseWriter, reason string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	json.NewEncoder(w).Encode(map[string]any{
+		"code":   "agent_unavailable",
+		"reason": reason,
+	})
+}
+
+// isRuntimeOnline returns true when the given runtime is currently
+// reachable (status == "online"). Quick-create rejects submissions whose
+// agent's runtime is offline so the user gets immediate feedback in the
+// modal instead of an inbox failure twenty seconds later.
+func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bool {
+	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		return false
+	}
+	return rt.Status == "online"
+}
+
+// checkQuickCreateDaemonVersion enforces MinQuickCreateCLIVersion against the
+// CLI version the daemon reported at registration time (stored on the runtime
+// row's metadata.cli_version). Returns (0, nil) when the version is
+// acceptable, otherwise (status, payload) ready to hand to writeJSON.
+//
+// Failure shape is stable so the modal can branch on the `code` field and
+// surface a "needs upgrade" hint that points at the specific runtime:
+//
+//	422 {
+//	  "code": "daemon_version_unsupported",
+//	  "current_version": "0.2.18" | "",
+//	  "min_version":     "0.2.20",
+//	  "runtime_id":      "<uuid>"
+//	}
+func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
+	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		// Runtime row vanished between the online check and here — treat
+		// as unavailable rather than wedging the request on a 500.
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":   "agent_unavailable",
+			"reason": "agent's runtime is no longer registered",
+		}
+	}
+	current := readRuntimeCLIVersion(rt.Metadata)
+	switch err := agent.CheckMinCLIVersion(current); {
+	case err == nil:
+		return 0, nil
+	case errors.Is(err, agent.ErrCLIVersionMissing), errors.Is(err, agent.ErrCLIVersionTooOld):
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":            "daemon_version_unsupported",
+			"current_version": current,
+			"min_version":     agent.MinQuickCreateCLIVersion,
+			"runtime_id":      uuidToString(runtimeID),
+		}
+	default:
+		// Defensive fall-through: unknown error from the version check is
+		// also fail-closed, since the gate exists precisely because we
+		// can't trust older daemons with this flow.
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":            "daemon_version_unsupported",
+			"current_version": current,
+			"min_version":     agent.MinQuickCreateCLIVersion,
+			"runtime_id":      uuidToString(runtimeID),
+		}
+	}
+}
+
+// readRuntimeCLIVersion pulls metadata.cli_version off a runtime row. The
+// metadata column is JSONB on the wire; the daemon stores the multica CLI
+// version under that key during registration (see DaemonRegister).
+func readRuntimeCLIVersion(metadata []byte) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return ""
+	}
+	if v, ok := m["cli_version"].(string); ok {
+		return v
+	}
+	return ""
+}
+
 type CreateIssueRequest struct {
 	Title              string   `json:"title"`
 	Description        *string  `json:"description"`
@@ -859,6 +1052,13 @@ type CreateIssueRequest struct {
 	ProjectID          *string  `json:"project_id"`
 	DueDate            *string  `json:"due_date"`
 	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	// OriginType / OriginID stamp the new issue with its provenance so
+	// platform-internal flows can deterministically locate it later. Only
+	// trusted callers should set these — currently the daemon CLI passes
+	// them through for quick-create tasks (origin_type=quick_create,
+	// origin_id=agent_task_queue.id).
+	OriginType *string `json:"origin_type,omitempty"`
+	OriginID   *string `json:"origin_id,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -976,22 +1176,70 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
-	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        wsUUID,
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
-		ProjectID:          projectID,
-	})
+	// Optional origin stamping (quick-create / autopilot). Only the
+	// allowed origin types are accepted; anything else is rejected so a
+	// rogue caller can't mint arbitrary origin labels. Both fields must
+	// be provided together.
+	var originType pgtype.Text
+	var originID pgtype.UUID
+	if req.OriginType != nil || req.OriginID != nil {
+		if req.OriginType == nil || req.OriginID == nil {
+			writeError(w, http.StatusBadRequest, "origin_type and origin_id must be provided together")
+			return
+		}
+		switch *req.OriginType {
+		case "quick_create":
+			// Allowed — daemon CLI passes this through from a quick-create task.
+		default:
+			writeError(w, http.StatusBadRequest, "unsupported origin_type")
+			return
+		}
+		oid, ok := parseUUIDOrBadRequest(w, *req.OriginID, "origin_id")
+		if !ok {
+			return
+		}
+		originType = pgtype.Text{String: *req.OriginType, Valid: true}
+		originID = oid
+	}
+
+	var issue db.Issue
+	if originType.Valid {
+		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
+			WorkspaceID:   wsUUID,
+			Title:         req.Title,
+			Description:   ptrToText(req.Description),
+			Status:        status,
+			Priority:      priority,
+			AssigneeType:  assigneeType,
+			AssigneeID:    assigneeID,
+			CreatorType:   creatorType,
+			CreatorID:     parseUUID(actualCreatorID),
+			ParentIssueID: parentIssueID,
+			Position:      0,
+			DueDate:       dueDate,
+			Number:        issueNumber,
+			ProjectID:     projectID,
+			OriginType:    originType,
+			OriginID:      originID,
+		})
+	} else {
+		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			WorkspaceID:   wsUUID,
+			Title:         req.Title,
+			Description:   ptrToText(req.Description),
+			Status:        status,
+			Priority:      priority,
+			AssigneeType:  assigneeType,
+			AssigneeID:    assigneeID,
+			CreatorType:   creatorType,
+			CreatorID:     parseUUID(actualCreatorID),
+			ParentIssueID: parentIssueID,
+			Position:      0,
+			DueDate:       dueDate,
+			Number:        issueNumber,
+			ProjectID:     projectID,
+		})
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -1443,6 +1691,32 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	var rawUpdates map[string]json.RawMessage
 	if raw, exists := rawTop["updates"]; exists {
 		json.Unmarshal(raw, &rawUpdates)
+	}
+
+	// Short-circuit when no mutation field is present in `updates`. Without
+	// this, the loop below runs N no-op UPDATEs (every if-guard skips, every
+	// COALESCE preserves the existing value) and reports `{"updated": N}` —
+	// the response cheerfully claims success while nothing changed. Most
+	// real-world cases that hit this path are caller mistakes (status placed
+	// at the top level, "update" misspelled as singular). Telling the truth
+	// here — `{"updated": 0}` — keeps the wire shape stable while making the
+	// count match reality. See multica-ai/multica#1660.
+	hasMutation := req.Updates.Title != nil ||
+		req.Updates.Description != nil ||
+		req.Updates.Status != nil ||
+		req.Updates.Priority != nil ||
+		req.Updates.Position != nil
+	if !hasMutation {
+		for _, k := range []string{"assignee_type", "assignee_id", "due_date", "parent_issue_id", "project_id"} {
+			if _, ok := rawUpdates[k]; ok {
+				hasMutation = true
+				break
+			}
+		}
+	}
+	if !hasMutation {
+		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
+		return
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)

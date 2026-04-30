@@ -1,11 +1,46 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// formatProjectResource renders a single resource as a human-readable bullet.
+// Unknown resource types fall back to a JSON-encoded ref so the agent can
+// still read what the user attached. New resource types should add a case
+// here AND in the API validator (handler/project_resource.go).
+func formatProjectResource(r ProjectResourceForEnv) string {
+	label := r.Label
+	switch r.ResourceType {
+	case "github_repo":
+		var payload struct {
+			URL               string `json:"url"`
+			DefaultBranchHint string `json:"default_branch_hint,omitempty"`
+		}
+		_ = json.Unmarshal(r.ResourceRef, &payload)
+		out := fmt.Sprintf("**GitHub repo**: %s", payload.URL)
+		if payload.DefaultBranchHint != "" {
+			out += fmt.Sprintf(" (default branch: `%s`)", payload.DefaultBranchHint)
+		}
+		if label != "" {
+			out += " — " + label
+		}
+		return out
+	default:
+		ref := string(r.ResourceRef)
+		if ref == "" {
+			ref = "{}"
+		}
+		out := fmt.Sprintf("**%s**: `%s`", r.ResourceType, ref)
+		if label != "" {
+			out += " — " + label
+		}
+		return out
+	}
+}
 
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
@@ -81,6 +116,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
 	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] [--limit N] [--offset N] --output json` — List issues in workspace (default limit: 50; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true)\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--limit N] [--offset N] [--since <RFC3339>] --output json` — List comments on an issue (supports pagination; includes id, parent_id for threading)\n")
+	b.WriteString("- `multica issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
+	b.WriteString("- `multica issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
+	b.WriteString("- `multica label list --output json` — List all labels defined in the workspace (returns id + name + color)\n")
 	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
 	b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
 	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
@@ -93,10 +131,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
 
 	b.WriteString("### Write\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--assignee X] [--parent <issue-id>] [--status X]` — Create a new issue\n")
-	b.WriteString("- `multica issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use --unassign to remove assignee)\n")
-	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
-	b.WriteString("  - **For multi-line content (anything with line breaks, paragraphs, code blocks, backticks, or quotes), you MUST pipe via stdin** — bash does NOT expand `\\n` inside double quotes, so writing `--content \"para1\\n\\npara2\"` stores the literal 4-char sequence and the comment renders without line breaks. Use a HEREDOC instead:\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
+	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	b.WriteString("- `multica issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use `--unassign` to remove assignee)\n")
+	b.WriteString("- `multica issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `multica label list`)\n")
+	b.WriteString("- `multica issue label remove <issue-id> <label-id>` — Detach a label from an issue\n")
+	b.WriteString("- `multica issue subscriber add <issue-id> [--user <name>]` — Subscribe a member or agent to issue updates (defaults to the caller when `--user` is omitted)\n")
+	b.WriteString("- `multica issue subscriber remove <issue-id> [--user <name>]` — Unsubscribe a member or agent\n")
+	b.WriteString("- `multica issue comment add <issue-id> --content-stdin [--parent <comment-id>] [--attachment <path>]` — Post a comment. Agent-authored comments should always pipe content via stdin, even for short single-line replies. Use `--parent` to reply to a specific comment; `--attachment` may be repeated.\n")
+	b.WriteString("  - **For comment content, you MUST pipe via stdin; this is mandatory for multi-line content (anything with line breaks, paragraphs, code blocks, backticks, or quotes).** Do not use inline `--content` and do not write `\\n` escapes. Use a HEREDOC instead:\n")
 	b.WriteString("\n")
 	b.WriteString("    ```\n")
 	b.WriteString("    cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin\n")
@@ -108,8 +152,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("\n")
 	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
-	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")
+	b.WriteString("- `multica label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `multica label list` first)\n")
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
@@ -117,9 +160,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
-		b.WriteString("Codex often follows the per-turn reply command literally. Treat inline `--content \"...\"` examples as short single-line examples only. ")
-		b.WriteString("For paragraphs, bullets, code blocks, backticks, quotes, or any text where line breaks matter, use `--content-stdin` with a HEREDOC and keep the same `--parent` value from the trigger comment. ")
-		b.WriteString("Do not compress a multi-paragraph answer into one `--content` argument and do not rely on `\\n` escapes.\n\n")
+		b.WriteString("Codex often follows the per-turn reply command literally. For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies. ")
+		b.WriteString("Never use inline `--content` for agent-authored comments. Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 
 	// Inject available repositories section.
@@ -127,16 +170,30 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
 		for _, repo := range ctx.Repos {
-			desc := repo.Description
-			if desc == "" {
-				desc = "—"
-			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			fmt.Fprintf(&b, "- %s\n", repo.URL)
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+	}
+
+	// Inject project-scoped context (resources attached to the issue's project).
+	// The full structured payload is also available at .multica/project/resources.json
+	// so skills can consume it programmatically.
+	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+		b.WriteString("## Project Context\n\n")
+		if ctx.ProjectTitle != "" {
+			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if len(ctx.ProjectResources) > 0 {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			for _, r := range ctx.ProjectResources {
+				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
+			}
+			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code.\n\n")
+		} else {
+			b.WriteString("This project has no resources attached yet.\n\n")
+		}
 	}
 
 	b.WriteString("### Workflow\n\n")
@@ -151,6 +208,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
+	} else if ctx.QuickCreatePrompt != "" {
+		// Quick-create task: detailed field / output rules live in the
+		// per-turn prompt (BuildPrompt → buildQuickCreatePrompt) so they
+		// have a single source of truth. Quick-create is one-shot, so the
+		// per-turn message is always present and the agent reads the rules
+		// from there. We only keep the hard guardrails here so a provider
+		// that doesn't propagate the user message into its working context
+		// (or a resumed session) still avoids the assignment-task workflow
+		// pointing at an empty issue id.
+		b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
+		b.WriteString("Hard guardrails (apply even if the user message is missing):\n")
+		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
+		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
+		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
@@ -194,8 +265,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("3. Read comments for additional context or human instructions\n")
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
+		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
@@ -255,9 +327,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
 	b.WriteString("## Output\n\n")
-	if ctx.AutopilotRunID != "" {
+	switch {
+	case ctx.AutopilotRunID != "":
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
-	} else {
+	case ctx.QuickCreatePrompt != "":
+		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
+		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
+		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
+		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
+	default:
 		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")

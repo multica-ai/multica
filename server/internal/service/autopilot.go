@@ -174,7 +174,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	return nil
 }
 
-// dispatchRunOnly enqueues a direct agent task without creating an issue.
+// dispatchRunOnly rejects legacy issue-less autopilot execution.
 func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
 	return fmt.Errorf("issue-bound dispatch requires issue_id: autopilot run_only mode has no validated issue_id (autopilot_id=%s run_id=%s source=%s)",
 		util.UUIDToString(ap.ID),

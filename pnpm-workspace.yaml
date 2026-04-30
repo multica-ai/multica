@@ -16,6 +16,7 @@ catalog:
   # State Management
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
+  "@tanstack/react-table": "^8.21.3"
 
   # UI & Styling
   tailwindcss: "^4"
@@ -27,9 +28,13 @@ catalog:
   katex: "^0.16.45"
   rehype-katex: "^7.0.1"
   remark-math: "^6.0.0"
+  mermaid: "^11.14.0"
 
   # Icons
   lucide-react: "^1.0.1"
+
+  # Loading animations (chat StatusPill)
+  unicode-animations: "^1.0.3"
 
   # Product analytics
   posthog-js: "^1.176.1"

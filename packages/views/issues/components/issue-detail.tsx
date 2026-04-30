@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleCheck,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -42,7 +43,8 @@ import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
-import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { AgentLiveCard } from "./agent-live-card";
+import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -137,6 +139,8 @@ function formatTokenCount(n: number): string {
 interface IssueDetailProps {
   issueId: string;
   onDelete?: () => void;
+  /** Called after the issue is marked as done via the toolbar button. */
+  onDone?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -147,7 +151,7 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -158,6 +162,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  // Workspace owners and admins moderate any comment authored by anyone
+  // (mirrors backend `comment.go:507-512`). Computed here so per-comment
+  // rendering doesn't have to re-derive it for every row.
+  const currentUserRole =
+    members.find((m) => m.user_id === user?.id)?.role ?? null;
+  const canModerateComments =
+    currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
@@ -166,14 +177,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
-  const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(defaultSidebarOpen);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (isMobile) {
-      setSidebarOpen(false);
-      sidebarRef.current?.collapse();
+      setMobileSidebarOpen(false);
     }
   }, [isMobile]);
+  const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
@@ -272,7 +284,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     if (el) {
       didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ behavior: "instant", block: "center" });
         setHighlightedId(highlightCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
@@ -295,6 +307,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  const handleToggleSidebar = useCallback(() => {
+    if (isMobile) {
+      setMobileSidebarOpen((open) => !open);
+      return;
+    }
+
+    const panel = sidebarRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [isMobile, sidebarRef]);
 
   if (loading) {
     return (
@@ -371,7 +395,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           Properties
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
-        {propertiesOpen && <div className="space-y-0.5 pl-2">
+        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           <PropRow label="Status">
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
@@ -425,7 +449,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           Details
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
-        {detailsOpen && <div className="space-y-0.5 pl-2">
+        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           <PropRow label="Created by">
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
@@ -439,6 +463,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>}
       </div>
 
+      {/* Execution log — active runs + collapsed past runs. Self-contained;
+          owns its own collapse state and WS subscriptions. Hides itself
+          when there are no runs to show. */}
+      <ExecutionLogSection issueId={id} />
+
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
         <div>
@@ -449,7 +478,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             Token usage
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
           </button>
-          {tokenUsageOpen && <div className="space-y-0.5 pl-2">
+          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
             <PropRow label="Input">
               <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
             </PropRow>
@@ -472,10 +501,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     </div>
   );
 
-  return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
-      <div className="flex h-full flex-col">
+  const detailContent = (
+    <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
@@ -500,14 +527,28 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0 text-muted-foreground">
-              {issue.identifier}
-            </span>
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                    >
+                      <CircleCheck />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Mark as done</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -542,16 +583,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                     variant={sidebarOpen ? "secondary" : "ghost"}
                     size="icon-sm"
                     className={sidebarOpen ? "" : "text-muted-foreground"}
-                    onClick={() => {
-                      if (isMobile) {
-                        setSidebarOpen(!sidebarOpen);
-                      } else {
-                        const panel = sidebarRef.current;
-                        if (!panel) return;
-                        if (panel.isCollapsed()) panel.expand();
-                        else panel.collapse();
-                      }
-                    }}
+                    onClick={handleToggleSidebar}
                   >
                     <PanelRight />
                   </Button>
@@ -835,16 +867,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </div>
             </div>
 
-            {/* Agent live output — sticky inside the Activity section so it
-                stays pinned while scrolling through TaskRunHistory + comments.
-                Keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue. */}
+            {/* Agent live output — sticky banner in the activity section,
+                keyed by issue id so switching issues remounts the card and
+                clears any in-flight task state from the previous issue.
+                The execution log itself (per-task timeline + past runs)
+                lives in the right panel via ExecutionLogSection — this
+                card is just a header-style "agent is working" anchor. */}
             <AgentLiveCard key={id} issueId={id} />
-
-            {/* Agent execution history */}
-            <div className="mt-3">
-              <TaskRunHistory key={id} issueId={id} />
-            </div>
 
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">
@@ -905,6 +934,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           entry={entry}
                           allReplies={repliesByParent}
                           currentUserId={user?.id}
+                          canModerate={canModerateComments}
                           onReply={submitReply}
                           onEdit={editComment}
                           onDelete={deleteComment}
@@ -972,9 +1002,27 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
         </div>
       </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="flex flex-1 min-h-0">
+        {detailContent}
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+            {sidebarContent}
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+      <ResizablePanel id="content" minSize="50%">
+        {detailContent}
       </ResizablePanel>
-      {!isMobile && <ResizableHandle />}
-      {!isMobile && (
+      <ResizableHandle />
       <ResizablePanel
         id="sidebar"
         defaultSize={defaultSidebarOpen ? 320 : 0}
@@ -983,7 +1031,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}
-        onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+        onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
       >
       <div className="overflow-y-auto border-l h-full">
         <div className="p-4">
@@ -991,14 +1039,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
       </div>
       </ResizablePanel>
-      )}
-      {isMobile && (
-        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
-            {sidebarContent}
-          </SheetContent>
-        </Sheet>
-      )}
     </ResizablePanelGroup>
   );
 }

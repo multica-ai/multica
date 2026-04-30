@@ -52,6 +52,43 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
+	t.Parallel()
+
+	sem := newTaskSlotSemaphore(4)
+	seen := make(map[int]bool)
+	for i := 0; i < 4; i++ {
+		select {
+		case slot := <-sem:
+			if slot < 0 || slot > 3 {
+				t.Fatalf("slot out of range: %d", slot)
+			}
+			if seen[slot] {
+				t.Fatalf("duplicate slot: %d", slot)
+			}
+			seen[slot] = true
+		default:
+			t.Fatalf("expected slot %d to be available", i)
+		}
+	}
+
+	select {
+	case slot := <-sem:
+		t.Fatalf("expected semaphore to be empty, got slot %d", slot)
+	default:
+	}
+
+	sem <- 2
+	select {
+	case slot := <-sem:
+		if slot != 2 {
+			t.Fatalf("expected released slot 2, got %d", slot)
+		}
+	default:
+		t.Fatal("expected released slot to be available")
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
@@ -554,7 +591,7 @@ func TestEnsureRepoReadyFastPathDoesNotRefresh(t *testing.T) {
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
@@ -576,7 +613,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	// URL with trailing whitespace should still hit the fast path.
 	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
@@ -600,11 +637,11 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 		refreshCalls.Add(1)
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: sourceRepo, Description: "repo"}},
+			Repos:        []RepoData{{URL: sourceRepo}},
 			ReposVersion: "v2",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
@@ -614,6 +651,89 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	}
 	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
 		t.Fatal("expected repo to be cached after refresh")
+	}
+}
+
+// A project github_repo URL that the workspace itself does not bind must still
+// be allowed for `multica repo checkout` after registerTaskRepos runs. Without
+// this, the new project-repos-override-workspace-repos behavior would surface
+// repos in the meta-skill that the agent then can't actually clone.
+func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	var refreshCalls atomic.Int32
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		refreshCalls.Add(1)
+		// If the workspace endpoint is hit it returns an empty list — the
+		// project-only URL must NOT depend on this for allowlist membership.
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{},
+			ReposVersion: "v1",
+		})
+	})
+	// Workspace has zero workspace-bound repos; the project resource gives us
+	// the only repo URL the agent should be able to check out.
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+
+	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+
+	// The async clone goroutine in registerTaskRepos may not have finished;
+	// poll briefly until the cache is populated so the test isn't racy.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if d.repoCache.Lookup("ws-1", sourceRepo) != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		t.Fatalf("expected repo to be cached after registerTaskRepos, but Lookup returned empty")
+	}
+
+	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
+		t.Fatal("expected project repo to pass workspaceRepoAllowed")
+	}
+
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+		t.Fatalf("ensureRepoReady: %v", err)
+	}
+	if got := refreshCalls.Load(); got != 0 {
+		t.Fatalf("expected zero workspace-repos refreshes (URL came from project), got %d", got)
+	}
+}
+
+// Confirms that a workspace refresh wiping allowedRepoURLs does not also wipe
+// task-scoped URLs (project repos). Without the separate taskRepoURLs map a
+// concurrent refresh would silently revoke project-only URLs and the next
+// checkout would fail.
+func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{},
+			ReposVersion: "v2",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+
+	// Wait for the registration to populate the cache.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := d.refreshWorkspaceRepos(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRepos: %v", err)
+	}
+
+	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
+		t.Fatal("project repo URL was wiped by workspace refresh")
 	}
 }
 
@@ -627,7 +747,7 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 			ReposVersion: "v1",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
 	if !errors.Is(err, ErrRepoNotConfigured) {
@@ -642,11 +762,11 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: missingRepo, Description: "missing"}},
+			Repos:        []RepoData{{URL: missingRepo}},
 			ReposVersion: "v1",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
@@ -670,11 +790,11 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		refreshCalls.Add(1)
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: sourceRepo, Description: "repo"}},
+			Repos:        []RepoData{{URL: sourceRepo}},
 			ReposVersion: "v2",
 		})
 	})
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil)
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	const concurrency = 8
 	var wg sync.WaitGroup
@@ -698,5 +818,41 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	// must serialize them so the server is only called once.
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
+	}
+}
+
+func TestShellArgsFromEnv(t *testing.T) {
+	t.Setenv("MULTICA_CLAUDE_ARGS", `--max-turns 60 --append-system-prompt "multi word"`)
+	got, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	want := []string{"--max-turns", "60", "--append-system-prompt", "multi word"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestShellArgsFromEnvEmptyIsNil(t *testing.T) {
+	t.Setenv("MULTICA_CODEX_ARGS", "   ")
+	got, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		t.Fatalf("shellArgsFromEnv: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil for empty env, got %#v", got)
+	}
+}
+
+func TestDefaultArgsForProvider(t *testing.T) {
+	cfg := Config{ClaudeArgs: []string{"--max-turns", "60"}, CodexArgs: []string{"--sandbox", "workspace-write"}}
+	if got := defaultArgsForProvider(cfg, "claude"); strings.Join(got, " ") != "--max-turns 60" {
+		t.Fatalf("unexpected claude args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
+		t.Fatalf("unexpected codex args: %#v", got)
+	}
+	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }

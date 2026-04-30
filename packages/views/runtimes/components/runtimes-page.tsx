@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Server } from "lucide-react";
+import { Plus, Search, Server } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { PageHeader } from "../../layout/page-header";
+import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { RuntimeList } from "./runtime-list";
 
 type RuntimeFilter = "mine" | "all";
@@ -92,6 +93,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const [scope, setScope] = useState<RuntimeFilter>("mine");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [search, setSearch] = useState("");
+  const [showConnectDialog, setShowConnectDialog] = useState(false);
 
   // One unified cache per workspace: scope (Mine/All) is a view filter, not
   // a fetch dimension. Splitting on owner used to give us two TanStack cache
@@ -154,14 +156,17 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={totalCount} />
+      <PageHeaderBar
+        totalCount={totalCount}
+        onConnectRemote={() => setShowConnectDialog(true)}
+      />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
         {topSlot}
 
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
-            <EmptyState />
+            <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
@@ -189,6 +194,10 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
           </div>
         )}
       </div>
+
+      {showConnectDialog && (
+        <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
+      )}
     </div>
   );
 }
@@ -198,9 +207,15 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
 // Page-level actions (Search, scope, filter) live in the card below.
 // ---------------------------------------------------------------------------
 
-function PageHeaderBar({ totalCount }: { totalCount: number }) {
+function PageHeaderBar({
+  totalCount,
+  onConnectRemote,
+}: {
+  totalCount: number;
+  onConnectRemote: () => void;
+}) {
   return (
-    <PageHeader className="px-5">
+    <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <Server className="h-4 w-4 text-muted-foreground" />
         <h1 className="text-sm font-medium">Runtimes</h1>
@@ -209,9 +224,6 @@ function PageHeaderBar({ totalCount }: { totalCount: number }) {
             {totalCount}
           </span>
         )}
-        {/* Tagline sits right next to the title — same flex group, single
-            sentence + docs link. Hidden below md so it never collides with
-            the title on narrow screens. */}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
           Machines and cloud workers running CLI sessions for your agents.{" "}
           <a
@@ -224,6 +236,10 @@ function PageHeaderBar({ totalCount }: { totalCount: number }) {
           </a>
         </p>
       </div>
+      <Button type="button" size="sm" onClick={onConnectRemote}>
+        <Plus className="h-3 w-3" />
+        Connect remote machine
+      </Button>
     </PageHeader>
   );
 }
@@ -413,7 +429,7 @@ function HealthChip({
 // workspace. Different from "filter matches nothing" (NoMatchesState).
 // ---------------------------------------------------------------------------
 
-function EmptyState() {
+function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -421,12 +437,18 @@ function EmptyState() {
       </div>
       <h2 className="mt-4 text-base font-semibold">No runtimes yet</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Runtimes register automatically when a daemon connects. Run{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-          multica daemon start
-        </code>{" "}
-        on your machine, or invite a teammate whose daemon is already running.
+        Desktop auto-scans your local machine. For AWS EC2 or other remote
+        machines, connect them using the setup wizard.
       </p>
+      <Button
+        type="button"
+        size="sm"
+        onClick={onConnectRemote}
+        className="mt-5"
+      >
+        <Plus className="h-3 w-3" />
+        Connect remote machine
+      </Button>
     </div>
   );
 }

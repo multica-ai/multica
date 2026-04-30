@@ -29,6 +29,12 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
+import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  VISIBILITY_DESCRIPTION,
+  VISIBILITY_LABEL,
+} from "@multica/core/agents";
+import { CharCounter } from "./char-counter";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -175,8 +181,15 @@ export function CreateAgentDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What does this agent do?"
+              maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
               className="mt-1"
             />
+            <div className="mt-1">
+              <CharCounter
+                length={[...description].length}
+                max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
           </div>
 
           <div>
@@ -193,8 +206,10 @@ export function CreateAgentDialog({
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Workspace</div>
-                  <div className="text-xs text-muted-foreground">All members can assign</div>
+                  <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION.workspace}
+                  </div>
                 </div>
               </button>
               <button
@@ -208,8 +223,10 @@ export function CreateAgentDialog({
               >
                 <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Private</div>
-                  <div className="text-xs text-muted-foreground">Only you can assign</div>
+                  <div className="font-medium">{VISIBILITY_LABEL.private}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION.private}
+                  </div>
                 </div>
               </button>
             </div>

@@ -39,6 +39,7 @@ import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
+import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
 import { createBlurShortcutExtension } from "./blur-shortcut";
 import { createFileUploadExtension } from "./file-upload";
@@ -48,16 +49,11 @@ import { BlockMathExtension, InlineMathExtension } from "./math";
 
 const lowlight = createLowlight(common);
 
-const LinkEditable = Link.extend({ inclusive: false }).configure({
+const LinkExtension = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
   autolink: true,
   linkOnPaste: true,
   defaultProtocol: "https",
-});
-
-const LinkReadonly = Link.configure({
-  openOnClick: false,
-  autolink: false,
 });
 
 const ImageExtension = Image.extend({
@@ -81,7 +77,6 @@ const ImageExtension = Image.extend({
 });
 
 export interface EditorExtensionsOptions {
-  editable: boolean;
   placeholder?: string;
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
@@ -103,9 +98,9 @@ export interface EditorExtensionsOptions {
 export function createEditorExtensions(
   options: EditorExtensionsOptions,
 ): AnyExtension[] {
-  const { editable, placeholder: placeholderText } = options;
+  const { placeholder: placeholderText } = options;
 
-  const extensions: AnyExtension[] = [
+  return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
       link: false,
@@ -119,7 +114,7 @@ export function createEditorExtensions(
     // ⚠️ Link MUST appear before markdownPaste in this array.
     // linkOnPaste relies on Link's handlePaste plugin firing first;
     // markdownPaste's handlePaste is a catch-all that returns true.
-    editable ? LinkEditable : LinkReadonly,
+    LinkExtension,
     ImageExtension,
     Table.configure({ resizable: false }),
     TableRow,
@@ -129,37 +124,33 @@ export function createEditorExtensions(
     InlineMathExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
+    // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain
+    // so users can copy rich content out as the original Markdown.
+    createMarkdownCopyExtension(),
     FileCardExtension,
     ...(options.disableMentions
       ? []
       : [
           BaseMentionExtension.configure({
             HTMLAttributes: { class: "mention" },
-            ...(editable && options.queryClient
+            ...(options.queryClient
               ? { suggestion: createMentionSuggestion(options.queryClient) }
               : {}),
           }),
         ]),
+    Typography,
+    Placeholder.configure({ placeholder: placeholderText }),
+    createMarkdownPasteExtension(),
+    createSubmitExtension(
+      () => {
+        const fn = options.onSubmitRef?.current;
+        if (!fn) return false; // no submit wired — let default Enter insert newline
+        fn();
+        return true;
+      },
+      { submitOnEnter: options.submitOnEnter ?? false },
+    ),
+    createBlurShortcutExtension(),
+    createFileUploadExtension(options.onUploadFileRef!),
   ];
-
-  if (editable) {
-    extensions.push(
-      Typography,
-      Placeholder.configure({ placeholder: placeholderText }),
-      createMarkdownPasteExtension(),
-      createSubmitExtension(
-        () => {
-          const fn = options.onSubmitRef?.current;
-          if (!fn) return false; // no submit wired — let default Enter insert newline
-          fn();
-          return true;
-        },
-        { submitOnEnter: options.submitOnEnter ?? false },
-      ),
-      createBlurShortcutExtension(),
-      createFileUploadExtension(options.onUploadFileRef!),
-    );
-  }
-
-  return extensions;
 }

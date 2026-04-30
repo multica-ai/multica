@@ -17,7 +17,14 @@ import { SkillAddDialog } from "../skill-add-dialog";
  * Hidden when there's nothing left to attach so we don't dangle a chip
  * that opens an empty dialog.
  */
-export function SkillAttach({ agent }: { agent: Agent }) {
+export function SkillAttach({
+  agent,
+  canEdit = true,
+}: {
+  agent: Agent;
+  /** When false, hide the attach trigger entirely. */
+  canEdit?: boolean;
+}) {
   const wsId = useWorkspaceId();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const [open, setOpen] = useState(false);
@@ -27,7 +34,7 @@ export function SkillAttach({ agent }: { agent: Agent }) {
     (s) => !agentSkillIds.has(s.id),
   ).length;
 
-  if (availableCount === 0) return null;
+  if (!canEdit || availableCount === 0) return null;
 
   return (
     <>

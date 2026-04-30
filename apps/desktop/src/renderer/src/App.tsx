@@ -7,7 +7,7 @@ import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { Toaster } from "sonner";
+import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { PageviewTracker } from "./components/pageview-tracker";
@@ -110,21 +110,58 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Onboarding and zero-workspace both resolve to an overlay, but
-  // onboarding wins: a user who hasn't completed it gets the onboarding
-  // overlay regardless of how many workspaces already exist.
+  // Pre-workspace overlay routing for desktop. Mirrors the web entry-point
+  // judgment in callback / login:
+  //   un-onboarded:
+  //     pending invites on email → /invitations overlay
+  //     no invites               → /onboarding overlay
+  //   already onboarded:
+  //     zero workspaces          → /workspaces/new overlay
+  //     ≥1 workspaces            → no overlay, fall through to dashboard
+  //
+  // The "un-onboarded but in workspace" state is now physically impossible
+  // because backend transactions atomically set onboarded_at when a user
+  // joins the `member` table. Anyone with workspaces is by definition
+  // onboarded.
   useEffect(() => {
-    if (!user || !workspaceListFetched) return;
+    if (!user || !workspaceListFetched) return undefined;
     const { overlay, open } = useWindowOverlayStore.getState();
-    if (overlay) return;
+    if (overlay) return undefined;
+    if (wsCount > 0) return undefined;
     if (!hasOnboarded) {
-      open({ type: "onboarding" });
-      return;
+      // Look up pending invitations by email. Network blip is non-fatal —
+      // fall through to onboarding so the user isn't stuck on a blank
+      // window. The sidebar's pending-invitations dropdown will surface
+      // missed invites later once they're onboarded.
+      let cancelled = false;
+      void api
+        .listMyInvitations()
+        .then((invites) => {
+          if (cancelled) return;
+          const { overlay: latestOverlay, open: latestOpen } =
+            useWindowOverlayStore.getState();
+          if (latestOverlay) return;
+          if (invites.length > 0) {
+            qc.setQueryData(workspaceKeys.myInvitations(), invites);
+            latestOpen({ type: "invitations" });
+          } else {
+            latestOpen({ type: "onboarding" });
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          const { overlay: latestOverlay, open: latestOpen } =
+            useWindowOverlayStore.getState();
+          if (latestOverlay) return;
+          latestOpen({ type: "onboarding" });
+        });
+      return () => {
+        cancelled = true;
+      };
     }
-    if (wsCount === 0) {
-      open({ type: "new-workspace" });
-    }
-  }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded]);
+    open({ type: "new-workspace" });
+    return undefined;
+  }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect

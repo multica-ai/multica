@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -13,7 +13,7 @@ import {
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { workspaceListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, AgentRuntime, Workspace } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "./components/step-header";
@@ -65,6 +65,8 @@ export function OnboardingFlow({
   // across sessions — which step the user is on is deliberately not
   // saved, so every entry starts at Welcome.
   const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
+
+  const qc = useQueryClient();
 
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -141,10 +143,23 @@ export function OnboardingFlow({
     setStep(rt ? "agent" : "first_issue");
   }, []);
 
-  const handleAgentCreated = useCallback((created: Agent) => {
-    setAgent(created);
-    setStep("first_issue");
-  }, []);
+  const handleAgentCreated = useCallback(
+    (created: Agent) => {
+      setAgent(created);
+      // Mark the workspace's agent list stale so the dashboard's first
+      // mount refetches and includes the just-created agent. Without
+      // this, anything resolving an agent ID from the cached list (the
+      // welcome issue's assignee in particular) renders as "Unknown
+      // Agent" until something else triggers a refetch.
+      if (workspace) {
+        qc.invalidateQueries({
+          queryKey: workspaceKeys.agents(workspace.id),
+        });
+      }
+      setStep("first_issue");
+    },
+    [workspace, qc],
+  );
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);

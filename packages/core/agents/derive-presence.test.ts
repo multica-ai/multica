@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, AgentRuntime, AgentTask, TaskFailureReason } from "../types";
+import type { Agent, AgentRuntime, AgentTask } from "../types";
 import {
   buildPresenceMap,
   deriveAgentAvailability,
   deriveAgentPresenceDetail,
-  deriveLastTaskState,
+  deriveWorkload,
+  deriveWorkloadDetail,
 } from "./derive-presence";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
@@ -80,8 +81,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
 
 describe("deriveAgentAvailability", () => {
   // Reachability dimension only — runtime + clock decide it; tasks are
-  // irrelevant. The whole point of splitting from LastTaskState is that
-  // these tests can ignore task fixtures entirely.
+  // irrelevant to this axis.
 
   it("returns online when runtime is fresh-online", () => {
     expect(deriveAgentAvailability(makeRuntime(), NOW)).toBe("online");
@@ -120,128 +120,111 @@ describe("deriveAgentAvailability", () => {
   });
 });
 
-describe("deriveLastTaskState", () => {
-  // Task dimension only — runtime status is not consulted.
+describe("deriveWorkload", () => {
+  // Atomic 3-way classifier — used by both Agent (per-agent task counts)
+  // and Runtime (per-runtime aggregated counts). Pure functional mapping
+  // from a count pair to a workload label.
+
+  it("returns working when runningCount > 0", () => {
+    expect(deriveWorkload({ runningCount: 1, queuedCount: 0 })).toBe("working");
+    expect(deriveWorkload({ runningCount: 3, queuedCount: 5 })).toBe("working");
+  });
+
+  it("returns queued when nothing running but queuedCount > 0", () => {
+    expect(deriveWorkload({ runningCount: 0, queuedCount: 1 })).toBe("queued");
+    expect(deriveWorkload({ runningCount: 0, queuedCount: 5 })).toBe("queued");
+  });
+
+  it("returns idle when both counts are zero", () => {
+    expect(deriveWorkload({ runningCount: 0, queuedCount: 0 })).toBe("idle");
+  });
+});
+
+describe("deriveWorkloadDetail", () => {
+  // Aggregates a task list into running/queued counts before classifying.
+  // Terminal statuses (completed / failed / cancelled) are silently
+  // ignored — workload is "what's on the plate right now", not history.
 
   it("returns idle when no tasks at all", () => {
-    const r = deriveLastTaskState([]);
-    expect(r.state).toBe("idle");
+    const r = deriveWorkloadDetail([]);
+    expect(r.workload).toBe("idle");
     expect(r.runningCount).toBe(0);
     expect(r.queuedCount).toBe(0);
   });
 
-  it("returns running when at least one task is running", () => {
-    const r = deriveLastTaskState([makeTask({ status: "running" })]);
-    expect(r.state).toBe("running");
+  it("returns working when at least one task is running", () => {
+    const r = deriveWorkloadDetail([makeTask({ status: "running" })]);
+    expect(r.workload).toBe("working");
     expect(r.runningCount).toBe(1);
+    expect(r.queuedCount).toBe(0);
   });
 
-  it("returns running when only queued / dispatched tasks exist (no running yet)", () => {
-    const r = deriveLastTaskState([
+  it("returns queued when only queued / dispatched tasks exist (no running)", () => {
+    // The "stuck on offline runtime" scenario in isolation: runningCount=0,
+    // queuedCount>0 surfaces as `queued` so the UI can honestly say
+    // "Queued · N" instead of misleading "Running 0/3 +Nq".
+    const r = deriveWorkloadDetail([
       makeTask({ status: "queued" }),
       makeTask({ id: "t2", status: "dispatched" }),
     ]);
-    expect(r.state).toBe("running");
+    expect(r.workload).toBe("queued");
     expect(r.runningCount).toBe(0);
     expect(r.queuedCount).toBe(2);
   });
 
-  it("returns running even when an older terminal exists (active wins over historical)", () => {
-    const r = deriveLastTaskState([
-      makeTask({
-        id: "old-failed",
-        status: "failed",
-        completed_at: "2026-04-27T10:00:00Z",
-      }),
-      makeTask({ id: "new-running", status: "running" }),
+  it("returns working when running coexists with queued (overflow)", () => {
+    // Capacity-saturated agent: still running, but with a queue building.
+    // The chip says "Working" with the queue expressed as a `+Nq` badge.
+    const r = deriveWorkloadDetail([
+      makeTask({ id: "t1", status: "running" }),
+      makeTask({ id: "t2", status: "queued" }),
+      makeTask({ id: "t3", status: "queued" }),
     ]);
-    expect(r.state).toBe("running");
+    expect(r.workload).toBe("working");
+    expect(r.runningCount).toBe(1);
+    expect(r.queuedCount).toBe(2);
   });
 
-  it("returns the latest terminal state when no tasks are active (latest = failed)", () => {
-    const r = deriveLastTaskState([
+  it("ignores terminal statuses entirely (no historical state in workload)", () => {
+    // Failed / completed / cancelled tasks contribute no count and don't
+    // change the verdict — Recent Work + Inbox handle history, not workload.
+    const r = deriveWorkloadDetail([
       makeTask({
-        id: "old",
+        id: "t-failed",
+        status: "failed",
+        completed_at: "2026-04-27T11:30:00Z",
+      }),
+      makeTask({
+        id: "t-completed",
         status: "completed",
-        completed_at: "2026-04-27T10:00:00Z",
+        completed_at: "2026-04-27T11:00:00Z",
       }),
       makeTask({
-        id: "new",
-        status: "failed",
-        completed_at: "2026-04-27T11:30:00Z",
-      }),
-    ]);
-    expect(r.state).toBe("failed");
-    expect(r.lastTaskCompletedAt).toBe("2026-04-27T11:30:00Z");
-  });
-
-  it("returns the latest terminal state when no tasks are active (latest = completed)", () => {
-    const r = deriveLastTaskState([
-      makeTask({
-        id: "old",
-        status: "failed",
-        completed_at: "2026-04-27T10:00:00Z",
-      }),
-      makeTask({
-        id: "new",
-        status: "completed",
-        completed_at: "2026-04-27T11:30:00Z",
-      }),
-    ]);
-    expect(r.state).toBe("completed");
-  });
-
-  it("surfaces failure_reason on a failed latest terminal", () => {
-    const reason: TaskFailureReason = "runtime_offline";
-    const r = deriveLastTaskState([
-      makeTask({
-        status: "failed",
-        completed_at: "2026-04-27T11:30:00Z",
-        failure_reason: reason,
-      }),
-    ]);
-    expect(r.state).toBe("failed");
-    expect(r.failureReason).toBe(reason);
-  });
-
-  it("leaves failureReason undefined when the failed terminal has empty failure_reason", () => {
-    const r = deriveLastTaskState([
-      makeTask({
-        status: "failed",
-        completed_at: "2026-04-27T11:30:00Z",
-        failure_reason: "",
-      }),
-    ]);
-    expect(r.state).toBe("failed");
-    expect(r.failureReason).toBeUndefined();
-  });
-
-  it("returns cancelled when the latest terminal is cancelled", () => {
-    // Under the new model cancelled is a real state — the dot is
-    // availability-driven so honestly surfacing it doesn't lie.
-    const r = deriveLastTaskState([
-      makeTask({
+        id: "t-cancelled",
         status: "cancelled",
-        completed_at: "2026-04-27T11:30:00Z",
+        completed_at: "2026-04-27T10:30:00Z",
       }),
     ]);
-    expect(r.state).toBe("cancelled");
+    expect(r.workload).toBe("idle");
+    expect(r.runningCount).toBe(0);
+    expect(r.queuedCount).toBe(0);
   });
 
-  it("ignores terminals without completed_at (treated as not-terminal)", () => {
-    // Defensive: a malformed row (no completed_at) shouldn't derail the
-    // latest-terminal scan. With nothing else in flight, idle.
-    const r = deriveLastTaskState([makeTask({ status: "failed", completed_at: null })]);
-    expect(r.state).toBe("idle");
+  it("classifies running over queued when both present, regardless of order", () => {
+    const r = deriveWorkloadDetail([
+      makeTask({ id: "t1", status: "queued" }),
+      makeTask({ id: "t2", status: "running" }),
+    ]);
+    expect(r.workload).toBe("working");
   });
 });
 
 describe("deriveAgentPresenceDetail", () => {
   // Composition: the two dimensions are derived independently and the
-  // detail object exposes both. No cross-axis override (the old "unstable
-  // overrides failed" rule is gone — they coexist now).
+  // detail object exposes both. No cross-axis override — workload never
+  // colours the dot, availability never overrides workload.
 
-  it("composes online + running for the common busy case", () => {
+  it("composes online + working for the common busy case", () => {
     const detail = deriveAgentPresenceDetail({
       agent: makeAgent(),
       runtime: makeRuntime(),
@@ -252,53 +235,53 @@ describe("deriveAgentPresenceDetail", () => {
       now: NOW,
     });
     expect(detail.availability).toBe("online");
-    expect(detail.lastTask).toBe("running");
+    expect(detail.workload).toBe("working");
     expect(detail.runningCount).toBe(1);
     expect(detail.queuedCount).toBe(1);
     expect(detail.capacity).toBe(6);
   });
 
-  it("composes online + failed — agent is reachable but last task failed (no longer sticky red dot)", () => {
-    // The whole motivation for the split: this combination was previously
-    // collapsed to a single red "failed" state, hiding the fact that the
-    // runtime is fine. Now the two dimensions are visible separately.
+  it("composes offline + queued — the canonical 'stuck' case (was previously misleading 'running 0/N')", () => {
+    // The motivation for the redesign: runtime offline + queued tasks
+    // used to surface as `running` with `0/3 +2q` counts (literally false).
+    // Workload now returns `queued` honestly, paired with offline
+    // availability — UI reads "Offline · Queued · 2".
     const detail = deriveAgentPresenceDetail({
       agent: makeAgent(),
-      runtime: makeRuntime(),
+      runtime: makeRuntime({
+        status: "offline",
+        last_seen_at: "2026-04-27T11:50:00Z",
+      }),
       tasks: [
-        makeTask({
-          status: "failed",
-          completed_at: "2026-04-27T11:30:00Z",
-          failure_reason: "agent_error",
-        }),
+        makeTask({ status: "queued" }),
+        makeTask({ id: "t2", status: "queued" }),
       ],
       now: NOW,
     });
-    expect(detail.availability).toBe("online");
-    expect(detail.lastTask).toBe("failed");
-    expect(detail.failureReason).toBe("agent_error");
-    expect(detail.lastTaskCompletedAt).toBe("2026-04-27T11:30:00Z");
+    expect(detail.availability).toBe("offline");
+    expect(detail.workload).toBe("queued");
+    expect(detail.runningCount).toBe(0);
+    expect(detail.queuedCount).toBe(2);
   });
 
-  it("composes unstable + running — runtime hiccup with queued tasks still in flight", () => {
-    // Previously "unstable" overrode "working"; now both signals are
-    // surfaced. The UI shows amber dot AND running chip — user sees both
-    // "connection issue" and "queue is paused".
+  it("composes unstable + working — runtime hiccup with tasks still in flight", () => {
+    // Recently-lost runtime, but a task is still recorded as running.
+    // Both signals surface independently — amber dot AND working chip —
+    // so the user sees "connection wobbling" alongside "agent is busy".
     const detail = deriveAgentPresenceDetail({
       agent: makeAgent(),
       runtime: makeRuntime({
         status: "offline",
         last_seen_at: "2026-04-27T11:59:00Z",
       }),
-      tasks: [makeTask({ status: "queued" })],
+      tasks: [makeTask({ status: "running" })],
       now: NOW,
     });
     expect(detail.availability).toBe("unstable");
-    expect(detail.lastTask).toBe("running");
-    expect(detail.queuedCount).toBe(1);
+    expect(detail.workload).toBe("working");
   });
 
-  it("composes offline + idle for a brand-new agent on a dead runtime", () => {
+  it("composes offline + idle for an unreachable agent with no tasks pending", () => {
     const detail = deriveAgentPresenceDetail({
       agent: makeAgent(),
       runtime: makeRuntime({
@@ -309,34 +292,34 @@ describe("deriveAgentPresenceDetail", () => {
       now: NOW,
     });
     expect(detail.availability).toBe("offline");
-    expect(detail.lastTask).toBe("idle");
+    expect(detail.workload).toBe("idle");
   });
 
-  it("handles a missing runtime by reporting offline + the task-driven last state", () => {
+  it("handles a missing runtime by reporting offline + the task-driven workload", () => {
     const detail = deriveAgentPresenceDetail({
       agent: makeAgent(),
       runtime: null,
+      tasks: [makeTask({ status: "running" })],
+      now: NOW,
+    });
+    expect(detail.availability).toBe("offline");
+    expect(detail.workload).toBe("working");
+  });
+
+  it("returns idle workload when only terminal tasks are present (history doesn't bleed in)", () => {
+    const detail = deriveAgentPresenceDetail({
+      agent: makeAgent(),
+      runtime: makeRuntime(),
       tasks: [
         makeTask({
-          status: "completed",
+          status: "failed",
           completed_at: "2026-04-27T11:30:00Z",
         }),
       ],
       now: NOW,
     });
-    expect(detail.availability).toBe("offline");
-    expect(detail.lastTask).toBe("completed");
-  });
-
-  it("leaves failureReason / lastTaskCompletedAt undefined when not relevant", () => {
-    const detail = deriveAgentPresenceDetail({
-      agent: makeAgent(),
-      runtime: makeRuntime(),
-      tasks: [makeTask({ status: "running" })],
-      now: NOW,
-    });
-    expect(detail.failureReason).toBeUndefined();
-    expect(detail.lastTaskCompletedAt).toBeUndefined();
+    expect(detail.availability).toBe("online");
+    expect(detail.workload).toBe("idle");
   });
 
   it("mirrors agent.max_concurrent_tasks into capacity", () => {
@@ -359,21 +342,16 @@ describe("buildPresenceMap", () => {
       runtimes: [makeRuntime()],
       snapshot: [
         makeTask({ id: "t1", agent_id: "a", status: "running" }),
-        makeTask({
-          id: "t2",
-          agent_id: "b",
-          status: "failed",
-          completed_at: "2026-04-27T11:30:00Z",
-        }),
+        makeTask({ id: "t2", agent_id: "b", status: "queued" }),
       ],
       now: NOW,
     });
     const a = map.get("a");
     const b = map.get("b");
     expect(a?.availability).toBe("online");
-    expect(a?.lastTask).toBe("running");
+    expect(a?.workload).toBe("working");
     expect(b?.availability).toBe("online");
-    expect(b?.lastTask).toBe("failed");
+    expect(b?.workload).toBe("queued");
   });
 
   it("returns offline availability for agents whose runtime_id has no matching runtime", () => {
@@ -386,8 +364,8 @@ describe("buildPresenceMap", () => {
     });
     const o = map.get("orphan");
     expect(o?.availability).toBe("offline");
-    // Task dimension still resolves independently — running task counts.
-    expect(o?.lastTask).toBe("running");
+    // Workload still resolves independently — running task counts.
+    expect(o?.workload).toBe("working");
   });
 
   it("threads the same `now` so every agent on a shared runtime gets the same availability", () => {
@@ -406,19 +384,35 @@ describe("buildPresenceMap", () => {
       ],
       snapshot: [
         makeTask({ id: "t1", agent_id: "a", status: "queued" }),
-        makeTask({
-          id: "t2",
-          agent_id: "b",
-          status: "failed",
-          completed_at: "2026-04-27T11:00:00Z",
-        }),
+        makeTask({ id: "t2", agent_id: "b", status: "running" }),
       ],
       now: NOW,
     });
     expect(map.get("a")?.availability).toBe("unstable");
     expect(map.get("b")?.availability).toBe("unstable");
-    // Last-task remains independent: a is running (queued), b is failed.
-    expect(map.get("a")?.lastTask).toBe("running");
-    expect(map.get("b")?.lastTask).toBe("failed");
+    // Workload remains independent: a is queued (waiting), b is working.
+    expect(map.get("a")?.workload).toBe("queued");
+    expect(map.get("b")?.workload).toBe("working");
+  });
+
+  it("ignores terminal tasks in the snapshot when building per-agent workload", () => {
+    // Snapshot intentionally still includes each agent's most recent
+    // terminal task (back-end SQL didn't change); the front-end now
+    // filters them out at the workload-derivation step.
+    const agentA = makeAgent({ id: "a", runtime_id: "rt-1" });
+    const map = buildPresenceMap({
+      agents: [agentA],
+      runtimes: [makeRuntime()],
+      snapshot: [
+        makeTask({
+          id: "t-terminal",
+          agent_id: "a",
+          status: "failed",
+          completed_at: "2026-04-27T11:30:00Z",
+        }),
+      ],
+      now: NOW,
+    });
+    expect(map.get("a")?.workload).toBe("idle");
   });
 });

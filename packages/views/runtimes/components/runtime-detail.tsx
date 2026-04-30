@@ -39,7 +39,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
-import { availabilityConfig, taskStateConfig } from "../../agents/presence";
+import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
@@ -206,6 +206,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <ServingAgentsCard
               agents={servingAgents}
               presenceMap={presenceMap}
+              agentHref={(id) => paths.agentDetail(id)}
             />
             <DiagnosticsCard
               runtime={runtime}
@@ -401,9 +402,11 @@ function Fact({
 function ServingAgentsCard({
   agents,
   presenceMap,
+  agentHref,
 }: {
   agents: Agent[];
   presenceMap: Map<string, AgentPresenceDetail>;
+  agentHref: (agentId: string) => string;
 }) {
   return (
     <div className="rounded-lg border">
@@ -427,17 +430,18 @@ function ServingAgentsCard({
             const av = detail
               ? availabilityConfig[detail.availability]
               : availabilityConfig.offline;
-            const ts = detail ? taskStateConfig[detail.lastTask] : null;
+            const wl = detail ? workloadConfig[detail.workload] : null;
             const running = detail?.runningCount ?? 0;
             const queued = detail?.queuedCount ?? 0;
             return (
-              <div
+              <AppLink
                 key={agent.id}
-                className="flex items-center gap-2 px-4 py-2"
+                href={agentHref(agent.id)}
+                className="group flex items-center gap-2 px-4 py-2 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
               >
                 <ActorAvatar actorType="agent" actorId={agent.id} size={20} enableHoverCard showStatusDot />
                 <div className="min-w-0 flex-1">
-                  <div className="cursor-pointer truncate text-xs font-medium">
+                  <div className="truncate text-xs font-medium">
                     {agent.name}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
@@ -445,11 +449,13 @@ function ServingAgentsCard({
                       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
                       <span className={av.textClass}>{av.label}</span>
                     </span>
-                    {ts && detail && detail.lastTask !== "idle" && (
-                      <span className={`inline-flex items-center gap-1 ${ts.textClass}`}>
+                    {wl && detail && detail.workload !== "idle" && (
+                      <span className={`inline-flex items-center gap-1 ${wl.textClass}`}>
                         <span className="text-muted-foreground">·</span>
-                        <ts.icon className="h-3 w-3" />
-                        {ts.label}
+                        <wl.icon
+                          className={`h-3 w-3 ${detail.workload === "working" ? "animate-spin" : ""}`}
+                        />
+                        {wl.label}
                         {running > 0 && (
                           <span className="text-muted-foreground">· {running} running</span>
                         )}
@@ -460,7 +466,8 @@ function ServingAgentsCard({
                     )}
                   </div>
                 </div>
-              </div>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+              </AppLink>
             );
           })}
         </div>
