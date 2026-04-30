@@ -1,0 +1,85 @@
+{
+  "page": {
+    "title": "Runtimes",
+    "tagline": "Machines and cloud workers running CLI sessions for your agents.",
+    "learn_more": "Learn more →",
+    "connect_remote": "Connect remote machine",
+    "search_placeholder": "Search runtimes…",
+    "scope_mine": "Mine",
+    "scope_all": "All",
+    "live": "Live",
+    "live_tooltip": "Real-time updates · offline detection up to 75s",
+    "filter_all": "All",
+    "filter_all_description": "All runtimes in this view",
+    "empty": {
+      "title": "No runtimes yet",
+      "hint": "Desktop auto-scans your local machine. For AWS EC2 or other remote machines, connect them using the setup wizard."
+    },
+    "no_matches": {
+      "title": "No matches",
+      "with_query": "No runtimes match \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " in this filter",
+      "no_query": "No runtimes match this filter.",
+      "try_widening": " Try widening the scope or clearing filters."
+    },
+    "bootstrapping": {
+      "title": "Starting local runtime…",
+      "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Online",
+      "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
+    },
+    "recently_lost": {
+      "label": "Recently lost",
+      "description": "Lost contact under 5 minutes ago — often a brief network blip."
+    },
+    "offline": {
+      "label": "Offline",
+      "description": "No heartbeat for 5+ minutes. Restart the daemon or investigate the host."
+    },
+    "about_to_gc": {
+      "label": "About to GC",
+      "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
+    }
+  },
+  "detail": {
+    "all_runtimes": "All runtimes",
+    "read_only": "Read-only",
+    "delete_aria": "Delete runtime",
+    "delete_tooltip": "Delete runtime",
+    "delete_button": "Delete runtime",
+    "last_seen": "last seen {{when}}",
+    "fact_owner": "Owner",
+    "fact_device": "Device",
+    "fact_runtime": "Runtime",
+    "technical_details": "Technical details",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "Daemon ID",
+    "serving_title": "Serving",
+    "serving_count_one": "{{count}} agent",
+    "serving_count_other": "{{count}} agents",
+    "no_agents": "No agents are bound to this runtime yet.",
+    "diagnostics_title": "Diagnostics",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "Delete Runtime",
+      "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    },
+    "toast_deleted": "Runtime deleted",
+    "toast_delete_failed": "Failed to delete runtime"
+  },
+  "detail_page": {
+    "not_found_title": "Runtime not found",
+    "not_found_hint": "It may have been deleted or you may not have access."
+  },
+  "running_one": "{{count}} running",
+  "running_other": "{{count}} running",
+  "queued_one": "{{count}} queued",
+  "queued_other": "{{count}} queued"
+}

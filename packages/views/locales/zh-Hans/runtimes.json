@@ -1,0 +1,82 @@
+{
+  "page": {
+    "title": "运行时",
+    "tagline": "为智能体跑 CLI 会话的机器和云端 worker。",
+    "learn_more": "了解更多 →",
+    "connect_remote": "连接远程机器",
+    "search_placeholder": "搜索运行时…",
+    "scope_mine": "我的",
+    "scope_all": "全部",
+    "live": "实时",
+    "live_tooltip": "实时更新 · 离线检测 75 秒以内",
+    "filter_all": "全部",
+    "filter_all_description": "当前视图下的所有运行时",
+    "empty": {
+      "title": "还没有运行时",
+      "hint": "桌面端会自动扫描本地机器。对于 AWS EC2 或其他远程机器，可使用连接向导。"
+    },
+    "no_matches": {
+      "title": "无匹配",
+      "with_query": "没有运行时匹配 \"{{query}}\"{{filterSuffix}}。",
+      "with_query_filter_suffix": "（在当前筛选下）",
+      "no_query": "当前筛选下没有匹配的运行时。",
+      "try_widening": "试试放宽筛选或清除条件。"
+    },
+    "bootstrapping": {
+      "title": "正在启动本地运行时…",
+      "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
+    }
+  },
+  "health": {
+    "online": {
+      "label": "在线",
+      "description": "最近 45 秒内收到心跳。可以派发 task。"
+    },
+    "recently_lost": {
+      "label": "最近失联",
+      "description": "失联不到 5 分钟——通常是短暂的网络抖动。"
+    },
+    "offline": {
+      "label": "离线",
+      "description": "5 分钟以上没有心跳。请重启守护进程或排查主机。"
+    },
+    "about_to_gc": {
+      "label": "即将清理",
+      "description": "离线 6 天以上。如不重连，将在 7 天时自动删除。"
+    }
+  },
+  "detail": {
+    "all_runtimes": "全部运行时",
+    "read_only": "只读",
+    "delete_aria": "删除运行时",
+    "delete_tooltip": "删除运行时",
+    "delete_button": "删除运行时",
+    "last_seen": "最后活跃 {{when}}",
+    "fact_owner": "所有者",
+    "fact_device": "设备",
+    "fact_runtime": "运行时",
+    "technical_details": "技术详情",
+    "fact_daemon_cli": "守护进程 CLI",
+    "fact_daemon_id": "守护进程 ID",
+    "serving_title": "服务中",
+    "serving_count_other": "{{count}} 个智能体",
+    "no_agents": "还没有智能体绑定到这个运行时。",
+    "diagnostics_title": "诊断",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "删除运行时",
+      "description": "确定要删除\"{{name}}\"吗？此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    },
+    "toast_deleted": "已删除运行时",
+    "toast_delete_failed": "删除运行时失败"
+  },
+  "detail_page": {
+    "not_found_title": "未找到运行时",
+    "not_found_hint": "它可能已被删除，或你没有访问权限。"
+  },
+  "running_other": "{{count}} 个运行中",
+  "queued_other": "{{count}} 个排队中"
+}

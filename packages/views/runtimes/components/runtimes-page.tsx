@@ -20,6 +20,7 @@ import {
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { RuntimeList } from "./runtime-list";
+import { useT } from "../../i18n";
 
 type RuntimeFilter = "mine" | "all";
 type HealthFilter = "all" | "online" | "recently_lost" | "offline" | "about_to_gc";
@@ -32,35 +33,12 @@ const HEALTH_ORDER: HealthFilter[] = [
   "about_to_gc",
 ];
 
-// Single source of truth for the 4-state chip visuals + tooltip copy.
-// Thresholds come from `deriveRuntimeHealth`: 45s heartbeat window (server
-// sweeper), 5 min "recently lost" cutoff, 6 day "about_to_gc" trigger,
-// 7 day hard GC. Wording leans on what the user should *do*, not the
-// internals of the sweeper — those live in the redesign doc.
-const HEALTH_CHIP: Record<
-  Exclude<HealthFilter, "all">,
-  { label: string; dot: string; description: string }
-> = {
-  online: {
-    label: "Online",
-    dot: "bg-success",
-    description: "Heartbeat received in the last 45s. Ready to dispatch tasks.",
-  },
-  recently_lost: {
-    label: "Recently lost",
-    dot: "bg-warning",
-    description: "Lost contact under 5 minutes ago — often a brief network blip.",
-  },
-  offline: {
-    label: "Offline",
-    dot: "bg-muted-foreground/40",
-    description: "No heartbeat for 5+ minutes. Restart the daemon or investigate the host.",
-  },
-  about_to_gc: {
-    label: "About to GC",
-    dot: "bg-destructive",
-    description: "Offline 6+ days. Auto-deleted at 7 days unless it reconnects.",
-  },
+// Dot tokens stay in code — labels/descriptions flow through useT.
+const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
+  online: "bg-success",
+  recently_lost: "bg-warning",
+  offline: "bg-muted-foreground/40",
+  about_to_gc: "bg-destructive",
 };
 
 interface RuntimesPageProps {
@@ -214,31 +192,32 @@ function PageHeaderBar({
   totalCount: number;
   onConnectRemote: () => void;
 }) {
+  const { t } = useT("runtimes");
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <Server className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">Runtimes</h1>
+        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
         {totalCount > 0 && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
             {totalCount}
           </span>
         )}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
-          Machines and cloud workers running CLI sessions for your agents.{" "}
+          {t(($) => $.page.tagline)}{" "}
           <a
             href="https://multica.ai/docs/runtimes"
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Learn more →
+            {t(($) => $.page.learn_more)}
           </a>
         </p>
       </div>
       <Button type="button" size="sm" onClick={onConnectRemote}>
         <Plus className="h-3 w-3" />
-        Connect remote machine
+        {t(($) => $.page.connect_remote)}
       </Button>
     </PageHeader>
   );
@@ -268,6 +247,7 @@ function CardToolbar({
   scope: RuntimeFilter;
   setScope: (v: RuntimeFilter) => void;
 }) {
+  const { t } = useT("runtimes");
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
       <div className="relative">
@@ -275,7 +255,7 @@ function CardToolbar({
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search runtimes…"
+          placeholder={t(($) => $.page.search_placeholder)}
           className="h-8 w-64 pl-8 text-sm"
         />
       </div>
@@ -288,12 +268,12 @@ function CardToolbar({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/60" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
               </span>
-              Live
+              {t(($) => $.page.live)}
             </div>
           }
         />
         <TooltipContent side="top">
-          Real-time updates · offline detection up to 75s
+          {t(($) => $.page.live_tooltip)}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -307,9 +287,7 @@ function ScopeSegment({
   value: RuntimeFilter;
   onChange: (v: RuntimeFilter) => void;
 }) {
-  // Mine first — that's the default selection and the more frequent
-  // scope (your own runtimes), so it lives in the leading slot. Mirrors
-  // the Agents page convention.
+  const { t } = useT("runtimes");
   return (
     <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
       <button
@@ -320,7 +298,7 @@ function ScopeSegment({
             : "text-muted-foreground hover:text-foreground"
         }`}
       >
-        Mine
+        {t(($) => $.page.scope_mine)}
       </button>
       <button
         onClick={() => onChange("all")}
@@ -330,7 +308,7 @@ function ScopeSegment({
             : "text-muted-foreground hover:text-foreground"
         }`}
       >
-        All
+        {t(($) => $.page.scope_all)}
       </button>
     </div>
   );
@@ -353,21 +331,27 @@ function FilterChipsRow({
   healthCounts: Record<Exclude<HealthFilter, "all">, number>;
   total: number;
 }) {
+  const { t } = useT("runtimes");
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
       {HEALTH_ORDER.map((key) => {
         const count = key === "all" ? total : healthCounts[key];
-        const visual = key === "all" ? null : HEALTH_CHIP[key];
+        const label =
+          key === "all"
+            ? t(($) => $.page.filter_all)
+            : t(($) => $.health[key].label);
         const description =
-          key === "all" ? "All runtimes in this view" : visual!.description;
+          key === "all"
+            ? t(($) => $.page.filter_all_description)
+            : t(($) => $.health[key].description);
         return (
           <HealthChip
             key={key}
             active={healthFilter === key}
             onClick={() => setHealthFilter(key)}
-            label={visual?.label ?? "All"}
+            label={label}
             count={count}
-            dotClass={visual?.dot}
+            dotClass={key === "all" ? undefined : HEALTH_DOT[key]}
             description={description}
           />
         );
@@ -430,15 +414,15 @@ function HealthChip({
 // ---------------------------------------------------------------------------
 
 function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
+  const { t } = useT("runtimes");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <Server className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h2 className="mt-4 text-base font-semibold">No runtimes yet</h2>
+      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Desktop auto-scans your local machine. For AWS EC2 or other remote
-        machines, connect them using the setup wizard.
+        {t(($) => $.page.empty.hint)}
       </p>
       <Button
         type="button"
@@ -447,7 +431,7 @@ function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
         className="mt-5"
       >
         <Plus className="h-3 w-3" />
-        Connect remote machine
+        {t(($) => $.page.connect_remote)}
       </Button>
     </div>
   );
@@ -470,13 +454,14 @@ function NoMatchesState({
   scope: RuntimeFilter;
   bootstrapping?: boolean;
 }) {
+  const { t } = useT("runtimes");
   if (bootstrapping) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center">
         <Server className="h-8 w-8 animate-pulse text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">Starting local runtime…</p>
+        <p className="text-sm text-muted-foreground">{t(($) => $.page.bootstrapping.title)}</p>
         <p className="max-w-xs text-xs text-muted-foreground/70">
-          This usually takes a few seconds. Your daemon is registering with the workspace.
+          {t(($) => $.page.bootstrapping.hint)}
         </p>
       </div>
     );
@@ -485,16 +470,17 @@ function NoMatchesState({
   const hasSearch = search.length > 0;
   const hasHealthFilter = healthFilter !== "all";
   const hasScope = scope === "mine";
+  const filterSuffix = hasHealthFilter || hasScope ? t(($) => $.page.no_matches.with_query_filter_suffix) : "";
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
       <Search className="h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm">No matches</p>
+      <p className="text-sm">{t(($) => $.page.no_matches.title)}</p>
       <p className="max-w-xs text-xs">
         {hasSearch
-          ? `No runtimes match "${search}"${hasHealthFilter || hasScope ? " in this filter" : ""}.`
-          : "No runtimes match this filter."}{" "}
-        Try widening the scope or clearing filters.
+          ? t(($) => $.page.no_matches.with_query, { query: search, filterSuffix })
+          : t(($) => $.page.no_matches.no_query)}
+        {t(($) => $.page.no_matches.try_widening)}
       </p>
     </div>
   );

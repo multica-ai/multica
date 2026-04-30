@@ -45,6 +45,7 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -89,6 +90,7 @@ function useNowTick(intervalMs = 30_000): number {
 }
 
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
   const launchedBy =
@@ -124,11 +126,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success("Runtime deleted");
+        toast.success(t(($) => $.detail.toast_deleted));
         setDeleteOpen(false);
       },
       onError: (e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to delete runtime");
+        toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
       },
     });
   };
@@ -148,7 +150,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           render={<AppLink href={paths.runtimes()} />}
         >
           <ArrowLeft className="h-3 w-3" />
-          All runtimes
+          {t(($) => $.detail.all_runtimes)}
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
@@ -158,7 +160,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           {!canDelete && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
-              Read-only
+              {t(($) => $.detail.read_only)}
             </span>
           )}
           {canDelete && (
@@ -170,13 +172,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
                     size="icon-sm"
                     onClick={() => setDeleteOpen(true)}
                     className="text-muted-foreground hover:text-destructive"
-                    aria-label="Delete runtime"
+                    aria-label={t(($) => $.detail.delete_aria)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 }
               />
-              <TooltipContent>Delete runtime</TooltipContent>
+              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -223,19 +225,19 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Runtime</AlertDialogTitle>
+            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{runtime.name}&rdquo;? This action cannot be undone.
+              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

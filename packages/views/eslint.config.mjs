@@ -78,6 +78,10 @@ const TRANSLATED_FILES = [
   "settings/components/workspace-tab.tsx",
   "settings/components/members-tab.tsx",
   "settings/components/delete-workspace-dialog.tsx",
+  "runtimes/components/runtimes-page.tsx",
+  "runtimes/components/runtime-detail-page.tsx",
+  "runtimes/components/runtime-detail.tsx",
+  "runtimes/components/shared.tsx",
 ];
 
 export default [
