@@ -3,9 +3,9 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AgentRuntime } from "@multica/core/types";
 
-// Mock the core onboarding module BEFORE the SUT imports it.
+// Swap out the runtime picker so tests can drive runtimes / selection
+// without a real TanStack Query + WS stack.
 const mocks = vi.hoisted(() => ({
-  joinCloudWaitlist: vi.fn(),
   pickerState: {
     runtimes: [] as AgentRuntime[],
     selected: null as AgentRuntime | null,
@@ -15,20 +15,6 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-// Partial mock — preserve ONBOARDING_STEP_ORDER etc. that StepHeader
-// (rendered inside the fork) reaches for, while replacing the network
-// call we want to assert on.
-vi.mock("@multica/core/onboarding", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@multica/core/onboarding")>();
-  return {
-    ...actual,
-    joinCloudWaitlist: mocks.joinCloudWaitlist,
-  };
-});
-
-// Swap out the runtime picker so tests can drive runtimes / selection
-// without a real TanStack Query + WS stack.
 vi.mock("../components/use-runtime-picker", () => ({
   useRuntimePicker: () => mocks.pickerState,
 }));
@@ -79,19 +65,18 @@ function resetPicker(patch: Partial<typeof mocks.pickerState> = {}) {
 
 describe("StepPlatformFork", () => {
   beforeEach(() => {
-    mocks.joinCloudWaitlist.mockReset();
     resetPicker();
     vi.restoreAllMocks();
   });
 
-  it("renders the three fork options at rest", () => {
+  it("renders the two fork options at rest", () => {
     renderFork();
     expect(screen.getByText(/download the desktop app/i)).toBeInTheDocument();
     expect(screen.getByText(/^install the cli$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^cloud runtime$/i)).toBeInTheDocument();
-    // Dialogs closed at rest → no CLI instructions, no email field.
+    // Cloud waitlist option was removed in the self-host fork.
+    expect(screen.queryByText(/^cloud runtime$/i)).not.toBeInTheDocument();
+    // Dialog closed at rest → no CLI instructions surfaced.
     expect(screen.queryByTestId("cli-instructions")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
   });
 
   it("footer: Skip only + explanatory hint (no Continue)", () => {
@@ -181,105 +166,4 @@ describe("StepPlatformFork", () => {
     expect(onNext).toHaveBeenCalledWith(rt);
   });
 
-  it("Cloud dialog submission does NOT advance the flow", async () => {
-    // Even with runtimes detected in the background, submitting the
-    // cloud waitlist form must not call onNext — it's pure interest
-    // capture. The user still has to hit Skip explicitly afterwards.
-    const rt = makeRuntime();
-    resetPicker({
-      runtimes: [rt],
-      selected: rt,
-      selectedId: rt.id,
-      hasRuntimes: true,
-    });
-    mocks.joinCloudWaitlist.mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    const { onNext } = renderFork();
-
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText(/email/i), "a@b.co");
-    await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
-    );
-
-    expect(mocks.joinCloudWaitlist).toHaveBeenCalled();
-    expect(onNext).not.toHaveBeenCalled();
-  });
-
-  it("Cloud submit: disables button, shows 'on the list', does NOT navigate", async () => {
-    mocks.joinCloudWaitlist.mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    const { onNext } = renderFork();
-
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText(/email/i), "a@b.co");
-    await user.type(
-      within(dialog).getByLabelText(/why cloud/i),
-      "running agents overnight",
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
-    );
-
-    expect(mocks.joinCloudWaitlist).toHaveBeenCalledTimes(1);
-    expect(mocks.joinCloudWaitlist).toHaveBeenCalledWith(
-      "a@b.co",
-      "running agents overnight",
-    );
-    // Cloud submit is pure side effect — it must NOT advance the flow.
-    expect(onNext).not.toHaveBeenCalled();
-    // Form button locks out after submit.
-    expect(
-      within(dialog).getByRole("button", { name: /you're on the list/i }),
-    ).toBeDisabled();
-    // Footer hint flips to reflect submitted state.
-    expect(
-      screen.getByText(/you're on the waitlist — pick skip to keep exploring/i),
-    ).toBeInTheDocument();
-  });
-
-  it("Cloud submit: empty reason is allowed, reason forwarded as ''", async () => {
-    mocks.joinCloudWaitlist.mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    renderFork();
-
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(
-      within(dialog).getByLabelText(/email/i),
-      "solo@example.com",
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
-    );
-
-    expect(mocks.joinCloudWaitlist).toHaveBeenCalledWith(
-      "solo@example.com",
-      "",
-    );
-  });
-
-  it("Cloud submit stays disabled until email is valid", async () => {
-    const user = userEvent.setup();
-    renderFork();
-
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
-    const dialog = await screen.findByRole("dialog");
-    const submit = within(dialog).getByRole("button", {
-      name: /^join waitlist$/i,
-    });
-    expect(submit).toBeDisabled();
-
-    await user.type(within(dialog).getByLabelText(/email/i), "not-an-email");
-    expect(submit).toBeDisabled();
-
-    await user.clear(within(dialog).getByLabelText(/email/i));
-    await user.type(
-      within(dialog).getByLabelText(/email/i),
-      "someone@example.com",
-    );
-    expect(submit).toBeEnabled();
-  });
 });

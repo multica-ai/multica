@@ -4,14 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { captureEvent, setPersonProperties } from "@multica/core/analytics";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type { AgentRuntime } from "@multica/core/types";
@@ -19,7 +11,6 @@ import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { useRuntimePicker } from "../components/use-runtime-picker";
-import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 
 /**
@@ -42,15 +33,10 @@ export function StepRuntimeConnect({
   wsId,
   onNext,
   onBack,
-  onWaitlistSubmitted,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
-  /** Parent-level latch used to label the onboarding completion path
-   *  as `cloud_waitlist` when the user ends up skipping this step
-   *  after submitting the waitlist form. */
-  onWaitlistSubmitted?: () => void;
 }) {
   const { runtimes, selected, selectedId, setSelectedId } =
     useRuntimePicker(wsId);
@@ -63,7 +49,6 @@ export function StepRuntimeConnect({
       setSelectedId={setSelectedId}
       onNext={onNext}
       onBack={onBack}
-      onWaitlistSubmitted={onWaitlistSubmitted}
     />
   );
 }
@@ -84,7 +69,6 @@ function FancyView({
   setSelectedId,
   onNext,
   onBack,
-  onWaitlistSubmitted,
 }: {
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
@@ -92,7 +76,6 @@ function FancyView({
   setSelectedId: (id: string) => void;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
-  onWaitlistSubmitted?: () => void;
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
@@ -100,7 +83,7 @@ function FancyView({
   // Flip to "empty" only after we've waited long enough for the daemon
   // to report. The 5s budget covers the bundled daemon's typical 1–3s
   // boot; anything past that is a genuine "no runtime" situation and we
-  // switch from scanning skeletons to the skip / cloud-waitlist exits.
+  // switch from scanning skeletons to the Skip exit.
   const [hasTimedOut, setHasTimedOut] = useState(false);
   useEffect(() => {
     if (runtimes.length > 0) return;
@@ -158,10 +141,6 @@ function FancyView({
   }, [phase, runtimes, onlineCount]);
 
   const [submitting, setSubmitting] = useState(false);
-  // Cloud waitlist submission state lives here (rather than in EmptyView)
-  // so it survives phase flips — e.g. a runtime coming online after the
-  // user has already submitted the waitlist form.
-  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Skip is always available — regardless of phase. Hitting Skip routes
   // the flow through the self-serve branch (agent=null), which still
@@ -195,9 +174,7 @@ function FancyView({
         ? "Pick a runtime above to continue."
         : phase === "scanning"
           ? "Waiting for the first result…"
-          : waitlistSubmitted
-            ? "You're on the waitlist — skip to keep exploring."
-            : "Skip to enter your workspace, or join the cloud waitlist above.";
+          : "Skip to enter your workspace and connect a runtime later.";
 
   return (
     <div className="animate-onboarding-enter grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
@@ -249,16 +226,7 @@ function FancyView({
                 onlineCount={onlineCount}
               />
             )}
-            {phase === "empty" && (
-              <EmptyView
-                waitlistSubmitted={waitlistSubmitted}
-                onWaitlistSubmitted={() => {
-                  setWaitlistSubmitted(true);
-                  onWaitlistSubmitted?.();
-                }}
-                onSkip={() => onNext(null)}
-              />
-            )}
+            {phase === "empty" && <EmptyView onSkip={() => onNext(null)} />}
           </div>
         </main>
 
@@ -393,23 +361,12 @@ function FoundView({
   );
 }
 
-function EmptyView({
-  waitlistSubmitted,
-  onWaitlistSubmitted,
-  onSkip,
-}: {
-  waitlistSubmitted: boolean;
-  onWaitlistSubmitted: () => void;
-  onSkip: () => void;
-}) {
-  // Two exits: "Skip for now" (enter the workspace in read-only mode)
-  // or "Join waitlist" (capture interest in the hosted runtime we
-  // haven't shipped yet). We deliberately don't link out to Claude
-  // Code / Codex / Cursor here — those are other companies' products,
-  // and nudging the user to install one would frame Multica as a
-  // launcher for them rather than a product that runs them.
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
-
+function EmptyView({ onSkip }: { onSkip: () => void }) {
+  // One exit: "Skip for now" (enter the workspace in read-only mode).
+  // We deliberately don't link out to Claude Code / Codex / Cursor here
+  // — those are other companies' products, and nudging the user to
+  // install one would frame Multica as a launcher for them rather than
+  // a product that runs them.
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
@@ -421,7 +378,7 @@ function EmptyView({
         <span className="font-medium text-foreground">Codex</span>,{" "}
         <span className="font-medium text-foreground">Cursor</span>, and
         others — we didn&apos;t find any on this machine. Install one and
-        come back, or pick a path below.
+        come back, or skip below.
       </p>
 
       <div className="mt-10 flex flex-col gap-3.5">
@@ -431,42 +388,7 @@ function EmptyView({
           actionLabel="Skip"
           onAction={onSkip}
         />
-
-        <EmptyCard
-          title="Join the cloud runtime waitlist"
-          subtitle="We'll host the runtime for you — no local install, no setup. Not live yet; click to leave your email and get notified."
-          actionLabel={waitlistSubmitted ? "On the waitlist" : "Join waitlist"}
-          onAction={() => setWaitlistOpen(true)}
-        />
       </div>
-
-      <Dialog
-        open={waitlistOpen}
-        onOpenChange={(o) => (o ? null : setWaitlistOpen(false))}
-      >
-        <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
-            <DialogDescription>
-              Cloud runtimes aren&apos;t live yet. Leave your email and
-              we&apos;ll email you when they are.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 overflow-y-auto pt-2">
-            <CloudWaitlistExpand
-              submitted={waitlistSubmitted}
-              onSubmitted={onWaitlistSubmitted}
-            />
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setWaitlistOpen(false)}>
-              {waitlistSubmitted ? "Close" : "Cancel"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

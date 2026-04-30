@@ -7,7 +7,6 @@ import { LandingFooter } from "@/features/landing/components/landing-footer";
 import { DownloadHero } from "@/features/landing/components/download/hero";
 import { AllPlatforms } from "@/features/landing/components/download/all-platforms";
 import { CliSection } from "@/features/landing/components/download/cli-section";
-import { CloudSection } from "@/features/landing/components/download/cloud-section";
 import { useLocale } from "@/features/landing/i18n";
 import {
   detectOS,
@@ -75,7 +74,6 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
         detected={detected}
       />
       <CliSection />
-      <CloudSection />
       <VersionInfoFooter
         version={release.version}
         releaseHtmlUrl={releaseHtmlUrl}
