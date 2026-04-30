@@ -637,7 +637,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 		refreshCalls.Add(1)
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: sourceRepo, Description: "repo"}},
+			Repos:        []RepoData{{URL: sourceRepo}},
 			ReposVersion: "v2",
 		})
 	})
@@ -762,7 +762,7 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: missingRepo, Description: "missing"}},
+			Repos:        []RepoData{{URL: missingRepo}},
 			ReposVersion: "v1",
 		})
 	})
@@ -790,7 +790,7 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		refreshCalls.Add(1)
 		json.NewEncoder(w).Encode(WorkspaceReposResponse{
 			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{{URL: sourceRepo, Description: "repo"}},
+			Repos:        []RepoData{{URL: sourceRepo}},
 			ReposVersion: "v2",
 		})
 	})
