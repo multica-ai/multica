@@ -94,6 +94,10 @@ import type {
   BulkRetryResponse,
   DashboardResponse,
   RedmineActivity,
+  WorkCalendar,
+  CreateWorkCalendarRequest,
+  UpdateWorkCalendarRequest,
+  ListWorkCalendarsResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1607,6 +1611,76 @@ export class ApiClient {
     if (end) params.set("end", end);
     const qs = params.toString();
     return this.fetch(`/api/time-tracking/dashboard${qs ? `?${qs}` : ""}`);
+  }
+
+  // ---- Work calendars ----
+
+  async listWorkCalendars(): Promise<ListWorkCalendarsResponse> {
+    return this.fetch("/api/work-calendars");
+  }
+
+  async getWorkCalendar(calendarId: string): Promise<WorkCalendar> {
+    return this.fetch(`/api/work-calendars/${calendarId}`);
+  }
+
+  async createWorkCalendar(
+    data: CreateWorkCalendarRequest,
+  ): Promise<WorkCalendar> {
+    return this.fetch("/api/work-calendars", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWorkCalendar(
+    calendarId: string,
+    data: UpdateWorkCalendarRequest,
+  ): Promise<WorkCalendar> {
+    return this.fetch(`/api/work-calendars/${calendarId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWorkCalendar(calendarId: string): Promise<void> {
+    await this.fetch(`/api/work-calendars/${calendarId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async importWorkCalendarFromPDF(
+    file: File,
+    name: string,
+  ): Promise<WorkCalendar> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("name", name);
+
+    // Build request manually — the generic fetch() auto-sets
+    // Content-Type: application/json which breaks multipart uploads.
+    const rid = createRequestId();
+    const headers: Record<string, string> = {
+      "X-Request-ID": rid,
+      ...this.authHeaders(),
+    };
+
+    const res = await fetch(`${this.baseUrl}/api/work-calendars/import-pdf`, {
+      method: "POST",
+      headers,
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const { message } = await this.parseErrorBody(
+        res,
+        `API error: ${res.status}`,
+      );
+      throw new Error(message);
+    }
+
+    return res.json() as Promise<WorkCalendar>;
   }
 
   // ---- Redmine activities ----

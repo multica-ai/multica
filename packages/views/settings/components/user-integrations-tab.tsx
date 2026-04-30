@@ -115,10 +115,12 @@ export function UserIntegrationsTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Integration API keys</h2>
-        <p className="text-xs text-muted-foreground">
-          Your personal API keys for each enabled integration. These are only used for your account.
-        </p>
+        <div>
+          <h2 className="text-sm font-semibold">Integration API keys</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Your personal API keys for each enabled integration. These are only used for your account.
+          </p>
+        </div>
 
         {integrations.map((integration) => (
           <CredentialRow

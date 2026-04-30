@@ -120,3 +120,13 @@ export type {
   DashboardEntry,
   DashboardResponse,
 } from "./time-entry";
+export type {
+  CalendarDay,
+  CalendarDayType,
+  CalendarSource,
+  MonthlyHours,
+  WorkCalendar,
+  CreateWorkCalendarRequest,
+  UpdateWorkCalendarRequest,
+  ListWorkCalendarsResponse,
+} from "./work-calendar";

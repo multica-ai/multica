@@ -379,6 +379,17 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type ProjectIntegrationLink struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	Provider            string             `json:"provider"`
+	ExternalProjectID   string             `json:"external_project_id"`
+	ExternalProjectName pgtype.Text        `json:"external_project_name"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
@@ -389,17 +400,6 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
-}
-
-type ProjectIntegrationLink struct {
-	ID                  pgtype.UUID        `json:"id"`
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	ProjectID           pgtype.UUID        `json:"project_id"`
-	Provider            string             `json:"provider"`
-	ExternalProjectID   string             `json:"external_project_id"`
-	ExternalProjectName pgtype.Text        `json:"external_project_name"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Skill struct {
@@ -497,6 +497,19 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type WorkCalendar struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Year         int32              `json:"year"`
+	Days         []byte             `json:"days"`
+	MonthlyHours []byte             `json:"monthly_hours"`
+	Source       string             `json:"source"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Status       string             `json:"status"`
 }
 
 type Workspace struct {

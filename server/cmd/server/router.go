@@ -532,6 +532,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			// Work calendars
+			r.Route("/api/work-calendars", func(r chi.Router) {
+				r.Get("/", h.ListWorkCalendars)
+				r.Post("/", h.CreateWorkCalendar)
+				r.Post("/import-pdf", h.ImportWorkCalendarFromPDF)
+				r.Route("/{calendarId}", func(r chi.Router) {
+					r.Get("/", h.GetWorkCalendar)
+					r.Put("/", h.UpdateWorkCalendar)
+					r.Delete("/", h.DeleteWorkCalendar)
+				})
+			})
 		})
 	})
 

@@ -87,7 +87,10 @@
     "./time-entries/queries": "./time-entries/queries.ts",
     "./time-entries/mutations": "./time-entries/mutations.ts",
     "./time-entries/timer-store": "./time-entries/timer-store.ts",
-    "./time-entries/idle-store": "./time-entries/idle-store.ts"
+    "./time-entries/idle-store": "./time-entries/idle-store.ts",
+    "./work-calendars": "./work-calendars/index.ts",
+    "./work-calendars/queries": "./work-calendars/queries.ts",
+    "./work-calendars/mutations": "./work-calendars/mutations.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
