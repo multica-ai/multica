@@ -14,7 +14,6 @@ import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { StarterContentPrompt } from "@multica/views/onboarding";
-import { FloatingTimer } from "@multica/views/time-tracking/floating-timer";
 import { IdleDetector } from "@multica/views/time-tracking/idle-detector";
 import {
   WorkspaceSlugProvider,
@@ -185,7 +184,6 @@ export function DesktopShell() {
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
         {slug && <StarterContentPrompt />}
-        {slug && <FloatingTimer />}
         {slug && <IdleDetector />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
