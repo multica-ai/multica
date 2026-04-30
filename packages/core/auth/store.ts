@@ -81,10 +81,10 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     verifyCode: async (email: string, code: string) => {
       const { token, user } = await api.verifyCode(email, code);
+      api.setToken(token);
       if (!cookieAuth) {
         // Token mode: persist for Electron / legacy.
         storage.setItem("multica_token", token);
-        api.setToken(token);
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
@@ -94,9 +94,9 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     loginWithGoogle: async (code: string, redirectUri: string) => {
       const { token, user } = await api.googleLogin(code, redirectUri);
+      api.setToken(token);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);
-        api.setToken(token);
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
@@ -106,9 +106,9 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     loginWithDingTalk: async (code: string, redirectUri: string) => {
       const { token, user } = await api.dingtalkLogin(code, redirectUri);
+      api.setToken(token);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);
-        api.setToken(token);
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });

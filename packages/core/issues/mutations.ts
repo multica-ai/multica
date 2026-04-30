@@ -21,6 +21,7 @@ import {
 } from "./cache-helpers";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
+import { workspaceKeys } from "../workspace/queries";
 import type { Issue, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
@@ -355,6 +356,7 @@ export function useCreateComment(issueId: string) {
       );
     },
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.mentionFrequency(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });

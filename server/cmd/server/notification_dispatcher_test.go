@@ -120,10 +120,11 @@ func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (strin
 		"provider":         "dingtalk",
 		"external_user_id": externalUserID,
 		"notification_event": map[string]any{
-			"type":  "mentioned",
-			"title": "dispatcher issue",
-			"body":  "please review this change",
-			"link":  "https://app.multica.test/test/issues/123",
+			"type":             "mentioned",
+			"title":            "dispatcher issue",
+			"body":             "please review this change",
+			"link":             "https://app.multica.test/test/issues/123",
+			"issue_identifier": "OPE-20",
 		},
 	})
 	if err != nil {
@@ -160,6 +161,34 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 	return deliveries[0]
 }
 
+func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
+	card := buildDingTalkDeliveryMarkdown(notificationEventPayload{
+		Title:           "1. Install a runtime (Desktop app or CLI)",
+		IssueIdentifier: "OPE-20",
+		Body:            "[@guodage003](mention://member/04e19961-c5c1-4757-a114-1355a1049ea4) hello",
+		Link:            "http://localhost:3000/guodage/issues/a77996be-cab2-4bc1-95bc-fbf4a33d5188?comment=5b0050c5-0575-4c5d-9ffb-9803c43af196",
+	})
+
+	if card.Title != "OPE-20 · 1. Install a runtime (Desktop app or CLI)" {
+		t.Fatalf("unexpected title: %q", card.Title)
+	}
+	if !strings.Contains(card.Text, "@guodage003 hello") {
+		t.Fatalf("expected sanitized mention in card text, got %q", card.Text)
+	}
+	if strings.Contains(card.Text, "mention://") {
+		t.Fatalf("card text should not expose internal mention links: %q", card.Text)
+	}
+	if !strings.Contains(card.Text, "**Issue**\nOPE-20 · 1. Install a runtime (Desktop app or CLI)") {
+		t.Fatalf("expected issue identifier in card text, got %q", card.Text)
+	}
+	if count := strings.Count(card.Text, "Open In Multica"); count != 1 {
+		t.Fatalf("expected exactly one Open In Multica link, got %d in %q", count, card.Text)
+	}
+	if !strings.Contains(card.Text, "dingtalk://dingtalkclient/page/link?url=http%3A%2F%2Flocalhost%3A3000%2Fguodage%2Fissues%2Fa77996be-cab2-4bc1-95bc-fbf4a33d5188%3Fcomment%3D5b0050c5-0575-4c5d-9ffb-9803c43af196&pc_slide=false") {
+		t.Fatalf("expected dingtalk external browser URL in card text, got %q", card.Text)
+	}
+}
+
 func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	cleanupNotificationDispatchData(t)
 	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
@@ -193,11 +222,27 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 			if len(body.UserIDs) != 1 || body.UserIDs[0] != "staff-success" {
 				t.Fatalf("expected userIds [staff-success], got %#v", body.UserIDs)
 			}
-			if body.MsgKey != "sampleText" {
-				t.Fatalf("expected msgKey %q, got %q", "sampleText", body.MsgKey)
+			if body.MsgKey != "sampleMarkdown" {
+				t.Fatalf("expected msgKey %q, got %q", "sampleMarkdown", body.MsgKey)
 			}
-			if !strings.Contains(body.MsgParam, "dispatcher issue") {
-				t.Fatalf("expected msgParam to include notification title, got %q", body.MsgParam)
+			var msgParam struct {
+				Title string `json:"title"`
+				Text  string `json:"text"`
+			}
+			if err := json.Unmarshal([]byte(body.MsgParam), &msgParam); err != nil {
+				t.Fatalf("unmarshal msgParam: %v", err)
+			}
+			if msgParam.Title != "OPE-20 · dispatcher issue" {
+				t.Fatalf("unexpected markdown title: %q", msgParam.Title)
+			}
+			if !strings.Contains(msgParam.Text, "**Issue**\nOPE-20 · dispatcher issue") {
+				t.Fatalf("expected msgParam to include issue identifier, got %q", body.MsgParam)
+			}
+			if count := strings.Count(msgParam.Text, "Open In Multica"); count != 1 {
+				t.Fatalf("expected exactly one Open In Multica link, got %d in %q", count, msgParam.Text)
+			}
+			if strings.Contains(body.MsgParam, "singleTitle") || strings.Contains(body.MsgParam, "singleURL") {
+				t.Fatalf("markdown msgParam should not include action card fields, got %q", body.MsgParam)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"processQueryKey":"query-123"}`))

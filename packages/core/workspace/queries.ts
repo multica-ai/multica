@@ -12,6 +12,7 @@ export const workspaceKeys = {
   agentsMine: (wsId: string) => ["workspaces", wsId, "agents", "mine"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
+  mentionFrequency: (wsId: string) => ["workspaces", wsId, "mention-frequency"] as const,
 };
 
 export function workspaceListOptions() {
@@ -69,5 +70,12 @@ export function assigneeFrequencyOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.assigneeFrequency(wsId),
     queryFn: () => api.getAssigneeFrequency(),
+  });
+}
+
+export function mentionFrequencyOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.mentionFrequency(wsId),
+    queryFn: () => api.getMentionFrequency(),
   });
 }

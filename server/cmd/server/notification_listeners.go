@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -69,8 +72,17 @@ func parseMentions(content string) []mention {
 }
 
 func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID string) string {
+	return buildNotificationContext(ctx, queries, workspaceID, issueID, commentID, "").Link
+}
+
+type notificationContext struct {
+	Link            string
+	IssueIdentifier string
+}
+
+func buildNotificationContext(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID, appOrigin string) notificationContext {
 	if workspaceID == "" || issueID == "" {
-		return ""
+		return notificationContext{}
 	}
 
 	workspace, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
@@ -81,14 +93,61 @@ func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID
 			"comment_id", commentID,
 			"error", err,
 		)
-		return ""
+		return notificationContext{}
 	}
 
-	baseURL := notifyutil.AppURL()
-	if commentID != "" {
-		return notifyutil.CommentURL(baseURL, workspace.Slug, issueID, commentID)
+	identifier := ""
+	if issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(issueID),
+		WorkspaceID: parseUUID(workspaceID),
+	}); err == nil {
+		identifier = fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
+	} else {
+		slog.Error("failed to resolve issue identifier for notification",
+			"workspace_id", workspaceID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
 	}
-	return notifyutil.IssueURL(baseURL, workspace.Slug, issueID)
+
+	issueRef := issueID
+	if identifier != "" {
+		issueRef = identifier
+	}
+	baseURL := notificationBaseURL(appOrigin)
+	if commentID != "" {
+		return notificationContext{
+			Link:            notifyutil.CommentURL(baseURL, workspace.Slug, issueRef, commentID),
+			IssueIdentifier: identifier,
+		}
+	}
+	return notificationContext{
+		Link:            notifyutil.IssueURL(baseURL, workspace.Slug, issueRef),
+		IssueIdentifier: identifier,
+	}
+}
+
+func notificationBaseURL(appOrigin string) string {
+	if normalized := normalizeNotificationBaseURL(appOrigin); normalized != "" {
+		return normalized
+	}
+	return notifyutil.AppURL()
+}
+
+func normalizeNotificationBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func recordMentionNotification(
@@ -101,6 +160,7 @@ func recordMentionNotification(
 	title string,
 	body string,
 	link string,
+	issueIdentifier string,
 	details []byte,
 ) {
 	if len(details) == 0 {
@@ -108,14 +168,15 @@ func recordMentionNotification(
 	}
 
 	payloadSnapshot, err := json.Marshal(map[string]any{
-		"type":       "mentioned",
-		"severity":   "info",
-		"title":      title,
-		"body":       body,
-		"link":       link,
-		"issue_id":   issueID,
-		"comment_id": commentID,
-		"details":    json.RawMessage(details),
+		"type":             "mentioned",
+		"severity":         "info",
+		"title":            title,
+		"body":             body,
+		"link":             link,
+		"issue_id":         issueID,
+		"issue_identifier": issueIdentifier,
+		"comment_id":       commentID,
+		"details":          json.RawMessage(details),
 	})
 	if err != nil {
 		payloadSnapshot = emptyDetails
@@ -534,6 +595,7 @@ func notifyMentionedMembers(
 	title string,
 	body string,
 	commentID string,
+	appOrigin string,
 	skip map[string]bool,
 	details []byte,
 ) {
@@ -571,10 +633,11 @@ func notifyMentionedMembers(
 		return
 	}
 
-	notificationLink := buildNotificationLink(ctx, queries, e.WorkspaceID, issueID, commentID)
+	notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID, appOrigin)
 
 	for id := range recipientIDs {
-		if skip[id] {
+		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
+		if skip[id] && !isExplicitSelfMention {
 			continue
 		}
 		if id == e.ActorID && !explicitRecipientIDs[id] {
@@ -607,7 +670,7 @@ func notifyMentionedMembers(
 			Payload:     map[string]any{"item": resp},
 		})
 
-		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationLink, details)
+		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
 	}
 }
 
@@ -631,6 +694,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
+		appOrigin, _ := payload["app_origin"].(string)
 
 		// Track who already got notified to avoid duplicates
 		skip := map[string]bool{e.ActorID: true}
@@ -652,7 +716,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Status,
-				issue.Title, *issue.Description, "", skip, emptyDetails)
+				issue.Title, *issue.Description, "", appOrigin, skip, emptyDetails)
 		}
 	})
 
@@ -666,6 +730,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
+		appOrigin, _ := payload["app_origin"].(string)
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		statusChanged, _ := payload["status_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
@@ -790,7 +855,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				skip := map[string]bool{e.ActorID: true}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Status,
-					issue.Title, *issue.Description, "", skip, emptyDetails)
+					issue.Title, *issue.Description, "", appOrigin, skip, emptyDetails)
 			}
 		}
 	})
@@ -821,6 +886,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
+		appOrigin, _ := payload["app_origin"].(string)
 
 		commentDetails := emptyDetails
 		if commentID != "" {
@@ -839,7 +905,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueStatus,
-				issueTitle, commentContent, commentID, skip, commentDetails)
+				issueTitle, commentContent, commentID, appOrigin, skip, commentDetails)
 		}
 	})
 

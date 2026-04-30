@@ -7,6 +7,13 @@ export interface AssigneeFrequencyEntry {
   frequency: number;
 }
 
+export interface MentionFrequencyEntry {
+  actor_type: string;
+  actor_id: string;
+  frequency: number;
+  last_mentioned_at: string;
+}
+
 export interface TimelineEntry {
   type: "activity" | "comment";
   id: string;

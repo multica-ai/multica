@@ -277,6 +277,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"app_origin":          requestAppOrigin(r),
 	})
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
@@ -301,6 +302,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	h.trackMentionFrequency(r.Context(), issue.WorkspaceID, authorType, authorID, comment.Content)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -399,12 +401,11 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
 // Skips self-mentions, agents with on_mention trigger disabled, and private
-// agents mentioned by non-owner members (only the agent owner or workspace
-// admin/owner can mention a private agent).
+// agents mentioned by non-owner members (only the agent owner can trigger
+// a private agent via @mention).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
-	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	// When replying in a thread, inherit mentions from the parent comment
 	// so that agents mentioned in the thread root are triggered by replies —
@@ -428,14 +429,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
+		// Private agents can only be mentioned by the agent owner.
+		// Workspace admin/owner roles grant governance rights (archive, delete)
+		// but not invocation rights — only the agent's owner can trigger it.
 		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
-			if !isOwner {
-				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					continue
-				}
+			if uuidToString(agent.OwnerID) != authorID {
+				continue
 			}
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
@@ -450,6 +449,34 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		// actual reply that mentioned it, not the thread root.
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
+		}
+	}
+}
+
+// trackMentionFrequency records member/agent mentions for ranking in mention
+// suggestion UI. Called after comment creation; best effort only.
+func (h *Handler) trackMentionFrequency(ctx context.Context, workspaceID pgtype.UUID, authorType, authorID, content string) {
+	if authorType != "member" {
+		return
+	}
+	mentions := util.ParseMentions(content)
+	if len(mentions) == 0 {
+		return
+	}
+	for _, m := range mentions {
+		if m.Type != "member" && m.Type != "agent" {
+			continue
+		}
+		if m.ID == authorID {
+			continue
+		}
+		if err := h.Queries.UpsertMentionFrequency(ctx, db.UpsertMentionFrequencyParams{
+			WorkspaceID: workspaceID,
+			ActorType:   m.Type,
+			ActorID:     parseUUID(m.ID),
+			MentionedBy: parseUUID(authorID),
+		}); err != nil {
+			slog.Warn("upsert mention frequency failed", "workspace_id", uuidToString(workspaceID), "mentioned_by", authorID, "actor_type", m.Type, "actor_id", m.ID, "error", err)
 		}
 	}
 }
@@ -481,8 +508,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := existing.AuthorType == actorType && uuidToString(existing.AuthorID) == actorID
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	if !isAuthor && !isAdmin {
-		writeError(w, http.StatusForbidden, "only comment author or admin can edit")
+	var isAgentOwner bool
+	if existing.AuthorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), existing.AuthorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+		}
+	}
+	if !isAuthor && !isAdmin && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only comment author, agent owner, or admin can edit")
 		return
 	}
 

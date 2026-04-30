@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,7 +17,8 @@ import (
 const dingTalkStateTTL = 15 * time.Minute
 
 type StartDingTalkBindingRequest struct {
-	NextPath string `json:"next_path"`
+	NextPath    string `json:"next_path"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 type StartDingTalkBindingResponse struct {
@@ -53,6 +55,28 @@ func sanitizeRelativePath(raw string) string {
 	return raw
 }
 
+func sanitizeOAuthCallbackRedirectURI(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	if parsed.Path != "/auth/callback" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	return parsed.String()
+}
+
 func (h *Handler) StartMyDingTalkBinding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -75,6 +99,11 @@ func (h *Handler) StartMyDingTalkBinding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	redirectURI := sanitizeOAuthCallbackRedirectURI(req.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = cfg.RedirectURL()
+	}
+
 	state, err := notifyutil.BuildDingTalkState(notifyutil.DingTalkBindingState{
 		UserID:   userID,
 		NextPath: sanitizeRelativePath(req.NextPath),
@@ -86,7 +115,7 @@ func (h *Handler) StartMyDingTalkBinding(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, StartDingTalkBindingResponse{
-		AuthURL: cfg.AuthorizationURL(state),
+		AuthURL: cfg.AuthorizationURLWithRedirectURI(state, redirectURI),
 	})
 }
 

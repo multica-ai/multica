@@ -7,7 +7,9 @@
 // no-op case (nothing changed) effectively free.
 //
 // ldflags mirror `make build` so `multica --version` reports a meaningful
-// version / commit / date.
+// version / commit / date. The CLI version itself is sourced from the
+// tracked release/cli-version.txt file so desktop bundling follows the
+// same explicit release version as other CLI build entrypoints.
 //
 // Graceful: if `go` is not installed (e.g. frontend-only contributor), we
 // skip the build and fall through to auto-install at runtime. A genuine
@@ -18,6 +20,8 @@ import { constants } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { CLI_VERSION_FILE, readCliVersionRaw } from "./cli-version.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -101,7 +105,7 @@ async function exists(p) {
 }
 
 if (hasGo()) {
-  const version = sh("git describe --tags --always --dirty") || "dev";
+  const version = readCliVersionRaw() || sh("git describe --tags --always --dirty") || "dev";
   const commit = sh("git rev-parse --short HEAD") || "unknown";
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;
@@ -109,6 +113,11 @@ if (hasGo()) {
   console.log(
     `[bundle-cli] go build → ${srcBinary} (${goos}/${goarch}, version=${version} commit=${commit})`,
   );
+  if (!readCliVersionRaw()) {
+    console.warn(
+      `[bundle-cli] ${CLI_VERSION_FILE} missing or invalid — falling back to git-derived version`,
+    );
+  }
   await mkdir(join(serverDir, "bin", `${goos}-${goarch}`), { recursive: true });
   execFileSync(
     "go",

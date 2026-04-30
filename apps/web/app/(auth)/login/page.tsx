@@ -33,6 +33,7 @@ const buildTimeDingTalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
 const buildTimeHideEmailLogin = process.env.NEXT_PUBLIC_HIDE_EMAIL_LOGIN === "true";
 
 interface RuntimeAuthConfig {
+  googleClientId?: string;
   dingtalkClientId?: string;
   dingtalkOAuthScope?: string;
   hideEmailLogin?: boolean;
@@ -81,6 +82,7 @@ function LoginPageContent() {
       .getConfig()
       .then((cfg) => {
         setRuntimeAuthConfig({
+          googleClientId: cfg.google_client_id || undefined,
           dingtalkClientId: cfg.dingtalk_client_id || undefined,
           dingtalkOAuthScope: cfg.dingtalk_oauth_scope || undefined,
           hideEmailLogin: cfg.hide_email_login,
@@ -93,6 +95,8 @@ function LoginPageContent() {
 
   const dingtalkClientId =
     runtimeAuthConfig.dingtalkClientId || buildTimeDingTalkClientId;
+  const resolvedGoogleClientId =
+    runtimeAuthConfig.googleClientId || googleClientId;
   const hideEmailLogin =
     runtimeAuthConfig.hideEmailLogin ?? buildTimeHideEmailLogin;
 
@@ -215,9 +219,9 @@ function LoginPageContent() {
     <LoginPage
       onSuccess={handleSuccess}
       google={
-        googleClientId
+        resolvedGoogleClientId
           ? {
-              clientId: googleClientId,
+              clientId: resolvedGoogleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
               state: googleState,
             }

@@ -8,6 +8,7 @@ import {
   resolveBuildMatrix,
   stripLeadingSeparator,
 } from "./package.mjs";
+import { normalizeCliVersion } from "./cli-version.mjs";
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {
@@ -43,6 +44,20 @@ describe("normalizeGitVersion", () => {
     // when there are no tags in the history at all.
     expect(normalizeGitVersion("f1415e96")).toBe("0.0.0-f1415e96");
     expect(normalizeGitVersion("abc1234")).toBe("0.0.0-abc1234");
+  });
+});
+
+describe("normalizeCliVersion", () => {
+  it("accepts a plain semver from the tracked version file", () => {
+    expect(normalizeCliVersion("0.2.11")).toBe("0.2.11");
+  });
+
+  it("accepts and normalizes a v-prefixed semver", () => {
+    expect(normalizeCliVersion("v0.2.11")).toBe("0.2.11");
+  });
+
+  it("rejects non-semver file contents", () => {
+    expect(normalizeCliVersion("main")).toBe(null);
   });
 });
 

@@ -19,7 +19,8 @@ func TestStartMyDingTalkBinding(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodPost, "/api/me/notification-bindings/dingtalk/start", map[string]any{
-		"next_path": "/handler-tests/settings",
+		"next_path":    "/handler-tests/settings",
+		"redirect_uri": "http://localhost:3000/auth/callback",
 	})
 
 	testHandler.StartMyDingTalkBinding(w, req)
@@ -41,7 +42,7 @@ func TestStartMyDingTalkBinding(t *testing.T) {
 	if query.Get("client_id") != "ding-client-id" {
 		t.Fatalf("expected client_id %q, got %q", "ding-client-id", query.Get("client_id"))
 	}
-	if query.Get("redirect_uri") != "https://app.multica.test/auth/callback" {
+	if query.Get("redirect_uri") != "http://localhost:3000/auth/callback" {
 		t.Fatalf("expected redirect_uri to point at auth callback, got %q", query.Get("redirect_uri"))
 	}
 
