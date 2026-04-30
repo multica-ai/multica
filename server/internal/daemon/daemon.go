@@ -17,6 +17,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -40,6 +41,7 @@ type workspaceState struct {
 type Daemon struct {
 	cfg       Config
 	client    *Client
+	notifier  notifier.Notifier
 	repoCache *repocache.Cache
 	logger    *slog.Logger
 
@@ -63,6 +65,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	return &Daemon{
 		cfg:           cfg,
 		client:        NewClient(cfg.ServerBaseURL),
+		notifier:      notifier.New(),
 		repoCache:     repocache.New(cacheRoot, logger),
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
@@ -885,6 +888,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// to forward — best we can do is record the failure.
 		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, false, err.Error())
 		}
 		return
 	}
@@ -914,6 +919,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// rather than start over and "forget" the conversation.
 		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, false, result.Comment)
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
@@ -921,7 +928,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
+			} else {
+				d.notifyTaskResult(ctx, taskLog, task, false, fmt.Sprintf("complete task failed: %s", err.Error()))
 			}
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, true, "")
 		}
 	}
 
@@ -933,6 +944,41 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}
+}
+
+func (d *Daemon) notifyTaskResult(ctx context.Context, taskLog *slog.Logger, task Task, success bool, message string) {
+	if !d.cfg.LocalNotificationEnabled {
+		return
+	}
+	if success && !d.cfg.LocalNotificationOnSuccess {
+		return
+	}
+	if !success && !d.cfg.LocalNotificationOnFailure {
+		return
+	}
+	if d.notifier == nil {
+		return
+	}
+
+	title, body := notifier.BuildNotificationContent(notifier.TaskNotificationPayload{
+		Success:   success,
+		AgentName: taskAgentName(task),
+		IssueID:   task.IssueID,
+		Message:   message,
+	})
+	if err := d.notifier.Notify(ctx, title, body); err != nil {
+		taskLog.Warn("local notification failed", "error", err)
+	}
+}
+
+func taskAgentName(task Task) string {
+	if task.Agent == nil {
+		return "Agent"
+	}
+	if name := strings.TrimSpace(task.Agent.Name); name != "" {
+		return name
+	}
+	return "Agent"
 }
 
 func preflightPrivateAgentGate(task Task) error {

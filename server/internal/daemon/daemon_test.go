@@ -16,9 +16,26 @@ import (
 	"sync/atomic"
 	"testing"
 
+	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+type stubNotifier struct {
+	calls []struct {
+		title string
+		body  string
+	}
+	err error
+}
+
+func (s *stubNotifier) Notify(_ context.Context, title, body string) error {
+	s.calls = append(s.calls, struct {
+		title string
+		body  string
+	}{title: title, body: body})
+	return s.err
+}
 
 func createDaemonTestRepo(t *testing.T) string {
 	t.Helper()
@@ -261,6 +278,63 @@ func TestPreflightPrivateAgentGate(t *testing.T) {
 				t.Fatalf("expected error %q, got %q", tt.wantErr, err.Error())
 			}
 		})
+	}
+}
+
+func TestNotifyTaskResultHonorsConfig(t *testing.T) {
+	t.Parallel()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: false,
+		},
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-1", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, true, "")
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "boom")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	if n.calls[0].title != "Multica 任务已完成" {
+		t.Fatalf("title = %q", n.calls[0].title)
+	}
+}
+
+func TestNotifyTaskResultUsesExpectedContent(t *testing.T) {
+	t.Parallel()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "disk full")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:   false,
+		AgentName: "Tony Bot",
+		IssueID:   "issue-9",
+		Message:   "disk full",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
 	}
 }
 
