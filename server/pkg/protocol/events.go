@@ -68,6 +68,18 @@ const (
 	EventChatDone        = "chat:done"
 	EventChatSessionRead = "chat:session_read"
 
+	// Channel events. Channels is the multi-participant chat surface (distinct
+	// from the 1:1 agent Chat above) — see migration 065 and the channels
+	// feature spec. Frontend subscribes by `channel:` prefix and invalidates
+	// the per-channel message cache.
+	EventChannelCreated       = "channel:created"
+	EventChannelUpdated       = "channel:updated"
+	EventChannelArchived      = "channel:archived"
+	EventChannelMessage       = "channel:message"
+	EventChannelMemberAdded   = "channel:member_added"
+	EventChannelMemberRemoved = "channel:member_removed"
+	EventChannelRead          = "channel:read"
+
 	// Project events
 	EventProjectCreated = "project:created"
 	EventProjectUpdated = "project:updated"
