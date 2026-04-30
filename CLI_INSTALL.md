@@ -140,7 +140,7 @@ multica auth status
 Expected output should show the authenticated user and server URL.
 
 **If login fails:**
-- If no browser is available (headless environment), the user can generate a Personal Access Token at `https://app.multica.ai/settings` and run: `multica login --token`
+- If no browser is available (headless environment), the user can generate a Personal Access Token at `<your-frontend-origin>/settings` (the URL set as `FRONTEND_ORIGIN` on the server) and run: `multica login --token`
 - If the server URL needs to be customized: `multica config set server_url <url>` before logging in.
 
 ---
