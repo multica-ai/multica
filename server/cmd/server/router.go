@@ -378,6 +378,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/members/{memberType}/{memberId}", h.RemoveChannelMember)
 					r.Get("/messages", h.ListChannelMessages)
 					r.Post("/messages", h.CreateChannelMessage)
+					// Phase 4 — per-message endpoints (threads + reactions).
+					// Nested so the channel-access gate covers them via
+					// requireChannelAccess inside each handler. The
+					// {messageId} URL param is shared across all three.
+					r.Route("/messages/{messageId}", func(r chi.Router) {
+						r.Get("/thread", h.ListChannelMessageThread)
+						r.Post("/reactions", h.AddChannelReaction)
+						r.Delete("/reactions", h.RemoveChannelReaction)
+					})
 				})
 			})
 			r.Post("/api/dms", h.CreateOrFetchDM)

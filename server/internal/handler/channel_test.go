@@ -604,6 +604,229 @@ func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
 	}
 }
 
+// Phase 4 — threads + reactions ---------------------------------------------
+
+func postChannelMessage(t *testing.T, channelID, content string) ChannelMessageResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels/"+channelID+"/messages", map[string]any{
+		"content": content,
+	})
+	req = withURLParam(req, "channelId", channelID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create message: %d %s", w.Code, w.Body.String())
+	}
+	var msg ChannelMessageResponse
+	if err := json.NewDecoder(w.Body).Decode(&msg); err != nil {
+		t.Fatalf("decode message: %v", err)
+	}
+	return msg
+}
+
+func TestThreads_RepliesNestUnderParent(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "thread-test", "display_name": "ThreadTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d", w.Code)
+	}
+	ch := decodeChannel(t, w)
+
+	// Post a parent and three replies.
+	parent := postChannelMessage(t, ch.ID, "parent message")
+	for i := 0; i < 3; i++ {
+		w = httptest.NewRecorder()
+		req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+			"content":           "reply " + string(rune('a'+i)),
+			"parent_message_id": parent.ID,
+		})
+		req = withURLParam(req, "channelId", ch.ID)
+		testHandler.CreateChannelMessage(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("reply %d: %d %s", i, w.Code, w.Body.String())
+		}
+	}
+
+	// Top-level list should include parent only — replies are nested.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list messages: %d", w.Code)
+	}
+	var listed []ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&listed)
+	var found *ChannelMessageResponse
+	for i := range listed {
+		if listed[i].ID == parent.ID {
+			found = &listed[i]
+		}
+		if listed[i].ParentMessageID != nil {
+			t.Fatalf("top-level list contains a reply (%s)", listed[i].ID)
+		}
+	}
+	if found == nil {
+		t.Fatalf("parent not found in top-level list")
+	}
+	if found.ThreadReplyCount != 3 {
+		t.Fatalf("ThreadReplyCount = %d, want 3", found.ThreadReplyCount)
+	}
+
+	// Thread endpoint returns parent + 3 replies.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages/"+parent.ID+"/thread", nil)
+	req = withURLParams(req, "channelId", ch.ID, "messageId", parent.ID)
+	testHandler.ListChannelMessageThread(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("thread: %d %s", w.Code, w.Body.String())
+	}
+	var threadResp struct {
+		Parent  ChannelMessageResponse   `json:"parent"`
+		Replies []ChannelMessageResponse `json:"replies"`
+	}
+	json.NewDecoder(w.Body).Decode(&threadResp)
+	if threadResp.Parent.ID != parent.ID {
+		t.Fatalf("thread parent = %q, want %q", threadResp.Parent.ID, parent.ID)
+	}
+	if len(threadResp.Replies) != 3 {
+		t.Fatalf("expected 3 replies, got %d", len(threadResp.Replies))
+	}
+}
+
+func TestReactions_AddRemoveAndCount(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "react-test", "display_name": "ReactTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	ch := decodeChannel(t, w)
+	msg := postChannelMessage(t, ch.ID, "react to me")
+
+	// Add 👍
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
+		"emoji": "👍",
+	})
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.AddChannelReaction(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add reaction: %d %s", w.Code, w.Body.String())
+	}
+
+	// Idempotent: same emoji twice still 201.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
+		"emoji": "👍",
+	})
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.AddChannelReaction(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("idempotent add: %d", w.Code)
+	}
+
+	// List reflects exactly one reaction.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	var listed []ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&listed)
+	var target *ChannelMessageResponse
+	for i := range listed {
+		if listed[i].ID == msg.ID {
+			target = &listed[i]
+		}
+	}
+	if target == nil {
+		t.Fatalf("message not in list")
+	}
+	if len(target.Reactions) != 1 || target.Reactions[0].Emoji != "👍" {
+		t.Fatalf("expected one 👍 reaction, got %+v", target.Reactions)
+	}
+
+	// Remove it.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
+		"emoji": "👍",
+	})
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.RemoveChannelReaction(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("remove reaction: %d %s", w.Code, w.Body.String())
+	}
+
+	// Re-list: zero reactions.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	json.NewDecoder(w.Body).Decode(&listed)
+	for _, m := range listed {
+		if m.ID == msg.ID && len(m.Reactions) != 0 {
+			t.Fatalf("expected 0 reactions after remove, got %d", len(m.Reactions))
+		}
+	}
+}
+
+func TestReactions_HiddenFromNonMembersOfPrivateChannel(t *testing.T) {
+	enableChannels(t)
+
+	// Create a private channel as the test member; agent is NOT added.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "react-priv", "display_name": "ReactPriv", "visibility": "private",
+	})
+	testHandler.CreateChannel(w, req)
+	ch := decodeChannel(t, w)
+	msg := postChannelMessage(t, ch.ID, "secret post")
+
+	// Owner adds 🔒.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
+		"emoji": "🔒",
+	})
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.AddChannelReaction(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("owner add reaction: %d", w.Code)
+	}
+
+	// As an agent (non-member), even the message itself shouldn't be
+	// retrievable — the channel-access guard fires before the reaction
+	// query runs. We assert the guard rather than the reaction list,
+	// because the proper invariant is "no leak via the parent surface".
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req.Header.Set("X-Agent-ID", testAgentID())
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("agent list of private channel: want 404, got %d", w.Code)
+	}
+
+	// Direct reaction-add by a non-member also 404s (the channel is
+	// invisible). Adding to a private message you can't see is exactly
+	// the leak-vector we're guarding.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
+		"emoji": "👀",
+	})
+	req.Header.Set("X-Agent-ID", testAgentID())
+	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
+	testHandler.AddChannelReaction(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("non-member reaction add: want 404, got %d", w.Code)
+	}
+}
+
 // testAgentID returns the workspace's first agent id, lazily seeding one if
 // the shared fixture didn't include it. We don't add a workspace-test-agent
 // to setupHandlerTestFixture because most tests don't need one.

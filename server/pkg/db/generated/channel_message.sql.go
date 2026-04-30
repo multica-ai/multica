@@ -11,6 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addChannelMessageReaction = `-- name: AddChannelMessageReaction :one
+INSERT INTO channel_message_reaction (channel_message_id, workspace_id, actor_type, actor_id, emoji)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (channel_message_id, actor_type, actor_id, emoji)
+DO UPDATE SET created_at = channel_message_reaction.created_at
+RETURNING id, channel_message_id, workspace_id, actor_type, actor_id, emoji, created_at
+`
+
+type AddChannelMessageReactionParams struct {
+	ChannelMessageID pgtype.UUID `json:"channel_message_id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ActorType        string      `json:"actor_type"`
+	ActorID          pgtype.UUID `json:"actor_id"`
+	Emoji            string      `json:"emoji"`
+}
+
+// Phase 4 — emoji reaction on a channel message. ON CONFLICT DO UPDATE
+// keeps the reaction row's created_at stable when the same actor adds
+// the same emoji again, so the handler can return 201 + the existing
+// row idempotently.
+func (q *Queries) AddChannelMessageReaction(ctx context.Context, arg AddChannelMessageReactionParams) (ChannelMessageReaction, error) {
+	row := q.db.QueryRow(ctx, addChannelMessageReaction,
+		arg.ChannelMessageID,
+		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Emoji,
+	)
+	var i ChannelMessageReaction
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelMessageID,
+		&i.WorkspaceID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Emoji,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const countChannelMessages = `-- name: CountChannelMessages :one
 SELECT count(*) FROM channel_message
 WHERE channel_id = $1 AND deleted_at IS NULL
@@ -21,6 +62,44 @@ func (q *Queries) CountChannelMessages(ctx context.Context, channelID pgtype.UUI
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countThreadRepliesByMessageIDs = `-- name: CountThreadRepliesByMessageIDs :many
+SELECT parent_message_id::uuid AS parent_id,
+       count(*)::int4 AS reply_count
+FROM channel_message
+WHERE parent_message_id = ANY($1::uuid[])
+  AND deleted_at IS NULL
+GROUP BY parent_message_id
+`
+
+type CountThreadRepliesByMessageIDsRow struct {
+	ParentID   pgtype.UUID `json:"parent_id"`
+	ReplyCount int32       `json:"reply_count"`
+}
+
+// Phase 4 — returns (parent_id, reply_count) for the given parent ids,
+// with replies that aren't soft-deleted. Used by the timeline query to
+// light up the "view thread (N)" badge under each parent without an
+// N+1 fetch.
+func (q *Queries) CountThreadRepliesByMessageIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]CountThreadRepliesByMessageIDsRow, error) {
+	rows, err := q.db.Query(ctx, countThreadRepliesByMessageIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountThreadRepliesByMessageIDsRow{}
+	for rows.Next() {
+		var i CountThreadRepliesByMessageIDsRow
+		if err := rows.Scan(&i.ParentID, &i.ReplyCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createChannelMessage = `-- name: CreateChannelMessage :one
@@ -91,6 +170,42 @@ func (q *Queries) GetChannelMessage(ctx context.Context, id pgtype.UUID) (Channe
 		&i.ContentTsv,
 	)
 	return i, err
+}
+
+const listChannelMessageReactionsByMessageIDs = `-- name: ListChannelMessageReactionsByMessageIDs :many
+SELECT id, channel_message_id, workspace_id, actor_type, actor_id, emoji, created_at FROM channel_message_reaction
+WHERE channel_message_id = ANY($1::uuid[])
+ORDER BY created_at ASC
+`
+
+// Batched fetch for the timeline view — pass every parent message id
+// in one call rather than firing one query per row.
+func (q *Queries) ListChannelMessageReactionsByMessageIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]ChannelMessageReaction, error) {
+	rows, err := q.db.Query(ctx, listChannelMessageReactionsByMessageIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelMessageReaction{}
+	for rows.Next() {
+		var i ChannelMessageReaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelMessageID,
+			&i.WorkspaceID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Emoji,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listChannelMessages = `-- name: ListChannelMessages :many
@@ -236,6 +351,31 @@ func (q *Queries) ListThreadReplies(ctx context.Context, parentMessageID pgtype.
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeChannelMessageReaction = `-- name: RemoveChannelMessageReaction :exec
+DELETE FROM channel_message_reaction
+WHERE channel_message_id = $1
+  AND actor_type = $2
+  AND actor_id = $3
+  AND emoji = $4
+`
+
+type RemoveChannelMessageReactionParams struct {
+	ChannelMessageID pgtype.UUID `json:"channel_message_id"`
+	ActorType        string      `json:"actor_type"`
+	ActorID          pgtype.UUID `json:"actor_id"`
+	Emoji            string      `json:"emoji"`
+}
+
+func (q *Queries) RemoveChannelMessageReaction(ctx context.Context, arg RemoveChannelMessageReactionParams) error {
+	_, err := q.db.Exec(ctx, removeChannelMessageReaction,
+		arg.ChannelMessageID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Emoji,
+	)
+	return err
 }
 
 const softDeleteChannelMessage = `-- name: SoftDeleteChannelMessage :exec

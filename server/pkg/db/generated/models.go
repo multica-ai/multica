@@ -200,6 +200,16 @@ type ChannelMessage struct {
 	ContentTsv      interface{}        `json:"content_tsv"`
 }
 
+type ChannelMessageReaction struct {
+	ID               pgtype.UUID        `json:"id"`
+	ChannelMessageID pgtype.UUID        `json:"channel_message_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ActorType        string             `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Emoji            string             `json:"emoji"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`

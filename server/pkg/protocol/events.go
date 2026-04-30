@@ -79,6 +79,14 @@ const (
 	EventChannelMemberAdded   = "channel:member_added"
 	EventChannelMemberRemoved = "channel:member_removed"
 	EventChannelRead          = "channel:read"
+	// Channel-message reactions (Phase 4). Separate from EventReactionAdded
+	// (which targets issue comments) and EventIssueReactionAdded (issues)
+	// because the payload shape differs — channel reactions carry channel_id
+	// + channel_message_id rather than issue_id + comment_id, and grouping
+	// the three under one event would force the frontend to discriminate
+	// on payload keys.
+	EventChannelReactionAdded   = "channel_reaction:added"
+	EventChannelReactionRemoved = "channel_reaction:removed"
 
 	// Project events
 	EventProjectCreated         = "project:created"

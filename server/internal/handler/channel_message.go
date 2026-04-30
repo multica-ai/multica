@@ -18,17 +18,45 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// ChannelReactionResponse is the JSON shape for one emoji reaction. Mirrors
+// the issue-comment ReactionResponse but scoped to channel_message rather
+// than comment.
+type ChannelReactionResponse struct {
+	ID               string `json:"id"`
+	ChannelMessageID string `json:"channel_message_id"`
+	ActorType        string `json:"actor_type"`
+	ActorID          string `json:"actor_id"`
+	Emoji            string `json:"emoji"`
+	CreatedAt        string `json:"created_at"`
+}
+
+func channelReactionToResponse(r db.ChannelMessageReaction) ChannelReactionResponse {
+	return ChannelReactionResponse{
+		ID:               uuidToString(r.ID),
+		ChannelMessageID: uuidToString(r.ChannelMessageID),
+		ActorType:        r.ActorType,
+		ActorID:          uuidToString(r.ActorID),
+		Emoji:            r.Emoji,
+		CreatedAt:        timestampToString(r.CreatedAt),
+	}
+}
+
 // ChannelMessageResponse is the JSON shape returned for channel messages.
+// Reactions and thread-reply count are populated by the list/get handlers
+// in batched fetches; the create handler returns an empty Reactions slice
+// and ThreadReplyCount=0 since neither can exist for a brand-new row.
 type ChannelMessageResponse struct {
-	ID              string  `json:"id"`
-	ChannelID       string  `json:"channel_id"`
-	AuthorType      string  `json:"author_type"`
-	AuthorID        string  `json:"author_id"`
-	Content         string  `json:"content"`
-	ParentMessageID *string `json:"parent_message_id"`
-	EditedAt        *string `json:"edited_at"`
-	DeletedAt       *string `json:"deleted_at"`
-	CreatedAt       string  `json:"created_at"`
+	ID               string                    `json:"id"`
+	ChannelID        string                    `json:"channel_id"`
+	AuthorType       string                    `json:"author_type"`
+	AuthorID         string                    `json:"author_id"`
+	Content          string                    `json:"content"`
+	ParentMessageID  *string                   `json:"parent_message_id"`
+	EditedAt         *string                   `json:"edited_at"`
+	DeletedAt        *string                   `json:"deleted_at"`
+	CreatedAt        string                    `json:"created_at"`
+	Reactions        []ChannelReactionResponse `json:"reactions"`
+	ThreadReplyCount int32                     `json:"thread_reply_count"`
 }
 
 func channelMessageToResponse(m db.ChannelMessage) ChannelMessageResponse {
@@ -39,6 +67,7 @@ func channelMessageToResponse(m db.ChannelMessage) ChannelMessageResponse {
 		AuthorID:   uuidToString(m.AuthorID),
 		Content:    m.Content,
 		CreatedAt:  timestampToString(m.CreatedAt),
+		Reactions:  []ChannelReactionResponse{},
 	}
 	if m.ParentMessageID.Valid {
 		s := uuidToString(m.ParentMessageID)
@@ -53,6 +82,45 @@ func channelMessageToResponse(m db.ChannelMessage) ChannelMessageResponse {
 		resp.DeletedAt = &s
 	}
 	return resp
+}
+
+// groupChannelReactions fetches all reactions for the given message ids
+// in one query and groups them by message id. Mirrors groupReactions for
+// issue comments. Returns a nil map when no message ids supplied.
+func (h *Handler) groupChannelReactions(r *http.Request, messageIDs []pgtype.UUID) map[string][]ChannelReactionResponse {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	rows, err := h.Queries.ListChannelMessageReactionsByMessageIDs(r.Context(), messageIDs)
+	if err != nil {
+		// Treat a fetch failure as "no reactions" — callers render the
+		// timeline without reaction chips rather than 500ing.
+		return nil
+	}
+	out := make(map[string][]ChannelReactionResponse, len(messageIDs))
+	for _, rx := range rows {
+		mid := uuidToString(rx.ChannelMessageID)
+		out[mid] = append(out[mid], channelReactionToResponse(rx))
+	}
+	return out
+}
+
+// groupChannelThreadReplyCounts batches the per-parent reply counts for
+// a list of (potentially) parent messages. Returns the count keyed by
+// parent message id; a missing key means zero replies.
+func (h *Handler) groupChannelThreadReplyCounts(r *http.Request, parentIDs []pgtype.UUID) map[string]int32 {
+	if len(parentIDs) == 0 {
+		return nil
+	}
+	rows, err := h.Queries.CountThreadRepliesByMessageIDs(r.Context(), parentIDs)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]int32, len(rows))
+	for _, row := range rows {
+		out[uuidToString(row.ParentID)] = row.ReplyCount
+	}
+	return out
 }
 
 // ListChannelMessages handles GET /api/channels/{channelId}/messages.
@@ -116,9 +184,28 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list messages")
 		return
 	}
+
+	// Batch the reaction and thread-reply-count fetches so the timeline
+	// query stays cheap even on busy channels. Both are best-effort — a
+	// failure renders the messages without the badge rather than 500ing.
+	ids := make([]pgtype.UUID, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+	reactions := h.groupChannelReactions(r, ids)
+	replyCounts := h.groupChannelThreadReplyCounts(r, ids)
+
 	out := make([]ChannelMessageResponse, len(msgs))
 	for i, m := range msgs {
-		out[i] = channelMessageToResponse(m)
+		resp := channelMessageToResponse(m)
+		mid := uuidToString(m.ID)
+		if rs, ok := reactions[mid]; ok && len(rs) > 0 {
+			resp.Reactions = rs
+		}
+		if c, ok := replyCounts[mid]; ok {
+			resp.ThreadReplyCount = c
+		}
+		out[i] = resp
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -352,6 +439,228 @@ func (h *Handler) fanOutChannelMentions(ctx context.Context, workspaceID pgtype.
 			slog.Warn("fanOutChannelMentions: create inbox", "recipient_id", m.ID, "error", err)
 		}
 	}
+}
+
+// ListChannelMessageThread handles GET
+// /api/channels/{channelId}/messages/{messageId}/thread.
+//
+// Returns the parent message + its non-deleted replies (chronological),
+// each with reactions populated. Used by the side-panel UI when the user
+// clicks "view thread (N)" on a parent.
+func (h *Handler) ListChannelMessageThread(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID}); !ok {
+		return
+	}
+
+	// Verify the parent belongs to this channel — defense against
+	// cross-channel id confusion.
+	parent, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || parent.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	replies, err := h.ChannelMessageService.ListThread(r.Context(), messageUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list thread")
+		return
+	}
+
+	// Hydrate the parent + each reply with reactions in one batched query.
+	allIDs := make([]pgtype.UUID, 0, len(replies)+1)
+	allIDs = append(allIDs, parent.ID)
+	for _, m := range replies {
+		allIDs = append(allIDs, m.ID)
+	}
+	reactions := h.groupChannelReactions(r, allIDs)
+
+	parentResp := channelMessageToResponse(parent)
+	if rs, ok := reactions[uuidToString(parent.ID)]; ok && len(rs) > 0 {
+		parentResp.Reactions = rs
+	}
+	parentResp.ThreadReplyCount = int32(len(replies))
+
+	replyResps := make([]ChannelMessageResponse, len(replies))
+	for i, m := range replies {
+		rresp := channelMessageToResponse(m)
+		if rs, ok := reactions[uuidToString(m.ID)]; ok && len(rs) > 0 {
+			rresp.Reactions = rs
+		}
+		replyResps[i] = rresp
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"parent":  parentResp,
+		"replies": replyResps,
+	})
+}
+
+// AddChannelReactionRequest is the body for POST
+// /api/channels/{channelId}/messages/{messageId}/reactions.
+type AddChannelReactionRequest struct {
+	Emoji string `json:"emoji"`
+}
+
+// AddChannelReaction handles POST
+// /api/channels/{channelId}/messages/{messageId}/reactions. Idempotent —
+// adding the same reaction twice is a no-op (the SQL ON CONFLICT keeps
+// the original created_at).
+func (h *Handler) AddChannelReaction(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID}); !ok {
+		return
+	}
+
+	// Cross-channel confusion guard: the message must belong to this
+	// channel. Without this check, a member of channel A could react to
+	// a message in private channel B by submitting B's message id with
+	// A's channel id in the URL.
+	msg, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || msg.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	var req AddChannelReactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Emoji == "" {
+		writeError(w, http.StatusBadRequest, "emoji is required")
+		return
+	}
+
+	row, err := h.Queries.AddChannelMessageReaction(r.Context(), db.AddChannelMessageReactionParams{
+		ChannelMessageID: messageUUID,
+		WorkspaceID:      wsID,
+		ActorType:        actorType,
+		ActorID:          actorUUID,
+		Emoji:            req.Emoji,
+	})
+	if err != nil {
+		slog.Warn("add channel reaction failed",
+			"channel_id", uuidToString(channelUUID),
+			"message_id", uuidToString(messageUUID),
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "failed to add reaction")
+		return
+	}
+
+	resp := channelReactionToResponse(row)
+	h.publish(protocol.EventChannelReactionAdded, uuidToString(wsID), actorType, actorID, map[string]any{
+		"reaction":   resp,
+		"channel_id": uuidToString(channelUUID),
+		"message_id": uuidToString(messageUUID),
+	})
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// RemoveChannelReaction handles DELETE
+// /api/channels/{channelId}/messages/{messageId}/reactions. Body carries
+// the emoji being removed (cleaner than an emoji-in-URL design — emojis
+// are multi-codepoint and URL-encode awkwardly).
+func (h *Handler) RemoveChannelReaction(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID}); !ok {
+		return
+	}
+	msg, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || msg.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	var req AddChannelReactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Emoji == "" {
+		writeError(w, http.StatusBadRequest, "emoji is required")
+		return
+	}
+
+	if err := h.Queries.RemoveChannelMessageReaction(r.Context(), db.RemoveChannelMessageReactionParams{
+		ChannelMessageID: messageUUID,
+		ActorType:        actorType,
+		ActorID:          actorUUID,
+		Emoji:            req.Emoji,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove reaction")
+		return
+	}
+
+	h.publish(protocol.EventChannelReactionRemoved, uuidToString(wsID), actorType, actorID, map[string]any{
+		"channel_id": uuidToString(channelUUID),
+		"message_id": uuidToString(messageUUID),
+		"emoji":      req.Emoji,
+		"actor_type": actorType,
+		"actor_id":   actorID,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // snippet returns the first n runes of s, ending at a word boundary if one

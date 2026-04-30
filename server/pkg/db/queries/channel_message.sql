@@ -57,6 +57,43 @@ UPDATE channel_message
 SET deleted_at = now(), deletion_reason = $2
 WHERE id = $1;
 
+-- name: CountThreadRepliesByMessageIDs :many
+-- Phase 4 — returns (parent_id, reply_count) for the given parent ids,
+-- with replies that aren't soft-deleted. Used by the timeline query to
+-- light up the "view thread (N)" badge under each parent without an
+-- N+1 fetch.
+SELECT parent_message_id::uuid AS parent_id,
+       count(*)::int4 AS reply_count
+FROM channel_message
+WHERE parent_message_id = ANY($1::uuid[])
+  AND deleted_at IS NULL
+GROUP BY parent_message_id;
+
+-- name: AddChannelMessageReaction :one
+-- Phase 4 — emoji reaction on a channel message. ON CONFLICT DO UPDATE
+-- keeps the reaction row's created_at stable when the same actor adds
+-- the same emoji again, so the handler can return 201 + the existing
+-- row idempotently.
+INSERT INTO channel_message_reaction (channel_message_id, workspace_id, actor_type, actor_id, emoji)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (channel_message_id, actor_type, actor_id, emoji)
+DO UPDATE SET created_at = channel_message_reaction.created_at
+RETURNING *;
+
+-- name: RemoveChannelMessageReaction :exec
+DELETE FROM channel_message_reaction
+WHERE channel_message_id = $1
+  AND actor_type = $2
+  AND actor_id = $3
+  AND emoji = $4;
+
+-- name: ListChannelMessageReactionsByMessageIDs :many
+-- Batched fetch for the timeline view — pass every parent message id
+-- in one call rather than firing one query per row.
+SELECT * FROM channel_message_reaction
+WHERE channel_message_id = ANY($1::uuid[])
+ORDER BY created_at ASC;
+
 -- name: SoftDeleteOldChannelMessages :execrows
 -- Retention sweep (Phase 2). Soft-deletes messages older than the cutoff in
 -- channels where retention applies, in batches. Returns the number of rows
