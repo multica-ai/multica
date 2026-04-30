@@ -12,8 +12,10 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { paths } from "@multica/core/paths";
 import { CreateWorkspaceForm } from "../workspace/create-workspace-form";
+import { useT } from "../i18n";
 
 export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
+  const { t } = useT("modals");
   const router = useNavigation();
 
   return (
@@ -43,18 +45,17 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
           onClick={onClose}
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          {t(($) => $.common.back)}
         </Button>
 
         <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
           <div className="flex w-full max-w-md flex-col items-center gap-6">
             <div className="text-center">
               <DialogTitle className="text-2xl font-semibold">
-                Create a new workspace
+                {t(($) => $.create_workspace.title)}
               </DialogTitle>
               <DialogDescription className="mt-2">
-                Workspaces are shared environments where teams can work on
-                projects and issues.
+                {t(($) => $.create_workspace.description)}
               </DialogDescription>
             </div>
             <CreateWorkspaceForm

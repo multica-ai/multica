@@ -1,0 +1,128 @@
+{
+  "common": {
+    "back": "Back",
+    "close": "Close",
+    "cancel": "Cancel",
+    "expand_tooltip": "Expand",
+    "collapse_tooltip": "Collapse"
+  },
+  "create_workspace": {
+    "title": "Create a new workspace",
+    "description": "Workspaces are shared environments where teams can work on projects and issues."
+  },
+  "delete_issue": {
+    "title": "Delete issue",
+    "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
+    "hint": "Any workspace member can delete issues.",
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "deleting": "Deleting...",
+    "toast_deleted": "Issue deleted",
+    "toast_delete_failed": "Failed to delete issue"
+  },
+  "feedback": {
+    "title": "Feedback",
+    "description": "We'd love to hear what's working, what isn't, or what you'd like to see next.",
+    "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
+    "toast_uploading": "Please wait for uploads to finish…",
+    "toast_too_long": "Message is too long",
+    "toast_sent": "Thanks for the feedback!",
+    "toast_failed": "Failed to send feedback",
+    "send": "Send feedback",
+    "sending": "Sending…"
+  },
+  "issue_picker": {
+    "search_placeholder": "Search issues...",
+    "searching": "Searching...",
+    "no_results": "No issues found.",
+    "prompt_to_search": "Type to search issues"
+  },
+  "set_parent": {
+    "title": "Set parent issue",
+    "description": "Search for an issue to set as the parent of this issue",
+    "toast_failed": "Failed to update issue",
+    "toast_success": "Set {{identifier}} as parent issue"
+  },
+  "add_child": {
+    "title": "Add sub-issue",
+    "description": "Search for an issue to add as a sub-issue",
+    "toast_failed": "Failed to add sub-issue",
+    "toast_success": "Added {{identifier}} as sub-issue"
+  },
+  "backlog_hint": {
+    "toast_status_failed": "Failed to update status"
+  },
+  "create_project": {
+    "title": "New Project",
+    "title_breadcrumb": "New project",
+    "icon_tooltip": "Choose icon",
+    "title_placeholder": "Project title",
+    "description_placeholder": "Add description...",
+    "lead": "Lead",
+    "no_lead": "No lead",
+    "lead_placeholder": "Assign lead...",
+    "members_group": "Members",
+    "agents_group": "Agents",
+    "no_results": "No results",
+    "submit": "Create Project",
+    "submitting": "Creating...",
+    "toast_created": "Project created",
+    "toast_failed": "Failed to create project"
+  },
+  "create_issue": {
+    "sr_manual": "New Issue",
+    "sr_agent": "Quick create issue",
+    "manual_breadcrumb": "Create manually",
+    "agent_breadcrumb": "Create with agent",
+    "title_placeholder": "Issue title",
+    "description_placeholder": "Add description...",
+    "more_options_aria": "More options",
+    "submit": "Create Issue",
+    "submitting": "Creating...",
+    "toast_created": "Issue created",
+    "view_issue": "View issue",
+    "toast_failed": "Failed to create issue",
+    "toast_link_subissues_all_failed": "Failed to link sub-issues",
+    "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
+    "switch_to_agent": "Switch to Agent",
+    "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
+    "switch_to_manual": "Switch to Manual",
+    "switch_to_manual_tooltip": "Switch to manual create — fill the fields yourself",
+    "create_another": "Create another",
+    "remove_parent_aria": "Remove parent",
+    "remove_subissue_aria": "Remove sub-issue {{identifier}}",
+    "subissue_of": "Sub-issue of {{identifier}}",
+    "subissue_chip": "Sub-issue: {{identifier}}",
+    "parent_with_id": "Parent: {{identifier}}",
+    "set_parent": "Set parent issue...",
+    "add_subissue": "Add sub-issue...",
+    "remove_parent": "Remove parent",
+    "set_parent_picker": {
+      "title": "Set parent issue",
+      "description": "Search for an issue to set as the parent of the new issue"
+    },
+    "add_subissue_picker": {
+      "title": "Add sub-issue",
+      "description": "Search for an issue to add as a sub-issue of the new issue"
+    },
+    "agent": {
+      "created_by": "Created by",
+      "select_agent_aria": "Select agent",
+      "pick_an_agent": "Pick an agent…",
+      "no_agents": "No agents available.",
+      "version_missing": "This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ {{min}}. Upgrade the daemon and reconnect, or switch to manual create.",
+      "version_below": "This agent's daemon CLI is {{current}} — Create with agent needs ≥ {{min}}. Upgrade the daemon, or switch to manual create.",
+      "prompt_placeholder": "Tell the agent what to do, e.g. \"let Bohan fix the inbox loading slowness in the Web project\"",
+      "submit": "Create (⌘↵)",
+      "sending": "Sending…",
+      "uploading": "Uploading…",
+      "sent_label": "Sent",
+      "sent_count": "{{count}} sent",
+      "version_blocked_tooltip": "Daemon CLI must be ≥ {{min}}",
+      "toast_sent": "Sent to agent — you'll get an inbox notification when it's done",
+      "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
+      "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",
+      "error_unknown": "Failed to submit. Try again."
+    }
+  }
+}

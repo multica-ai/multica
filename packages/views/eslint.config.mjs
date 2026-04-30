@@ -59,6 +59,16 @@ const TRANSLATED_FILES = [
   "chat/components/no-agent-banner.tsx",
   "chat/components/offline-banner.tsx",
   "chat/components/task-status-pill.tsx",
+  "modals/backlog-agent-hint.tsx",
+  "modals/set-parent-issue.tsx",
+  "modals/add-child-issue.tsx",
+  "modals/delete-issue-confirm.tsx",
+  "modals/feedback.tsx",
+  "modals/issue-picker-modal.tsx",
+  "modals/create-workspace.tsx",
+  "modals/create-project.tsx",
+  "modals/create-issue.tsx",
+  "modals/quick-create-issue.tsx",
 ];
 
 export default [

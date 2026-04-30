@@ -14,6 +14,7 @@ import enProjects from "./en/projects.json";
 import enAutopilots from "./en/autopilots.json";
 import enSkills from "./en/skills.json";
 import enChat from "./en/chat.json";
+import enModals from "./en/modals.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
@@ -29,6 +30,7 @@ import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansAutopilots from "./zh-Hans/autopilots.json";
 import zhHansSkills from "./zh-Hans/skills.json";
 import zhHansChat from "./zh-Hans/chat.json";
+import zhHansModals from "./zh-Hans/modals.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -50,6 +52,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     autopilots: enAutopilots,
     skills: enSkills,
     chat: enChat,
+    modals: enModals,
   },
   "zh-Hans": {
     common: zhHansCommon,
@@ -67,5 +70,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     autopilots: zhHansAutopilots,
     skills: zhHansSkills,
     chat: zhHansChat,
+    modals: zhHansModals,
   },
 };
