@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -57,17 +58,23 @@ type ChannelMessageResponse struct {
 	CreatedAt        string                    `json:"created_at"`
 	Reactions        []ChannelReactionResponse `json:"reactions"`
 	ThreadReplyCount int32                     `json:"thread_reply_count"`
+	// Phase 5b — attachments hydrated from metadata.attachments JSONB
+	// (a string array of attachment ids). The list/get/thread handlers
+	// fetch attachment rows in one batched query and preserve the
+	// order from metadata. Empty array on rows without attachments.
+	Attachments []AttachmentResponse `json:"attachments"`
 }
 
 func channelMessageToResponse(m db.ChannelMessage) ChannelMessageResponse {
 	resp := ChannelMessageResponse{
-		ID:         uuidToString(m.ID),
-		ChannelID:  uuidToString(m.ChannelID),
-		AuthorType: m.AuthorType,
-		AuthorID:   uuidToString(m.AuthorID),
-		Content:    m.Content,
-		CreatedAt:  timestampToString(m.CreatedAt),
-		Reactions:  []ChannelReactionResponse{},
+		ID:          uuidToString(m.ID),
+		ChannelID:   uuidToString(m.ChannelID),
+		AuthorType:  m.AuthorType,
+		AuthorID:    uuidToString(m.AuthorID),
+		Content:     m.Content,
+		CreatedAt:   timestampToString(m.CreatedAt),
+		Reactions:   []ChannelReactionResponse{},
+		Attachments: []AttachmentResponse{},
 	}
 	if m.ParentMessageID.Valid {
 		s := uuidToString(m.ParentMessageID)
@@ -82,6 +89,126 @@ func channelMessageToResponse(m db.ChannelMessage) ChannelMessageResponse {
 		resp.DeletedAt = &s
 	}
 	return resp
+}
+
+// channelMessageAttachmentIDs decodes metadata.attachments from a
+// channel_message row. Returns nil when the metadata is missing or
+// malformed; callers treat that as "no attachments".
+func channelMessageAttachmentIDs(m db.ChannelMessage) []pgtype.UUID {
+	if len(m.Metadata) == 0 {
+		return nil
+	}
+	var meta struct {
+		Attachments []string `json:"attachments"`
+	}
+	if err := json.Unmarshal(m.Metadata, &meta); err != nil || len(meta.Attachments) == 0 {
+		return nil
+	}
+	out := make([]pgtype.UUID, 0, len(meta.Attachments))
+	for _, s := range meta.Attachments {
+		u, err := util.ParseUUID(s)
+		if err != nil {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// groupChannelAttachments hydrates attachment rows for a list of channel
+// messages by joining the per-message metadata.attachments arrays into a
+// single ListAttachmentsByIDs call. Order is preserved per message based
+// on the metadata array, so the UI renders attachments in the order the
+// author selected them.
+func (h *Handler) groupChannelAttachments(r *http.Request, workspaceID pgtype.UUID, msgs []db.ChannelMessage) map[string][]AttachmentResponse {
+	if len(msgs) == 0 {
+		return nil
+	}
+	// Collect every attachment id across all messages, plus per-message
+	// id-order for later reordering.
+	perMessage := make(map[string][]pgtype.UUID, len(msgs))
+	all := make([]pgtype.UUID, 0)
+	seen := make(map[[16]byte]struct{})
+	for _, m := range msgs {
+		ids := channelMessageAttachmentIDs(m)
+		if len(ids) == 0 {
+			continue
+		}
+		perMessage[uuidToString(m.ID)] = ids
+		for _, id := range ids {
+			if _, dup := seen[id.Bytes]; dup {
+				continue
+			}
+			seen[id.Bytes] = struct{}{}
+			all = append(all, id)
+		}
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	rows, err := h.Queries.ListAttachmentsByIDs(r.Context(), db.ListAttachmentsByIDsParams{
+		Column1:     all,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return nil
+	}
+	byID := make(map[string]db.Attachment, len(rows))
+	for _, a := range rows {
+		byID[uuidToString(a.ID)] = a
+	}
+	out := make(map[string][]AttachmentResponse, len(perMessage))
+	for mid, ids := range perMessage {
+		ordered := make([]AttachmentResponse, 0, len(ids))
+		for _, id := range ids {
+			if a, ok := byID[uuidToString(id)]; ok {
+				ordered = append(ordered, h.attachmentToResponse(a))
+			}
+		}
+		if len(ordered) > 0 {
+			out[mid] = ordered
+		}
+	}
+	return out
+}
+
+// validateChannelAttachmentIDs is the create-time guard: every id the
+// client claims to attach must (1) parse, (2) exist in the same
+// workspace, (3) have been uploaded by the calling actor. The third
+// constraint stops a member from "borrowing" another user's
+// attachment by submitting its id as their own.
+func (h *Handler) validateChannelAttachmentIDs(ctx context.Context, ids []string, workspaceID pgtype.UUID, uploaderType, uploaderID string) ([]pgtype.UUID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	uploaderUUID, err := util.ParseUUID(uploaderID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid uploader id: %w", err)
+	}
+	parsed := make([]pgtype.UUID, 0, len(ids))
+	for _, s := range ids {
+		u, err := util.ParseUUID(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid attachment id: %w", err)
+		}
+		parsed = append(parsed, u)
+	}
+	rows, err := h.Queries.ListAttachmentsByIDs(ctx, db.ListAttachmentsByIDsParams{
+		Column1:     parsed,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != len(parsed) {
+		return nil, fmt.Errorf("one or more attachments not found in this workspace")
+	}
+	for _, a := range rows {
+		if a.UploaderType != uploaderType || a.UploaderID.Bytes != uploaderUUID.Bytes {
+			return nil, fmt.Errorf("attachment %s was not uploaded by you", uuidToString(a.ID))
+		}
+	}
+	return parsed, nil
 }
 
 // groupChannelReactions fetches all reactions for the given message ids
@@ -194,6 +321,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	reactions := h.groupChannelReactions(r, ids)
 	replyCounts := h.groupChannelThreadReplyCounts(r, ids)
+	attachments := h.groupChannelAttachments(r, wsID, msgs)
 
 	out := make([]ChannelMessageResponse, len(msgs))
 	for i, m := range msgs {
@@ -205,6 +333,9 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		if c, ok := replyCounts[mid]; ok {
 			resp.ThreadReplyCount = c
 		}
+		if atts, ok := attachments[mid]; ok && len(atts) > 0 {
+			resp.Attachments = atts
+		}
 		out[i] = resp
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -212,8 +343,14 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 
 // CreateChannelMessageRequest is the JSON body for POST /api/channels/{channelId}/messages.
 type CreateChannelMessageRequest struct {
-	Content         string  `json:"content"`
-	ParentMessageID *string `json:"parent_message_id"`
+	Content         string   `json:"content"`
+	ParentMessageID *string  `json:"parent_message_id"`
+	// Phase 5b — attachment ids the client uploaded via /api/upload-file
+	// before submitting the message. Stored in
+	// channel_message.metadata.attachments JSONB array. The handler
+	// validates each id exists, lives in the same workspace, and was
+	// uploaded by the same actor before stamping it.
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 // CreateChannelMessage handles POST /api/channels/{channelId}/messages.
@@ -255,10 +392,38 @@ func (h *Handler) CreateChannelMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 5b — validate + stamp attachment ids before insert. The
+	// metadata JSONB carries the array as ["uuid1", "uuid2", ...] so the
+	// hydrator on read can do one batched query.
+	var validatedAttachments []pgtype.UUID
+	if len(req.AttachmentIDs) > 0 {
+		var err error
+		validatedAttachments, err = h.validateChannelAttachmentIDs(r.Context(), req.AttachmentIDs, wsID, actorType, actorID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	params := channel.CreateMessageParams{
 		ChannelID: channelUUID,
 		Author:    channel.Actor{Type: actorType, ID: actorUUID},
 		Content:   req.Content,
+	}
+	if len(validatedAttachments) > 0 {
+		// Build the metadata blob with the attachment id array. Future
+		// metadata writers should preserve existing keys; today only this
+		// path writes metadata so we can construct from scratch.
+		ids := make([]string, len(validatedAttachments))
+		for i, u := range validatedAttachments {
+			ids[i] = uuidToString(u)
+		}
+		metaJSON, err := json.Marshal(map[string]any{"attachments": ids})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to marshal metadata")
+			return
+		}
+		params.Metadata = metaJSON
 	}
 	if req.ParentMessageID != nil {
 		parentUUID, ok := parseUUIDOrBadRequest(w, *req.ParentMessageID, "parent_message_id")
@@ -283,6 +448,14 @@ func (h *Handler) CreateChannelMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := channelMessageToResponse(msg)
+	// Hydrate attachments onto the create response so the client can
+	// render the inline previews/cards immediately without a follow-up
+	// list refetch.
+	if atts := h.groupChannelAttachments(r, wsID, []db.ChannelMessage{msg}); atts != nil {
+		if items, ok := atts[uuidToString(msg.ID)]; ok && len(items) > 0 {
+			resp.Attachments = items
+		}
+	}
 	h.publish(protocol.EventChannelMessage, uuidToString(wsID), actorType, actorID, map[string]any{
 		"channel_id":   uuidToString(channelUUID),
 		"channel_name": ch.Name,
@@ -487,25 +660,37 @@ func (h *Handler) ListChannelMessageThread(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Hydrate the parent + each reply with reactions in one batched query.
-	allIDs := make([]pgtype.UUID, 0, len(replies)+1)
-	allIDs = append(allIDs, parent.ID)
-	for _, m := range replies {
-		allIDs = append(allIDs, m.ID)
+	// Hydrate the parent + each reply with reactions and attachments in
+	// batched queries. allMsgs preserves order so the attachment-batch
+	// can return its grouping keyed by message id.
+	allMsgs := make([]db.ChannelMessage, 0, len(replies)+1)
+	allMsgs = append(allMsgs, parent)
+	allMsgs = append(allMsgs, replies...)
+	allIDs := make([]pgtype.UUID, len(allMsgs))
+	for i, m := range allMsgs {
+		allIDs[i] = m.ID
 	}
 	reactions := h.groupChannelReactions(r, allIDs)
+	attachments := h.groupChannelAttachments(r, wsID, allMsgs)
 
 	parentResp := channelMessageToResponse(parent)
 	if rs, ok := reactions[uuidToString(parent.ID)]; ok && len(rs) > 0 {
 		parentResp.Reactions = rs
+	}
+	if atts, ok := attachments[uuidToString(parent.ID)]; ok && len(atts) > 0 {
+		parentResp.Attachments = atts
 	}
 	parentResp.ThreadReplyCount = int32(len(replies))
 
 	replyResps := make([]ChannelMessageResponse, len(replies))
 	for i, m := range replies {
 		rresp := channelMessageToResponse(m)
-		if rs, ok := reactions[uuidToString(m.ID)]; ok && len(rs) > 0 {
+		mid := uuidToString(m.ID)
+		if rs, ok := reactions[mid]; ok && len(rs) > 0 {
 			rresp.Reactions = rs
+		}
+		if atts, ok := attachments[mid]; ok && len(atts) > 0 {
+			rresp.Attachments = atts
 		}
 		replyResps[i] = rresp
 	}

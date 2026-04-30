@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 import type { ChannelMessage, MemberWithUser, Agent } from "@multica/core/types";
 import { MessageReactions } from "./message-reactions";
+import { MessageAttachments } from "./message-attachments";
 
 interface MessageRowProps {
   message: ChannelMessage;
@@ -262,9 +263,14 @@ function MessageRowBody({
               </div>
             </div>
           ) : (
-            <div className="prose prose-sm max-w-none text-foreground">
-              <ReadonlyContent content={message.content} />
-            </div>
+            <>
+              {message.content ? (
+                <div className="prose prose-sm max-w-none text-foreground">
+                  <ReadonlyContent content={message.content} />
+                </div>
+              ) : null}
+              <MessageAttachments attachments={message.attachments} />
+            </>
           )}
           <MessageReactions
             channelId={channelId}

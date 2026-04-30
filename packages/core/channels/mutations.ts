@@ -100,6 +100,7 @@ export function useSendChannelMessage(channelId: string) {
         created_at: new Date().toISOString(),
         reactions: [],
         thread_reply_count: 0,
+        attachments: [],
       };
       // Newest-first ordering matches the list query.
       qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>

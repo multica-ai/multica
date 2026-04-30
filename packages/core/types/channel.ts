@@ -48,6 +48,19 @@ export interface ChannelReaction {
   created_at: string;
 }
 
+export interface ChannelMessageAttachment {
+  id: string;
+  workspace_id: string;
+  filename: string;
+  url: string;
+  download_url: string;
+  content_type: string;
+  size_bytes: number;
+  uploader_type: ChannelActorType;
+  uploader_id: string;
+  created_at: string;
+}
+
 export interface ChannelMessage {
   id: string;
   channel_id: string;
@@ -66,6 +79,10 @@ export interface ChannelMessage {
   /** Phase 4 — count of non-deleted replies under this message.
    * Always 0 for replies themselves (the schema is one level deep in v1). */
   thread_reply_count: number;
+  /** Phase 5 — attachments stamped via metadata.attachments at create time
+   * and hydrated server-side on read. Order matches what the author selected
+   * in the composer. */
+  attachments: ChannelMessageAttachment[];
 }
 
 export interface ChannelMessageThread {
@@ -102,6 +119,9 @@ export interface AddChannelMemberRequest {
 export interface CreateChannelMessageRequest {
   content: string;
   parent_message_id?: string | null;
+  /** Phase 5 — attachment ids the client uploaded via /api/upload-file
+   * before submitting. Stored in channel_message.metadata.attachments. */
+  attachment_ids?: string[];
 }
 
 export interface MarkChannelReadRequest {

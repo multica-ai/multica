@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -602,6 +605,121 @@ func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
 	}
 	if !strings.Contains(content, "Hi! I'm the agent") {
 		t.Fatalf("reply content unexpected: %q", content)
+	}
+}
+
+// Phase 5b — attachments -----------------------------------------------------
+
+// seedTestAttachment writes a row directly via the queries layer. We
+// don't actually upload bytes — that would require S3 + the multipart
+// form path. The handler's create-message branch only validates the
+// attachment row exists, lives in the workspace, and was uploaded by
+// the calling actor; the bytes themselves are irrelevant to the
+// metadata-stamping behavior we're testing here.
+func seedTestAttachment(t *testing.T, uploaderType string, uploaderID string) string {
+	t.Helper()
+	ctx := context.Background()
+	id := uuid.Must(uuid.NewV7())
+	_, err := testHandler.Queries.CreateAttachment(ctx, db.CreateAttachmentParams{
+		ID:           pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:  parseUUID(testWorkspaceID),
+		UploaderType: uploaderType,
+		UploaderID:   parseUUID(uploaderID),
+		Filename:     "test.png",
+		Url:          "https://example.invalid/" + id.String() + ".png",
+		ContentType:  "image/png",
+		SizeBytes:    1024,
+	})
+	if err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM attachment WHERE id = $1`, id)
+	})
+	return id.String()
+}
+
+func TestChannelMessage_AttachmentIDsStoredAndHydrated(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "att-test", "display_name": "AttTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d", w.Code)
+	}
+	ch := decodeChannel(t, w)
+
+	att1 := seedTestAttachment(t, "member", testUserID)
+	att2 := seedTestAttachment(t, "member", testUserID)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content":        "see image",
+		"attachment_ids": []string{att1, att2},
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create message: %d %s", w.Code, w.Body.String())
+	}
+	var created ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if len(created.Attachments) != 2 {
+		t.Fatalf("create response attachments len = %d, want 2", len(created.Attachments))
+	}
+	// Order from the request must be preserved on the response.
+	if created.Attachments[0].ID != att1 || created.Attachments[1].ID != att2 {
+		t.Fatalf("attachment order not preserved: got %v, want [%s,%s]",
+			[]string{created.Attachments[0].ID, created.Attachments[1].ID}, att1, att2)
+	}
+
+	// Round-trip via the list endpoint — attachments must reappear.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	var listed []ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&listed)
+	var hit *ChannelMessageResponse
+	for i := range listed {
+		if listed[i].ID == created.ID {
+			hit = &listed[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("message not in list")
+	}
+	if len(hit.Attachments) != 2 || hit.Attachments[0].ID != att1 {
+		t.Fatalf("list hydration drift: %+v", hit.Attachments)
+	}
+}
+
+func TestChannelMessage_AttachmentIDFromAnotherUploaderRejected(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "att-leak", "display_name": "AttLeak", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	ch := decodeChannel(t, w)
+
+	// Seed an attachment uploaded by an AGENT (not the calling member).
+	stranger := seedTestAttachment(t, "agent", testAgentID())
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content":        "trying to attach someone else's file",
+		"attachment_ids": []string{stranger},
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("foreign-attachment attach: want 400, got %d %s", w.Code, w.Body.String())
 	}
 }
 

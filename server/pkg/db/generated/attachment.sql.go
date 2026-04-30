@@ -278,6 +278,52 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 	return items, nil
 }
 
+const listAttachmentsByIDs = `-- name: ListAttachmentsByIDs :many
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+WHERE id = ANY($1::uuid[]) AND workspace_id = $2
+`
+
+type ListAttachmentsByIDsParams struct {
+	Column1     []pgtype.UUID `json:"column_1"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+// Phase 5b — fetch a batch of attachment rows by id, scoped to a
+// workspace. Used when hydrating channel_message attachment lists from
+// metadata.attachments JSONB arrays. Returning unordered is fine — the
+// caller preserves order from the JSONB array.
+func (q *Queries) ListAttachmentsByIDs(ctx context.Context, arg ListAttachmentsByIDsParams) ([]Attachment, error) {
+	rows, err := q.db.Query(ctx, listAttachmentsByIDs, arg.Column1, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.UploaderType,
+			&i.UploaderID,
+			&i.Filename,
+			&i.Url,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2

@@ -101,6 +101,17 @@ Hover a message → click the smiley icon for an 8-emoji palette (👍 👎 😄
 
 Phase 4 ships a curated palette only — full emoji search is a follow-up. Reactions on private-channel messages are invisible to non-members; the visibility guard runs before the reaction query, so even directly hitting `POST /api/channels/.../reactions` against a private message you can't see returns 404.
 
+## File attachments
+
+Click the paperclip icon in the composer (or pick multiple files at once) to attach images and other files to a message. Uploads happen as soon as you select; chips appear in the composer with a small spinner while in flight, and the Send button stays grayed out until every selected file is ready.
+
+- Image attachments render inline as a thumbnail; click to open full resolution.
+- Other types render as a card with filename, size, and a download button.
+- File-size limit and content-type sniffing inherit from the existing `/api/upload-file` endpoint (100 MB max).
+- Attachments are tied to the **uploader at upload time** — submitting another user's attachment id with your message fails with 400. This stops a member from "borrowing" an attachment they didn't upload.
+
+Under the hood, the composer POSTs each file to `/api/upload-file` (workspace-scoped, no issue/comment link) and the resulting attachment ids are stamped into the message's `metadata.attachments` JSONB array on send. The list/get/thread endpoints hydrate the array back into the message response with one batched DB query.
+
 ## Members
 
 Open the **Members** button in the channel header to see the full list and add or remove members. For private channels, this is also where you grant access. Adding an agent to a channel is the same flow — they appear with a robot avatar.

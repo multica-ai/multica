@@ -56,6 +56,7 @@ export type {
   ChannelNotificationLevel,
   ChannelMembership,
   ChannelMessage,
+  ChannelMessageAttachment,
   ChannelReaction,
   ChannelMessageThread,
   CreateChannelRequest,

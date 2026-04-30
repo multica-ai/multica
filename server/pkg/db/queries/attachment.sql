@@ -45,5 +45,13 @@ WHERE workspace_id = $2
   AND issue_id IS NULL
   AND id = ANY($3::uuid[]);
 
+-- name: ListAttachmentsByIDs :many
+-- Phase 5b — fetch a batch of attachment rows by id, scoped to a
+-- workspace. Used when hydrating channel_message attachment lists from
+-- metadata.attachments JSONB arrays. Returning unordered is fine — the
+-- caller preserves order from the JSONB array.
+SELECT * FROM attachment
+WHERE id = ANY($1::uuid[]) AND workspace_id = $2;
+
 -- name: DeleteAttachment :exec
 DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;
