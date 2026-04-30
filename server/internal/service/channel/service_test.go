@@ -660,6 +660,184 @@ func TestSoftDeleteOldMessages(t *testing.T) {
 	}
 }
 
+func TestRunRetentionSweep_HonorsEffectiveRetention(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	// Workspace default = 30 days. Channel A inherits (null override),
+	// channel B overrides to 7. Both contain one ancient message
+	// (timestamp = 365 days ago) and one fresh message; we expect the
+	// sweep to soft-delete the ancient ones in both, leaving the fresh.
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET channel_retention_days = 30 WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace retention: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET channel_retention_days = NULL WHERE id = $1`, testWorkspaceID)
+	})
+
+	chA, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "sweep-a", DisplayName: "A",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	override := int32(7)
+	chB, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "sweep-b", DisplayName: "B",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+		RetentionDays: &override,
+	})
+
+	insertMsg := func(channelID pgtype.UUID, age time.Duration) pgtype.UUID {
+		t.Helper()
+		m, err := testMessageSvc.Create(ctx, CreateMessageParams{
+			ChannelID: channelID, Author: memberActor(), Content: "x",
+		})
+		if err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+		// Backdate.
+		if _, err := testPool.Exec(ctx, `UPDATE channel_message SET created_at = $1 WHERE id = $2`,
+			time.Now().Add(-age), m.ID); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+		return m.ID
+	}
+	oldA := insertMsg(chA.ID, 365*24*time.Hour)
+	freshA := insertMsg(chA.ID, 1*time.Hour)
+	oldB := insertMsg(chB.ID, 14*24*time.Hour) // 14d old > 7d retention → delete
+	freshB := insertMsg(chB.ID, 1*time.Hour)
+
+	// Run with a deterministic "now" — production passes time.Now().UTC().
+	stats, err := testMessageSvc.RunRetentionSweep(ctx, time.Now(), 100)
+	if err != nil {
+		t.Fatalf("RunRetentionSweep: %v", err)
+	}
+	if stats.ChannelsScanned != 2 {
+		t.Fatalf("expected 2 channels scanned, got %d", stats.ChannelsScanned)
+	}
+	if stats.MessagesDeleted != 2 {
+		t.Fatalf("expected 2 messages deleted, got %d", stats.MessagesDeleted)
+	}
+
+	assertDeleted := func(id pgtype.UUID, want bool) {
+		t.Helper()
+		var hasDeletedAt bool
+		if err := testPool.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM channel_message WHERE id = $1`, id).Scan(&hasDeletedAt); err != nil {
+			t.Fatalf("query deleted_at: %v", err)
+		}
+		if hasDeletedAt != want {
+			t.Fatalf("message %s: deleted=%v want=%v", uuidString(id), hasDeletedAt, want)
+		}
+	}
+	assertDeleted(oldA, true)
+	assertDeleted(freshA, false)
+	assertDeleted(oldB, true)
+	assertDeleted(freshB, false)
+}
+
+func TestRunRetentionSweep_RetainForeverSkips(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	// Workspace retention NULL (default), channel retention NULL —
+	// this represents "retain forever". An ancient message must NOT be
+	// touched by the sweep.
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "forever", DisplayName: "Forever",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	m, err := testMessageSvc.Create(ctx, CreateMessageParams{
+		ChannelID: ch.ID, Author: memberActor(), Content: "ancient",
+	})
+	if err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE channel_message SET created_at = now() - interval '365 days' WHERE id = $1`, m.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	stats, err := testMessageSvc.RunRetentionSweep(ctx, time.Now(), 100)
+	if err != nil {
+		t.Fatalf("RunRetentionSweep: %v", err)
+	}
+	if stats.ChannelsScanned != 0 {
+		t.Fatalf("expected 0 channels scanned (none have retention), got %d", stats.ChannelsScanned)
+	}
+	if stats.MessagesDeleted != 0 {
+		t.Fatalf("expected 0 messages deleted, got %d", stats.MessagesDeleted)
+	}
+
+	// Belt-and-braces: the ancient message is still visible.
+	visible, _ := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
+	if len(visible) != 1 {
+		t.Fatalf("expected the ancient message to remain visible, got %d", len(visible))
+	}
+}
+
+func TestRunRetentionSweep_ArchivedChannelsExcluded(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET channel_retention_days = 30 WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace retention: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET channel_retention_days = NULL WHERE id = $1`, testWorkspaceID)
+	})
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "abandoned", DisplayName: "Abandoned",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	m, _ := testMessageSvc.Create(ctx, CreateMessageParams{
+		ChannelID: ch.ID, Author: memberActor(), Content: "ancient",
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE channel_message SET created_at = now() - interval '365 days' WHERE id = $1`, m.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if err := testService.Archive(ctx, ch.ID); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	stats, err := testMessageSvc.RunRetentionSweep(ctx, time.Now(), 100)
+	if err != nil {
+		t.Fatalf("RunRetentionSweep: %v", err)
+	}
+	if stats.ChannelsScanned != 0 {
+		t.Fatalf("expected archived channel to be skipped, got %d scanned", stats.ChannelsScanned)
+	}
+}
+
+func TestRunRetentionSweep_BatchedDrain(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	override := int32(7)
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "drain", DisplayName: "Drain",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+		RetentionDays: &override,
+	})
+
+	// Insert 5 ancient messages; with batchSize=2 the drain should make
+	// three trips (2+2+1) and report 5 deletions.
+	for i := 0; i < 5; i++ {
+		m, _ := testMessageSvc.Create(ctx, CreateMessageParams{
+			ChannelID: ch.ID, Author: memberActor(), Content: "x",
+		})
+		if _, err := testPool.Exec(ctx, `UPDATE channel_message SET created_at = now() - interval '30 days' WHERE id = $1`, m.ID); err != nil {
+			t.Fatalf("backdate: %v", err)
+		}
+	}
+
+	stats, err := testMessageSvc.RunRetentionSweep(ctx, time.Now(), 2)
+	if err != nil {
+		t.Fatalf("RunRetentionSweep: %v", err)
+	}
+	if stats.MessagesDeleted != 5 {
+		t.Fatalf("expected 5 deletions, got %d", stats.MessagesDeleted)
+	}
+}
+
 func TestDMName_DeterministicAndOrderIndependent(t *testing.T) {
 	a := Actor{Type: ActorMember, ID: pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}}
 	b := Actor{Type: ActorAgent, ID: pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9}, Valid: true}}

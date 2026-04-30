@@ -408,21 +408,141 @@ function ChannelsSettings({ workspace }: ChannelsSettingsProps) {
   };
 
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <p className="text-sm font-medium">Enable Channels</p>
-        <p className="text-xs text-muted-foreground">
-          Multi-participant chat alongside the issue board, with public
-          channels, private channels, and direct messages. When off, the
-          sidebar entry hides and Channels endpoints return 404.
-        </p>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">Enable Channels</p>
+          <p className="text-xs text-muted-foreground">
+            Multi-participant chat alongside the issue board, with public
+            channels, private channels, and direct messages. When off, the
+            sidebar entry hides and Channels endpoints return 404.
+          </p>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+          disabled={pending}
+          aria-label="Enable Channels"
+        />
       </div>
-      <Switch
-        checked={enabled}
-        onCheckedChange={handleToggle}
-        disabled={pending}
-        aria-label="Enable Channels"
-      />
+      {enabled && <RetentionSettings workspace={workspace} />}
+    </div>
+  );
+}
+
+interface RetentionSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * RetentionSettings — workspace-level default retention window. Per-channel
+ * overrides live in the channel settings dialog and beat this default.
+ *
+ * UX: a "Retain forever" checkbox swaps the integer input in/out. Default
+ * suggestion is 90 days (matches the channels spec). Submitting normalizes:
+ * checkbox checked → channel_retention_days=null, set=true; checkbox
+ * unchecked → channel_retention_days=N, set=true.
+ *
+ * The "transition to finite" warning is rendered when the user toggles the
+ * checkbox off and types a value smaller than the message age that would
+ * actually exist — but since we don't have that data on the client, we
+ * just show the warning unconditionally when going forever→finite.
+ */
+function RetentionSettings({ workspace }: RetentionSettingsProps) {
+  const qc = useQueryClient();
+  const initialForever = workspace.channel_retention_days == null;
+  const initialDays = workspace.channel_retention_days ?? 90;
+  const [forever, setForever] = useState(initialForever);
+  const [days, setDays] = useState<number>(initialDays);
+  const [saving, setSaving] = useState(false);
+
+  // Reconcile when the cached workspace updates (e.g. from another tab).
+  useEffect(() => {
+    setForever(workspace.channel_retention_days == null);
+    if (workspace.channel_retention_days != null) {
+      setDays(workspace.channel_retention_days);
+    }
+  }, [workspace.channel_retention_days]);
+
+  const dirty =
+    forever !== initialForever ||
+    (!forever && days !== initialDays);
+
+  // Warn when the user is about to introduce retention against an existing
+  // workspace that previously had none — old messages will start getting
+  // hidden by the next sweep.
+  const transitioningToFinite = !forever && initialForever;
+
+  // Validation: days must be 1..3650 (10 years) per the channels spec.
+  const daysValid = forever || (Number.isInteger(days) && days >= 1 && days <= 3650);
+
+  const handleSave = async () => {
+    if (!dirty || !daysValid || saving) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        channel_retention_days: forever ? null : days,
+        channel_retention_days_set: true,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success("Retention setting saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save retention setting");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <div className="text-sm font-medium">Message retention</div>
+      <p className="text-xs text-muted-foreground">
+        Messages older than this are hidden from view. Default: 90 days.
+        Per-channel overrides take precedence.
+      </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={forever}
+          onChange={(e) => setForever(e.target.checked)}
+          disabled={saving}
+        />
+        Retain messages forever
+      </label>
+      {!forever && (
+        <div className="flex items-center gap-2">
+          <Input
+            id="channel-retention-days"
+            type="number"
+            min={1}
+            max={3650}
+            placeholder="90"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            disabled={saving}
+            className="w-24"
+          />
+          <span className="text-xs text-muted-foreground">days</span>
+        </div>
+      )}
+      {!daysValid && (
+        <p className="text-xs text-destructive" role="alert">
+          Retention must be between 1 and 3650 days.
+        </p>
+      )}
+      {transitioningToFinite && (
+        <p className="text-xs text-muted-foreground">
+          Heads up: existing messages older than {Number.isFinite(days) ? days : 0} days will be hidden after the next cleanup run.
+        </p>
+      )}
+      <div>
+        <Button size="sm" onClick={handleSave} disabled={!dirty || !daysValid || saving}>
+          <Save className="h-3 w-3" />
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
     </div>
   );
 }

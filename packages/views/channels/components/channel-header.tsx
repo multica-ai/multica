@@ -9,7 +9,7 @@ import {
   memberListOptions,
 } from "@multica/core/workspace/queries";
 import { channelMembersOptions, useArchiveChannel } from "@multica/core/channels";
-import { Hash, Lock, MessageCircle, Users, Bot, MoreHorizontal, Archive } from "lucide-react";
+import { Hash, Lock, MessageCircle, Users, Bot, MoreHorizontal, Archive, Settings } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import {
@@ -30,9 +30,10 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useNavigation } from "../../navigation";
-import { useRequiredWorkspaceSlug, paths } from "@multica/core/paths";
+import { useRequiredWorkspaceSlug, paths, useCurrentWorkspace } from "@multica/core/paths";
 import type { Channel } from "@multica/core/types";
 import { MembersPanel } from "./members-panel";
+import { ChannelSettingsDialog } from "./channel-settings-dialog";
 
 interface ChannelHeaderProps {
   channel: Channel;
@@ -67,8 +68,10 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const { data: workspaceAgents = [] } = useQuery(agentListOptions(wsId));
   const archiveMut = useArchiveChannel();
+  const workspace = useCurrentWorkspace();
   const [membersOpen, setMembersOpen] = useState(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const dmInfo = useMemo(() => {
     if (channel.kind !== "dm") return null;
@@ -165,6 +168,10 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
               }
             />
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                <Settings className="mr-2 h-4 w-4" />
+                Channel settings
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setArchiveConfirmOpen(true)}
                 className="text-destructive focus:text-destructive"
@@ -182,6 +189,13 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
         open={membersOpen}
         onOpenChange={setMembersOpen}
         enabled={enabled}
+      />
+
+      <ChannelSettingsDialog
+        channel={channel}
+        workspaceRetentionDays={workspace?.channel_retention_days ?? null}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
       />
 
       <AlertDialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>

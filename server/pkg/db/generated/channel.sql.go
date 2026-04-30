@@ -394,6 +394,53 @@ func (q *Queries) ListChannelsForActor(ctx context.Context, arg ListChannelsForA
 	return items, nil
 }
 
+const listChannelsWithRetention = `-- name: ListChannelsWithRetention :many
+SELECT
+    c.id            AS channel_id,
+    c.workspace_id,
+    COALESCE(c.retention_days, w.channel_retention_days)::int4 AS effective_days
+FROM channel c
+JOIN workspace w ON w.id = c.workspace_id
+WHERE c.archived_at IS NULL
+  AND COALESCE(c.retention_days, w.channel_retention_days) IS NOT NULL
+  AND COALESCE(c.retention_days, w.channel_retention_days) > 0
+ORDER BY c.workspace_id, c.id
+`
+
+type ListChannelsWithRetentionRow struct {
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	EffectiveDays int32       `json:"effective_days"`
+}
+
+// Phase 2 retention sweep — returns every non-archived channel whose
+// effective retention is finite (i.e. NOT "retain forever"). Effective
+// retention is COALESCE(channel.retention_days, workspace.channel_retention_days);
+// a NULL at both levels means "retain forever" and the row is excluded.
+//
+// The Go caller iterates and applies SoftDeleteOldChannelMessages per row;
+// doing the date math here would force interval-arithmetic SQL inside the
+// batched delete and complicate the test fixtures.
+func (q *Queries) ListChannelsWithRetention(ctx context.Context) ([]ListChannelsWithRetentionRow, error) {
+	rows, err := q.db.Query(ctx, listChannelsWithRetention)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelsWithRetentionRow{}
+	for rows.Next() {
+		var i ListChannelsWithRetentionRow
+		if err := rows.Scan(&i.ChannelID, &i.WorkspaceID, &i.EffectiveDays); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markChannelRead = `-- name: MarkChannelRead :exec
 UPDATE channel_membership
 SET last_read_message_id = $4, last_read_at = now()

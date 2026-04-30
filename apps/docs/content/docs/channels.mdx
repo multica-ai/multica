@@ -79,14 +79,36 @@ Multica tracks read-state per member, per channel — the membership row carries
 
 ## Retention
 
-Workspaces have a default retention window (90 days out of the box) configurable in Settings. Per-channel overrides are also supported — useful for ops channels where you want to keep history longer, or for ephemeral spaces where you don't.
+Channels supports a two-tier retention system: a **workspace-level default**, plus a **per-channel override** that takes precedence. Messages older than the effective retention are soft-deleted by a daily background sweep — they don't appear in the UI but the rows are preserved for a short window in case retention is reverted. Hard-purge tooling lands in a later phase.
 
-Messages older than the effective retention are soft-deleted by a daily background sweep — they don't appear in the UI but the rows are preserved for a short window in case retention is reverted. Hard-purge tooling lands in a later phase.
+### Workspace default
+
+Workspace admins set this from **Settings → Workspace → Channels**:
+
+- **"Retain messages forever"** (default for new workspaces) — no sweep runs.
+- **A retention period in days** (1–3650) — sweep soft-deletes any message older than `now − N days`. The recommended value is 90.
+
+Switching from "forever" to a finite value will start hiding existing older messages on the next nightly run; the settings UI surfaces a warning before save.
+
+### Per-channel override
+
+Channel admins set this from **the `…` menu in the channel header → Channel settings → Message retention**:
+
+- **"Use workspace default"** — clears the override; the channel inherits the workspace value.
+- **"Custom for this channel"** — a positive integer that applies only to this channel and beats the workspace default.
+
+This is useful for ops channels where you want to keep history longer than the default, or for ephemeral spaces where you want to keep less.
+
+### How the sweep runs
+
+A background goroutine fires once per UTC day at the hour configured via `CHANNEL_RETENTION_RUN_HOUR` (default `3`, i.e. 03:00 UTC). For each non-archived channel with a finite effective retention, it soft-deletes messages older than the cutoff in batches of 1000 — bounded so a single channel can't monopolize one run.
+
+Idempotent: re-running the sweep with no new messages older than the cutoff is a no-op. Archived channels are skipped entirely (their messages stay until you restore the channel or hard-purge it later).
 
 <Callout type="info">
-  **Retention is set to "retain forever" by default at the workspace level
-  until you change it.** The 90-day default is the *recommended* value, but
-  no messages are deleted automatically until an admin opts in.
+  **Retention is set to "retain forever" by default until an admin changes
+  it.** The 90-day suggestion is just that — no messages are deleted
+  automatically until an admin opts in.
 </Callout>
 
 ## Archiving a channel

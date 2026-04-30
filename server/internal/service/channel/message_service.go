@@ -120,3 +120,60 @@ func (s *MessageService) SoftDeleteOldMessages(ctx context.Context, channelID pg
 		Limit:     batchSize,
 	})
 }
+
+// RetentionSweepStats reports per-run aggregate counts. The cron loop logs
+// these so operators can see "did anything happen?" at a glance.
+type RetentionSweepStats struct {
+	ChannelsScanned int
+	MessagesDeleted int64
+}
+
+// RunRetentionSweep performs the daily retention pass: iterate every
+// non-archived channel whose effective retention is finite, soft-delete
+// messages older than the cutoff in batches of `batchSize`. Idempotent —
+// already-deleted rows are filtered by the underlying query's WHERE.
+//
+// `now` is injectable so tests can pin a deterministic cutoff. Production
+// callers pass time.Now().UTC().
+//
+// Failure mode: if a single channel's batched delete errors, we log and
+// continue — one bad workspace shouldn't stall the rest of the sweep.
+// The error is captured in stats so callers can decide whether to alert.
+func (s *MessageService) RunRetentionSweep(ctx context.Context, now time.Time, batchSize int32) (RetentionSweepStats, error) {
+	candidates, err := s.Queries.ListChannelsWithRetention(ctx)
+	if err != nil {
+		return RetentionSweepStats{}, fmt.Errorf("retention sweep: list candidates: %w", err)
+	}
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+
+	var stats RetentionSweepStats
+	for _, c := range candidates {
+		if c.EffectiveDays <= 0 {
+			// Defensive: the SQL filter excludes <=0, but a future schema
+			// change to allow 0 ("immediate") shouldn't accidentally wipe
+			// a workspace mid-deploy. Skip rather than interpret.
+			continue
+		}
+		stats.ChannelsScanned++
+		cutoff := now.Add(-time.Duration(c.EffectiveDays) * 24 * time.Hour)
+
+		// Drain the channel in batches. We cap the inner loop at 100 rounds
+		// (= 100 × batchSize messages) per channel per run so a single
+		// pathological channel can't monopolize one sweep — rare, but
+		// retention can be flipped from "forever" to "30 days" on a
+		// chatty long-lived channel and produce a huge candidate set.
+		for round := 0; round < 100; round++ {
+			n, err := s.SoftDeleteOldMessages(ctx, c.ChannelID, cutoff, batchSize)
+			if err != nil {
+				return stats, fmt.Errorf("retention sweep: channel %s: %w", uuidString(c.ChannelID), err)
+			}
+			stats.MessagesDeleted += n
+			if n < int64(batchSize) {
+				break
+			}
+		}
+	}
+	return stats, nil
+}

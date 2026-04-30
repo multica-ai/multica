@@ -103,3 +103,23 @@ WHERE channel_id = $1 AND member_type = $2 AND member_id = $3;
 UPDATE channel_membership
 SET notification_level = $4
 WHERE channel_id = $1 AND member_type = $2 AND member_id = $3;
+
+-- name: ListChannelsWithRetention :many
+-- Phase 2 retention sweep — returns every non-archived channel whose
+-- effective retention is finite (i.e. NOT "retain forever"). Effective
+-- retention is COALESCE(channel.retention_days, workspace.channel_retention_days);
+-- a NULL at both levels means "retain forever" and the row is excluded.
+--
+-- The Go caller iterates and applies SoftDeleteOldChannelMessages per row;
+-- doing the date math here would force interval-arithmetic SQL inside the
+-- batched delete and complicate the test fixtures.
+SELECT
+    c.id            AS channel_id,
+    c.workspace_id,
+    COALESCE(c.retention_days, w.channel_retention_days)::int4 AS effective_days
+FROM channel c
+JOIN workspace w ON w.id = c.workspace_id
+WHERE c.archived_at IS NULL
+  AND COALESCE(c.retention_days, w.channel_retention_days) IS NOT NULL
+  AND COALESCE(c.retention_days, w.channel_retention_days) > 0
+ORDER BY c.workspace_id, c.id;
