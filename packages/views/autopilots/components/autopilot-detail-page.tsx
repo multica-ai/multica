@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { CheckCircle2, Clock, Copy, Loader2, Pencil, Play, Plus, Trash2, XCircle, Zap } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -48,6 +48,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { buildAutopilotDuplicatePreset } from "./autopilot-duplicate";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -286,6 +287,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -337,6 +339,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   }
 
   const { autopilot, triggers } = data;
+  const duplicatePreset = buildAutopilotDuplicatePreset(autopilot, triggers);
 
   const handleRunNow = async () => {
     try {
@@ -392,6 +395,10 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setDuplicateDialogOpen(true)}>
+            <Copy className="h-3.5 w-3.5 mr-1" />
+            Duplicate
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             Edit
@@ -506,6 +513,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
           }}
           triggers={triggers}
+        />
+      )}
+      {duplicateDialogOpen && (
+        <AutopilotDialog
+          mode="create"
+          open={duplicateDialogOpen}
+          onOpenChange={setDuplicateDialogOpen}
+          initial={duplicatePreset.initial}
+          initialTriggerConfig={duplicatePreset.initialTriggerConfig}
+          intent="duplicate"
         />
       )}
       <AlertDialog

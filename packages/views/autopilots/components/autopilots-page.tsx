@@ -1,21 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { autopilotListOptions } from "@multica/core/autopilots/queries";
+import { AlertCircle, BarChart3, Bug, Copy, FileSearch, GitPullRequest, Newspaper, Pause, Play, Plus, Shield, Zap } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { autopilotDetailOptions, autopilotListOptions } from "@multica/core/autopilots/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { toast } from "sonner";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
-import { AutopilotDialog } from "./autopilot-dialog";
+import { AutopilotDialog, type AutopilotInitial } from "./autopilot-dialog";
+import { buildAutopilotDuplicatePreset } from "./autopilot-duplicate";
 import type { Autopilot } from "@multica/core/types";
-import type { TriggerFrequency } from "./trigger-config";
+import type { TriggerConfig, TriggerFrequency } from "./trigger-config";
 
 interface AutopilotTemplate {
   title: string;
@@ -123,7 +125,15 @@ const EXECUTION_MODE_LABELS: Record<string, string> = {
   run_only: "Run Only",
 };
 
-function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
+function AutopilotRow({
+  autopilot,
+  duplicating,
+  onDuplicate,
+}: {
+  autopilot: Autopilot;
+  duplicating: boolean;
+  onDuplicate: (autopilot: Autopilot) => void;
+}) {
   const { getActorName } = useActorName();
   const wsPaths = useWorkspacePaths();
   const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
@@ -162,19 +172,62 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
       <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
       </span>
+
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        aria-label={`Duplicate ${autopilot.title}`}
+        title="Duplicate"
+        disabled={duplicating}
+        className="shrink-0 opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100"
+        onClick={() => onDuplicate(autopilot)}
+      >
+        <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+      </Button>
     </div>
   );
 }
 
 export function AutopilotsPage() {
   const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const { data: autopilots = [], isLoading } = useQuery(autopilotListOptions(wsId));
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<AutopilotTemplate | null>(null);
+  const [createIntent, setCreateIntent] = useState<"create" | "duplicate">("create");
+  const [createInitial, setCreateInitial] = useState<Partial<AutopilotInitial> | undefined>();
+  const [createTriggerConfig, setCreateTriggerConfig] = useState<Partial<TriggerConfig> | undefined>();
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   const openCreate = (template?: AutopilotTemplate) => {
-    setSelectedTemplate(template ?? null);
+    setCreateIntent("create");
+    setCreateInitial(
+      template
+        ? { title: template.title, description: template.prompt }
+        : undefined,
+    );
+    setCreateTriggerConfig(
+      template
+        ? { frequency: template.frequency, time: template.time }
+        : undefined,
+    );
     setCreateOpen(true);
+  };
+
+  const handleDuplicate = async (autopilot: Autopilot) => {
+    setDuplicatingId(autopilot.id);
+    try {
+      const detail = await qc.fetchQuery(autopilotDetailOptions(wsId, autopilot.id));
+      const preset = buildAutopilotDuplicatePreset(detail.autopilot, detail.triggers);
+      setCreateIntent("duplicate");
+      setCreateInitial(preset.initial);
+      setCreateTriggerConfig(preset.initialTriggerConfig);
+      setCreateOpen(true);
+    } catch {
+      toast.error("Failed to load autopilot for copying");
+    } finally {
+      setDuplicatingId(null);
+    }
   };
 
   return (
@@ -253,9 +306,15 @@ export function AutopilotsPage() {
               <span className="w-24 text-center shrink-0">Mode</span>
               <span className="w-20 text-center shrink-0">Status</span>
               <span className="w-20 text-right shrink-0">Last run</span>
+              <span className="w-6 shrink-0" />
             </div>
             {autopilots.map((autopilot) => (
-              <AutopilotRow key={autopilot.id} autopilot={autopilot} />
+              <AutopilotRow
+                key={autopilot.id}
+                autopilot={autopilot}
+                duplicating={duplicatingId === autopilot.id}
+                onDuplicate={handleDuplicate}
+              />
             ))}
           </>
         )}
@@ -266,16 +325,9 @@ export function AutopilotsPage() {
           mode="create"
           open={createOpen}
           onOpenChange={setCreateOpen}
-          initial={
-            selectedTemplate
-              ? { title: selectedTemplate.title, description: selectedTemplate.prompt }
-              : undefined
-          }
-          initialTriggerConfig={
-            selectedTemplate
-              ? { frequency: selectedTemplate.frequency, time: selectedTemplate.time }
-              : undefined
-          }
+          initial={createInitial}
+          initialTriggerConfig={createTriggerConfig}
+          intent={createIntent}
         />
       )}
     </div>
