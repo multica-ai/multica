@@ -34,7 +34,6 @@ export default function OnboardingPage() {
     ...workspaceListOptions(),
     enabled: !!user,
   });
-  const hasWorkspaces = workspaces.length > 0;
 
   useEffect(() => {
     if (isLoading || !user) {
@@ -42,15 +41,19 @@ export default function OnboardingPage() {
       return;
     }
     if (!workspacesFetched) return;
-    // Bounce out if onboarding doesn't apply: either already onboarded, or
-    // the user already has a workspace (e.g. arrived via invitation) — we
-    // never trap an in-workspace user on the onboarding screen.
-    if (hasOnboarded || hasWorkspaces) {
+    // Bounce out only when onboarding genuinely doesn't apply: the user is
+    // already onboarded. We deliberately don't bounce on `workspaces.length`
+    // here — Step 3 of the flow creates a workspace mid-onboarding, and a
+    // hasWorkspaces bounce here would kick the user out before Steps 4–5
+    // (runtime / agent / first issue) can run. The new entry-point
+    // judgment in callback / login handles "where should this user go on
+    // login" so OnboardingPage no longer needs to second-guess it.
+    if (hasOnboarded) {
       router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, hasWorkspaces, router]);
+  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
 
-  if (isLoading || !user || hasOnboarded || hasWorkspaces) return null;
+  if (isLoading || !user || hasOnboarded) return null;
 
   // Layout: page owns its own scroll (root layout sets `body {
   // overflow: hidden }` for the app-shell convention). OnboardingFlow
