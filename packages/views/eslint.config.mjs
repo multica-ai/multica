@@ -33,6 +33,10 @@ const TRANSLATED_FILES = [
   "workspace/create-workspace-form.tsx",
   "workspace/new-workspace-page.tsx",
   "workspace/no-access-page.tsx",
+  "projects/components/projects-page.tsx",
+  "projects/components/project-detail.tsx",
+  "projects/components/project-picker.tsx",
+  "projects/components/project-chip.tsx",
 ];
 
 export default [

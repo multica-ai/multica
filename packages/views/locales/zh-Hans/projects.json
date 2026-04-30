@@ -1,0 +1,77 @@
+{
+  "page": {
+    "title": "project",
+    "new_project": "新建 project",
+    "empty": "还没有 project",
+    "create_first": "创建第一个 project"
+  },
+  "table": {
+    "name": "名称",
+    "priority": "优先级",
+    "status": "状态",
+    "progress": "进度",
+    "lead": "负责人",
+    "created": "创建时间"
+  },
+  "status": {
+    "planned": "计划中",
+    "in_progress": "进行中",
+    "paused": "已暂停",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "priority": {
+    "urgent": "紧急",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "无优先级"
+  },
+  "lead": {
+    "no_lead": "无负责人",
+    "assign_placeholder": "指派负责人...",
+    "members_group": "成员",
+    "agents_group": "智能体",
+    "no_results": "未找到结果"
+  },
+  "relative_date": {
+    "today": "今天",
+    "one_day_ago": "1 天前",
+    "days_ago": "{{count}} 天前",
+    "months_ago": "{{count}} 个月前"
+  },
+  "detail": {
+    "not_found": "未找到该 project",
+    "breadcrumb_fallback": "project",
+    "title_placeholder": "project 标题",
+    "icon_tooltip": "更换图标",
+    "pin_tooltip": "固定到侧边栏",
+    "unpin_tooltip": "从侧边栏取消固定",
+    "sidebar_tooltip": "切换侧边栏",
+    "copy_link": "复制链接",
+    "delete_action": "删除 project",
+    "section_properties": "属性",
+    "section_progress": "进度",
+    "section_description": "描述",
+    "description_placeholder": "添加描述...",
+    "empty_issues_title": "还没有关联的 issue",
+    "empty_issues_hint": "在 issue 详情页将 issue 关联到这个 project。",
+    "toast_link_copied": "已复制链接",
+    "toast_project_deleted": "已删除 project",
+    "toast_move_issue_failed": "移动 issue 失败"
+  },
+  "delete_dialog": {
+    "title": "删除 project",
+    "description": "将删除这个 project。issue 不会被删除，只会从 project 中解除关联。",
+    "confirm": "删除",
+    "cancel": "取消"
+  },
+  "picker": {
+    "no_project": "无 project",
+    "remove": "从 project 移除",
+    "empty": "还没有 project"
+  },
+  "chip": {
+    "fallback_label": "project"
+  }
+}
