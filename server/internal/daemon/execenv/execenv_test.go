@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -117,6 +118,97 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	}
 	if !strings.Contains(string(skillContent), "Be concise.") {
 		t.Fatal("SKILL.md missing content")
+	}
+}
+
+func TestPrepareWithProjectResources(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Agent UX 2026",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-pr",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	// resources.json should exist and decode back to what we wrote.
+	resourcesPath := filepath.Join(env.WorkDir, ".multica", "project", "resources.json")
+	raw, err := os.ReadFile(resourcesPath)
+	if err != nil {
+		t.Fatalf("failed to read resources.json: %v", err)
+	}
+	var got struct {
+		ProjectID    string `json:"project_id"`
+		ProjectTitle string `json:"project_title"`
+		Resources    []struct {
+			ID           string          `json:"id"`
+			ResourceType string          `json:"resource_type"`
+			ResourceRef  json.RawMessage `json:"resource_ref"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
+	}
+	if got.ProjectID != taskCtx.ProjectID {
+		t.Errorf("resources.json project_id = %q, want %q", got.ProjectID, taskCtx.ProjectID)
+	}
+	if got.ProjectTitle != taskCtx.ProjectTitle {
+		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	}
+	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
+		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
+	}
+
+	// CLAUDE.md should mention the project context block.
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Project Context",
+		"Agent UX 2026",
+		"GitHub repo",
+		"https://github.com/multica-ai/multica",
+		"default branch: `main`",
+		".multica/project/resources.json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
+func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+		t.Fatalf("writeProjectResources: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no resources.json to be written when project context is empty")
 	}
 }
 

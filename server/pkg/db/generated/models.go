@@ -365,6 +365,18 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type ProjectResource struct {
+	ID           pgtype.UUID        `json:"id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ResourceType string             `json:"resource_type"`
+	ResourceRef  []byte             `json:"resource_ref"`
+	Label        pgtype.Text        `json:"label"`
+	Position     int32              `json:"position"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

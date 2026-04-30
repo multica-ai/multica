@@ -882,6 +882,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+			// Attach project context (id, title, resources) when the issue
+			// belongs to a project. Resource fetch failures degrade gracefully
+			// — the agent simply runs without project context, never blocked.
+			if issue.ProjectID.Valid {
+				resp.ProjectID = uuidToString(issue.ProjectID)
+				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
+					resp.ProjectTitle = proj.Title
+				}
+				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
+					out := make([]ProjectResourceData, 0, len(rows))
+					for _, row := range rows {
+						label := ""
+						if row.Label.Valid {
+							label = row.Label.String
+						}
+						ref := json.RawMessage(row.ResourceRef)
+						if len(ref) == 0 {
+							ref = json.RawMessage("{}")
+						}
+						out = append(out, ProjectResourceData{
+							ID:           uuidToString(row.ID),
+							ResourceType: row.ResourceType,
+							ResourceRef:  ref,
+							Label:        label,
+						})
+					}
+					resp.ProjectResources = out
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

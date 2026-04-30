@@ -1168,6 +1168,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:       instructions,
 		AgentSkills:             convertSkillsForEnv(skills),
 		Repos:                   convertReposForEnv(task.Repos),
+		ProjectID:               task.ProjectID,
+		ProjectTitle:            task.ProjectTitle,
+		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1684,6 +1687,22 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+	}
+	return result
+}
+
+func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {
+	if len(resources) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectResourceForEnv, len(resources))
+	for i, r := range resources {
+		result[i] = execenv.ProjectResourceForEnv{
+			ID:           r.ID,
+			ResourceType: r.ResourceType,
+			ResourceRef:  r.ResourceRef,
+			Label:        r.Label,
+		}
 	}
 	return result
 }

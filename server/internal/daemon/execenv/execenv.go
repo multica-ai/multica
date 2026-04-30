@@ -18,6 +18,18 @@ type RepoContextForEnv struct {
 	Description string // human-readable description
 }
 
+// ProjectResourceForEnv describes a single resource attached to the issue's
+// project. The resource_ref payload is type-specific JSON; the agent reads
+// resources.json on disk for the full structure. This struct only carries
+// fields the meta-skill template needs to render a human-readable summary
+// (URL for github_repo, generic label otherwise).
+type ProjectResourceForEnv struct {
+	ID           string          // server-assigned UUID
+	ResourceType string          // e.g. "github_repo"
+	ResourceRef  json.RawMessage // raw JSONB payload from the API
+	Label        string          // optional user-supplied label
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
@@ -37,8 +49,11 @@ type TaskContextForEnv struct {
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
-	Repos                   []RepoContextForEnv // workspace repos available for checkout
-	ChatSessionID           string              // non-empty for chat tasks
+	Repos                   []RepoContextForEnv     // workspace repos available for checkout
+	ProjectID               string                  // issue's project, when present
+	ProjectTitle            string                  // human-readable project title
+	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string              // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
+import { ChevronRight, FolderGit, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCreateProject } from "@multica/core/projects/mutations";
 import { useProjectDraftStore } from "@multica/core/projects";
+import { api } from "@multica/core/api";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
@@ -78,6 +79,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // Repos selected to attach as github_repo resources after the project is
+  // created. Stored as URLs (not full ProjectResource rows) — they're not
+  // persisted until handleSubmit fires the createProjectResource calls.
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
+  const [customRepoUrl, setCustomRepoUrl] = useState("");
+  const workspaceRepos = workspace?.repos ?? [];
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -115,6 +123,29 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_type: leadType,
         lead_id: leadId,
       });
+      // Attach selected repos. We don't roll back the project on failure here —
+      // the user can retry attaching from the project detail page. A failed
+      // resource attach is surfaced as a toast, not a fatal error.
+      if (selectedRepos.length > 0) {
+        const failures: string[] = [];
+        await Promise.all(
+          selectedRepos.map(async (url) => {
+            try {
+              await api.createProjectResource(project.id, {
+                resource_type: "github_repo",
+                resource_ref: { url },
+              });
+            } catch {
+              failures.push(url);
+            }
+          }),
+        );
+        if (failures.length > 0) {
+          toast.error(
+            `Project created but failed to attach ${failures.length} repo${failures.length === 1 ? "" : "s"}.`,
+          );
+        }
+      }
       clearDraft();
       onClose();
       toast.success("Project created");
@@ -124,6 +155,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleRepo = (url: string) => {
+    setSelectedRepos((prev) =>
+      prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url],
+    );
+  };
+
+  const addCustomRepo = () => {
+    const url = customRepoUrl.trim();
+    if (!url) return;
+    setSelectedRepos((prev) => (prev.includes(url) ? prev : [...prev, url]));
+    setCustomRepoUrl("");
   };
 
   return (
@@ -351,6 +395,105 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
               </div>
+            </PopoverContent>
+          </Popover>
+
+          <Popover open={repoPopoverOpen} onOpenChange={setRepoPopoverOpen}>
+            <PopoverTrigger
+              render={
+                <PillButton>
+                  <FolderGit className="size-3" />
+                  <span>
+                    {selectedRepos.length === 0
+                      ? "Repos"
+                      : `${selectedRepos.length} repo${selectedRepos.length === 1 ? "" : "s"}`}
+                  </span>
+                </PillButton>
+              }
+            />
+            <PopoverContent align="start" className="w-72 p-2 space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">
+                Attach GitHub repos to this project
+              </div>
+              {workspaceRepos.length > 0 ? (
+                <div className="space-y-1">
+                  {workspaceRepos.map((repo) => {
+                    const checked = selectedRepos.includes(repo.url);
+                    return (
+                      <button
+                        type="button"
+                        key={repo.url}
+                        onClick={() => toggleRepo(repo.url)}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                          checked && "bg-accent",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          readOnly
+                          className="size-3.5"
+                        />
+                        <FolderGit className="size-3.5" />
+                        <span className="truncate flex-1 text-left">{repo.url}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No workspace-level repos yet. Paste a URL below to attach one
+                  ad-hoc.
+                </p>
+              )}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addCustomRepo();
+                }}
+                className="flex items-center gap-1.5 pt-1 border-t"
+              >
+                <input
+                  type="url"
+                  value={customRepoUrl}
+                  onChange={(e) => setCustomRepoUrl(e.target.value)}
+                  placeholder="https://github.com/owner/repo"
+                  className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  disabled={!customRepoUrl.trim()}
+                >
+                  Add
+                </Button>
+              </form>
+              {selectedRepos.length > 0 && (
+                <div className="space-y-1 pt-1 border-t">
+                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Selected
+                  </div>
+                  {selectedRepos.map((url) => (
+                    <div
+                      key={url}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <FolderGit className="size-3 text-muted-foreground" />
+                      <span className="truncate flex-1">{url}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleRepo(url)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </PopoverContent>
           </Popover>
         </div>

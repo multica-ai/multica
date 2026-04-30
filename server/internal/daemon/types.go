@@ -22,6 +22,15 @@ type RepoData struct {
 	Description string `json:"description"`
 }
 
+// ProjectResourceData mirrors handler.ProjectResourceData — a single project
+// resource as delivered to the daemon. resource_ref is type-specific JSON.
+type ProjectResourceData struct {
+	ID           string          `json:"id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        string          `json:"label,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -31,7 +40,10 @@ type Task struct {
 	IssueID                 string          `json:"issue_id"`
 	WorkspaceID             string          `json:"workspace_id"`
 	Agent                   *AgentData      `json:"agent,omitempty"`
-	Repos                   []RepoData      `json:"repos,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
