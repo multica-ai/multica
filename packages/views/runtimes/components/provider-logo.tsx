@@ -165,6 +165,22 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Devin (Cognition AI) — minimalist "D" mark on a rounded square in
+// Devin's usual ink-blue. We don't ship Cognition's wordmark; this is
+// a tasteful neutral stand-in matching the visual weight of the other
+// provider logos until an official asset is published.
+function DevinLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0F172A" />
+      <path
+        d="M7.25 6.5h4.4c3.45 0 5.85 2.4 5.85 5.5s-2.4 5.5-5.85 5.5h-4.4V6.5Zm2.65 2.5v6h1.7c1.95 0 3.2-1.3 3.2-3s-1.25-3-3.2-3h-1.7Z"
+        fill="#F8FAFC"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -193,6 +209,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "devin":
+      return <DevinLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

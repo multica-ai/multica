@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 11 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **11 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -17,6 +17,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Codex** | OpenAI | ⚠️ Code exists but unreachable | ❌ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
+| **Devin** | Cognition AI | ✅ (via ACP `session/load`) | ❌ (managed via Devin's own `devin mcp`) | `.devin/skills/` | Driven by Devin's own config (daemon-side selection unsupported) |
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
 | **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` (fallback) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | Dynamic discovery |
@@ -42,6 +43,10 @@ From GitHub. Model routing goes through your GitHub account entitlement — the 
 ### Cursor
 
 From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else.
+
+### Devin
+
+From Cognition AI. Uses ACP over stdio via `devin acp` (same protocol family as Hermes / Kimi / Kiro). Session resumption works through ACP `session/load`. Skills are auto-discovered from `.devin/skills/`, mirroring Devin for Terminal's native convention. **Model selection happens entirely on Devin's side** — Devin's ACP server doesn't implement `session/set_model`, so the daemon-side model dropdown is hidden; configure your model with `devin --model` or `~/.config/devin/config.json`. Tool auto-approval works through ACP's `session/request_permission`, which the daemon answers automatically per task.
 
 ### Gemini
 
@@ -77,7 +82,7 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 | Status | Tools | Meaning |
 |---|---|---|
-| ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
+| ✅ Really works | Claude Code, Copilot, Devin, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
 | ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
 | ❌ None | Gemini | The CLI has no resume mechanism |
 
@@ -85,7 +90,7 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: only Claude Code actually reads it
 
-**Of the 11 tools, only Claude Code actually consumes `mcp_config`**. The other 10 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, only Claude Code actually consumes `mcp_config`**. The other 11 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code, your MCP servers have **no effect** on that agent. MCP integration currently covers Claude Code only.
@@ -101,6 +106,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Codex | `$CODEX_HOME/skills/` | ✅ Native |
 | Copilot | `.github/skills/` | ✅ Native |
 | Cursor | `.cursor/skills/` | ✅ Native |
+| Devin | `.devin/skills/` | ✅ Native |
 | Kimi | `.kimi/skills/` | ✅ Native |
 | Kiro CLI | `.kiro/skills/` | ✅ Native |
 | OpenCode | `.config/opencode/skills/` | ✅ Native |
