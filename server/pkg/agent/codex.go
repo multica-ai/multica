@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -155,19 +156,19 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		threadResult, err := c.request(runCtx, "thread/start", map[string]any{
-			"model":                    nilIfEmpty(opts.Model),
-			"modelProvider":            nil,
-			"profile":                  nil,
-			"cwd":                      opts.Cwd,
-			"approvalPolicy":           nil,
-			"sandbox":                  "workspace-write",
-			"config":                   threadConfig,
-			"baseInstructions":         nil,
-			"developerInstructions":    nilIfEmpty(opts.SystemPrompt),
-			"compactPrompt":            nil,
-			"includeApplyPatchTool":    nil,
-			"experimentalRawEvents":    false,
-			"persistExtendedHistory":   true,
+			"model":                  nilIfEmpty(opts.Model),
+			"modelProvider":          nil,
+			"profile":                nil,
+			"cwd":                    opts.Cwd,
+			"approvalPolicy":         nil,
+			"sandbox":                "workspace-write",
+			"config":                 threadConfig,
+			"baseInstructions":       nil,
+			"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+			"compactPrompt":          nil,
+			"includeApplyPatchTool":  nil,
+			"experimentalRawEvents":  false,
+			"persistExtendedHistory": true,
 		})
 		if err != nil {
 			finalStatus = "failed"
@@ -274,14 +275,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg       Config
-	stdin     interface{ Write([]byte) (int, error) }
-	mu        sync.Mutex
-	nextID    int
-	pending   map[int]*pendingRPC
-	threadID  string
-	turnID    string
-	onMessage func(Message)
+	cfg        Config
+	stdin      interface{ Write([]byte) (int, error) }
+	mu         sync.Mutex
+	nextID     int
+	pending    map[int]*pendingRPC
+	threadID   string
+	turnID     string
+	onMessage  func(Message)
 	onTurnDone func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
@@ -876,14 +877,18 @@ func bytesContainsStr(b []byte, s string) bool {
 // ── MCP config loader ──
 
 // loadCodexMCPServers reads MCP server definitions from the Codex config.toml.
-// It checks CODEX_HOME from the provided env map first, then falls back to
-// ~/.codex/config.toml. Returns nil if no MCP servers are configured.
+// It checks CODEX_HOME from the provided env map first. If CODEX_HOME is not
+// set, it falls back to ~/.codex/config.toml. Returns nil if no MCP servers are
+// configured.
 func loadCodexMCPServers(env map[string]string) map[string]any {
 	configPath := ""
 	if codexHome := env["CODEX_HOME"]; codexHome != "" {
 		configPath = filepath.Join(codexHome, "config.toml")
+		if !fileExists(configPath) {
+			return nil
+		}
 	}
-	if configPath == "" || !fileExists(configPath) {
+	if configPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil
@@ -917,7 +922,8 @@ func parseMCPServersFromTOML(content string) map[string]any {
 	var currentServer string // e.g. "vercel"
 	var currentSub string    // e.g. "env" for [mcp_servers.vercel.env]
 
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
 		// Skip empty lines and comments.
@@ -955,6 +961,26 @@ func parseMCPServersFromTOML(content string) map[string]any {
 			continue
 		}
 
+		// TOML arrays can span multiple lines. Coalesce a multi-line array before
+		// parsing so common Codex config such as args = ["--stdio", ...] works.
+		if strings.Contains(trimmed, "=") {
+			_, val, _ := strings.Cut(trimmed, "=")
+			if strings.HasPrefix(strings.TrimSpace(val), "[") && !tomlArrayComplete(val) {
+				var b strings.Builder
+				b.WriteString(trimmed)
+				for i+1 < len(lines) {
+					i++
+					next := strings.TrimSpace(lines[i])
+					b.WriteByte('\n')
+					b.WriteString(next)
+					if tomlArrayComplete(b.String()) {
+						break
+					}
+				}
+				trimmed = b.String()
+			}
+		}
+
 		key, value, ok := parseTOMLKeyValue(trimmed)
 		if !ok {
 			continue
@@ -988,25 +1014,22 @@ func parseTOMLKeyValue(line string) (string, any, bool) {
 		return "", nil, false
 	}
 	key := strings.TrimSpace(line[:idx])
-	val := strings.TrimSpace(line[idx+1:])
+	val := strings.TrimSpace(stripTOMLComment(line[idx+1:]))
 
 	// String value.
-	if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") && len(val) >= 2 {
-		return key, val[1 : len(val)-1], true
+	if strings.HasPrefix(val, "\"") {
+		parsed, ok := parseTOMLString(val)
+		if !ok {
+			return "", nil, false
+		}
+		return key, parsed, true
 	}
 
 	// Array of strings.
-	if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-		inner := strings.TrimSpace(val[1 : len(val)-1])
-		if inner == "" {
-			return key, []any{}, true
-		}
-		var items []any
-		for _, item := range strings.Split(inner, ",") {
-			item = strings.TrimSpace(item)
-			if strings.HasPrefix(item, "\"") && strings.HasSuffix(item, "\"") && len(item) >= 2 {
-				items = append(items, item[1:len(item)-1])
-			}
+	if strings.HasPrefix(val, "[") {
+		items, ok := parseTOMLStringArray(val)
+		if !ok {
+			return "", nil, false
 		}
 		return key, items, true
 	}
@@ -1021,6 +1044,153 @@ func parseTOMLKeyValue(line string) (string, any, bool) {
 
 	// Pass through as string for other values.
 	return key, val, true
+}
+
+func parseTOMLString(val string) (string, bool) {
+	val = strings.TrimSpace(stripTOMLComment(val))
+	if !strings.HasPrefix(val, "\"") || !strings.HasSuffix(val, "\"") || len(val) < 2 {
+		return "", false
+	}
+	parsed, err := strconv.Unquote(val)
+	if err != nil {
+		return "", false
+	}
+	return parsed, true
+}
+
+func parseTOMLStringArray(val string) ([]any, bool) {
+	val = strings.TrimSpace(stripTOMLComment(val))
+	if !strings.HasPrefix(val, "[") || !strings.HasSuffix(val, "]") || !tomlArrayComplete(val) {
+		return nil, false
+	}
+	inner := strings.TrimSpace(val[1 : len(val)-1])
+	if inner == "" {
+		return []any{}, true
+	}
+
+	var items []any
+	for len(inner) > 0 {
+		inner = strings.TrimSpace(stripTOMLComment(inner))
+		if inner == "" {
+			break
+		}
+		if !strings.HasPrefix(inner, "\"") {
+			return nil, false
+		}
+
+		end := findTOMLStringEnd(inner)
+		if end < 0 {
+			return nil, false
+		}
+		item, ok := parseTOMLString(inner[:end+1])
+		if !ok {
+			return nil, false
+		}
+		items = append(items, item)
+
+		inner = strings.TrimSpace(inner[end+1:])
+		if inner == "" {
+			break
+		}
+		if !strings.HasPrefix(inner, ",") {
+			return nil, false
+		}
+		inner = strings.TrimSpace(inner[1:])
+	}
+
+	return items, true
+}
+
+func findTOMLStringEnd(s string) int {
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch s[i] {
+		case '\\':
+			escaped = true
+		case '"':
+			return i
+		}
+	}
+	return -1
+}
+
+func tomlArrayComplete(val string) bool {
+	inString := false
+	escaped := false
+	depth := 0
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stripTOMLComment(val string) string {
+	inString := false
+	escaped := false
+	var b strings.Builder
+	b.Grow(len(val))
+
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+		if inString {
+			b.WriteByte(ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+			b.WriteByte(ch)
+		case '#':
+			for i+1 < len(val) && val[i+1] != '\n' && val[i+1] != '\r' {
+				i++
+			}
+		case '\n', '\r':
+			b.WriteByte(ch)
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // fileExists returns true if the path exists and is a regular file.

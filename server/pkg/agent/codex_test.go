@@ -531,7 +531,7 @@ command = "/usr/local/bin/vercel-mcp"
 args = ["--stdio"]
 
 [mcp_servers.vercel.env]
-VERCEL_TOKEN = "tok_123"
+VERCEL_TOKEN="tok_123"
 
 [mcp_servers.github]
 command = "gh-mcp"
@@ -609,6 +609,66 @@ args = ["hello"]
 	}
 	if srv["command"] != "/bin/echo" {
 		t.Fatalf("unexpected command: %v", srv["command"])
+	}
+}
+
+func TestParseMCPServersFromTOMLMultilineArrayAndEscapes(t *testing.T) {
+	t.Parallel()
+
+	config := `[mcp_servers.fs]
+command = "C:\\Program Files\\mcp\\server.exe"
+args = [
+  "--stdio",
+  "--label=contains \"quotes\"",
+  "--path=C:\\tmp"
+]
+`
+
+	servers := parseMCPServersFromTOML(config)
+	fs, ok := servers["fs"].(map[string]any)
+	if !ok {
+		t.Fatal("expected fs server")
+	}
+	if fs["command"] != `C:\Program Files\mcp\server.exe` {
+		t.Fatalf("unexpected command: %v", fs["command"])
+	}
+	args, ok := fs["args"].([]any)
+	if !ok {
+		t.Fatalf("expected args array, got %T", fs["args"])
+	}
+	expected := []any{"--stdio", `--label=contains "quotes"`, `--path=C:\tmp`}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i := range expected {
+		if args[i] != expected[i] {
+			t.Fatalf("arg %d: expected %q, got %q", i, expected[i], args[i])
+		}
+	}
+}
+
+func TestParseMCPServersFromTOMLRejectsNonStringArrayElements(t *testing.T) {
+	t.Parallel()
+
+	servers := parseMCPServersFromTOML(`[mcp_servers.bad]
+command = "mcp"
+args = ["--port", 3000]
+`)
+	bad, ok := servers["bad"].(map[string]any)
+	if !ok {
+		t.Fatal("expected bad server")
+	}
+	if _, ok := bad["args"]; ok {
+		t.Fatalf("expected invalid args array to be skipped, got %v", bad["args"])
+	}
+}
+
+func TestLoadCodexMCPServersDoesNotFallbackWhenEnvConfigMissing(t *testing.T) {
+	t.Parallel()
+
+	servers := loadCodexMCPServers(map[string]string{"CODEX_HOME": filepath.Join(t.TempDir(), "missing")})
+	if servers != nil {
+		t.Fatalf("expected nil for missing explicit CODEX_HOME config, got %v", servers)
 	}
 }
 
