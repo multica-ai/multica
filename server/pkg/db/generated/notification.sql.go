@@ -18,7 +18,7 @@ SET status = $2,
     last_error = NULL,
     updated_at = now()
 WHERE id = $1 AND status = $3
-RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id
 `
 
 type ClaimNotificationDeliveryParams struct {
@@ -41,6 +41,8 @@ func (q *Queries) ClaimNotificationDelivery(ctx context.Context, arg ClaimNotifi
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -52,7 +54,7 @@ SET status = $2,
     sent_at = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id
 `
 
 type CompleteNotificationDeliveryParams struct {
@@ -81,6 +83,8 @@ func (q *Queries) CompleteNotificationDelivery(ctx context.Context, arg Complete
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -95,7 +99,7 @@ INSERT INTO notification_delivery (
     payload_snapshot,
     sent_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id
 `
 
 type CreateNotificationDeliveryParams struct {
@@ -130,6 +134,8 @@ func (q *Queries) CreateNotificationDelivery(ctx context.Context, arg CreateNoti
 		&i.SentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -198,6 +204,63 @@ func (q *Queries) CreateNotificationEvent(ctx context.Context, arg CreateNotific
 		&i.Link,
 		&i.Details,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createTargetedNotificationDelivery = `-- name: CreateTargetedNotificationDelivery :one
+INSERT INTO notification_delivery (
+    notification_event_id,
+    channel,
+    target_type,
+    target_id,
+    status,
+    attempt_count,
+    last_error,
+    payload_snapshot,
+    sent_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id
+`
+
+type CreateTargetedNotificationDeliveryParams struct {
+	NotificationEventID pgtype.UUID        `json:"notification_event_id"`
+	Channel             string             `json:"channel"`
+	TargetType          string             `json:"target_type"`
+	TargetID            pgtype.UUID        `json:"target_id"`
+	Status              string             `json:"status"`
+	AttemptCount        int32              `json:"attempt_count"`
+	LastError           pgtype.Text        `json:"last_error"`
+	PayloadSnapshot     []byte             `json:"payload_snapshot"`
+	SentAt              pgtype.Timestamptz `json:"sent_at"`
+}
+
+func (q *Queries) CreateTargetedNotificationDelivery(ctx context.Context, arg CreateTargetedNotificationDeliveryParams) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, createTargetedNotificationDelivery,
+		arg.NotificationEventID,
+		arg.Channel,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Status,
+		arg.AttemptCount,
+		arg.LastError,
+		arg.PayloadSnapshot,
+		arg.SentAt,
+	)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.NotificationEventID,
+		&i.Channel,
+		&i.Status,
+		&i.AttemptCount,
+		&i.LastError,
+		&i.PayloadSnapshot,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -389,7 +452,7 @@ func (q *Queries) ListNotificationChannelPreferencesByUser(ctx context.Context, 
 }
 
 const listNotificationDeliveriesByEvent = `-- name: ListNotificationDeliveriesByEvent :many
-SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at FROM notification_delivery
+SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id FROM notification_delivery
 WHERE notification_event_id = $1
 ORDER BY created_at ASC
 `
@@ -414,6 +477,8 @@ func (q *Queries) ListNotificationDeliveriesByEvent(ctx context.Context, notific
 			&i.SentAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TargetType,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}
@@ -426,7 +491,7 @@ func (q *Queries) ListNotificationDeliveriesByEvent(ctx context.Context, notific
 }
 
 const listNotificationDeliveriesByStatus = `-- name: ListNotificationDeliveriesByStatus :many
-SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at FROM notification_delivery
+SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id FROM notification_delivery
 WHERE status = $1
 ORDER BY created_at ASC
 `
@@ -451,6 +516,8 @@ func (q *Queries) ListNotificationDeliveriesByStatus(ctx context.Context, status
 			&i.SentAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TargetType,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}

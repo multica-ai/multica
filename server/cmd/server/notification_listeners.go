@@ -163,13 +163,31 @@ func recordMentionNotification(
 	issueIdentifier string,
 	details []byte,
 ) {
+	recordNotification(ctx, queries, e, recipientID, "mentioned", "info", issueID, commentID, title, body, link, issueIdentifier, details)
+}
+
+func recordNotification(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	recipientID string,
+	eventType string,
+	severity string,
+	issueID string,
+	commentID string,
+	title string,
+	body string,
+	link string,
+	issueIdentifier string,
+	details []byte,
+) {
 	if len(details) == 0 {
 		details = emptyDetails
 	}
 
 	payloadSnapshot, err := json.Marshal(map[string]any{
-		"type":             "mentioned",
-		"severity":         "info",
+		"type":             eventType,
+		"severity":         severity,
 		"title":            title,
 		"body":             body,
 		"link":             link,
@@ -185,8 +203,8 @@ func recordMentionNotification(
 	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
 		WorkspaceID:     parseUUID(e.WorkspaceID),
 		RecipientUserID: parseUUID(recipientID),
-		Type:            "mentioned",
-		Severity:        "info",
+		Type:            eventType,
+		Severity:        severity,
 		IssueID:         parseUUID(issueID),
 		CommentID:       parseUUID(commentID),
 		ActorType:       util.StrToText(e.ActorType),
@@ -197,10 +215,11 @@ func recordMentionNotification(
 		Details:         details,
 	})
 	if err != nil {
-		slog.Error("failed to create canonical mention notification",
+		slog.Error("failed to create canonical notification",
 			"recipient_id", recipientID,
 			"issue_id", issueID,
 			"comment_id", commentID,
+			"type", eventType,
 			"error", err,
 		)
 		return
@@ -223,8 +242,11 @@ func recordMentionNotification(
 		)
 	}
 
-	recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
-	recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	if eventType == "mentioned" {
+		recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+		recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	}
+	recordCustomWebhookDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 }
 
 func recordMentionDingTalkDelivery(
@@ -393,6 +415,94 @@ func recordMentionEmailDelivery(
 	}
 }
 
+func recordCustomWebhookDeliveries(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	preferenceEventType := customWebhookPreferenceEventType(event.Type)
+	if preferenceEventType == "" {
+		return
+	}
+
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for custom webhook delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	enabled := false
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "custom_webhook" && pref.EventType == preferenceEventType && pref.Enabled {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		return
+	}
+
+	endpoints, err := queries.ListEnabledNotificationWebhookEndpointsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load custom webhook endpoints",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	for _, endpoint := range endpoints {
+		payload := map[string]any{
+			"webhook_endpoint_id": util.UUIDToString(endpoint.ID),
+			"notification_event":  json.RawMessage(payloadSnapshot),
+		}
+		webhookPayload, err := json.Marshal(payload)
+		if err != nil {
+			webhookPayload = payloadSnapshot
+		}
+
+		if _, err := queries.CreateTargetedNotificationDelivery(ctx, db.CreateTargetedNotificationDeliveryParams{
+			NotificationEventID: event.ID,
+			Channel:             "custom_webhook",
+			TargetType:          "webhook_endpoint",
+			TargetID:            endpoint.ID,
+			Status:              "pending",
+			AttemptCount:        0,
+			LastError:           pgtype.Text{},
+			PayloadSnapshot:     webhookPayload,
+			SentAt:              pgtype.Timestamptz{},
+		}); err != nil {
+			slog.Error("failed to create custom webhook delivery record",
+				"notification_event_id", util.UUIDToString(event.ID),
+				"recipient_id", recipientID,
+				"webhook_endpoint_id", util.UUIDToString(endpoint.ID),
+				"error", err,
+			)
+		}
+	}
+}
+
+func customWebhookPreferenceEventType(notificationType string) string {
+	switch notificationType {
+	case "mentioned":
+		return "mentioned"
+	case "issue_assigned":
+		return "issue_assigned"
+	case "new_comment", "assignee_changed", "status_changed", "priority_changed", "due_date_changed", "task_failed":
+		return "subscribed_issue_updated"
+	default:
+		return ""
+	}
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
@@ -513,6 +623,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, "", "")
+		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
+
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -567,6 +680,11 @@ func notifyDirect(
 		slog.Error("direct notification creation failed",
 			"recipient_id", recipientID, "type", notifType, "error", err)
 		return
+	}
+
+	notificationCtx := buildNotificationContext(ctx, queries, workspaceID, issueID, "", "")
+	if recipientType == "member" {
+		recordNotification(ctx, queries, e, recipientID, notifType, severity, issueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
 	}
 
 	resp := inboxItemToResponse(item)
