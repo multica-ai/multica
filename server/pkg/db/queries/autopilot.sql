@@ -184,6 +184,16 @@ WHERE issue_id = $1
 -- Scheduler Recovery
 -- =====================
 
+-- name: FailStaleAutopilotRuns :many
+-- Fails autopilot runs stuck in non-terminal states beyond the given threshold.
+-- Covers create_issue runs whose linked issue never transitioned, and run_only
+-- runs whose task completion was never recorded.
+UPDATE autopilot_run
+SET status = 'failed', completed_at = now(), failure_reason = 'run timed out'
+WHERE status IN ('issue_created', 'running')
+  AND created_at < now() - make_interval(secs => @timeout_secs::double precision)
+RETURNING id, autopilot_id;
+
 -- name: RecoverLostTriggers :many
 -- Finds schedule triggers that were claimed (next_run_at = NULL) but never
 -- advanced — typically due to a scheduler crash. Returns them so the scheduler

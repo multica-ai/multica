@@ -64,8 +64,8 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, autopilot_run_id)
+VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), sqlc.narg(autopilot_run_id))
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
@@ -81,6 +81,37 @@ WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running');
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
 WHERE id = $1;
+
+-- name: CreateRetryTask :one
+-- Re-enqueues a failed task as a fresh queued row. attempt = parent.attempt + 1,
+-- agent/runtime/issue/etc. inherited from the parent. parent_task_id chains the
+-- history so the UI (and operators) can trace retries.
+-- Guard: only succeeds when parent.attempt < parent.max_attempts AND there is no
+-- recent retry chain for the same issue/agent (anti-storm cap, 1h window). The
+-- guard returns no row when retry should be skipped — caller treats nil as a no-op.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, chat_session_id,
+    priority, trigger_comment_id, autopilot_run_id,
+    parent_task_id, attempt, max_attempts, status
+)
+SELECT p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id,
+       p.priority, p.trigger_comment_id, p.autopilot_run_id,
+       p.id, p.attempt + 1, p.max_attempts, 'queued'
+FROM agent_task_queue p
+WHERE p.id = @parent_task_id
+  AND p.attempt < p.max_attempts
+  AND NOT EXISTS (
+      -- anti-storm cap: skip retry if >= max_attempts tasks already created
+      -- for this (issue, agent) pair within the last hour.
+      SELECT 1 FROM agent_task_queue recent
+      WHERE recent.agent_id = p.agent_id
+        AND ((p.issue_id IS NOT NULL AND recent.issue_id = p.issue_id)
+             OR (p.chat_session_id IS NOT NULL AND recent.chat_session_id = p.chat_session_id))
+        AND recent.created_at > now() - interval '1 hour'
+      GROUP BY recent.agent_id
+      HAVING COUNT(*) >= p.max_attempts
+  )
+RETURNING *;
 
 -- name: ClaimAgentTask :one
 -- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
