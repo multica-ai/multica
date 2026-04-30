@@ -5,7 +5,8 @@ import { useTabStore } from "@/stores/tab-store";
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
 
 /**
- * Fires a PostHog $pageview whenever the user's visible surface changes.
+ * Fires an Amplitude page view event whenever the user's visible surface
+ * changes.
  *
  * Desktop has three layers that can own the visible page:
  *
@@ -19,12 +20,12 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  *
  * The overlay takes precedence over the tab path because it is visually in
  * front of the tab system; the logged-out state shadows both because the
- * shell doesn't render at all yet. This keeps the `$pageview` stream aligned
+ * shell doesn't render at all yet. This keeps the page view stream aligned
  * with what the user actually sees.
  *
- * PostHog's `capture_pageview: true` auto-capture is intentionally off (see
- * `initAnalytics`) so this component owns the event shape, matching the web
- * implementation in `apps/web/components/pageview-tracker.tsx`.
+ * Amplitude's auto-tracking is intentionally off (see `initAnalytics`) so
+ * this component owns the event shape, matching the web implementation in
+ * `apps/web/components/pageview-tracker.tsx`.
  */
 export function PageviewTracker() {
   const user = useAuthStore((s) => s.user);

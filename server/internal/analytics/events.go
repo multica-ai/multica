@@ -16,6 +16,8 @@ const (
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
 	EventStarterContentDecided         = "starter_content_decided"
 	EventFeedbackSubmitted             = "feedback_submitted"
+	EventStoryCreated                  = "story_created"
+	EventPROpened                      = "pr_opened"
 )
 
 // Onboarding completion paths. Keep in sync with docs/analytics.md.
@@ -24,7 +26,7 @@ const (
 	OnboardingPathRuntimeSkipped = "runtime_skipped" // completed without connecting a runtime
 	OnboardingPathCloudWaitlist  = "cloud_waitlist"  // completed via cloud waitlist soft exit
 	OnboardingPathSkipExisting   = "skip_existing"   // "I've done this before" from welcome
-	OnboardingPathUnknown        = "unknown"         // fallback when the server can't derive the path
+	OnboardingPathUnknown        = "unknown"          // fallback when the server can't derive the path
 )
 
 // Starter content branches. Matches the server-authoritative decision in
@@ -64,9 +66,7 @@ func Signup(userID, email, signupSource string) Event {
 	}
 }
 
-// WorkspaceCreated builds the workspace_created event. "Is this the user's
-// first workspace?" is deliberately not stamped here — it's derived in
-// PostHog by checking whether the user has a prior workspace_created event.
+// WorkspaceCreated builds the workspace_created event.
 func WorkspaceCreated(userID, workspaceID string) Event {
 	return Event{
 		Name:        EventWorkspaceCreated,
@@ -76,20 +76,10 @@ func WorkspaceCreated(userID, workspaceID string) Event {
 }
 
 // RuntimeRegistered fires on the first time a (workspace, daemon, provider)
-// triple is upserted. The handler uses a `xmax = 0` flag returned from the
-// upsert query to distinguish inserts from updates — heartbeats and repeat
-// registrations never emit this event.
-//
-// ownerID may be empty when the daemon authenticates via a daemon token
-// (no user context); downstream funnels that need per-user attribution
-// fall back to `workspace_id` as the grouping key.
+// triple is upserted.
 func RuntimeRegistered(ownerID, workspaceID, runtimeID, provider, runtimeVersion, cliVersion string) Event {
 	distinct := ownerID
 	if distinct == "" {
-		// A per-workspace synthetic id keeps PostHog from merging unrelated
-		// daemon registrations across workspaces under a single "anonymous"
-		// person. It's stable within a workspace so repeat heartbeats (which
-		// don't emit anyway) would at least group correctly.
 		distinct = "workspace:" + workspaceID
 	}
 	return Event{
@@ -106,14 +96,7 @@ func RuntimeRegistered(ownerID, workspaceID, runtimeID, provider, runtimeVersion
 }
 
 // IssueExecuted fires at most once per issue lifetime — on the first task
-// completion that flips `issues.first_executed_at` from NULL via an atomic
-// UPDATE. Retries, re-assignments, and comment-triggered follow-ups never
-// re-emit, which is what keeps the ≥1/≥2/≥5/≥10 funnel buckets honest.
-//
-// Deliberately not stamped here: the workspace's Nth-issue ordinal.
-// Computing it at emit time is not atomic (two concurrent first-completions
-// both read count=1, both emit n=1), and PostHog derives the same number
-// exactly at query time from the event stream.
+// completion that flips `issues.first_executed_at` from NULL.
 func IssueExecuted(actorID, workspaceID, issueID string, taskDurationMS int64) Event {
 	return Event{
 		Name:        EventIssueExecuted,
@@ -127,8 +110,6 @@ func IssueExecuted(actorID, workspaceID, issueID string, taskDurationMS int64) E
 }
 
 // TeamInviteSent fires when a workspace admin creates an invitation.
-// inviteMethod is "email" for now; future non-email invite flows can pass
-// their own value to keep this stable.
 func TeamInviteSent(inviterID, workspaceID, invitedEmail, inviteMethod string) Event {
 	return Event{
 		Name:        EventTeamInviteSent,
@@ -142,8 +123,6 @@ func TeamInviteSent(inviterID, workspaceID, invitedEmail, inviteMethod string) E
 }
 
 // TeamInviteAccepted fires when the invitee accepts and joins the workspace.
-// daysSinceInvite lets us segment fast-acceptance (warm) from long-tail
-// acceptance (someone dug through old email).
 func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Event {
 	return Event{
 		Name:        EventTeamInviteAccepted,
@@ -156,18 +135,7 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 }
 
 // OnboardingQuestionnaireSubmitted fires the first time a user's
-// `user.onboarding_questionnaire` transitions from empty (or partial) to
-// all three answers present. The handler drives this transition — we
-// emit from PatchOnboarding so the single emission site stays honest
-// even if the frontend retries.
-//
-// The three answers are also mirrored into person properties via $set
-// so cohorting by role / use_case / team_size works across every event
-// on the same user without re-joining back to the DB.
-//
-// teamSizeOther / roleOther / useCaseOther are presence booleans only —
-// the free-text content is kept in the DB for product research but not
-// broadcast via analytics (PII risk + low cardinality ask).
+// questionnaire transitions to all three answers present.
 func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, teamSizeOther, roleOther, useCaseOther bool) Event {
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
@@ -188,13 +156,7 @@ func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, te
 	}
 }
 
-// AgentCreated fires whenever a new agent is added to a workspace — not
-// just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
-// isolate the Step 4 signal from later agent additions.
-//
-// template is the template slug the frontend used to seed the agent
-// (e.g. "coding", "planning", "writing", "assistant") — empty when the
-// caller didn't come from a template picker.
+// AgentCreated fires whenever a new agent is added to a workspace.
 func AgentCreated(actorID, workspaceID, agentID, provider, template string, isFirstAgentInWorkspace bool) Event {
 	return Event{
 		Name:        EventAgentCreated,
@@ -209,16 +171,7 @@ func AgentCreated(actorID, workspaceID, agentID, provider, template string, isFi
 	}
 }
 
-// OnboardingCompleted fires from CompleteOnboarding. `completionPath`
-// is derived server-side from the state the user arrived in (see the
-// OnboardingPath* constants above). `joinedCloudWaitlist` is true when
-// the user submitted the waitlist form at any point during the flow —
-// it's orthogonal to `completion_path`; a user may submit the form and
-// still pick CLI, so we keep both signals.
-//
-// onboardedAt is an RFC3339 timestamp set $set_once on the person so
-// "onboarded before date X" cohorts are queryable directly from
-// person_properties without re-emitting per-event.
+// OnboardingCompleted fires from CompleteOnboarding.
 func OnboardingCompleted(userID, completionPath, onboardedAt string, joinedCloudWaitlist bool) Event {
 	return Event{
 		Name:       EventOnboardingCompleted,
@@ -233,9 +186,7 @@ func OnboardingCompleted(userID, completionPath, onboardedAt string, joinedCloud
 	}
 }
 
-// CloudWaitlistJoined fires when a user submits the Step 3 cloud
-// waitlist form. `hasReason` is a presence bool — the free-text reason
-// stays in the DB for product research.
+// CloudWaitlistJoined fires when a user submits the Step 3 cloud waitlist form.
 func CloudWaitlistJoined(userID string, hasReason bool) Event {
 	return Event{
 		Name:       EventCloudWaitlistJoined,
@@ -246,11 +197,7 @@ func CloudWaitlistJoined(userID string, hasReason bool) Event {
 	}
 }
 
-// StarterContentDecided fires on the atomic NULL -> terminal state
-// transition in both ImportStarterContent and DismissStarterContent.
-// branch carries agent_guided / self_serve for BOTH decisions — the
-// dismiss handler resolves it from the current ListAgents state so
-// acceptance rates split cleanly by branch.
+// StarterContentDecided fires on the atomic NULL -> terminal state transition.
 func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
 	return Event{
 		Name:        EventStarterContentDecided,
@@ -264,9 +211,6 @@ func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
 }
 
 // FeedbackSubmitted fires after a feedback row is successfully inserted.
-// The raw message is stored in the DB and never broadcast — we only emit a
-// coarse length bucket, an image-presence flag, and the client platform /
-// version so support can segment without leaking content.
 func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages bool, platform, appVersion string) Event {
 	props := map[string]any{
 		"message_length_bucket": feedbackLengthBucket(messageLen),
@@ -283,6 +227,40 @@ func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages boo
 		DistinctID:  userID,
 		WorkspaceID: workspaceID,
 		Properties:  props,
+	}
+}
+
+// StoryCreated fires when a new issue (story) is created. This is the first
+// step of the user → story → PR funnel. creatorType is "user" or "agent".
+func StoryCreated(actorID, workspaceID, issueID, creatorType string) Event {
+	return Event{
+		Name:        EventStoryCreated,
+		DistinctID:  actorID,
+		WorkspaceID: workspaceID,
+		Properties: map[string]any{
+			"story_id":     issueID,
+			"creator_type": creatorType,
+		},
+	}
+}
+
+// PROpened fires when a pull request is linked to an issue. This is the
+// final step of the user → story → PR funnel.
+//
+// NOTE: As of this writing, there is no inbound webhook or integration that
+// receives PR events from GitHub/GitLab. This builder is ready for when that
+// integration is built. The emission site will be the webhook handler that
+// processes PR creation events from the git provider.
+func PROpened(actorID, workspaceID, issueID, prURL, provider string) Event {
+	return Event{
+		Name:        EventPROpened,
+		DistinctID:  actorID,
+		WorkspaceID: workspaceID,
+		Properties: map[string]any{
+			"story_id": issueID,
+			"pr_url":   prURL,
+			"provider": provider,
+		},
 	}
 }
 

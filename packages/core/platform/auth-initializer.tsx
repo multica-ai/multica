@@ -45,7 +45,7 @@ export function AuthInitializer({
     // reads this cookie, so it has to be present before the user hits submit.
     captureSignupSource();
 
-    // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
+    // Fetch app config (CDN domain, Amplitude key, …) in the background — non-blocking.
     api
       .getConfig()
       .then((cfg) => {
@@ -54,10 +54,10 @@ export function AuthInitializer({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
         });
-        if (cfg.posthog_key) {
+        if (cfg.amplitude_key) {
           initAnalytics({
-            key: cfg.posthog_key,
-            host: cfg.posthog_host || "",
+            key: cfg.amplitude_key,
+            host: "", // Amplitude SDK uses default endpoint
             appVersion: identity?.version,
           });
         }

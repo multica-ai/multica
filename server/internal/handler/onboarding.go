@@ -589,6 +589,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	if welcomeIssueForEvent != nil {
 		welcomeResp := issueToResponse(*welcomeIssueForEvent, workspacePrefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": welcomeResp})
+		h.Analytics.Capture(analytics.StoryCreated(userID, req.WorkspaceID, uuidToString(welcomeIssueForEvent.ID), "member"))
 		if h.shouldEnqueueAgentTask(r.Context(), *welcomeIssueForEvent) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), *welcomeIssueForEvent)
 		}
@@ -596,6 +597,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 	for _, sub := range subIssuesCreated {
 		subResp := issueToResponse(sub, workspacePrefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": subResp})
+		h.Analytics.Capture(analytics.StoryCreated(userID, req.WorkspaceID, uuidToString(sub.ID), "member"))
 	}
 	// Pin events. Without these, the sidebar's `pinListOptions` query
 	// stays cached on the pre-import snapshot — only a hard refresh

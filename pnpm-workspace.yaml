@@ -32,7 +32,7 @@ catalog:
   lucide-react: "^1.0.1"
 
   # Product analytics
-  posthog-js: "^1.176.1"
+  "@amplitude/analytics-browser": "^2.11.0"
 
   # Testing
   vitest: "^4.1.0"

@@ -18,10 +18,10 @@ const (
 	defaultFlushTimeout = 5 * time.Second
 )
 
-// PostHogConfig configures the live PostHog client.
-type PostHogConfig struct {
+// AmplitudeConfig configures the live Amplitude client.
+type AmplitudeConfig struct {
 	APIKey string
-	Host   string
+	Host   string // e.g. "https://api2.amplitude.com" (default)
 
 	// Optional overrides. Zero values fall back to sensible defaults.
 	QueueSize  int
@@ -30,11 +30,11 @@ type PostHogConfig struct {
 	HTTPClient *http.Client
 }
 
-// PostHogClient ships events to PostHog's /batch/ endpoint. It enqueues events
+// AmplitudeClient ships events to Amplitude's HTTP V2 API. It enqueues events
 // into a bounded buffer (non-blocking Capture) and flushes them from a
 // background worker.
-type PostHogClient struct {
-	cfg  PostHogConfig
+type AmplitudeClient struct {
+	cfg  AmplitudeConfig
 	ch   chan Event
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -44,9 +44,9 @@ type PostHogClient struct {
 	failed  atomic.Uint64
 }
 
-// NewPostHogClient starts the background flush worker. Caller must call Close
+// NewAmplitudeClient starts the background flush worker. Caller must call Close
 // on shutdown to drain pending events.
-func NewPostHogClient(cfg PostHogConfig) *PostHogClient {
+func NewAmplitudeClient(cfg AmplitudeConfig) *AmplitudeClient {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = defaultQueueSize
 	}
@@ -59,7 +59,10 @@ func NewPostHogClient(cfg PostHogConfig) *PostHogClient {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: defaultFlushTimeout}
 	}
-	c := &PostHogClient{
+	if cfg.Host == "" {
+		cfg.Host = "https://api2.amplitude.com"
+	}
+	c := &AmplitudeClient{
 		cfg:  cfg,
 		ch:   make(chan Event, cfg.QueueSize),
 		done: make(chan struct{}),
@@ -71,7 +74,7 @@ func NewPostHogClient(cfg PostHogConfig) *PostHogClient {
 
 // Capture enqueues an event. Returns immediately; on a full queue the event
 // is dropped and counted. Analytics must never block a request handler.
-func (c *PostHogClient) Capture(e Event) {
+func (c *AmplitudeClient) Capture(e Event) {
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}
@@ -88,17 +91,17 @@ func (c *PostHogClient) Capture(e Event) {
 }
 
 // Close stops accepting events and drains whatever is already queued.
-func (c *PostHogClient) Close() {
+func (c *AmplitudeClient) Close() {
 	close(c.done)
 	c.wg.Wait()
-	slog.Info("analytics: posthog client closed",
+	slog.Info("analytics: amplitude client closed",
 		"sent", c.sent.Load(),
 		"dropped", c.dropped.Load(),
 		"failed", c.failed.Load(),
 	)
 }
 
-func (c *PostHogClient) run() {
+func (c *AmplitudeClient) run() {
 	defer c.wg.Done()
 	ticker := time.NewTicker(c.cfg.FlushEvery)
 	defer ticker.Stop()
@@ -140,44 +143,54 @@ func (c *PostHogClient) run() {
 	}
 }
 
-// capturePayload mirrors the PostHog /batch/ JSON shape.
-type capturePayload struct {
-	APIKey string        `json:"api_key"`
-	Batch  []captureItem `json:"batch"`
+// amplitudePayload mirrors the Amplitude HTTP V2 API /2/httpapi request shape.
+type amplitudePayload struct {
+	APIKey string           `json:"api_key"`
+	Events []amplitudeEvent `json:"events"`
 }
 
-type captureItem struct {
-	Event      string         `json:"event"`
-	DistinctID string         `json:"distinct_id"`
-	Properties map[string]any `json:"properties"`
-	Timestamp  string         `json:"timestamp"`
+type amplitudeEvent struct {
+	EventType       string         `json:"event_type"`
+	UserID          string         `json:"user_id"`
+	EventProperties map[string]any `json:"event_properties,omitempty"`
+	UserProperties  map[string]any `json:"user_properties,omitempty"`
+	Time            int64          `json:"time"` // epoch millis
 }
 
-func (c *PostHogClient) send(batch []Event) {
-	items := make([]captureItem, 0, len(batch))
+func (c *AmplitudeClient) send(batch []Event) {
+	items := make([]amplitudeEvent, 0, len(batch))
 	for _, e := range batch {
-		props := make(map[string]any, len(e.Properties)+2)
+		props := make(map[string]any, len(e.Properties)+1)
 		for k, v := range e.Properties {
 			props[k] = v
 		}
 		if e.WorkspaceID != "" {
 			props["workspace_id"] = e.WorkspaceID
 		}
-		if len(e.SetOnce) > 0 {
-			props["$set_once"] = e.SetOnce
+
+		// Merge SetOnce and Set into user_properties using Amplitude's
+		// special operations format.
+		var userProps map[string]any
+		if len(e.SetOnce) > 0 || len(e.Set) > 0 {
+			userProps = make(map[string]any)
+			if len(e.SetOnce) > 0 {
+				userProps["$setOnce"] = e.SetOnce
+			}
+			if len(e.Set) > 0 {
+				userProps["$set"] = e.Set
+			}
 		}
-		if len(e.Set) > 0 {
-			props["$set"] = e.Set
-		}
-		items = append(items, captureItem{
-			Event:      e.Name,
-			DistinctID: e.DistinctID,
-			Properties: props,
-			Timestamp:  e.Timestamp.UTC().Format(time.RFC3339Nano),
+
+		items = append(items, amplitudeEvent{
+			EventType:       e.Name,
+			UserID:          e.DistinctID,
+			EventProperties: props,
+			UserProperties:  userProps,
+			Time:            e.Timestamp.UnixMilli(),
 		})
 	}
 
-	body, err := json.Marshal(capturePayload{APIKey: c.cfg.APIKey, Batch: items})
+	body, err := json.Marshal(amplitudePayload{APIKey: c.cfg.APIKey, Events: items})
 	if err != nil {
 		c.failed.Add(uint64(len(batch)))
 		slog.Error("analytics: marshal batch", "error", err)
@@ -186,13 +199,14 @@ func (c *PostHogClient) send(batch []Event) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultFlushTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.Host+"/batch/", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.Host+"/2/httpapi", bytes.NewReader(body))
 	if err != nil {
 		c.failed.Add(uint64(len(batch)))
 		slog.Error("analytics: build request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "*/*")
 
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
@@ -203,7 +217,7 @@ func (c *PostHogClient) send(batch []Event) {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		c.failed.Add(uint64(len(batch)))
-		slog.Warn("analytics: posthog rejected batch", "status", resp.StatusCode, "events", len(batch))
+		slog.Warn("analytics: amplitude rejected batch", "status", resp.StatusCode, "events", len(batch))
 		return
 	}
 	c.sent.Add(uint64(len(batch)))

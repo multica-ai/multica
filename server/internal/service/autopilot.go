@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -25,10 +26,11 @@ type AutopilotService struct {
 	TxStarter TxStarter
 	Bus       *events.Bus
 	TaskSvc   *TaskService
+	Analytics analytics.Client
 }
 
-func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
-	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService, analyticsClient analytics.Client) *AutopilotService {
+	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc, Analytics: analyticsClient}
 }
 
 // DispatchAutopilot is the core execution entry point.
@@ -147,6 +149,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("link run to issue: %w", err)
 	}
 	*run = updatedRun
+
+	s.Analytics.Capture(analytics.StoryCreated(
+		util.UUIDToString(ap.CreatedByID),
+		util.UUIDToString(ap.WorkspaceID),
+		util.UUIDToString(issue.ID),
+		ap.CreatedByType,
+	))
 
 	// Publish issue:created so the existing event chain fires
 	// (subscriber listeners, activity listeners, notification listeners).

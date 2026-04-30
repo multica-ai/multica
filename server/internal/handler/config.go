@@ -13,13 +13,12 @@ type AppConfig struct {
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
 
-	// PostHog public config for the frontend. The key is the same Project
+	// Amplitude public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
 	// instances — whose server returns an empty key — automatically
 	// disable frontend event shipping too.
-	PosthogKey  string `json:"posthog_key"`
-	PosthogHost string `json:"posthog_host"`
+	AmplitudeKey string `json:"amplitude_key"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -38,11 +37,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.
 	if v := os.Getenv("ANALYTICS_DISABLED"); v != "true" && v != "1" {
-		config.PosthogKey = os.Getenv("POSTHOG_API_KEY")
-		config.PosthogHost = os.Getenv("POSTHOG_HOST")
-		if config.PosthogHost == "" && config.PosthogKey != "" {
-			config.PosthogHost = "https://us.i.posthog.com"
-		}
+		config.AmplitudeKey = os.Getenv("AMPLITUDE_API_KEY")
 	}
 
 	writeJSON(w, http.StatusOK, config)

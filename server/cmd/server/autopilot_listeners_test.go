@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -16,7 +17,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
-	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc, analytics.NoopClient{})
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	var agentID string

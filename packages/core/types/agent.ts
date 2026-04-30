@@ -83,7 +83,7 @@ export interface CreateAgentRequest {
   max_concurrent_tasks?: number;
   model?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
-   *  as the `template` property on the `agent_created` PostHog event. */
+   *  as the `template` property on the `agent_created` Amplitude event. */
   template?: string;
 }
 

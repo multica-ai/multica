@@ -93,7 +93,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:             daemonHub,
 		Bus:                   bus,
 		TaskService:           taskSvc,
-		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc, analyticsClient),
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),

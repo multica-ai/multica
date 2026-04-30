@@ -19,7 +19,7 @@ export async function saveQuestionnaire(
   const user = await api.patchOnboarding({ questionnaire: answers });
   useAuthStore.getState().setUser(user);
   // Mirror the three cohort signals into person properties so every
-  // PostHog event on this user can be broken down by role / use_case /
+  // Amplitude event on this user can be broken down by role / use_case /
   // team_size without re-joining the DB. Matches the $set block the
   // server writes alongside `onboarding_questionnaire_submitted`.
   if (answers.team_size || answers.role || answers.use_case) {

@@ -81,7 +81,7 @@ export function StepPlatformFork({
   const [downloaded, setDownloaded] = useState(false);
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
-  // Platform signal retained purely for PostHog dimensions — the UI
+  // Platform signal retained purely for Amplitude dimensions — the UI
   // no longer branches on it (Windows / Linux desktop installers now
   // ship, so all three platforms get the same card). Computed
   // lazily; SSR-safe because handlers only run client-side.

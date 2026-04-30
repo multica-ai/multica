@@ -1061,7 +1061,7 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	// distinct_id prefers the human creator so agent-driven events flow into
 	// the issue-author's person profile (same place signup and
 	// workspace_created land). Agent-created issues keep the agent id with a
-	// prefix so PostHog doesn't merge them into a user by accident.
+	// prefix so Amplitude doesn't merge them into a user by accident.
 	distinct := uuidToString(marked.CreatorID)
 	if marked.CreatorType == "agent" {
 		distinct = "agent:" + distinct

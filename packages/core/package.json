@@ -75,7 +75,7 @@
   "dependencies": {
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-query-devtools": "^5.96.2",
-    "posthog-js": "catalog:",
+    "@amplitude/analytics-browser": "catalog:",
     "zustand": "catalog:"
   },
   "peerDependencies": {
