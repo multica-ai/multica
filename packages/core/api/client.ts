@@ -83,6 +83,8 @@ import type {
   Channel,
   ChannelMembership,
   ChannelMessage,
+  ChannelReaction,
+  ChannelMessageThread,
   CreateChannelRequest,
   UpdateChannelRequest,
   AddChannelMemberRequest,
@@ -1137,6 +1139,26 @@ export class ApiClient {
     return this.fetch(`/api/dms`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Phase 4: threads + reactions
+
+  async getChannelMessageThread(channelId: string, messageId: string): Promise<ChannelMessageThread> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
+  }
+
+  async addChannelReaction(channelId: string, messageId: string, emoji: string): Promise<ChannelReaction> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  async removeChannelReaction(channelId: string, messageId: string, emoji: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: "DELETE",
+      body: JSON.stringify({ emoji }),
     });
   }
 

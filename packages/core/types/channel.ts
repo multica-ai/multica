@@ -39,6 +39,15 @@ export interface ChannelMembership {
   last_read_at: string | null;
 }
 
+export interface ChannelReaction {
+  id: string;
+  channel_message_id: string;
+  actor_type: ChannelActorType;
+  actor_id: string;
+  emoji: string;
+  created_at: string;
+}
+
 export interface ChannelMessage {
   id: string;
   channel_id: string;
@@ -50,6 +59,18 @@ export interface ChannelMessage {
   /** Soft-delete timestamp; UI renders "[message deleted]" placeholder. */
   deleted_at: string | null;
   created_at: string;
+  /** Phase 4 — reactions hydrated by the list/get/thread endpoints. The
+   * create endpoint returns an empty array since reactions can't exist on
+   * a brand-new row. */
+  reactions: ChannelReaction[];
+  /** Phase 4 — count of non-deleted replies under this message.
+   * Always 0 for replies themselves (the schema is one level deep in v1). */
+  thread_reply_count: number;
+}
+
+export interface ChannelMessageThread {
+  parent: ChannelMessage;
+  replies: ChannelMessage[];
 }
 
 // --- Request payloads ----------------------------------------------------

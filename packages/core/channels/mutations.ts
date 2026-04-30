@@ -14,6 +14,10 @@ import type {
   CreateOrFetchDMRequest,
 } from "../types";
 
+// Note: useToggleChannelReaction below also imports ChannelMessage. The
+// import above already has it. ChannelReaction is referenced inline in
+// the optimistic synthetic record so no separate import is needed.
+
 const logger = createLogger("channels.mut");
 
 export function useCreateChannel() {
@@ -94,6 +98,8 @@ export function useSendChannelMessage(channelId: string) {
         edited_at: null,
         deleted_at: null,
         created_at: new Date().toISOString(),
+        reactions: [],
+        thread_reply_count: 0,
       };
       // Newest-first ordering matches the list query.
       qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>
@@ -127,6 +133,69 @@ export function useCreateOrFetchDM() {
       // The DM may be brand new, so refresh the list.
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
       qc.setQueryData(channelKeys.detail(wsId, channel.id), channel);
+    },
+  });
+}
+
+// Phase 4 reaction mutations. Optimistic toggle: reaction immediately
+// appears/disappears on the message in the cache; a server failure
+// reverts and surfaces a toast.
+//
+// Channel-scope: the per-channel messages cache is the source of truth
+// for reaction display. The thread cache (if open) gets invalidated too
+// since a reaction on a thread reply needs to reflect there.
+export function useToggleChannelReaction(channelId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { messageId: string; emoji: string; currentlyReacted: boolean }) => {
+      if (params.currentlyReacted) {
+        await api.removeChannelReaction(channelId, params.messageId, params.emoji);
+        return null;
+      }
+      return api.addChannelReaction(channelId, params.messageId, params.emoji);
+    },
+    onMutate: async (params) => {
+      await qc.cancelQueries({ queryKey: channelKeys.messages(channelId) });
+      const prevMessages = qc.getQueryData<ChannelMessage[]>(channelKeys.messages(channelId));
+      // Optimistic patch in the message list. We don't have the actor's
+      // full reaction record handy until the server returns; for the
+      // optimistic add we synthesize a minimal one with id="optimistic-…"
+      // that the WS event will replace.
+      qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>
+        old?.map((m) => {
+          if (m.id !== params.messageId) return m;
+          if (params.currentlyReacted) {
+            return {
+              ...m,
+              reactions: m.reactions.filter((r) => r.emoji !== params.emoji),
+            };
+          }
+          return {
+            ...m,
+            reactions: [
+              ...m.reactions,
+              {
+                id: `optimistic-${Date.now()}`,
+                channel_message_id: m.id,
+                actor_type: "member",
+                actor_id: "self",
+                emoji: params.emoji,
+                created_at: new Date().toISOString(),
+              },
+            ],
+          };
+        }),
+      );
+      return { prevMessages };
+    },
+    onError: (_err, _params, ctx) => {
+      if (ctx?.prevMessages) {
+        qc.setQueryData(channelKeys.messages(channelId), ctx.prevMessages);
+      }
+    },
+    onSettled: (_data, _err, params) => {
+      qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
+      qc.invalidateQueries({ queryKey: channelKeys.thread(params.messageId) });
     },
   });
 }

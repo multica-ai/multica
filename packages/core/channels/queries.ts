@@ -11,6 +11,10 @@ export const channelKeys = {
   detail: (wsId: string, id: string) => [...channelKeys.all(wsId), "detail", id] as const,
   members: (channelId: string) => ["channels", "members", channelId] as const,
   messages: (channelId: string) => ["channels", "messages", channelId] as const,
+  // Phase 4 — per-parent thread payload (parent + replies, batch-hydrated
+  // with reactions). Keyed by message id so the panel can be opened
+  // independently of which channel the user is currently viewing.
+  thread: (messageId: string) => ["channels", "thread", messageId] as const,
 };
 
 export function channelsListOptions(wsId: string, enabled: boolean) {
@@ -39,6 +43,15 @@ export function channelMembersOptions(channelId: string, enabled: boolean) {
     queryFn: () => api.listChannelMembers(channelId),
     staleTime: Infinity,
     enabled: enabled && !!channelId,
+  });
+}
+
+export function channelMessageThreadOptions(channelId: string, messageId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: channelKeys.thread(messageId),
+    queryFn: () => api.getChannelMessageThread(channelId, messageId),
+    staleTime: Infinity,
+    enabled: enabled && !!channelId && !!messageId,
   });
 }
 

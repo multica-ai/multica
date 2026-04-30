@@ -164,6 +164,16 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
       },
+      // Phase 4 reactions: the prefix is `channel_reaction` (with an
+      // underscore) to distinguish from regular channel:* events. Payload
+      // carries channel_id + message_id; the explicit handler below does
+      // the granular cache update.
+      channel_reaction: () => {
+        // Prefix-level invalidation is unhelpful here because reactions
+        // are stored inside ChannelMessage rows and the messages cache is
+        // keyed by channel_id (not in workspaceKeys). Defer to the
+        // specific handler below.
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence
@@ -222,6 +232,10 @@ export function useRealtimeSync(
       // the per-channel message cache (the prefix handler only touches the
       // workspace-wide channels tree, not individual message caches).
       "channel:message",
+      // Same reasoning for reactions: the per-message reaction list lives
+      // inside the channel-messages cache, not under the channels tree.
+      "channel_reaction:added",
+      "channel_reaction:removed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -536,6 +550,28 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
       }
     });
+    // Phase 4 reactions: invalidate both the channel timeline (for the
+    // reaction chip under the parent message) AND the thread cache (in case
+    // the reacted-to message is a thread reply currently displayed in the
+    // side panel).
+    const unsubChannelReactionAdded = ws.on("channel_reaction:added", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
+    const unsubChannelReactionRemoved = ws.on("channel_reaction:removed", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
 
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
@@ -677,6 +713,8 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChannelMessage();
+      unsubChannelReactionAdded();
+      unsubChannelReactionRemoved();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

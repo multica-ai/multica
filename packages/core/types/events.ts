@@ -58,6 +58,8 @@ export type WSEventType =
   | "channel:member_added"
   | "channel:member_removed"
   | "channel:read"
+  | "channel_reaction:added"
+  | "channel_reaction:removed"
   | "project:created"
   | "project:updated"
   | "project:deleted"

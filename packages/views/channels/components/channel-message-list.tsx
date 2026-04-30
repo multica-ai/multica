@@ -13,6 +13,7 @@ import { MessageRow } from "./message-row";
 interface ChannelMessageListProps {
   channelId: string;
   enabled: boolean;
+  onOpenThread?: (parentMessageId: string) => void;
 }
 
 /**
@@ -26,7 +27,7 @@ interface ChannelMessageListProps {
  * Phase 5+: switch to a virtualized list (TanStack Virtual) if channels
  * routinely exceed ~500 visible messages.
  */
-export function ChannelMessageList({ channelId, enabled }: ChannelMessageListProps) {
+export function ChannelMessageList({ channelId, enabled, onOpenThread }: ChannelMessageListProps) {
   const wsId = useWorkspaceId();
   const { data: rawMessages = [], isLoading } = useQuery(
     channelMessagesOptions(channelId, enabled),
@@ -71,8 +72,10 @@ export function ChannelMessageList({ channelId, enabled }: ChannelMessageListPro
         <MessageRow
           key={m.id}
           message={m}
+          channelId={channelId}
           member={m.author_type === "member" ? memberById.get(m.author_id) : undefined}
           agent={m.author_type === "agent" ? agentById.get(m.author_id) : undefined}
+          onOpenThread={onOpenThread}
         />
       ))}
     </div>

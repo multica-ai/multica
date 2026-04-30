@@ -84,6 +84,23 @@ A `@agent` mention enqueues a task when **all** of:
 
 `@all` is parsed but currently produces no fan-out — pending design on whether channel @all should generate inbox entries for every member.
 
+## Threads
+
+Hover any message and click **Reply** (or the reply count under the message, if it has replies already) to open the **thread side panel** to the right of the timeline. Replies you post in the thread carry `parent_message_id` set to the original message; the main channel view continues to show only top-level messages so threads stay out of the way.
+
+A reply count badge (e.g. *"3 replies"*) appears under any message that has replies. The count updates live as people reply.
+
+Limitations in v1:
+
+- One level deep — replies to replies thread up under the original parent.
+- Mentions in thread replies follow the same Phase 3 rules as top-level messages.
+
+## Reactions
+
+Hover a message → click the smiley icon for an 8-emoji palette (👍 👎 😄 🎉 ❤️ 🚀 👀 🙏). Clicking an existing chip toggles your reaction; the count updates optimistically and reconciles on the WS event from the server.
+
+Phase 4 ships a curated palette only — full emoji search is a follow-up. Reactions on private-channel messages are invisible to non-members; the visibility guard runs before the reaction query, so even directly hitting `POST /api/channels/.../reactions` against a private message you can't see returns 404.
+
 ## Members
 
 Open the **Members** button in the channel header to see the full list and add or remove members. For private channels, this is also where you grant access. Adding an agent to a channel is the same flow — they appear with a robot avatar.
@@ -164,6 +181,9 @@ Private channels are invisible to non-members regardless of workspace role.
 | POST   | `/api/channels/{id}/messages`                                 | Post a message                        |
 | POST   | `/api/channels/{id}/read`                                     | Advance the caller's read cursor      |
 | POST   | `/api/dms`                                                    | Idempotent get-or-create DM           |
+| GET    | `/api/channels/{id}/messages/{messageId}/thread`              | Parent + replies for the side panel   |
+| POST   | `/api/channels/{id}/messages/{messageId}/reactions`           | Add reaction (idempotent)             |
+| DELETE | `/api/channels/{id}/messages/{messageId}/reactions`           | Remove reaction                       |
 
 All endpoints require workspace membership and respond 404 when `workspace.channels_enabled` is `false`.
 

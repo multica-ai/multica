@@ -12,6 +12,7 @@ export {
   channelDetailOptions,
   channelMembersOptions,
   channelMessagesOptions,
+  channelMessageThreadOptions,
 } from "./queries";
 export {
   useCreateChannel,
@@ -22,6 +23,7 @@ export {
   useSendChannelMessage,
   useMarkChannelRead,
   useCreateOrFetchDM,
+  useToggleChannelReaction,
 } from "./mutations";
 
 import type { createChannelsStore as CreateChannelsStoreFn } from "./store";

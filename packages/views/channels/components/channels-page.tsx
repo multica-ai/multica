@@ -15,6 +15,7 @@ import { ChannelMessageList } from "./channel-message-list";
 import { ChannelComposer } from "./channel-composer";
 import { ChannelCreateDialog } from "./channel-create-dialog";
 import { NewDMDialog } from "./new-dm-dialog";
+import { ThreadPanel } from "./thread-panel";
 
 interface ChannelsPageProps {
   /** When non-null, the right pane shows that channel. When null, an empty
@@ -50,6 +51,13 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   const enabled = !!workspace?.channels_enabled;
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [dmDialogOpen, setDmDialogOpen] = useState(false);
+  // Phase 4 — open-thread state. Cleared when the user navigates to a
+  // different channel so we don't accidentally show a stale thread side
+  // panel from the previous channel.
+  const [threadParentId, setThreadParentId] = useState<string | null>(null);
+  useEffect(() => {
+    setThreadParentId(null);
+  }, [activeChannelId]);
 
   const { data: channel, isLoading: channelLoading } = useQuery(
     channelDetailOptions(wsId, activeChannelId ?? "", enabled && !!activeChannelId),
@@ -112,11 +120,27 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
         ) : (
           <>
             <ChannelHeader channel={channel} enabled={enabled} />
-            <ChannelMessageList channelId={channel.id} enabled={enabled} />
-            <ChannelComposer
-              channelId={channel.id}
-              channelName={channel.display_name || channel.name}
-            />
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <ChannelMessageList
+                  channelId={channel.id}
+                  enabled={enabled}
+                  onOpenThread={setThreadParentId}
+                />
+                <ChannelComposer
+                  channelId={channel.id}
+                  channelName={channel.display_name || channel.name}
+                />
+              </div>
+              {threadParentId ? (
+                <ThreadPanel
+                  channelId={channel.id}
+                  parentMessageId={threadParentId}
+                  onClose={() => setThreadParentId(null)}
+                  enabled={enabled}
+                />
+              ) : null}
+            </div>
           </>
         )}
       </main>
