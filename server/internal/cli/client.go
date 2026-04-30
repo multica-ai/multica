@@ -367,7 +367,9 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining > httpClient.Timeout {
-			httpClient = &http.Client{Timeout: remaining}
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
 		}
 	}
 
