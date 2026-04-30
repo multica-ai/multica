@@ -1,6 +1,10 @@
 # --- Dependencies ---
 FROM node:22-alpine AS deps
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
@@ -18,6 +22,10 @@ RUN pnpm install --frozen-lockfile
 
 # --- Build ---
 FROM node:22-alpine AS builder
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
