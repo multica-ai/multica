@@ -40,10 +40,21 @@ export function ChannelComposer({ channelId, channelName, disabled }: ChannelCom
     setIsEmpty(true);
   };
 
+  // Upstream removed the `editable` prop from ContentEditor (Tiptap mounts
+  // editable-state at construction; toggling later was silently a no-op).
+  // The migration guidance is to wrap in pointer-events-none / aria-disabled
+  // for "currently disabled" — applied here so the composer reads as
+  // disabled without monkey-patching the editor.
   return (
     <div className="border-t border-border bg-background px-4 py-3">
       <div className="flex items-end gap-2">
-        <div className="flex-1 rounded-md border border-input bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
+        <div
+          className={[
+            "flex-1 rounded-md border border-input bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring",
+            disabled ? "pointer-events-none opacity-60" : "",
+          ].join(" ")}
+          aria-disabled={disabled || undefined}
+        >
           <ContentEditor
             ref={editorRef}
             defaultValue={inputDraft}
@@ -52,7 +63,6 @@ export function ChannelComposer({ channelId, channelName, disabled }: ChannelCom
               setIsEmpty(!md.trim());
             }}
             placeholder={`Message #${channelName}`}
-            editable={!disabled}
             submitOnEnter
             onSubmit={handleSend}
           />
