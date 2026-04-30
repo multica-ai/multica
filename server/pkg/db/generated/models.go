@@ -233,6 +233,12 @@ type ExternalAccountBinding struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FixedVerificationCode struct {
+	Email     string             `json:"email"`
+	CodeHash  string             `json:"code_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
