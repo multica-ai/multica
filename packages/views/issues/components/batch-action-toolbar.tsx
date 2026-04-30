@@ -127,6 +127,9 @@ export function BatchActionToolbar() {
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the
               selected issue{count > 1 ? "s" : ""} and all associated data.
+              <span className="mt-2 block text-xs text-muted-foreground/80">
+                Any workspace member can delete issues.
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

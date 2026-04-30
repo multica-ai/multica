@@ -24,7 +24,9 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
+import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
+import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +75,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const agent = agents.find((a) => a.id === agentId) ?? null;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
+
+  // Permission hook MUST be called unconditionally — its `agent | null`
+  // signature handles the not-found / loading case internally so the early
+  // returns below don't violate the rules of hooks. Backend gates archive
+  // and restore identically to edit, so a single `canEdit` covers them all.
+  const { canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -163,8 +171,19 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         agent={agent}
         presence={presence}
         backHref={paths.agents()}
+        canArchive={canEdit.allowed}
         onArchive={() => setConfirmArchive(true)}
       />
+
+      {!canEdit.allowed && (
+        <div className="px-6 pt-3">
+          <CapabilityBanner
+            reason={canEdit.reason}
+            resource="agent"
+            ownerName={owner?.name}
+          />
+        </div>
+      )}
 
       {isArchived && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-6 py-2 text-xs text-muted-foreground">
@@ -172,14 +191,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <span className="flex-1">
             This agent is archived. It cannot be assigned or mentioned.
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 text-xs"
-            onClick={() => handleRestore(agent.id)}
-          >
-            Restore
-          </Button>
+          {canEdit.allowed && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() => handleRestore(agent.id)}
+            >
+              Restore
+            </Button>
+          )}
         </div>
       )}
 
@@ -192,6 +213,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtimes={runtimes}
           members={members}
           currentUserId={currentUser?.id ?? null}
+          canEdit={canEdit.allowed}
           onUpdate={handleUpdate}
         />
 
@@ -254,11 +276,13 @@ function DetailHeader({
   agent,
   presence,
   backHref,
+  canArchive,
   onArchive,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
   backHref: string;
+  canArchive: boolean;
   onArchive: () => void;
 }) {
   const isArchived = !!agent.archived_at;
@@ -290,7 +314,7 @@ function DetailHeader({
         )}
       </div>
 
-      {!isArchived && (
+      {!isArchived && canArchive && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" />}
