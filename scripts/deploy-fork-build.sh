@@ -34,12 +34,24 @@ cd "$REPO_ROOT"
 # ---------- Operator-tunable knobs ----------
 COMPOSE_BASE="${COMPOSE_BASE:-docker-compose.selfhost.yml}"
 COMPOSE_BUILD_OVERRIDE="${COMPOSE_BUILD_OVERRIDE:-docker-compose.selfhost.build.yml}"
+# Production-only port-binding override (binds postgres/backend/frontend to
+# 127.0.0.1 so nginx terminates TLS and we don't collide with king-postgres
+# on :5432). Kept off git on purpose (host-specific paths + bind addresses);
+# the script auto-includes it when present so the dry-run config matches
+# what Cuong actually runs in step 5.
+COMPOSE_PROD_OVERRIDE="${COMPOSE_PROD_OVERRIDE:-docker-compose.production.yml}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-king-postgres}"
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://api-team.cuongpho.com/healthz}"
 ENV_FILE="${ENV_FILE:-.env}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-server/migrations}"
 
 COMPOSE_FILES=(-f "$COMPOSE_BASE" -f "$COMPOSE_BUILD_OVERRIDE")
+if [ -f "$COMPOSE_PROD_OVERRIDE" ]; then
+  COMPOSE_FILES+=(-f "$COMPOSE_PROD_OVERRIDE")
+  COMPOSE_PROD_PRESENT=1
+else
+  COMPOSE_PROD_PRESENT=0
+fi
 
 hr() { printf '\n========================================================\n%s\n========================================================\n' "$1"; }
 
@@ -48,6 +60,13 @@ hr "[0/5] Pre-flight"
 echo "    REPO_ROOT             = $REPO_ROOT"
 echo "    COMPOSE_BASE          = $COMPOSE_BASE"
 echo "    COMPOSE_BUILD_OVERRIDE= $COMPOSE_BUILD_OVERRIDE"
+if [ "$COMPOSE_PROD_PRESENT" -eq 1 ]; then
+  echo "    COMPOSE_PROD_OVERRIDE = $COMPOSE_PROD_OVERRIDE (present, will be included)"
+else
+  echo "    COMPOSE_PROD_OVERRIDE = $COMPOSE_PROD_OVERRIDE (not present, skipped)"
+  echo "                           WARN: without this file, ports default to host:5432"
+  echo "                                 which collides with king-postgres on prod."
+fi
 echo "    POSTGRES_CONTAINER    = $POSTGRES_CONTAINER"
 echo "    HEALTHCHECK_URL       = $HEALTHCHECK_URL"
 echo "    ENV_FILE              = $ENV_FILE"
@@ -58,6 +77,7 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: 'docker compose' plugin
 
 [ -f "$COMPOSE_BASE" ] || { echo "ERROR: missing $COMPOSE_BASE in $REPO_ROOT"; exit 1; }
 [ -f "$COMPOSE_BUILD_OVERRIDE" ] || { echo "ERROR: missing $COMPOSE_BUILD_OVERRIDE in $REPO_ROOT"; exit 1; }
+# COMPOSE_PROD_OVERRIDE is intentionally optional — git-ignored on purpose.
 [ -d "$MIGRATIONS_DIR" ] || { echo "ERROR: missing $MIGRATIONS_DIR in $REPO_ROOT"; exit 1; }
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -166,13 +186,24 @@ fi
 # ---------- Step 5: Print Cuong's commands ----------
 hr "[5/5] DRY RUN COMPLETE — Cuong runs the following from his own SSH session"
 
+# Build the printed up/rollback commands so they match the COMPOSE_FILES the
+# script actually used above (i.e. include docker-compose.production.yml when
+# it is present on the host). Without this, the printed `up -d` would expose
+# postgres on host :5432 and collide with king-postgres.
+UP_FLAGS="-f $COMPOSE_BASE -f $COMPOSE_BUILD_OVERRIDE"
+ROLLBACK_FLAGS="-f $COMPOSE_BASE"
+if [ "$COMPOSE_PROD_PRESENT" -eq 1 ]; then
+  UP_FLAGS="$UP_FLAGS -f $COMPOSE_PROD_OVERRIDE"
+  ROLLBACK_FLAGS="$ROLLBACK_FLAGS -f $COMPOSE_PROD_OVERRIDE"
+fi
+
 cat <<EOF
 
 Step A. Apply migrations + start the fork stack (single command — the backend
         entrypoint runs migrate-up before booting the server):
 
   cd $REPO_ROOT
-  docker compose -f $COMPOSE_BASE -f $COMPOSE_BUILD_OVERRIDE up -d
+  docker compose $UP_FLAGS up -d
 
 Step B. Verify the deploy is healthy (give the backend ~30s to migrate + boot):
 
@@ -182,7 +213,7 @@ Step B. Verify the deploy is healthy (give the backend ~30s to migrate + boot):
 Rollback (revert to upstream GHCR images, no fork build):
 
   cd $REPO_ROOT
-  docker compose -f $COMPOSE_BASE up -d
+  docker compose $ROLLBACK_FLAGS up -d
 
 Notes:
   - Migrations are applied by the backend entrypoint (./migrate up). The plan
