@@ -466,6 +466,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 // createWorktree creates a git worktree at the given path with a new branch.
 // Returns the actual branch name used — which may differ from the requested
 // branchName if a collision was resolved by appending a timestamp suffix.
+// branchExists checks if a branch (as a remote tracking ref) exists in the bare repo.
+func branchExists(gitRoot, branchName string) bool {
+	ref := "refs/remotes/origin/" + branchName
+	err := exec.Command("git", "-C", gitRoot, "rev-parse", "--verify", ref).Run()
+	return err == nil
+}
+
 func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, error) {
 	// Pre-check: if the worktree path already exists we would get a confusing
 	// "already exists" error from `git worktree add` — which used to be
@@ -477,11 +484,6 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 	}
 
 	err := runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef)
-	if err != nil && isBranchCollisionError(err) {
-		// Branch name collision: append timestamp and retry once.
-		branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
-		err = runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef)
-	}
 	if err != nil {
 		return "", err
 	}
@@ -489,6 +491,15 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 }
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
+	// If the branch already exists as a remote tracking ref, check it out without
+	// creating a new branch. Otherwise create a new branch from the base ref.
+	if branchExists(gitRoot, branchName) {
+		cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", worktreePath, "origin/"+branchName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return nil
+	}
 	cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
