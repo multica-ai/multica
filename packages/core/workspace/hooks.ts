@@ -9,6 +9,14 @@ export function useWorkspaceList() {
   return useQuery(workspaceListOptions());
 }
 
+export function useMemberList(workspaceId: string) {
+  return useQuery(memberListOptions(workspaceId));
+}
+
+export function useAgentList(workspaceId: string) {
+  return useQuery(agentListOptions(workspaceId));
+}
+
 export function useActorName() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));

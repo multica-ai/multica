@@ -29,6 +29,8 @@
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",
     "./issues/config/priority": "./issues/config/priority.ts",
+    "./issues/utils": "./issues/utils/index.ts",
+    "./issues/utils/*": "./issues/utils/*.ts",
     "./issues/stores": "./issues/stores/index.ts",
     "./issues/stores/view-store-context": "./issues/stores/view-store-context.tsx",
     "./issues/stores/*": "./issues/stores/*.ts",

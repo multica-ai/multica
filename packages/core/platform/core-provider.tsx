@@ -8,7 +8,7 @@ import { createChatStore, registerChatStore } from "../chat";
 import { WSProvider } from "../realtime";
 import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
-import { defaultStorage } from "./storage";
+import { defaultStorage, setDefaultStorageAdapter } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps } from "./types";
 import type { StorageAdapter } from "../types/storage";
@@ -26,6 +26,8 @@ function initCore(
   cookieAuth?: boolean,
 ) {
   if (initialized) return;
+
+  setDefaultStorageAdapter(storage);
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
