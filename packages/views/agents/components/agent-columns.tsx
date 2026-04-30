@@ -7,6 +7,7 @@ import {
   type AgentActivity,
   type AgentPresenceDetail,
   summarizeActivityWindow,
+  VISIBILITY_TOOLTIP,
 } from "@multica/core/agents";
 import {
   Tooltip,
@@ -30,6 +31,8 @@ export interface AgentRow {
   // Inline owner avatar — non-null when the page wants to attribute the
   // agent to a teammate (typically All scope on someone else's agent).
   ownerIdToShow: string | null;
+  // True when the current user owns this agent (drives the "You" badge).
+  isOwnedByMe: boolean;
   // True when the current user can archive / cancel-tasks on this agent.
   canManage: boolean;
 }
@@ -150,7 +153,7 @@ export function createAgentColumns({
 // ---------------------------------------------------------------------------
 
 function AgentNameCell({ row }: { row: AgentRow }) {
-  const { agent, ownerIdToShow } = row;
+  const { agent, ownerIdToShow, isOwnedByMe } = row;
   const isArchived = !!agent.archived_at;
   const isPrivate = agent.visibility === "private";
 
@@ -180,9 +183,14 @@ function AgentNameCell({ row }: { row: AgentRow }) {
                 }
               />
               <TooltipContent>
-                Private — only the owner can assign work
+                {VISIBILITY_TOOLTIP.private}
               </TooltipContent>
             </Tooltip>
+          )}
+          {isOwnedByMe && !ownerIdToShow && (
+            <span className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+              You
+            </span>
           )}
           {ownerIdToShow && (
             <ActorAvatar

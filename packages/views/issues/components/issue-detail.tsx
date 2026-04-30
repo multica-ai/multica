@@ -159,6 +159,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  // Workspace owners and admins moderate any comment authored by anyone
+  // (mirrors backend `comment.go:507-512`). Computed here so per-comment
+  // rendering doesn't have to re-derive it for every row.
+  const currentUserRole =
+    members.find((m) => m.user_id === user?.id)?.role ?? null;
+  const canModerateComments =
+    currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
@@ -908,6 +915,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                           entry={entry}
                           allReplies={repliesByParent}
                           currentUserId={user?.id}
+                          canModerate={canModerateComments}
                           onReply={submitReply}
                           onEdit={editComment}
                           onDelete={deleteComment}

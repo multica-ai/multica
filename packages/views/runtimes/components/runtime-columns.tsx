@@ -118,11 +118,16 @@ export function createRuntimeColumns({
       size: COL_WIDTHS.owner,
       cell: ({ row }) =>
         row.original.ownerMember ? (
-          <ActorAvatar
-            actorType="member"
-            actorId={row.original.ownerMember.user_id}
-            size={18}
-          />
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <ActorAvatar
+              actorType="member"
+              actorId={row.original.ownerMember.user_id}
+              size={18}
+            />
+            <span className="truncate text-xs text-muted-foreground">
+              {row.original.ownerMember.name}
+            </span>
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground/50">—</span>
         ),
@@ -510,6 +515,7 @@ function RowMenu({
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setDeleteOpen(true)}
+            title="Only the runtime owner and workspace admins can delete this runtime"
           >
             <Trash2 className="h-3.5 w-3.5" />
             Delete
@@ -529,6 +535,9 @@ function RowMenu({
             <AlertDialogDescription>
               Are you sure you want to delete &ldquo;{runtime.name}&rdquo;?
               This action cannot be undone.
+              <span className="mt-2 block text-xs text-muted-foreground/80">
+                Only the runtime owner and workspace admins can delete a runtime.
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

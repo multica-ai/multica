@@ -16,6 +16,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
+import { VisibilityBadge } from "./visibility-badge";
 
 interface AgentProfileCardProps {
   agentId: string;
@@ -81,6 +82,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-sm font-semibold">{agent.name}</p>
+            {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 Archived
