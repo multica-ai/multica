@@ -454,13 +454,6 @@ type TaskUsage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
-type FixedLoginCode struct {
-	UserID    pgtype.UUID        `json:"user_id"`
-	CodeHash  string             `json:"code_hash"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
 type User struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`
