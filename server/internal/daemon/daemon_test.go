@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -335,6 +336,123 @@ func TestNotifyTaskResultUsesExpectedContent(t *testing.T) {
 	})
 	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
 		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestNotifyTaskResultUsesIssueSummaryWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/issues/issue-9" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-9",
+			"identifier": "OPE-251",
+			"title":      "新增通知渠道 系统通知栏",
+		})
+	}))
+	defer srv.Close()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		client:   NewClient(srv.URL),
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, true, "")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:         true,
+		AgentName:       "Tony Bot",
+		IssueID:         "issue-9",
+		IssueIdentifier: "OPE-251",
+		IssueTitle:      "新增通知渠道 系统通知栏",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestNotifyTaskResultFallsBackWhenIssueLookupFails(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		client:   NewClient(srv.URL),
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "disk full")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:   false,
+		AgentName: "Tony Bot",
+		IssueID:   "issue-9",
+		Message:   "disk full",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestEnrichTaskNotificationPayloadUsesTimeout(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(5 * time.Second):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		client: NewClient(srv.URL),
+		logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	start := time.Now()
+	payload := d.enrichTaskNotificationPayload(context.Background(), d.logger, daemonnotifier.TaskNotificationPayload{
+		IssueID: "issue-9",
+	})
+
+	if payload.IssueIdentifier != "" || payload.IssueTitle != "" {
+		t.Fatalf("expected timeout fallback payload, got %+v", payload)
+	}
+	if elapsed := time.Since(start); elapsed >= 4*time.Second {
+		t.Fatalf("issue lookup did not timeout quickly enough: %s", elapsed)
 	}
 }
 

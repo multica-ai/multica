@@ -27,6 +27,8 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+const notificationIssueLookupTimeout = 2 * time.Second
+
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
 	workspaceID     string
@@ -960,15 +962,49 @@ func (d *Daemon) notifyTaskResult(ctx context.Context, taskLog *slog.Logger, tas
 		return
 	}
 
-	title, body := notifier.BuildNotificationContent(notifier.TaskNotificationPayload{
+	payload := notifier.TaskNotificationPayload{
 		Success:   success,
 		AgentName: taskAgentName(task),
 		IssueID:   task.IssueID,
 		Message:   message,
-	})
+	}
+	payload = d.enrichTaskNotificationPayload(ctx, taskLog, payload)
+
+	title, body := notifier.BuildNotificationContent(payload)
 	if err := d.notifier.Notify(ctx, title, body); err != nil {
 		taskLog.Warn("local notification failed", "error", err)
 	}
+}
+
+func (d *Daemon) enrichTaskNotificationPayload(ctx context.Context, taskLog *slog.Logger, payload notifier.TaskNotificationPayload) notifier.TaskNotificationPayload {
+	if d.client == nil {
+		return payload
+	}
+	if strings.TrimSpace(payload.IssueID) == "" {
+		return payload
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, notificationIssueLookupTimeout)
+	defer cancel()
+
+	issue, err := d.client.GetIssue(lookupCtx, payload.IssueID)
+	if err != nil {
+		taskLog.Debug("load issue summary for local notification failed", "issue_id", payload.IssueID, "error", err)
+		return payload
+	}
+	if issue == nil {
+		return payload
+	}
+
+	identifier := strings.TrimSpace(issue.Identifier)
+	title := strings.TrimSpace(issue.Title)
+	if identifier == "" || title == "" {
+		return payload
+	}
+
+	payload.IssueIdentifier = identifier
+	payload.IssueTitle = title
+	return payload
 }
 
 func taskAgentName(task Task) string {
