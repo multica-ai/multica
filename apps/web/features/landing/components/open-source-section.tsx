@@ -54,7 +54,7 @@ export function OpenSourceSection() {
                   <h3
                     className={
                       i === 0
-                        ? "font-[family-name:var(--font-serif)] text-[1.75rem] leading-[1.1] tracking-[-0.02em] text-[#0a0d12] sm:text-[2.05rem] sm:w-[260px] sm:shrink-0"
+                        ? "text-[22px] font-semibold leading-tight tracking-[-0.01em] text-[#0a0d12] sm:text-[24px] sm:w-[260px] sm:shrink-0"
                         : "text-[17px] font-semibold leading-snug text-[#0a0d12] sm:text-[18px] sm:w-[260px] sm:shrink-0"
                     }
                   >
