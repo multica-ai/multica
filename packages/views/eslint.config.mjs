@@ -85,6 +85,9 @@ const TRANSLATED_FILES = [
   "layout/app-sidebar.tsx",
   "layout/help-launcher.tsx",
   "layout/workspace-loader.tsx",
+  "onboarding/components/step-header.tsx",
+  "onboarding/steps/step-welcome.tsx",
+  "onboarding/onboarding-flow.tsx",
 ];
 
 export default [

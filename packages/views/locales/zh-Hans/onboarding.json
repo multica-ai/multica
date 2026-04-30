@@ -1,1 +1,22 @@
-{}
+{
+  "step_header": {
+    "step_of": "第 {{current}} 步 / 共 {{total}} 步"
+  },
+  "welcome": {
+    "wordmark": "欢迎使用 Multica",
+    "headline_line1": "你的 AI 队友，",
+    "headline_line2": "在",
+    "headline_emphasis": "同一个工作区。",
+    "lede": "像分配给同事一样把任务交给它们——它们会接手、推进状态、完成后留下评论。",
+    "lede_web": "桌面端自带运行时，无需安装。在 web 端继续可以连接你自己的 CLI。",
+    "lede_desktop": "完成本流程后，真实的智能体会回复你创建的第一个 issue。",
+    "download_desktop": "下载桌面端",
+    "continue_on_web": "在 web 端继续",
+    "start_exploring": "开始探索",
+    "skip_existing": "我之前做过了",
+    "illustration_caption": "每个 issue、每条对话、每个决策——团队和智能体共享同一份上下文。"
+  },
+  "errors": {
+    "skip_failed": "完成上手引导失败"
+  }
+}

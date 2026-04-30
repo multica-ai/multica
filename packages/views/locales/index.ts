@@ -3,6 +3,7 @@ import enCommon from "./en/common.json";
 import enAuth from "./en/auth.json";
 import enSettings from "./en/settings.json";
 import enEditor from "./en/editor.json";
+import enOnboarding from "./en/onboarding.json";
 import enInvite from "./en/invite.json";
 import enLabels from "./en/labels.json";
 import enMembers from "./en/members.json";
@@ -21,6 +22,7 @@ import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
 import zhHansEditor from "./zh-Hans/editor.json";
+import zhHansOnboarding from "./zh-Hans/onboarding.json";
 import zhHansInvite from "./zh-Hans/invite.json";
 import zhHansLabels from "./zh-Hans/labels.json";
 import zhHansMembers from "./zh-Hans/members.json";
@@ -45,6 +47,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     auth: enAuth,
     settings: enSettings,
     editor: enEditor,
+    onboarding: enOnboarding,
     invite: enInvite,
     labels: enLabels,
     members: enMembers,
@@ -65,6 +68,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     auth: zhHansAuth,
     settings: zhHansSettings,
     editor: zhHansEditor,
+    onboarding: zhHansOnboarding,
     invite: zhHansInvite,
     labels: zhHansLabels,
     members: zhHansMembers,

@@ -1,1 +1,22 @@
-{}
+{
+  "step_header": {
+    "step_of": "Step {{current}} of {{total}}"
+  },
+  "welcome": {
+    "wordmark": "Welcome to Multica",
+    "headline_line1": "Your AI teammates,",
+    "headline_line2": "in",
+    "headline_emphasis": "one workspace.",
+    "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
+    "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
+    "lede_desktop": "By the end, a real agent will be replying to your first issue.",
+    "download_desktop": "Download Desktop",
+    "continue_on_web": "Continue on web",
+    "start_exploring": "Start exploring",
+    "skip_existing": "I've done this before",
+    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents."
+  },
+  "errors": {
+    "skip_failed": "Failed to finish onboarding"
+  }
+}
