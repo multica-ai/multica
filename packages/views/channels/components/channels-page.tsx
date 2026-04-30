@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { channelDetailOptions, useMarkChannelRead } from "@multica/core/channels";
+import {
+  channelDetailOptions,
+  channelMessagesOptions,
+  useMarkChannelRead,
+} from "@multica/core/channels";
 import { ChannelList } from "./channel-list";
 import { ChannelHeader } from "./channel-header";
 import { ChannelMessageList } from "./channel-message-list";
@@ -50,17 +54,28 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   const { data: channel, isLoading: channelLoading } = useQuery(
     channelDetailOptions(wsId, activeChannelId ?? "", enabled && !!activeChannelId),
   );
+  const { data: messages = [] } = useQuery(
+    channelMessagesOptions(activeChannelId ?? "", enabled && !!activeChannelId),
+  );
   const markRead = useMarkChannelRead(activeChannelId ?? "");
 
-  // Mark the channel read when the user views it. We bump on mount and
-  // again whenever the message-list cache changes; the mutation itself is
-  // idempotent on the server side.
+  // Mark-read on view: whenever the newest message id changes (mount, new
+  // arrival, channel switch) we POST /channels/<id>/read with that id. We
+  // track the last id we POSTed so a re-render with the same data is a
+  // no-op. Optimistic messages (id starts with "optimistic-") are
+  // skipped — we only persist canonical server ids.
+  //
+  // The list query returns newest-first so messages[0] is the latest.
+  const lastSentRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!enabled || !activeChannelId || !channel) return;
-    // We mark up to "now" via a stable sentinel until cursor management
-    // is added in a follow-up; for Phase 1 this is acceptable since
-    // last_read_message_id is informational, not a UX-critical signal.
-  }, [enabled, activeChannelId, channel, markRead]);
+    if (!enabled || !activeChannelId || messages.length === 0) return;
+    const newest = messages[0];
+    if (!newest || newest.id.startsWith("optimistic-")) return;
+    const key = `${activeChannelId}:${newest.id}`;
+    if (lastSentRef.current === key) return;
+    lastSentRef.current = key;
+    markRead.mutate(newest.id);
+  }, [enabled, activeChannelId, messages, markRead]);
 
   if (!enabled) {
     return (

@@ -236,6 +236,13 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	// ChannelsEnabled is gated by ChannelsEnabledSet so a PATCH that doesn't
+	// mention the flag (e.g. a name change) leaves it untouched. Same for
+	// ChannelRetentionDays — Set=true with the value=nil clears the override.
+	ChannelsEnabled         *bool  `json:"channels_enabled"`
+	ChannelsEnabledSet      bool   `json:"channels_enabled_set"`
+	ChannelRetentionDays    *int32 `json:"channel_retention_days"`
+	ChannelRetentionDaysSet bool   `json:"channel_retention_days_set"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +288,14 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	params.ChannelsEnabledSet = req.ChannelsEnabledSet
+	if req.ChannelsEnabled != nil {
+		params.ChannelsEnabled = pgtype.Bool{Bool: *req.ChannelsEnabled, Valid: true}
+	}
+	params.ChannelRetentionDaysSet = req.ChannelRetentionDaysSet
+	if req.ChannelRetentionDays != nil {
+		params.ChannelRetentionDays = pgtype.Int4{Int32: *req.ChannelRetentionDays, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)

@@ -833,7 +833,23 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      context?: string;
+      settings?: Record<string, unknown>;
+      repos?: WorkspaceRepo[];
+      // Channels feature flag — see migration 065 and the channels spec.
+      // Pair with channels_enabled_set=true to actually mutate; otherwise
+      // a missing field would leave the value untouched (handler convention).
+      channels_enabled?: boolean;
+      channels_enabled_set?: boolean;
+      channel_retention_days?: number | null;
+      channel_retention_days_set?: boolean;
+    },
+  ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

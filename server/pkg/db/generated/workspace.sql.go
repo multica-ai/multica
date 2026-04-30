@@ -175,21 +175,38 @@ UPDATE workspace SET
     settings = COALESCE($5, settings),
     repos = COALESCE($6, repos),
     issue_prefix = COALESCE($7, issue_prefix),
+    channels_enabled = CASE
+        WHEN $8::bool THEN COALESCE($9, channels_enabled)
+        ELSE channels_enabled
+    END,
+    channel_retention_days = CASE
+        WHEN $10::bool THEN $11
+        ELSE channel_retention_days
+    END,
     updated_at = now()
 WHERE id = $1
 RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled
 `
 
 type UpdateWorkspaceParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        pgtype.Text `json:"name"`
-	Description pgtype.Text `json:"description"`
-	Context     pgtype.Text `json:"context"`
-	Settings    []byte      `json:"settings"`
-	Repos       []byte      `json:"repos"`
-	IssuePrefix pgtype.Text `json:"issue_prefix"`
+	ID                      pgtype.UUID `json:"id"`
+	Name                    pgtype.Text `json:"name"`
+	Description             pgtype.Text `json:"description"`
+	Context                 pgtype.Text `json:"context"`
+	Settings                []byte      `json:"settings"`
+	Repos                   []byte      `json:"repos"`
+	IssuePrefix             pgtype.Text `json:"issue_prefix"`
+	ChannelsEnabledSet      bool        `json:"channels_enabled_set"`
+	ChannelsEnabled         pgtype.Bool `json:"channels_enabled"`
+	ChannelRetentionDaysSet bool        `json:"channel_retention_days_set"`
+	ChannelRetentionDays    pgtype.Int4 `json:"channel_retention_days"`
 }
 
+// channels_enabled / channel_retention_days follow the same pattern as the
+// per-channel retention update in channel.sql: an explicit `*_set` flag
+// distinguishes "leave alone" from "set to NULL/false". Without the flag,
+// a missing JSON field would always coerce to false/NULL and a single
+// name-update PATCH would silently disable channels.
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
 	row := q.db.QueryRow(ctx, updateWorkspace,
 		arg.ID,
@@ -199,6 +216,10 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Settings,
 		arg.Repos,
 		arg.IssuePrefix,
+		arg.ChannelsEnabledSet,
+		arg.ChannelsEnabled,
+		arg.ChannelRetentionDaysSet,
+		arg.ChannelRetentionDays,
 	)
 	var i Workspace
 	err := row.Scan(
