@@ -18,7 +18,7 @@ Two commands to set up everything — server, CLI, and configuration:
 
 ```bash
 # 1. Install CLI + provision the self-host server
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash -s -- --with-server
 
 # 2. Configure CLI, authenticate, and start the daemon
 multica setup self-host
@@ -47,7 +47,7 @@ If you prefer to run each step manually:
 **Prerequisites:** Docker and Docker Compose.
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
+git clone https://github.com/TheophilusChinomona/multica.git
 cd multica
 make selfhost
 ```
@@ -137,7 +137,7 @@ multica daemon status
 If you installed via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash -s -- --stop
 ```
 
 If you cloned the repo manually:
@@ -167,7 +167,7 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 If you prefer running Docker Compose steps manually instead of `make selfhost`:
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
+git clone https://github.com/TheophilusChinomona/multica.git
 cd multica
 cp .env.example .env
 ```

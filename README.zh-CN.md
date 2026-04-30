@@ -61,7 +61,7 @@ brew install multica-ai/tap/multica
 ### macOS / Linux（安装脚本）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash
 ```
 
 如果没有 Homebrew，可以使用安装脚本。脚本会安装 Multica CLI：检测到 `brew` 时通过 Homebrew 安装，否则直接下载二进制。
@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.ps1 | iex
 ```
 
 安装完成后，一条命令完成配置、认证和启动：
@@ -81,7 +81,7 @@ multica setup          # 连接 Multica Cloud，登录，启动 daemon
 > **自部署？** 加上 `--with-server` 在本地部署完整的 Multica 服务：
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+> curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash -s -- --with-server
 > multica setup self-host
 > ```
 >

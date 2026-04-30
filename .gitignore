@@ -58,3 +58,7 @@ server/server
 data/
 .kilo
 .idea
+
+# pnpm store created when running pnpm install inside the devcontainer
+# (workspace is bind-mounted from host, so the store lands here)
+.pnpm-store/
