@@ -441,7 +441,7 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 			continue
 		}
 		ws.taskRepoURLs[url] = struct{}{}
-		toSync = append(toSync, RepoData{URL: url, Description: repo.Description})
+		toSync = append(toSync, RepoData{URL: url})
 	}
 	d.mu.Unlock()
 

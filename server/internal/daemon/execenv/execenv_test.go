@@ -217,7 +217,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 		ProjectID:    "22222222-3333-4444-5555-666666666666",
 		ProjectTitle: "Project A",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/project-repo", Description: ""},
+			{URL: "https://github.com/org/project-repo"},
 		},
 		ProjectResources: []ProjectResourceForEnv{
 			{
