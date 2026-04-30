@@ -271,7 +271,13 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      // 401 (not authenticated) and 404 (resource missing) are routine
+      // expected outcomes — anonymous page loads probe /api/me, optimistic
+      // queries hit endpoints that may legitimately 404. The thrown
+      // ApiError still reaches the caller, so callers that consider these
+      // statuses fatal can react however they want; the log level just
+      // reflects that the response itself is not noteworthy.
+      const logLevel = res.status === 404 || res.status === 401 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }
