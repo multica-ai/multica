@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 
 vi.mock("@multica/core/paths", () => ({
@@ -43,11 +43,22 @@ vi.mock("mermaid", () => ({
 
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
   value: () => ({
-    fillStyle: "rgb(1, 2, 3)",
+    fillStyle: "#000",
+    fillRect: vi.fn(),
+    getImageData: () => ({ data: new Uint8ClampedArray([12, 34, 56, 255]) }),
   }),
 });
 
+import mermaid from "mermaid";
 import { ReadonlyContent } from "./readonly-content";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("ReadonlyContent math rendering", () => {
   it("renders inline and block LaTeX with KaTeX markup", () => {
@@ -89,7 +100,15 @@ describe("ReadonlyContent line breaks", () => {
 });
 
 describe("ReadonlyContent Mermaid rendering", () => {
-  it("renders mermaid code fences in a sized sandbox iframe", async () => {
+  it("renders mermaid code fences in a sized sandbox iframe with legacy rgb colors", async () => {
+    const originalGetComputedStyle = window.getComputedStyle;
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudoElt) => {
+      if (element instanceof HTMLElement && element.style.color.startsWith("var(")) {
+        return { color: "oklch(60% 0.2 120)" } as CSSStyleDeclaration;
+      }
+      return originalGetComputedStyle.call(window, element, pseudoElt);
+    });
+
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
@@ -107,5 +126,16 @@ describe("ReadonlyContent Mermaid rendering", () => {
       expect(iframe?.style.width).toBe("123px");
       expect(iframe?.style.height).toBe("45px");
     });
+
+    expect(mermaid.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        themeVariables: expect.objectContaining({
+          lineColor: "rgb(12, 34, 56)",
+          primaryBorderColor: "rgb(12, 34, 56)",
+          primaryColor: "rgb(12, 34, 56)",
+          primaryTextColor: "rgb(12, 34, 56)",
+        }),
+      }),
+    );
   });
 });

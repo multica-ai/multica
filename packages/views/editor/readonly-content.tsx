@@ -66,18 +66,20 @@ function getMermaid(): Promise<MermaidAPI> {
 
 function toLegacyColor(color: string, fallback: string, ownerDocument: Document): string {
   const canvas = ownerDocument.createElement("canvas");
-  const context = canvas.getContext("2d");
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return fallback;
 
-  context.fillStyle = fallback;
-  context.fillStyle = color;
-  const normalized = context.fillStyle || fallback;
-  const hexMatch = normalized.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
-  if (hexMatch?.[1] && hexMatch[2] && hexMatch[3]) {
-    return `rgb(${Number.parseInt(hexMatch[1], 16)}, ${Number.parseInt(hexMatch[2], 16)}, ${Number.parseInt(hexMatch[3], 16)})`;
-  }
+  // Mermaid's color parser only supports legacy color syntax. Canvas can parse
+  // modern CSS Color 4 values such as oklch(), then getImageData gives concrete
+  // 8-bit sRGB bytes that Mermaid can consume safely.
+  context.fillStyle = "#000";
+  context.fillStyle = color || fallback;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
 
-  return normalized;
+  return `rgb(${red}, ${green}, ${blue})`;
 }
 
 function resolveCssColor(
