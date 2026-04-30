@@ -58,8 +58,16 @@ export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
 ) {
-  const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  return useLoadMoreByStatusForWorkspace(wsId, status, myIssues);
+}
+
+export function useLoadMoreByStatusForWorkspace(
+  wsId: string,
+  status: IssueStatus,
+  myIssues?: { scope: string; filter: MyIssuesFilter },
+) {
+  const qc = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
 
   const queryKey = myIssues

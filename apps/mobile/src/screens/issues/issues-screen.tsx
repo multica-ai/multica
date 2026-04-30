@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -7,6 +7,7 @@ import { ChevronDown, Filter } from "lucide-react-native";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG, PRIORITY_ORDER } from "@multica/core/issues/config/priority";
 import { useIssueList } from "@multica/core/issues/hooks";
+import { useLoadMoreByStatusForWorkspace } from "@multica/core/issues/mutations";
 import {
   useMobileIssuesFilterStore,
   useRehydrateMobileIssuesFilters,
@@ -30,7 +31,18 @@ export function IssuesScreen() {
   useRehydrateMobileIssuesFilters(userId);
   const [status, setStatus] = useState<IssueStatus>("todo");
   const [filterOpen, setFilterOpen] = useState(false);
-  const { data: issues = [], isLoading, isError } = useIssueList(workspace.id);
+  const {
+    data: issues = [],
+    isLoading,
+    isError,
+    isRefetching,
+    refetch,
+  } = useIssueList(workspace.id);
+  const {
+    hasMore,
+    isLoading: isLoadingMore,
+    loadMore,
+  } = useLoadMoreByStatusForWorkspace(workspace.id, status);
   const { data: members = [] } = useMemberList(workspace.id);
   const { data: agents = [] } = useAgentList(workspace.id);
   const { data: projects = [] } = useProjectList(workspace.id);
@@ -117,12 +129,26 @@ export function IssuesScreen() {
           contentContainerStyle={styles.list}
           data={filteredIssues}
           keyExtractor={(item) => item.id}
+          ListFooterComponent={
+            <IssueListFooter
+              hasMore={hasMore}
+              loading={isLoadingMore}
+            />
+          }
           ListEmptyComponent={
             <IssueListEmpty
               hasFilters={activeFilterCount > 0}
               onClear={clearFilters}
             />
           }
+          onEndReached={() => {
+            if (hasMore && !isLoadingMore) void loadMore();
+          }}
+          onEndReachedThreshold={0.4}
+          onRefresh={() => {
+            void refetch();
+          }}
+          refreshing={isRefetching && !isLoading}
           renderItem={({ item }) => (
             <IssueCard
               issue={item}
@@ -202,6 +228,26 @@ function IssueListEmpty({
       >
         <Text style={styles.emptyClearText}>Clear filters</Text>
       </Pressable>
+    </View>
+  );
+}
+
+function IssueListFooter({
+  hasMore,
+  loading,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+}) {
+  if (!hasMore && !loading) return null;
+  return (
+    <View style={styles.listFooter}>
+      {loading ? (
+        <>
+          <ActivityIndicator color={colors.mutedForeground} />
+          <Text style={styles.listFooterText}>Loading more...</Text>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -582,6 +628,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     gap: spacing.sm,
     paddingBottom: spacing.xl,
+  },
+  listFooter: {
+    alignItems: "center",
+    gap: spacing.sm,
+    minHeight: 56,
+    justifyContent: "center",
+    paddingVertical: spacing.md,
+  },
+  listFooterText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
   },
   emptyFiltered: {
     alignItems: "center",
