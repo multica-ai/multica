@@ -570,7 +570,7 @@ function AgentSection({
                 actorType="agent"
                 actorId={selectedId}
                 size={28}
-                disableHoverCard
+                showStatusDot
               />
             ) : (
               <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground">

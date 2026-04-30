@@ -1192,3 +1192,26 @@ func TestWithAgentStderrAppendsHint(t *testing.T) {
 		t.Errorf("got %q, want %q", msg, want)
 	}
 }
+
+func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		ExtraArgs:  []string{"--listen", "tcp://evil", "--sandbox", "read-only"},
+		CustomArgs: []string{"--sandbox", "workspace-write", "--listen=bad"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "tcp://evil") || strings.Contains(joined, "--listen=bad") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--sandbox" && args[i+1] == "read-only" {
+			extraIdx = i
+		}
+		if args[i] == "--sandbox" && args[i+1] == "workspace-write" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
+	}
+}

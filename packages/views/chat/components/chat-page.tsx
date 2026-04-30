@@ -21,6 +21,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
+import { useAgentPresenceDetail } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import {
   chatSessionsOptions,
@@ -88,6 +89,10 @@ export function ChatPage() {
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
+
+  const presenceDetail = useAgentPresenceDetail(wsId, activeAgent?.id);
+  const availability =
+    presenceDetail === "loading" ? undefined : presenceDetail.availability;
 
   // Restore most recent active session once the session query resolves.
   // The ref is set only AFTER we've seen a successful query — setting it
@@ -248,8 +253,8 @@ export function ChatPage() {
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col min-h-0">
             <ChatMessageList
               messages={messages}
-              pendingTaskId={pendingTaskId}
-              isWaiting={!!pendingTaskId}
+              pendingTask={pendingTask}
+              availability={availability}
             />
           </div>
         ) : (

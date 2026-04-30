@@ -7,13 +7,14 @@ import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { Toaster } from "sonner";
+import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
+import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 
 
 function AppContent() {
@@ -99,18 +100,29 @@ function AppContent() {
   const wsCount = workspaces.length;
   const hasOnboarded = useHasOnboarded();
 
-  // Onboarding and zero-workspace both resolve to an overlay, but
-  // onboarding wins: a user who hasn't completed it gets the onboarding
-  // overlay regardless of how many workspaces already exist.
+  // Bridge local daemon IPC status into the runtimes cache so this user's
+  // own daemon flips to offline/online sub-second instead of waiting on the
+  // server's 75s sweeper. Resolves wsId from the active tab so workspace
+  // switches automatically rebind the subscription.
+  const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
+  const activeWsId = activeWorkspaceSlug
+    ? workspaces.find((w) => w.slug === activeWorkspaceSlug)?.id
+    : undefined;
+  useDaemonIPCBridge(activeWsId);
+
+  // Workspace presence wins over onboarding state: a user invited into an
+  // existing workspace must enter that workspace, not be trapped in the
+  // onboarding overlay just because their personal `onboarded_at` is null.
+  // Onboarding is only the right destination when the account has zero
+  // workspaces AND has never onboarded.
   useEffect(() => {
     if (!user || !workspaceListFetched) return;
     const { overlay, open } = useWindowOverlayStore.getState();
     if (overlay) return;
+    if (wsCount > 0) return;
     if (!hasOnboarded) {
       open({ type: "onboarding" });
-      return;
-    }
-    if (wsCount === 0) {
+    } else {
       open({ type: "new-workspace" });
     }
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded]);

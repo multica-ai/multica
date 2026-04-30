@@ -36,6 +36,8 @@ function FileUploadButton({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
+        aria-label="Attach file"
+        title="Attach file"
         className={cn(
           "inline-flex items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none",
           btnSize,

@@ -292,6 +292,28 @@ func TestHermesClientHandleAgentMessage(t *testing.T) {
 	}
 }
 
+func TestHermesClientHandleSessionNotificationAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	var got Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = msg
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"Hello from Kiro"}}}}`
+	c.handleLine(line)
+
+	if got.Type != MessageText {
+		t.Errorf("type: got %v, want MessageText", got.Type)
+	}
+	if got.Content != "Hello from Kiro" {
+		t.Errorf("content: got %q, want %q", got.Content, "Hello from Kiro")
+	}
+}
+
 func TestHermesClientHandleAgentThought(t *testing.T) {
 	t.Parallel()
 
@@ -339,6 +361,62 @@ func TestHermesClientHandleToolCallStart(t *testing.T) {
 	}
 	if cmd, ok := got.Input["command"].(string); !ok || cmd != "ls -la" {
 		t.Errorf("input.command: got %v", got.Input["command"])
+	}
+}
+
+func TestHermesClientHandleSessionNotificationToolCall(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"ToolCall","toolCallId":"tc-kiro","name":"Shell","status":"pending","parameters":{"command":"pwd"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"ToolCallUpdate","toolCallId":"tc-kiro","status":"completed","name":"Shell","output":"/tmp/project\n"}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if got[0].Type != MessageToolUse {
+		t.Errorf("first message: got %v, want MessageToolUse", got[0].Type)
+	}
+	if got[0].Tool != "Shell" {
+		t.Errorf("first tool: got %q, want Shell", got[0].Tool)
+	}
+	if cmd, _ := got[0].Input["command"].(string); cmd != "pwd" {
+		t.Errorf("first input.command: got %v, want pwd", got[0].Input["command"])
+	}
+	if got[1].Type != MessageToolResult {
+		t.Errorf("second message: got %v, want MessageToolResult", got[1].Type)
+	}
+	if got[1].Output != "/tmp/project\n" {
+		t.Errorf("second output: got %q", got[1].Output)
+	}
+}
+
+func TestHermesClientHandleSessionNotificationTurnEnd(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"TurnEnd","stopReason":"end_turn","usage":{"inputTokens":3,"outputTokens":4,"cachedReadTokens":1}}}}`
+	c.handleLine(line)
+
+	if got.stopReason != "end_turn" {
+		t.Errorf("stopReason: got %q, want end_turn", got.stopReason)
+	}
+	if got.usage.InputTokens != 3 || got.usage.OutputTokens != 4 || got.usage.CacheReadTokens != 1 {
+		t.Errorf("usage: got %+v", got.usage)
 	}
 }
 

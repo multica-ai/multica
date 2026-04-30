@@ -5,6 +5,7 @@ import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
@@ -16,11 +17,22 @@ import {
   PickerEmpty,
 } from "./property-picker";
 
-export function canAssignAgent(agent: Agent, userId: string | undefined, memberRole: string | undefined): boolean {
-  if (agent.visibility !== "private") return true;
-  if (agent.owner_id === userId) return true;
-  if (memberRole === "owner" || memberRole === "admin") return true;
-  return false;
+/**
+ * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
+ * that haven't migrated to the new `canAssignAgentToIssue` Decision API yet.
+ * Internally redirects to the canonical rule so behaviour stays in sync.
+ */
+export function canAssignAgent(
+  agent: Agent,
+  userId: string | undefined,
+  memberRole: string | undefined,
+): boolean {
+  return canAssignAgentToIssue(agent, {
+    userId: userId ?? null,
+    role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
+      ? memberRole
+      : null,
+  }).allowed;
 }
 
 export function AssigneePicker({
@@ -99,7 +111,7 @@ export function AssigneePicker({
       trigger={
         customTrigger ? customTrigger : assigneeType && assigneeId ? (
           <>
-            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={18} disableHoverCard />
+            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={18} enableHoverCard showStatusDot />
             <span className="truncate">{triggerLabel}</span>
           </>
         ) : (
@@ -147,12 +159,22 @@ export function AssigneePicker({
       {filteredAgents.length > 0 && (
         <PickerSection label="Agents">
           {filteredAgents.map((a) => {
-            const allowed = canAssignAgent(a, user?.id, memberRole);
+            const decision = canAssignAgentToIssue(a, {
+              userId: user?.id ?? null,
+              role:
+                memberRole === "owner" ||
+                memberRole === "admin" ||
+                memberRole === "member"
+                  ? memberRole
+                  : null,
+            });
+            const allowed = decision.allowed;
             return (
               <PickerItem
                 key={a.id}
                 selected={isSelected("agent", a.id)}
                 disabled={!allowed}
+                tooltip={!allowed ? decision.message : undefined}
                 onClick={() => {
                   if (!allowed) return;
                   onUpdate({
@@ -162,7 +184,7 @@ export function AssigneePicker({
                   setOpen(false);
                 }}
               >
-                <ActorAvatar actorType="agent" actorId={a.id} size={18} disableHoverCard />
+                <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                 <span className={allowed ? "" : "text-muted-foreground"}>{a.name}</span>
                 {a.visibility === "private" && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />

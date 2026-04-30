@@ -9,6 +9,7 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
 }
 
 /**
@@ -21,7 +22,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
 
@@ -65,6 +66,14 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
         // Only "No project" is checked → hide issues that have a project
         return false;
       }
+    }
+
+    if (labelFilters.length > 0) {
+      // OR semantics within the filter: keep issues that carry any of the
+      // selected labels. Matches existing priority / project multi-select.
+      const issueLabels = issue.labels;
+      if (!issueLabels || issueLabels.length === 0) return false;
+      if (!issueLabels.some((l) => labelFilters.includes(l.id))) return false;
     }
 
     return true;

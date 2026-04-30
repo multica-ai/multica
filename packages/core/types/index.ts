@@ -5,6 +5,9 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  AgentActivityBucket,
+  AgentRunCount,
+  TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
   CreateAgentRequest,
@@ -16,6 +19,8 @@ export type {
   SetAgentSkillsRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
@@ -33,6 +38,7 @@ export type {
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
+export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
@@ -42,7 +48,19 @@ export type * from "./api";
 export type { Attachment } from "./attachment";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
-export type { Project, ProjectStatus, ProjectPriority, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
+export type {
+  Project,
+  ProjectStatus,
+  ProjectPriority,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  ListProjectsResponse,
+  ProjectResource,
+  ProjectResourceType,
+  GithubRepoResourceRef,
+  CreateProjectResourceRequest,
+  ListProjectResourcesResponse,
+} from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   Autopilot,

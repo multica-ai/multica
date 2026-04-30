@@ -265,6 +265,8 @@ type ProviderName =
   | "opencode"
   | "openclaw"
   | "hermes"
+  | "kimi"
+  | "kiro"
   | "pi"
   | "copilot"
   | "cursor";

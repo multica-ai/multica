@@ -13,15 +13,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // resolveTextFlag picks between a `--<name>` flag value and a paired
 // `--<name>-stdin` flag, mirroring the existing `--content` / `--content-stdin`
 // pattern. It returns the resolved string and an error when both are set or
-// stdin is requested but produces no body. The resulting text is returned
-// verbatim — callers decide whether to apply unescapeFlagText to the inline
-// flag form (and never to the stdin form, which already preserves literal
-// backslashes).
+// stdin is requested but produces no body. Inline flag values are passed
+// through util.UnescapeBackslashEscapes so bash-double-quoted `\n` becomes a
+// real newline; stdin bodies are returned verbatim so literal backslashes
+// survive intact.
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
 	useStdin, _ := cmd.Flags().GetBool(stdinFlag)
@@ -43,49 +44,7 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 	if inline == "" {
 		return "", false, nil
 	}
-	return unescapeFlagText(inline), true, nil
-}
-
-// unescapeFlagText decodes the common backslash escape sequences (\n, \r, \t,
-// \\) in a free-form string flag value. Shells like bash do not expand these
-// inside double quotes, so an LLM agent that emits
-// `--content "para1\n\npara2"` ends up sending the literal 4-char sequence to
-// the CLI and then to storage, where it renders as text rather than as line
-// breaks. Decoding here makes the flag behave the way callers intuit; users
-// who genuinely need a literal backslash-n can write `\\n` or pipe the body
-// via `--content-stdin` / `--description-stdin`, which bypass this path
-// entirely.
-func unescapeFlagText(s string) string {
-	if !strings.ContainsRune(s, '\\') {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case 'n':
-				b.WriteByte('\n')
-				i++
-				continue
-			case 'r':
-				b.WriteByte('\r')
-				i++
-				continue
-			case 't':
-				b.WriteByte('\t')
-				i++
-				continue
-			case '\\':
-				b.WriteByte('\\')
-				i++
-				continue
-			}
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
+	return util.UnescapeBackslashEscapes(inline), true, nil
 }
 
 var issueCmd = &cobra.Command{
@@ -465,6 +424,15 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
+// isHTTPURL reports whether path is an http:// or https:// URL.
+// Used to skip URL-shaped values passed to --attachment, which only
+// accepts local file paths. Trims surrounding whitespace because
+// agent-generated commands sometimes copy URLs with stray spaces.
+func isHTTPURL(path string) bool {
+	p := strings.TrimSpace(path)
+	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -517,22 +485,65 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_id"] = aID
 	}
 
+	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
+	// before invoking the agent, the agent's `multica issue create` call
+	// inherits the env var and tags the new issue with origin_type=
+	// quick_create + origin_id=<task_id>. The completion handler then
+	// locates the issue deterministically by origin instead of "most
+	// recent issue by this agent", which is racy when max_concurrent_tasks
+	// > 1 and the agent is creating other issues in parallel.
+	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
+		body["origin_type"] = "quick_create"
+		body["origin_id"] = taskID
+	}
+
+	// Pre-validate attachments BEFORE creating the issue so a bad path
+	// can never produce a half-created issue (which would otherwise
+	// trigger callers — especially the agent doing quick-create — to
+	// retry the whole `issue create` and end up with duplicates).
+	//
+	//   - http(s) URLs are not local files; the API only accepts local
+	//     paths here. Warn and skip rather than fail — a markdown image
+	//     URL embedded in the prompt should never be re-attached, and
+	//     skipping is the safest outcome for that case.
+	//   - Anything else is treated as a local path and read upfront.
+	//     A read failure here is a real user/agent mistake (typo,
+	//     missing file) and we surface it pre-create so the issue
+	//     never lands.
+	type pendingAttachment struct {
+		path string
+		data []byte
+	}
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
 
 	// Upload attachments and link them to the newly created issue.
+	// Failures here are partial-success: the issue exists already, so
+	// turning a non-zero exit on the caller would invite a retry that
+	// duplicates the issue. Warn on stderr and continue.
 	issueID := strVal(result, "id")
-	for _, filePath := range attachments {
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+	for _, att := range pending {
+		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
+				att.path, strVal(result, "identifier"), uploadErr)
+			continue
 		}
-		if _, uploadErr := client.UploadFile(ctx, data, filePath, issueID); uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -823,9 +834,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Upload attachments and collect their IDs.
+	// Upload attachments and collect their IDs. URLs are skipped with a
+	// warning — `--attachment` only accepts local file paths, and a
+	// markdown image URL embedded in agent-supplied content should never
+	// be re-uploaded as if it were a file. Unlike `issue create`, this
+	// path uploads BEFORE posting the comment, so a hard failure on a
+	// real (local) attachment correctly aborts the whole call.
 	var attachmentIDs []string
 	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
 			return fmt.Errorf("read attachment %s: %w", filePath, readErr)

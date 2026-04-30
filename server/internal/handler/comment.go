@@ -404,6 +404,39 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 	return true // Reply to member thread without agent participation — suppress
 }
 
+// shouldInheritParentMentions decides whether a reply with no explicit
+// mentions should inherit the parent (thread root) comment's mentions.
+//
+// Inheritance lets a member who started a thread by @mentioning an agent
+// continue the conversation with that agent without re-typing the mention
+// on every follow-up reply.
+//
+// It is intentionally narrow:
+//
+//   - Only when the reply contains zero mentions of its own. Any explicit
+//     mention in the reply is a deliberate choice about who to involve.
+//   - Only when the reply author is a member. Agent-authored replies must
+//     never inherit, otherwise an agent posting in a thread whose root
+//     mentioned another agent would re-trigger that agent and create a loop.
+//   - Only when the parent author is a member. When an agent authors a
+//     comment that @mentions another agent, it is typically a one-shot
+//     delegation (e.g. an agent posting a PR completion that @mentions a
+//     reviewer agent). Subsequent member follow-ups in the same thread are
+//     directed at the assignee, not at the delegated agent — inheriting
+//     would re-trigger the delegated agent on every plain reply.
+func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
+	if parentComment == nil {
+		return false
+	}
+	if len(replyMentions) > 0 {
+		return false
+	}
+	if replyAuthorType == "agent" {
+		return false
+	}
+	return parentComment.AuthorType == "member"
+}
+
 // enqueueMentionedAgentTasks parses @agent mentions from comment content and
 // enqueues a task for each mentioned agent. When parentComment is non-nil
 // (i.e. the comment is a reply), mentions from the parent (thread root) are
@@ -419,17 +452,7 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
-	// When replying in a thread, inherit mentions from the parent comment
-	// so that agents mentioned in the thread root are triggered by replies —
-	// but only when the reply contains no mentions at all (a plain follow-up).
-	// If the reply explicitly @mentions anyone (agents or members), the user
-	// is making a deliberate choice about who to involve; don't auto-inherit.
-	//
-	// CRITICAL: agent-authored replies must NOT inherit parent mentions.
-	// Otherwise an agent posting "No reply needed" in a thread whose root
-	// mentioned another agent would re-trigger that agent, creating a loop.
-	// Explicit @mentions in the agent's own comment still work for delegation.
-	if parentComment != nil && len(mentions) == 0 && authorType != "agent" {
+	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {

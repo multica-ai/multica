@@ -9,18 +9,15 @@ import { createChatStore, registerChatStore } from "../chat";
 import { WSProvider } from "../realtime";
 import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
-import { defaultStorage } from "./storage";
-import { AuthInitializer } from "./auth-initializer";
 import { setWorkspaceUrlHost } from "./workspace-url-host";
 import { getCurrentWsId } from "./workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { inboxKeys } from "../inbox/queries";
+import { defaultStorage } from "./storage";
+import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 
-// Invalidates the most critical query keys when the browser tab becomes visible
-// again, catching any WS events that were missed while the connection was
-// half-open (NAT/NLB/sleep silently dropped the TCP session).
 function VisibilityRefetcher() {
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -98,7 +95,6 @@ export function CoreProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
-  // Assigned every render (not gated on `initialized`) so HMR env changes apply.
   setWorkspaceUrlHost(workspaceUrlHostProp);
 
   return (

@@ -206,6 +206,12 @@ type SendChatMessageRequest struct {
 type SendChatMessageResponse struct {
 	MessageID string `json:"message_id"`
 	TaskID    string `json:"task_id"`
+	// CreatedAt anchors the chat StatusPill timer the instant the user
+	// hits send. Without it the front-end falls back to its local clock
+	// and the timer "snaps backwards" later when WS events deliver the
+	// real created_at. Returning it here means the pill renders 0s from
+	// the start with a stable anchor.
+	CreatedAt string `json:"created_at"`
 }
 
 func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +279,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID: uuidToString(msg.ID),
 		TaskID:    uuidToString(task.ID),
+		CreatedAt: timestampToString(task.CreatedAt),
 	})
 }
 
@@ -304,9 +311,14 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 
 // PendingChatTaskResponse is returned by GetPendingChatTask — either the
 // current in-flight task's id/status, or an empty object when none is active.
+// CreatedAt is the anchor the frontend uses to time the chat StatusPill
+// (elapsed seconds = now - CreatedAt). It must come from the server because
+// optimistic seeds don't have a real task created_at and the timer needs to
+// survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID string `json:"task_id,omitempty"`
-	Status string `json:"status,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
 }
 
 // MarkChatSessionRead clears the session's unread_since (→ has_unread=false)
@@ -403,8 +415,9 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, PendingChatTaskResponse{
-		TaskID: uuidToString(task.ID),
-		Status: task.Status,
+		TaskID:    uuidToString(task.ID),
+		Status:    task.Status,
+		CreatedAt: timestampToString(task.CreatedAt),
 	})
 }
 
@@ -491,6 +504,12 @@ type ChatMessageResponse struct {
 	Content       string  `json:"content"`
 	TaskID        *string `json:"task_id"`
 	CreatedAt     string  `json:"created_at"`
+	// FailureReason flags an assistant row synthesized by FailTask's chat
+	// fallback. Front-end uses it to switch to the destructive bubble.
+	FailureReason *string `json:"failure_reason"`
+	// ElapsedMs is the wall-clock duration from task creation to terminal
+	// state. Drives "Replied in 38s" / "Failed after 12s" captions.
+	ElapsedMs *int64 `json:"elapsed_ms"`
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -514,5 +533,7 @@ func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
 		Content:       m.Content,
 		TaskID:        uuidToPtr(m.TaskID),
 		CreatedAt:     timestampToString(m.CreatedAt),
+		FailureReason: textToPtr(m.FailureReason),
+		ElapsedMs:     int8ToPtr(m.ElapsedMs),
 	}
 }

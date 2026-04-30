@@ -19,24 +19,24 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("not onboarded → /onboarding regardless of workspaces", () => {
-    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
-    expect(resolvePostAuthDestination([makeWs("acme")], false)).toBe(
-      paths.onboarding(),
-    );
-    expect(
-      resolvePostAuthDestination([makeWs("acme"), makeWs("beta")], false),
-    ).toBe(paths.onboarding());
-  });
-
-  it("onboarded + has workspace → /<first.slug>/issues", () => {
+  it("has workspace → /<first.slug>/issues regardless of onboarded state", () => {
     const ws = [makeWs("acme"), makeWs("beta")];
     expect(resolvePostAuthDestination(ws, true)).toBe(
       paths.workspace("acme").issues(),
     );
+    expect(resolvePostAuthDestination(ws, false)).toBe(
+      paths.workspace("acme").issues(),
+    );
+    expect(resolvePostAuthDestination([makeWs("acme")], false)).toBe(
+      paths.workspace("acme").issues(),
+    );
   });
 
-  it("onboarded + zero workspaces → /workspaces/new", () => {
+  it("zero workspaces + !onboarded → /onboarding", () => {
+    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
+  });
+
+  it("zero workspaces + onboarded → /workspaces/new", () => {
     expect(resolvePostAuthDestination([], true)).toBe(paths.newWorkspace());
   });
 });

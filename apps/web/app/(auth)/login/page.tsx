@@ -72,10 +72,6 @@ function LoginPageContent() {
         });
       return;
     }
-    if (!hasOnboarded) {
-      router.replace(paths.onboarding());
-      return;
-    }
     if (nextUrl) {
       router.replace(nextUrl);
       return;
@@ -89,10 +85,6 @@ function LoginPageContent() {
     // was captured before login completed and would be stale here.
     const currentUser = useAuthStore.getState().user;
     const onboarded = currentUser?.onboarded_at != null;
-    if (!onboarded) {
-      router.push(paths.onboarding());
-      return;
-    }
     if (nextUrl) {
       router.push(nextUrl);
       return;

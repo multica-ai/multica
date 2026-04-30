@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -214,36 +216,16 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 	return resp.Status, nil
 }
 
-// HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
-type HeartbeatResponse struct {
-	Status                  string                   `json:"status"`
-	PendingUpdate           *PendingUpdate           `json:"pending_update,omitempty"`
-	PendingModelList        *PendingModelList        `json:"pending_model_list,omitempty"`
-	PendingLocalSkills      *PendingLocalSkills      `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport *PendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
-}
-
-// PendingUpdate represents a CLI update request from the server.
-type PendingUpdate struct {
-	ID            string `json:"id"`
-	TargetVersion string `json:"target_version"`
-}
-
-// PendingModelList represents a request to enumerate supported models.
-type PendingModelList struct {
-	ID string `json:"id"`
-}
-
-// PendingLocalSkills represents a request to enumerate runtime local skills.
-type PendingLocalSkills struct {
-	ID string `json:"id"`
-}
-
-// PendingLocalSkillImport represents a request to import a runtime local skill.
-type PendingLocalSkillImport struct {
-	ID       string `json:"id"`
-	SkillKey string `json:"skill_key"`
-}
+// HeartbeatResponse, PendingUpdate, etc. alias the wire types so HTTP and WS
+// heartbeat paths share a single type and a single decoder shape. Aliases
+// (rather than wrappers) keep call sites unchanged.
+type (
+	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
+	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
+	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
+	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
+	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+)
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
@@ -313,9 +295,10 @@ func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 
 // RegisterResponse holds the server's response to a daemon registration.
 type RegisterResponse struct {
-	Runtimes     []Runtime  `json:"runtimes"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	Runtimes     []Runtime       `json:"runtimes"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {

@@ -16,7 +16,7 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
-import { useCreateFeedback } from "@multica/core/feedback";
+import { useCreateFeedback, useFeedbackDraftStore } from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -26,8 +26,12 @@ const MAX_MESSAGE_LEN = 10000;
 
 export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const workspace = useCurrentWorkspace();
+  const draft = useFeedbackDraftStore((s) => s.draft);
+  const setDraft = useFeedbackDraftStore((s) => s.setDraft);
+  const clearDraft = useFeedbackDraftStore((s) => s.clearDraft);
+
   const editorRef = useRef<ContentEditorRef>(null);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(draft.message);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -69,6 +73,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         url: typeof window !== "undefined" ? window.location.href : undefined,
         workspace_id: workspace?.id,
       });
+      clearDraft();
       toast.success("Thanks for the feedback!");
       onClose();
     } catch (err) {
@@ -98,8 +103,9 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           >
             <ContentEditor
               ref={editorRef}
+              defaultValue={draft.message}
               placeholder="Tell us about your experience, bugs you've found, or features you'd like to see…"
-              onUpdate={(md) => setMessage(md)}
+              onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
               onUploadFile={uploadWithToast}
               onSubmit={handleSubmit}
               debounceMs={150}

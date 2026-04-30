@@ -185,7 +185,7 @@ func TestSyncAndLookup(t *testing.T) {
 
 	// Sync should clone the repo.
 	err := cache.Sync("ws-123", []RepoInfo{
-		{URL: sourceRepo, Description: "test repo"},
+		{URL: sourceRepo},
 	})
 	if err != nil {
 		t.Fatalf("Sync failed: %v", err)
@@ -880,6 +880,97 @@ func TestGetRemoteDefaultBranchUsesBareHeadHintForCustomDefault(t *testing.T) {
 	got := getRemoteDefaultBranch(barePath)
 	if got != "refs/remotes/origin/trunk" {
 		t.Fatalf("getRemoteDefaultBranch = %q, want refs/remotes/origin/trunk (via bare-HEAD hint)", got)
+	}
+}
+
+// TestCreateWorktreeInstallsCoAuthoredByHook verifies that CreateWorktree
+// installs a prepare-commit-msg hook that appends a Co-authored-by trailer
+// for the Multica Agent to every commit made in the worktree.
+func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:        "ws-1",
+		RepoURL:            sourceRepo,
+		WorkDir:            workDir,
+		AgentName:          "Test Agent",
+		TaskID:             "a1b2c3d4-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// Make a commit in the worktree and verify the hook appends the trailer.
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	// Read the commit message.
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	expectedTrailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	if !strings.Contains(commitMsg, expectedTrailer) {
+		t.Errorf("commit message missing Co-authored-by trailer.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestCoAuthoredByHookIdempotent verifies that the hook does not add a
+// duplicate Co-authored-by trailer if one is already present in the message.
+func TestCoAuthoredByHookIdempotent(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:        "ws-1",
+		RepoURL:            sourceRepo,
+		WorkDir:            workDir,
+		AgentName:          "Test Agent",
+		TaskID:             "b2c3d4e5-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// Commit with the trailer already in the message.
+	trailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit\n\n"+trailer)
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+
+	// Count occurrences — should appear exactly once.
+	count := strings.Count(commitMsg, trailer)
+	if count != 1 {
+		t.Errorf("expected exactly 1 Co-authored-by trailer, found %d.\ngot:\n%s", count, commitMsg)
 	}
 }
 

@@ -48,15 +48,15 @@ export function RepositoriesTab() {
   };
 
   const handleAddRepo = () => {
-    setRepos([...repos, { url: "", description: "" }]);
+    setRepos([...repos, { url: "" }]);
   };
 
   const handleRemoveRepo = (index: number) => {
     setRepos(repos.filter((_, i) => i !== index));
   };
 
-  const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
-    setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  const handleRepoChange = (index: number, value: string) => {
+    setRepos(repos.map((r, i) => (i === index ? { ...r, url: value } : r)));
   };
 
   if (!workspace) return null;
@@ -74,24 +74,14 @@ export function RepositoriesTab() {
 
             {repos.map((repo, index) => (
               <div key={index} className="flex gap-2">
-                <div className="flex-1 space-y-1.5">
-                  <Input
-                    type="url"
-                    value={repo.url}
-                    onChange={(e) => handleRepoChange(index, "url", e.target.value)}
-                    disabled={!canManageWorkspace}
-                    placeholder="https://git.example.com/org/repo.git"
-                    className="text-sm"
-                  />
-                  <Input
-                    type="text"
-                    value={repo.description}
-                    onChange={(e) => handleRepoChange(index, "description", e.target.value)}
-                    disabled={!canManageWorkspace}
-                    placeholder="Description (e.g. Go backend + Next.js frontend)"
-                    className="text-sm"
-                  />
-                </div>
+                <Input
+                  type="url"
+                  value={repo.url}
+                  onChange={(e) => handleRepoChange(index, e.target.value)}
+                  disabled={!canManageWorkspace}
+                  placeholder="https://git.example.com/org/repo.git"
+                  className="flex-1 text-sm"
+                />
                 {canManageWorkspace && (
                   <Button
                     variant="ghost"

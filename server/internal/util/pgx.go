@@ -99,3 +99,10 @@ func UUIDToPtr(u pgtype.UUID) *string {
 	s := UUIDToString(u)
 	return &s
 }
+
+func Int8ToPtr(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}

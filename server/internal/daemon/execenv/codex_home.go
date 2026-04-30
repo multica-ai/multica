@@ -89,6 +89,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Drop `[[skills.config]]` entries inherited from the user's
+	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
+	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
+	// `missing field path` and bails out of `thread/start`. Multica writes the
+	// agent's active skills directly to `codex-home/skills/`, so the
+	// user-level registry is redundant here. See codex_skill_strip.go.
+	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
+		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
+	}
+
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
@@ -99,6 +109,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+	}
+
+	// Disable Codex native multi-agent inside daemon-managed task sessions
+	// so the parent thread's `turn/completed` is not interpreted as task
+	// completion while spawned subagents are still running. See
+	// codex_multi_agent.go for the full rationale and escape hatch.
+	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 
 	return nil

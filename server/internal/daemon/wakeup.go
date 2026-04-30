@@ -92,13 +92,47 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		return err
 	}
 	defer conn.Close()
+	// HTTP heartbeats resume the moment WS detaches so the freshness window
+	// from a previous connection cannot keep them silenced past disconnect.
+	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups)
 
+	// Serialize all writes through a single channel: the gorilla/websocket
+	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
+	// sender now coexists with future server-initiated writes.
+	writes := make(chan []byte, 8)
+	writerDone := make(chan struct{})
+	go d.runWSWriter(conn, writes, writerDone)
+
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		d.runWSHeartbeatSender(heartbeatCtx, runtimeIDs, writes)
+	}()
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
+	}()
+
+	// Defer cleanup must shut goroutines down in this order:
+	//   1. cancel the heartbeat sender's ctx
+	//   2. wait for the sender to actually return — only then is it safe
+	//      to close the writes channel without a "send on closed channel"
+	//      panic from sendWSHeartbeats
+	//   3. close writes; the writer drains and exits
+	//   4. wait for the writer to finish so it doesn't outlive the conn
+	//
+	// LIFO defer order would close writes before the sender stops, so the
+	// teardown is folded into a single deferred function instead.
+	defer func() {
+		cancelHeartbeat()
+		<-hbDone
+		close(writes)
+		<-writerDone
 	}()
 
 	select {
@@ -109,6 +143,82 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	case err := <-errCh:
 		return err
 	}
+}
+
+// runWSWriter funnels writes from the heartbeat sender (and any future
+// daemon-initiated message) into a single goroutine. gorilla/websocket
+// requires that all WriteMessage calls happen from the same goroutine.
+func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan []byte, done chan<- struct{}) {
+	defer close(done)
+	for frame := range writes {
+		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+			d.logger.Debug("task wakeup websocket write failed", "error", err)
+			conn.Close()
+			// Drain remaining frames so the producers don't block forever
+			// while waiting for runTaskWakeupConnection to close the channel.
+			for range writes {
+			}
+			return
+		}
+	}
+}
+
+// runWSHeartbeatSender emits a daemon:heartbeat per runtime every
+// HeartbeatInterval. The first batch fires immediately so the server learns
+// the connection identity without waiting a full interval. Frames are queued
+// to the writer; if the queue is full the heartbeat is dropped (the
+// freshness window is short enough that one missed beat just means HTTP will
+// pick it up next tick).
+func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+	d.sendWSHeartbeats(ctx, runtimeIDs, writes)
+	interval := d.cfg.HeartbeatInterval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.sendWSHeartbeats(ctx, runtimeIDs, writes)
+		}
+	}
+}
+
+func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+	for _, rid := range runtimeIDs {
+		if ctx.Err() != nil {
+			return
+		}
+		frame, err := json.Marshal(protocol.Message{
+			Type:    protocol.EventDaemonHeartbeat,
+			Payload: marshalRaw(protocol.DaemonHeartbeatRequestPayload{RuntimeID: rid}),
+		})
+		if err != nil {
+			d.logger.Debug("ws heartbeat marshal failed", "error", err, "runtime_id", rid)
+			continue
+		}
+		select {
+		case writes <- frame:
+		case <-ctx.Done():
+			return
+		default:
+			// Writer is backed up; drop this beat. HTTP heartbeat will resume
+			// on its next tick once the freshness window expires.
+			d.logger.Debug("ws heartbeat dropped: writer backlog", "runtime_id", rid)
+		}
+	}
+}
+
+func marshalRaw(v any) json.RawMessage {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
@@ -123,20 +233,31 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			d.logger.Debug("task wakeup websocket invalid message", "error", err)
 			continue
 		}
-		if msg.Type != protocol.EventDaemonTaskAvailable {
-			continue
-		}
-		var payload protocol.TaskAvailablePayload
-		if len(msg.Payload) > 0 {
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				d.logger.Debug("task wakeup websocket invalid payload", "error", err)
+		switch msg.Type {
+		case protocol.EventDaemonTaskAvailable:
+			var payload protocol.TaskAvailablePayload
+			if len(msg.Payload) > 0 {
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					d.logger.Debug("task wakeup websocket invalid payload", "error", err)
+					continue
+				}
+			}
+			if payload.RuntimeID != "" {
+				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
+			}
+			signalTaskWakeup(taskWakeups)
+		case protocol.EventDaemonHeartbeatAck:
+			var ack HeartbeatResponse
+			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
+				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
+			if ack.RuntimeID == "" {
+				continue
+			}
+			d.recordWSHeartbeatAck(ack.RuntimeID)
+			d.handleHeartbeatActions(context.Background(), ack.RuntimeID, &ack)
 		}
-		if payload.RuntimeID != "" {
-			d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
-		}
-		signalTaskWakeup(taskWakeups)
 	}
 }
 

@@ -10,6 +10,7 @@ const NO_FILTER: IssueFilters = {
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
+  labelFilters: [],
 };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -160,5 +161,47 @@ describe("filterIssues", () => {
       projectFilters: ["p-1"],
     });
     expect(result.map((i) => i.id)).toEqual(["1", "4"]);
+  });
+
+  // --- Label ---
+  // Build a separate fixture for label tests so we can sprinkle labels onto
+  // specific rows without polluting the assignee/project test cases above.
+  const makeLabel = (id: string, name: string, color: string) => ({
+    id,
+    name,
+    color,
+    workspace_id: "ws-1",
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+  });
+  const labelBug = makeLabel("lab-bug", "bug", "#ff0000");
+  const labelFeat = makeLabel("lab-feat", "feature", "#00ff00");
+  const labelP0 = makeLabel("lab-p0", "p0", "#0000ff");
+  const labeledIssues: Issue[] = [
+    makeIssue({ id: "L1", labels: [labelBug] }),
+    makeIssue({ id: "L2", labels: [labelFeat] }),
+    makeIssue({ id: "L3", labels: [labelBug, labelP0] }),
+    makeIssue({ id: "L4", labels: [] }),
+    makeIssue({ id: "L5" }), // labels field absent
+  ];
+
+  it("filters by a single label", () => {
+    const result = filterIssues(labeledIssues, { ...NO_FILTER, labelFilters: ["lab-bug"] });
+    expect(result.map((i) => i.id)).toEqual(["L1", "L3"]);
+  });
+
+  it("filters by multiple labels with OR semantics", () => {
+    const result = filterIssues(labeledIssues, {
+      ...NO_FILTER,
+      labelFilters: ["lab-bug", "lab-feat"],
+    });
+    expect(result.map((i) => i.id)).toEqual(["L1", "L2", "L3"]);
+  });
+
+  it("excludes issues with no labels when a label filter is active", () => {
+    const result = filterIssues(labeledIssues, { ...NO_FILTER, labelFilters: ["lab-bug"] });
+    // L4 (empty labels) and L5 (missing labels field) must both be filtered out.
+    expect(result.map((i) => i.id)).not.toContain("L4");
+    expect(result.map((i) => i.id)).not.toContain("L5");
   });
 });

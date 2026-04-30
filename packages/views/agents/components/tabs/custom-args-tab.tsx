@@ -1,17 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Loader2,
-  Save,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Plus, Save, Trash2 } from "lucide-react";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
 
 interface ArgEntry {
@@ -23,6 +17,11 @@ function argsToEntries(args: string[]): ArgEntry[] {
   return args.map((value) => ({ id: createSafeId(), value }));
 }
 
+// Each row may contain a single arg ("--model") or several space-separated
+// tokens ("--model claude-sonnet-4"). We split on whitespace so users can
+// paste multi-token flags into one row without having to break them apart
+// manually. The placeholder + helper text explain this so users aren't
+// surprised when "--flag value" lands as two args at the back-end.
 function entriesToArgs(entries: ArgEntry[]): string[] {
   return entries.flatMap((e) => e.value.trim().split(/\s+/)).filter(Boolean);
 }
@@ -31,10 +30,12 @@ export function CustomArgsTab({
   agent,
   runtimeDevice,
   onSave,
+  onDirtyChange,
 }: {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
   onSave: (updates: Partial<Agent>) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [entries, setEntries] = useState<ArgEntry[]>(
     argsToEntries(agent.custom_args ?? []),
@@ -44,6 +45,10 @@ export function CustomArgsTab({
   const currentArgs = entriesToArgs(entries);
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const addEntry = () => {
     setEntries([...entries, { id: createSafeId(), value: "" }]);
@@ -74,18 +79,16 @@ export function CustomArgsTab({
   const launchHeader = runtimeDevice?.launch_header;
 
   return (
-    <div className="max-w-lg space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <Label className="text-xs text-muted-foreground">
-            Custom Arguments
-          </Label>
-          <p className="text-xs text-muted-foreground mt-0.5">
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
             Additional CLI arguments appended to the agent command at launch.
-            Supported flags depend on the agent's CLI.
+            Multi-token flags can share one row — they&apos;ll be split on
+            whitespace before being passed to the CLI.
           </p>
           {launchHeader && (
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Launch mode:{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
                 {launchHeader} &lt;your args&gt;
@@ -98,12 +101,13 @@ export function CustomArgsTab({
           variant="outline"
           size="sm"
           onClick={addEntry}
-          className="h-7 gap-1 text-xs"
+          className="shrink-0"
         >
           <Plus className="h-3 w-3" />
           Add
         </Button>
       </div>
+
       {entries.length > 0 && (
         <div className="space-y-2">
           {entries.map((entry, index) => (
@@ -114,26 +118,33 @@ export function CustomArgsTab({
                 placeholder="--flag value"
                 className="flex-1 font-mono text-xs"
               />
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => removeEntry(index)}
-                className="shrink-0 text-muted-foreground hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label="Remove argument"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
       )}
 
-      <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-        {saving ? (
-          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-        ) : (
-          <Save className="h-3.5 w-3.5 mr-1.5" />
+      <div className="flex items-center justify-end gap-3">
+        {dirty && (
+          <span className="text-xs text-muted-foreground">Unsaved changes</span>
         )}
-        Save
-      </Button>
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          Save
+        </Button>
+      </div>
     </div>
   );
 }

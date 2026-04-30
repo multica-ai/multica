@@ -49,6 +49,9 @@ export function DeleteIssueConfirmModal({
           <AlertDialogTitle>Delete issue</AlertDialogTitle>
           <AlertDialogDescription>
             This will permanently delete this issue and all its comments. This action cannot be undone.
+            <span className="mt-2 block text-xs text-muted-foreground/80">
+              Any workspace member can delete issues.
+            </span>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

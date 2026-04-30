@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,16 +16,9 @@ import (
 // way out of Running was the 2-minute memory GC, which exceeded the UI
 // polling window and surfaced as a silent "discovery failed" (MUL-1397).
 func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
-	store := NewInMemoryModelListStore()
-	ctx := context.Background()
-	req, err := store.Create(ctx, "runtime-xyz")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	claimed, err := store.PopPending(ctx, "runtime-xyz")
-	if err != nil {
-		t.Fatalf("PopPending: %v", err)
-	}
+	store := NewModelListStore()
+	req := store.Create("runtime-xyz")
+	claimed := store.PopPending("runtime-xyz")
 	if claimed == nil {
 		t.Fatal("expected PopPending to claim the pending request")
 	}
@@ -38,10 +30,7 @@ func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 	// reporting a result. Get() must flip it to Timeout so the UI can
 	// terminate polling instead of waiting for the 2-minute GC.
 	claimed.UpdatedAt = time.Now().Add(-(modelListRunningTimeout + time.Second))
-	got, err := store.Get(ctx, req.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+	got := store.Get(req.ID)
 	if got == nil {
 		t.Fatal("expected stored request")
 	}
@@ -59,12 +48,8 @@ func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 // dropped here (e.g. by going through a map[string]string), the badge
 // silently disappears.
 func TestReportModelListResult_PreservesDefault(t *testing.T) {
-	store := NewInMemoryModelListStore()
-	ctx := context.Background()
-	req, err := store.Create(ctx, "runtime-xyz")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	store := NewModelListStore()
+	req := store.Create("runtime-xyz")
 
 	// Report a completed result with one default entry and one not.
 	body := map[string]any{
@@ -87,14 +72,9 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
-	if err := store.Complete(ctx, req.ID, parsed.Models, true); err != nil {
-		t.Fatalf("Complete: %v", err)
-	}
+	store.Complete(req.ID, parsed.Models, true)
 
-	got, err := store.Get(ctx, req.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+	got := store.Get(req.ID)
 	if got == nil {
 		t.Fatal("expected stored result")
 	}

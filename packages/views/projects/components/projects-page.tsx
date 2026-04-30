@@ -152,7 +152,7 @@ function ProjectRow({ project }: { project: Project }) {
             <button type="button" className="flex w-10 items-center justify-center shrink-0 rounded-full hover:ring-2 hover:ring-accent transition-all cursor-pointer">
               {project.lead_type && project.lead_id ? (
                 <Tooltip>
-                  <TooltipTrigger render={<span><ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={22} /></span>} />
+                  <TooltipTrigger render={<span><ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={22} enableHoverCard /></span>} />
                   <TooltipContent side="bottom">{getActorName(project.lead_type, project.lead_id)}</TooltipContent>
                 </Tooltip>
               ) : (
@@ -206,7 +206,7 @@ function ProjectRow({ project }: { project: Project }) {
                     onClick={() => { handleUpdate({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
                   >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
                     <span>{a.name}</span>
                   </button>
                 ))}

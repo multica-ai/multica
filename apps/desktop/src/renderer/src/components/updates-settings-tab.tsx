@@ -5,12 +5,13 @@ import { Button } from "@multica/ui/components/ui/button";
 type CheckState =
   | { status: "idle" }
   | { status: "checking" }
-  | { status: "up-to-date"; currentVersion: string }
+  | { status: "up-to-date" }
   | { status: "available"; latestVersion: string }
   | { status: "error"; message: string };
 
 export function UpdatesSettingsTab() {
   const [state, setState] = useState<CheckState>({ status: "idle" });
+  const currentVersion = window.desktopAPI.appInfo.version;
 
   const handleCheck = useCallback(async () => {
     setState({ status: "checking" });
@@ -22,7 +23,7 @@ export function UpdatesSettingsTab() {
     setState(
       result.available
         ? { status: "available", latestVersion: result.latestVersion }
-        : { status: "up-to-date", currentVersion: result.currentVersion },
+        : { status: "up-to-date" },
     );
   }, []);
 
@@ -35,6 +36,15 @@ export function UpdatesSettingsTab() {
       </p>
 
       <div className="mt-6 divide-y">
+        <div className="flex items-center justify-between gap-6 py-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Current version</p>
+            <p className="text-sm text-muted-foreground mt-0.5 font-mono">
+              v{currentVersion}
+            </p>
+          </div>
+        </div>
+
         <div className="flex items-start justify-between gap-6 py-4">
           <div className="min-w-0">
             <p className="text-sm font-medium">Check for updates</p>
@@ -45,7 +55,7 @@ export function UpdatesSettingsTab() {
             {state.status === "up-to-date" && (
               <p className="text-sm text-muted-foreground mt-2 inline-flex items-center gap-1.5">
                 <Check className="size-3.5 text-success" />
-                You&apos;re on the latest version (v{state.currentVersion}).
+                You&apos;re on the latest version.
               </p>
             )}
             {state.status === "available" && (

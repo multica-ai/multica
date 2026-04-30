@@ -7,6 +7,11 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
@@ -25,6 +30,8 @@ export function PropertyPicker({
   searchable = false,
   searchPlaceholder = "Filter...",
   onSearchChange,
+  header,
+  tooltip,
   children,
   footer,
 }: {
@@ -37,6 +44,15 @@ export function PropertyPicker({
   searchable?: boolean;
   searchPlaceholder?: string;
   onSearchChange?: (query: string) => void;
+  /** Custom sticky header rendered above the scrollable list. Use for
+   *  filter toggles, search inputs, or any UI that must stay visible while
+   *  the list scrolls. The built-in `searchable` input renders just above
+   *  this header when both are present. */
+  header?: React.ReactNode;
+  /** Optional design-system tooltip shown when the trigger is hovered while
+   *  the popover is closed. Suppressed automatically when the popover is
+   *  open (otherwise tooltip + popover would stack on the same anchor). */
+  tooltip?: React.ReactNode;
   children: React.ReactNode;
   /**
    * Optional footer rendered below the listbox. Unlike items rendered as
@@ -48,7 +64,12 @@ export function PropertyPicker({
 }) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [tooltipHover, setTooltipHover] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // Show the tooltip only while the trigger is hovered AND the popover is
+  // closed — avoids the awkward state where the tooltip floats next to (or
+  // on top of) the popover that just opened on click.
+  const tooltipOpen = !!tooltip && tooltipHover && !open;
 
   const getItems = useCallback(() => {
     if (!listRef.current) return [];
@@ -112,14 +133,25 @@ export function PropertyPicker({
     [getItems, highlightedIndex],
   );
 
+  const popoverTrigger = (
+    <PopoverTrigger
+      className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+      render={triggerRender}
+    >
+      {trigger}
+    </PopoverTrigger>
+  );
+
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
-        render={triggerRender}
-      >
-        {trigger}
-      </PopoverTrigger>
+      {tooltip ? (
+        <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
+          <TooltipTrigger render={popoverTrigger} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        popoverTrigger
+      )}
       <PopoverContent align={align} className={`${width} gap-0 p-0`}>
         {searchable && (
           <div className="px-2 py-1.5 border-b">
@@ -138,7 +170,8 @@ export function PropertyPicker({
             />
           </div>
         )}
-        <div ref={listRef} className="p-1 max-h-60 overflow-y-auto">{children}</div>
+        {header && <div className="border-b">{header}</div>}
+        <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
         {footer && <div className="border-t p-1">{footer}</div>}
       </PopoverContent>
     </Popover>
@@ -154,28 +187,50 @@ export function PickerItem({
   disabled,
   onClick,
   hoverClassName,
+  tooltip,
   children,
 }: {
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
   hoverClassName?: string;
+  /** Design-system tooltip for the row — useful when truncated content needs
+   *  the full string, or when the row carries metadata that doesn't fit on
+   *  a single line. Wrapped in a real Tooltip component (200ms delay,
+   *  styled), not a native `title` attribute. */
+  tooltip?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  return (
+  const button = (
     <button
       type="button"
       data-picker-item
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off
-          the right edge. shrink-0 on the Check keeps it visible. */}
+          the right edge. The check column always reserves its 14px slot
+          (visible when selected, invisible otherwise) so unselected rows
+          align with selected rows and the eye doesn't chase a jittery
+          right edge. */}
       <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
-      {selected && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+      <Check
+        className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${
+          selected ? "" : "invisible"
+        }`}
+      />
     </button>
+  );
+
+  if (!tooltip) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} />
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

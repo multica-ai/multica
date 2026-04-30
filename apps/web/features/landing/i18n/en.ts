@@ -284,6 +284,53 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.20",
+        date: "2026-04-29",
+        title: "Create Issue by Agent, Agent Presence v3 & Daemon WebSocket Heartbeat",
+        changes: [],
+        features: [
+          "Create Issue by Agent — press `c`, write one line, pick an agent; issue creation runs async and the result lands in your inbox",
+          "Agent Presence v3 — availability and last-task split into clearer signals, with an execution log on the issue panel showing active and recent runs",
+          "Daemon ↔ server heartbeat now flows over WebSocket with HTTP fallback, cutting task wakeup latency",
+          "Mention picker ranks suggestions by your local recency",
+        ],
+        improvements: [
+          "Server caches PAT / daemon token lookups in Redis, so large fleets stop hammering the database on every request",
+          "Backend default agent CLI args via `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` env vars",
+          "Manual and agent create-issue flows share one dialog shell, and picker agents become the default assignee",
+        ],
+        fixes: [
+          "Create-issue-by-agent no longer leaves tasks stuck queued, and no longer duplicates the issue when an attachment upload fails",
+          "Agent comments respect newlines instead of rendering literal `\\n`, and multi-line replies keep their formatting",
+          "Agent-authored root comments no longer inherit parent @mentions, breaking accidental agent loops",
+          "Cursor agent on Windows preserves multi-line prompts",
+        ],
+      },
+      {
+        version: "0.2.19",
+        date: "2026-04-28",
+        title: "Kiro CLI Runtime, Desktop Notifications & Issue Label Filter",
+        changes: [],
+        features: [
+          "Kiro CLI added as a local agent runtime option",
+          "macOS dock badge for unread issues, plus a native notification when the window is unfocused — click to jump straight to the issue",
+          "Issue list now supports filtering by label, combinable with status / priority / assignee",
+          "Daemon receives task wakeups over WebSocket — task startup latency drops noticeably",
+        ],
+        improvements: [
+          "List and board status group headers are simpler, with clearer color cues",
+          "Author-written markdown links are preserved through linkify",
+          "Label attach now applies optimistically, no server round-trip wait",
+          "Mention picker's issue search refreshes as you type",
+        ],
+        fixes: [
+          "Deleting a comment now cancels any agent task it triggered — no more ghost runs",
+          "Stalled Codex turns now time out instead of holding the slot",
+          "Windows daemon no longer dies when the parent shell closes",
+          "Agent-to-agent mention threads no longer cause feedback loops",
+        ],
+      },
+      {
         version: "0.2.18",
         date: "2026-04-27",
         title: "Issue Labels, Labs Tab & Sidebar Invite Dot",

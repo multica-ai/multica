@@ -602,3 +602,26 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	}
 	return data
 }
+
+func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
+		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--output-format text") || strings.Contains(joined, "--permission-mode plan") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--max-budget-usd" && args[i+1] == "1.00" {
+			extraIdx = i
+		}
+		if args[i] == "--max-budget-usd" && args[i+1] == "2.00" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
+	}
+}

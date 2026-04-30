@@ -66,12 +66,25 @@ Grab the installer for your platform from the [Multica downloads page](https://m
 
 On first launch you'll need to sign in — the same email + verification code flow as the web app. Once you're in, Desktop syncs your workspace list automatically.
 
-<Callout type="info">
-**Which backend Desktop connects to** is determined by the address you select at sign-in. It defaults to Multica Cloud; if you're running self-hosted, click "Connect to a self-hosted instance" on the first login screen and fill in your server address.
+<Callout type="warning">
+**Released Desktop builds are pinned to Multica Cloud.** The backend, websocket, and web URLs are baked in at build time (`VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`) — there is no in-app option to point Desktop at a self-hosted instance. To use Desktop against a self-hosted backend you need to build it yourself:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+# Edit apps/desktop/.env.production:
+#   VITE_API_URL=https://api.your-domain
+#   VITE_WS_URL=wss://api.your-domain/ws
+#   VITE_APP_URL=https://your-domain
+pnpm install
+pnpm --filter @multica/desktop package
+```
+
+If you'd rather not build from source, the supported self-hosted path is **web frontend + CLI** — see [Self-host quickstart](/self-host-quickstart). Runtime backend configuration in Desktop is tracked in [issue #1371](https://github.com/multica-ai/multica/issues/1371).
 </Callout>
 
 ## Next steps
 
 - [Cloud Quickstart](/cloud-quickstart) — the Cloud onboarding flow for Desktop
-- [Self-Host Quickstart](/self-host-quickstart) — connecting Desktop to a self-hosted backend
+- [Self-Host Quickstart](/self-host-quickstart) — running your own backend (Desktop against self-host requires a custom build, see the callout above)
 - [Daemon and runtimes](/daemon-runtimes) — how the daemon works (Desktop starts it for you, but the behavior is the same)

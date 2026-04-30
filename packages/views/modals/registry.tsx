@@ -2,7 +2,7 @@
 
 import { useModalStore } from "@multica/core/modals";
 import { CreateWorkspaceModal } from "./create-workspace";
-import { CreateIssueModal } from "./create-issue";
+import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
@@ -18,8 +18,12 @@ export function ModalRegistry() {
   switch (modal) {
     case "create-workspace":
       return <CreateWorkspaceModal onClose={close} />;
+    // Both modal types open the same shell so the in-modal mode switch is
+    // instant — only the inner panel swaps, the Dialog Root stays mounted.
     case "create-issue":
-      return <CreateIssueModal onClose={close} data={data} />;
+      return <CreateIssueDialog onClose={close} initialMode="manual" data={data} />;
+    case "quick-create-issue":
+      return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
     case "create-project":
       return <CreateProjectModal onClose={close} />;
     case "feedback":

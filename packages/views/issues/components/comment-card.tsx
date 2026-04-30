@@ -47,6 +47,14 @@ interface CommentCardProps {
   entry: TimelineEntry;
   allReplies: Map<string, TimelineEntry[]>;
   currentUserId?: string;
+  /**
+   * True when the current user is a workspace owner/admin and can therefore
+   * moderate comments authored by anyone — restoring the admin override that
+   * the backend already grants at `comment.go:507-512`. Computed once in
+   * `issue-detail.tsx` and threaded down so neither this component nor
+   * `CommentRow` has to rerun the rule per row.
+   */
+  canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
@@ -153,6 +161,7 @@ function CommentRow({
   issueId,
   entry,
   currentUserId,
+  canModerate = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -160,6 +169,7 @@ function CommentRow({
   issueId: string;
   entry: TimelineEntry;
   currentUserId?: string;
+  canModerate?: boolean;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -175,6 +185,8 @@ function CommentRow({
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -213,8 +225,8 @@ function CommentRow({
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
       <div className="flex items-center gap-2.5">
-        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} />
-        <span className="text-sm font-medium">
+        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
+        <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
@@ -252,18 +264,22 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 Copy
               </DropdownMenuItem>
-              {isOwn && (
+              {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={startEdit}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </DropdownMenuItem>
+                  {canEditEntry && (
+                    <DropdownMenuItem onClick={startEdit}>
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </DropdownMenuItem>
+                  )}
+                  {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                  {canDeleteEntry && (
+                    <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
                 </>
               )}
             </DropdownMenuContent>
@@ -337,6 +353,7 @@ function CommentCard({
   entry,
   allReplies,
   currentUserId,
+  canModerate = false,
   onReply,
   onEdit,
   onDelete,
@@ -358,6 +375,12 @@ function CommentCard({
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  // Author-only edit is the same as before; admins additionally get edit
+  // *and* delete on member-authored comments, plus delete on agent-authored
+  // ones. Edit on agent comments is intentionally never offered — agents
+  // own their own outputs.
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -417,8 +440,8 @@ function CommentCard({
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
             </CollapsibleTrigger>
-            <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} />
-            <span className="shrink-0 text-sm font-medium">
+            <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
+            <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
             </span>
             <Tooltip>
@@ -467,18 +490,22 @@ function CommentCard({
                     <Copy className="h-3.5 w-3.5" />
                     Copy
                   </DropdownMenuItem>
-                  {isOwn && (
+                  {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={startEdit}>
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </DropdownMenuItem>
+                      {canEditEntry && (
+                        <DropdownMenuItem onClick={startEdit}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </DropdownMenuItem>
+                      )}
+                      {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                      {canDeleteEntry && (
+                        <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
                 </DropdownMenuContent>
@@ -554,6 +581,7 @@ function CommentCard({
                 issueId={issueId}
                 entry={reply}
                 currentUserId={currentUserId}
+                canModerate={canModerate}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}

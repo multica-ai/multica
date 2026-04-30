@@ -53,6 +53,7 @@ function MemberRow({
   member,
   canManage,
   canManageOwners,
+  ownerCount,
   isSelf,
   busy,
   onRoleChange,
@@ -61,6 +62,9 @@ function MemberRow({
   member: MemberWithUser;
   canManage: boolean;
   canManageOwners: boolean;
+  /** Total number of owners in this workspace — needed to gate demoting the
+   *  last owner per `workspace.go:497-507`. */
+  ownerCount: number;
   isSelf: boolean;
   busy: boolean;
   onRoleChange: (role: MemberRole) => void;
@@ -70,6 +74,7 @@ function MemberRow({
   const RoleIcon = rc.icon;
   const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const canRemove = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
+  const isLastOwner = member.role === "owner" && ownerCount <= 1;
   const showMenu = canEditRole || canRemove;
 
   return (
@@ -100,16 +105,31 @@ function MemberRow({
                     ([role, config]) => {
                       if (role === "owner" && !canManageOwners) return null;
                       const Icon = config.icon;
+                      // Demoting the last owner would leave the workspace
+                      // ownerless — server rejects with 400, mirror that
+                      // here as a disabled option with explanation.
+                      const wouldDemoteLastOwner =
+                        isLastOwner && role !== "owner";
                       return (
                         <DropdownMenuItem
                           key={role}
-                          onClick={() => onRoleChange(role)}
+                          onClick={() =>
+                            wouldDemoteLastOwner ? undefined : onRoleChange(role)
+                          }
+                          disabled={wouldDemoteLastOwner}
+                          title={
+                            wouldDemoteLastOwner
+                              ? "Promote another member to owner first — a workspace must keep at least one owner."
+                              : undefined
+                          }
                         >
                           <Icon className="h-3.5 w-3.5" />
                           <div className="flex flex-col">
                             <span>{config.label}</span>
                             <span className="text-xs text-muted-foreground font-normal">
-                              {config.description}
+                              {wouldDemoteLastOwner
+                                ? "Cannot demote the last owner"
+                                : config.description}
                             </span>
                           </div>
                           {member.role === role && (
@@ -206,6 +226,7 @@ export function MembersTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  const ownerCount = members.filter((m) => m.role === "owner").length;
 
   const handleInviteMember = async () => {
     if (!workspace) return;
@@ -337,6 +358,7 @@ export function MembersTab() {
                   member={m}
                   canManage={canManageWorkspace}
                   canManageOwners={isOwner}
+                  ownerCount={ownerCount}
                   isSelf={m.user_id === user?.id}
                   busy={memberActionId === m.id}
                   onRoleChange={(role) => handleRoleChange(m.id, role)}

@@ -53,6 +53,11 @@ type DeleteDaemonTokensByWorkspaceAndDaemonParams struct {
 	DaemonID    string      `json:"daemon_id"`
 }
 
+// Callers MUST also invalidate auth.DaemonTokenCache for each affected
+// token_hash so the deletion takes effect before the cache TTL expires.
+// Today this query has no caller; when a deregister / rotate flow lands,
+// change this to :many RETURNING token_hash and call
+// DaemonTokenCache.Invalidate(hash) for each row.
 func (q *Queries) DeleteDaemonTokensByWorkspaceAndDaemon(ctx context.Context, arg DeleteDaemonTokensByWorkspaceAndDaemonParams) error {
 	_, err := q.db.Exec(ctx, deleteDaemonTokensByWorkspaceAndDaemon, arg.WorkspaceID, arg.DaemonID)
 	return err

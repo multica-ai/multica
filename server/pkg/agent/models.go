@@ -75,6 +75,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKimiModels(ctx, executablePath)
 		})
+	case "kiro":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKiroModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -341,10 +345,10 @@ func parsePiModels(output string) []Model {
 // creatable manual-entry input instead of blocking the form.
 func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:      "hermes",
-		clientName:      "multica-model-discovery",
-		extraEnv:        []string{"HERMES_YOLO_MODE=1"},
-		tmpdirPrefix:    "multica-hermes-discovery-",
+		defaultBin:   "hermes",
+		clientName:   "multica-model-discovery",
+		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix: "multica-hermes-discovery-",
 	})
 }
 
@@ -361,6 +365,16 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+	})
+}
+
+// discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses
+// the models block Kiro returns from session/new.
+func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kiro-cli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kiro-discovery-",
 	})
 }
 

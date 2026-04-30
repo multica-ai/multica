@@ -2116,6 +2116,98 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	}
 }
 
+// TestMemberReplyToAgentRootDoesNotInheritParentMentions is the regression
+// for MUL-1535. When an agent posts a comment that @mentions another agent
+// (e.g. J posting a PR completion that @mentions a reviewer agent), a later
+// member reply in the same thread with no explicit mentions must NOT inherit
+// the @reviewer mention. The reviewer was a one-shot delegation; subsequent
+// member follow-ups are directed at the assignee, not the reviewer.
+func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	jAgent := createHandlerTestAgent(t, "J", nil)
+	reviewerAgent := createHandlerTestAgent(t, "Reviewer", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "PR review delegation no-leak test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// 1. Agent J posts a PR-completion comment that @mentions Reviewer for review.
+	// This is a deliberate handoff and must enqueue a task for Reviewer.
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", jAgent)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("J PR completion: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var rootComment CommentResponse
+	json.NewDecoder(w.Body).Decode(&rootComment)
+	if got := countTasks(reviewerAgent); got != 1 {
+		t.Fatalf("expected 1 task for Reviewer after explicit mention, got %d", got)
+	}
+
+	// Cancel reviewer's task so it's free to be re-triggered if the bug returns.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+		issueID, reviewerAgent,
+	); err != nil {
+		t.Fatalf("cancel reviewer task: %v", err)
+	}
+
+	// 2. Member posts a plain follow-up reply under J's PR comment, with no
+	// explicit mentions. The pre-fix code path inherited mentions from the
+	// parent regardless of the parent author, which re-triggered Reviewer.
+	// With the fix, the reply must NOT inherit because the parent was
+	// authored by an agent.
+	w = httptest.NewRecorder()
+	r = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content":   "How do I test this after merging?",
+		"parent_id": rootComment.ID,
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member follow-up: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTasks(reviewerAgent); got != 0 {
+		t.Fatalf("expected 0 tasks for Reviewer after plain member reply (no inheritance from agent root), got %d", got)
+	}
+}
+
 // TestAgentExplicitMentionStillTriggers documents the boundary the structural
 // fix preserves: suppressing implicit parent-mention inheritance for agent
 // authors does NOT block deliberate handoffs. An agent that explicitly
