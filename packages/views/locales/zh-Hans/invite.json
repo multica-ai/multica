@@ -10,16 +10,16 @@
   },
   "accepted": {
     "title": "你已加入 {{workspace_name}}！",
-    "redirecting": "正在跳转到 Workspace..."
+    "redirecting": "正在跳转到 工作区..."
   },
   "declined": {
     "title": "已拒绝邀请",
-    "description": "你将不会加入此 Workspace。",
+    "description": "你将不会加入此 工作区。",
     "go_to_dashboard": "前往主页"
   },
   "main": {
     "join_title": "加入 {{workspace_name}}",
-    "fallback_workspace_name": "Workspace",
+    "fallback_workspace_name": "工作区",
     "invited_role_admin": "邀请你以管理员身份加入。",
     "invited_role_member": "邀请你以成员身份加入。",
     "already_handled_accepted": "此邀请已被接受。",

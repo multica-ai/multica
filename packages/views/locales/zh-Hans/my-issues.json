@@ -1,23 +1,23 @@
 {
   "page": {
-    "breadcrumb": "我的 Issue",
-    "workspace_fallback": "Workspace",
-    "empty_title": "没有分配给你的 Issue",
-    "empty_description": "你创建或被分配到的 Issue 会显示在这里。"
+    "breadcrumb": "我的 issue",
+    "workspace_fallback": "工作区",
+    "empty_title": "没有分配给你的 issue",
+    "empty_description": "你创建或被分配到的 issue 会显示在这里。"
   },
   "header": {
     "scope": {
       "assigned_label": "已分配",
-      "assigned_description": "分配给我的 Issue",
+      "assigned_description": "分配给我的 issue",
       "created_label": "我创建的",
-      "created_description": "我创建的 Issue",
-      "agents_label": "我的 Agent",
-      "agents_description": "分配给我的 Agent 的 Issue"
+      "created_description": "我创建的 issue",
+      "agents_label": "我的智能体",
+      "agents_description": "分配给我的智能体的 issue"
     },
     "filter_button": "筛选",
     "filter_status": "状态",
     "filter_priority": "优先级",
-    "issue_count_other": "{{count}} 个 Issue",
+    "issue_count_other": "{{count}} 个 issue",
     "reset_filters": "重置所有筛选",
     "display_settings": "显示设置",
     "ordering": "排序",
@@ -32,6 +32,6 @@
     "sort_manual": "手动"
   },
   "errors": {
-    "move_failed": "移动 Issue 失败"
+    "move_failed": "移动 issue 失败"
   }
 }
