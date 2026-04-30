@@ -13,7 +13,7 @@ import (
 
 const countComments = `-- name: CountComments :one
 SELECT count(*) FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 `
 
 type CountCommentsParams struct {
@@ -31,7 +31,7 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 const createComment = `-- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at
 `
 
 type CreateCommentParams struct {
@@ -66,6 +66,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -80,8 +81,8 @@ func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE id = $1
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, error) {
@@ -98,13 +99,14 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE id = $1 AND workspace_id = $2
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 `
 
 type GetCommentInWorkspaceParams struct {
@@ -126,6 +128,7 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -137,6 +140,7 @@ SELECT EXISTS (
       AND author_type = 'agent'
       AND author_id = $2
       AND created_at >= $3
+      AND deleted_at IS NULL
 ) AS commented
 `
 
@@ -155,7 +159,7 @@ func (q *Queries) HasAgentCommentedSince(ctx context.Context, arg HasAgentCommen
 
 const hasAgentRepliedInThread = `-- name: HasAgentRepliedInThread :one
 SELECT count(*) > 0 AS has_replied FROM comment
-WHERE parent_id = $1 AND author_type = 'agent' AND author_id = $2
+WHERE parent_id = $1 AND author_type = 'agent' AND author_id = $2 AND deleted_at IS NULL
 `
 
 type HasAgentRepliedInThreadParams struct {
@@ -174,8 +178,8 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listComments = `-- name: ListComments :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 ORDER BY created_at ASC
 `
 
@@ -204,6 +208,7 @@ func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]C
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -216,8 +221,8 @@ func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]C
 }
 
 const listCommentsPaginated = `-- name: ListCommentsPaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 ORDER BY created_at ASC
 LIMIT $3 OFFSET $4
 `
@@ -254,6 +259,7 @@ func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPag
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -266,8 +272,8 @@ func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPag
 }
 
 const listCommentsSince = `-- name: ListCommentsSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS NULL
 ORDER BY created_at ASC
 `
 
@@ -297,6 +303,7 @@ func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSincePa
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -309,8 +316,8 @@ func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSincePa
 }
 
 const listCommentsSincePaginated = `-- name: ListCommentsSincePaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at FROM comment
+WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS NULL
 ORDER BY created_at ASC
 LIMIT $4 OFFSET $5
 `
@@ -349,6 +356,7 @@ func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommen
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -364,8 +372,8 @@ const updateComment = `-- name: UpdateComment :one
 UPDATE comment SET
     content = $2,
     updated_at = now()
-WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at
 `
 
 type UpdateCommentParams struct {
@@ -387,6 +395,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.DeletedAt,
 	)
 	return i, err
 }

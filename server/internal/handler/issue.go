@@ -265,7 +265,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Full phrase match: title, description, or comment
 	phraseMatch := fmt.Sprintf(
-		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
+		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.deleted_at IS NULL AND LOWER(c.content) LIKE %s))",
 		phraseContains, phraseContains, phraseContains,
 	)
 	whereParts = append(whereParts, phraseMatch)
@@ -276,7 +276,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		for _, tp := range termParams {
 			tc := "'%' || " + tp + " || '%'"
 			termConditions = append(termConditions, fmt.Sprintf(
-				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
+				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND c.deleted_at IS NULL AND LOWER(c.content) LIKE %s))",
 				tc, tc, tc,
 			))
 		}
@@ -383,7 +383,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
 		ELSE COALESCE(
 			(SELECT c.content FROM comment c
-			 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
+			 WHERE c.issue_id = i.id AND c.deleted_at IS NULL AND LOWER(c.content) LIKE %s
 			 ORDER BY c.created_at DESC LIMIT 1),
 			''
 		)
@@ -406,7 +406,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 			WHEN (%s) THEN ''
 			ELSE COALESCE(
 				(SELECT c.content FROM comment c
-				 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
+				 WHERE c.issue_id = i.id AND c.deleted_at IS NULL AND (LOWER(c.content) LIKE %s OR (%s))
 				 ORDER BY c.created_at DESC LIMIT 1),
 				''
 			)
