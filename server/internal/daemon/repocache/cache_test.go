@@ -185,7 +185,7 @@ func TestSyncAndLookup(t *testing.T) {
 
 	// Sync should clone the repo.
 	err := cache.Sync("ws-123", []RepoInfo{
-		{URL: sourceRepo, Description: "test repo"},
+		{URL: sourceRepo},
 	})
 	if err != nil {
 		t.Fatalf("Sync failed: %v", err)

@@ -284,6 +284,29 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.21",
+        date: "2026-04-30",
+        title: "Quick Capture Overhaul, Mermaid Diagrams & Typed Project Resources",
+        changes: [],
+        features: [
+          "Quick Capture replaces the old New Issue dialog — continuous-create mode, file uploads, and automatic enrichment from pasted URLs",
+          "Mermaid diagrams render inline in markdown, with a fullscreen lightbox for complex graphs",
+          "Projects can bind their own repo, separate from the workspace default",
+          "Permission-aware UI across agents, comments, runtimes, and skills — actions you can't take are no longer offered",
+        ],
+        improvements: [
+          "Daemon `/tasks/claim` polling uses a Redis empty-claim fast-path, dropping idle DB load and reclaiming disk on long-open issues",
+          "Multica Agent commits include a `Co-authored-by` trailer for proper Git attribution",
+          "Desktop blocks Cmd+R / Ctrl+R / F5 from reloading the app and shows the real version in dev and Updates settings",
+        ],
+        fixes: [
+          "Quick Create no longer invents requirements beyond user input, and subscribes the requester to the issue it creates",
+          "Inbox jumps straight to the targeted comment, and auto-archives when the issue is marked Done from the detail page",
+          "Task rerun starts a fresh session and skips poisoned resume state",
+          "Invitees land on their workspace after sign-in instead of being forced through `/onboarding`",
+        ],
+      },
+      {
         version: "0.2.20",
         date: "2026-04-29",
         title: "Create Issue by Agent, Agent Presence v3 & Daemon WebSocket Heartbeat",

@@ -25,15 +25,13 @@ func gitEnv() []string {
 
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
-	URL         string
-	Description string
+	URL string
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
 type CachedRepo struct {
-	URL         string // remote URL
-	Description string // human-readable description
-	LocalPath   string // absolute path to the bare clone
+	URL       string // remote URL
+	LocalPath string // absolute path to the bare clone
 }
 
 // Cache manages bare git clones for workspace repositories.
