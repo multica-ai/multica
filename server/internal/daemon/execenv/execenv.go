@@ -88,6 +88,16 @@ type Environment struct {
 	logger *slog.Logger // for cleanup logging
 }
 
+// PredictRootDir returns the env root path that Prepare would create for the
+// given task, without performing any I/O. Callers use this to claim ownership
+// of the directory (e.g. against the GC loop) before Prepare/Reuse runs.
+func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
+	if workspacesRoot == "" || workspaceID == "" || taskID == "" {
+		return ""
+	}
+	return filepath.Join(workspacesRoot, workspaceID, shortID(taskID))
+}
+
 // Prepare creates an isolated execution environment for a task.
 // The workdir starts empty (no repo checkouts). The agent checks out repos
 // on demand via `multica repo checkout <url>`.

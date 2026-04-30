@@ -31,6 +31,24 @@ func TestShortID(t *testing.T) {
 	}
 }
 
+func TestPredictRootDir(t *testing.T) {
+	t.Parallel()
+	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	if got != want {
+		t.Errorf("PredictRootDir = %q, want %q", got, want)
+	}
+	if got := PredictRootDir("", "ws", "task"); got != "" {
+		t.Errorf("expected empty when workspaces root missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "", "task"); got != "" {
+		t.Errorf("expected empty when workspace ID missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "ws", ""); got != "" {
+		t.Errorf("expected empty when task ID missing, got %q", got)
+	}
+}
+
 func TestSanitizeName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

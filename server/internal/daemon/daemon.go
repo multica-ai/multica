@@ -59,6 +59,9 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+
+	activeEnvRootsMu sync.Mutex
+	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 }
 
 // New creates a new Daemon instance.
@@ -74,10 +77,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		repoCache:     repocache.New(cacheRoot, logger),
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
-		runtimeIndex:  make(map[string]Runtime),
-		runtimeSetCh:  make(chan struct{}, 1),
-		agentVersions: make(map[string]string),
-		wsHBLastAck:   make(map[string]time.Time),
+		runtimeIndex:   make(map[string]Runtime),
+		runtimeSetCh:   make(chan struct{}, 1),
+		agentVersions:  make(map[string]string),
+		wsHBLastAck:    make(map[string]time.Time),
+		activeEnvRoots: make(map[string]int),
 	}
 }
 
@@ -1181,6 +1185,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 	}
 
+	// Mark candidate env roots as active before any env work so the GC loop
+	// can't reclaim artifacts inside them mid-execution. We mark both the
+	// predicted root for a fresh Prepare and the prior root for Reuse — they
+	// usually differ (Reuse keeps the original task's directory).
+	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	d.markActiveEnvRoot(predictedRoot)
+	defer d.unmarkActiveEnvRoot(predictedRoot)
+	if task.PriorWorkDir != "" {
+		priorRoot := filepath.Dir(task.PriorWorkDir)
+		if priorRoot != predictedRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
+		}
+	}
+
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
@@ -1201,6 +1220,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
+	}
+	// Belt-and-suspenders: also mark whatever root we ended up with, in case
+	// future changes diverge from PredictRootDir.
+	if env.RootDir != predictedRoot && env.RootDir != "" {
+		d.markActiveEnvRoot(env.RootDir)
+		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
@@ -1726,6 +1751,38 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 		}
 	}
 	return result
+}
+
+// markActiveEnvRoot records that a task is currently using the given env root,
+// so the GC loop won't reclaim its artifacts mid-execution. Calls are
+// reference-counted so a reuse path marked twice (predicted + prior) only
+// becomes inactive after both unmark calls.
+func (d *Daemon) markActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	d.activeEnvRoots[envRoot]++
+}
+
+func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	if d.activeEnvRoots[envRoot] <= 1 {
+		delete(d.activeEnvRoots, envRoot)
+		return
+	}
+	d.activeEnvRoots[envRoot]--
+}
+
+func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	return d.activeEnvRoots[envRoot] > 0
 }
 
 // shortID returns the first 8 characters of an ID for readable logs.
