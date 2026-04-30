@@ -4,9 +4,6 @@ CREATE TABLE fixed_verification_code (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_fixed_verification_code_email
-    ON fixed_verification_code(email);
-
 INSERT INTO fixed_verification_code (email, code_hash)
 VALUES (
     'tester@multica.com',
