@@ -12,6 +12,7 @@ import {
   issueTimelineOptions,
   taskMessagesOptions,
 } from "./queries";
+export { useLiveIssueTasks, type LiveIssueTask } from "./live-tasks";
 
 export function useIssueList(workspaceId: string) {
   return useQuery(issueListOptions(workspaceId));

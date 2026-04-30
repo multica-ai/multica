@@ -43,6 +43,7 @@ import {
   useIssueReactions,
   useIssueTaskRuns,
   useIssueTimelineEntries,
+  useLiveIssueTasks,
   useTaskMessagesQueries,
 } from "@multica/core/issues/hooks";
 import { ALL_STATUSES, PRIORITY_CONFIG, PRIORITY_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
@@ -152,6 +153,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
   const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
+  const {
+    tasks: liveTasks,
+    cancellingTaskIds,
+    cancelTask: cancelLiveTask,
+  } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
   const taskIds = useMemo(() => taskRuns.map((task) => task.id), [taskRuns]);
   const taskMessageQueries = useTaskMessagesQueries(workspace.id, taskIds);
@@ -174,6 +180,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
 
@@ -408,6 +415,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       setCommentError(formatClipboardError(err));
     }
   }, []);
+
+  const stopLiveTask = useCallback(async (taskId: string) => {
+    setLiveTaskError(null);
+    try {
+      await cancelLiveTask(taskId);
+    } catch (err) {
+      setLiveTaskError(err instanceof Error ? err.message : "Unable to stop agent");
+    }
+  }, [cancelLiveTask]);
 
   const closeAttachmentPreview = useCallback(() => {
     previewAbortRef.current?.abort();
@@ -816,6 +832,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   return (
     <Screen padded={false} safeArea={false}>
       <ScreenTitleBar onBack={() => navigation.goBack()} title={issue.identifier} />
+      {liveTasks.length > 0 ? (
+        <IssueLiveAgentCard
+          cancellingTaskIds={cancellingTaskIds}
+          error={liveTaskError}
+          getActorName={getActorName}
+          onStop={(taskId) => void stopLiveTask(taskId)}
+          tasks={liveTasks}
+        />
+      ) : null}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
@@ -1718,6 +1743,126 @@ function AttachmentPreviewModal({
   );
 }
 
+function IssueLiveAgentCard({
+  cancellingTaskIds,
+  error,
+  getActorName,
+  onStop,
+  tasks,
+}: {
+  cancellingTaskIds: Set<string>;
+  error: string | null;
+  getActorName: (type: string, id: string) => string;
+  onStop: (taskId: string) => void;
+  tasks: Array<{ task: AgentTask; messages: TaskMessagePayload[] }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const primary = tasks[0];
+  if (!primary) return null;
+
+  const agentName = getActorName("agent", primary.task.agent_id);
+  const toolCount = primary.messages.filter((message) => message.type === "tool_use").length;
+  const extraCount = Math.max(0, tasks.length - 1);
+  const statusText = [
+    error ? `Error: ${error}` : null,
+    toolCount > 0 ? `${toolCount} tools` : null,
+    extraCount > 0 ? `+${extraCount} more` : null,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <View style={styles.liveCard}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => setExpanded(true)}
+        style={({ pressed }) => [styles.liveCardHeader, pressed && styles.buttonPressed]}
+      >
+        <ActivityIndicator color={colors.primary} size="small" />
+        <View style={styles.liveCardTextGroup}>
+          <Text numberOfLines={1} style={styles.liveCardTitle}>
+            {agentName} is working ·{" "}
+            <LiveElapsed task={primary.task} />
+            {statusText ? ` · ${statusText}` : ""}
+          </Text>
+        </View>
+        <Pressable
+          disabled={cancellingTaskIds.has(primary.task.id)}
+          onPress={(event) => {
+            event.stopPropagation();
+            onStop(primary.task.id);
+          }}
+          style={({ pressed }) => [
+            styles.liveStopButton,
+            pressed && styles.buttonPressed,
+            cancellingTaskIds.has(primary.task.id) && styles.headerIconButtonDisabled,
+          ]}
+        >
+          <Text style={styles.liveStopButtonText}>
+            {cancellingTaskIds.has(primary.task.id) ? "Stopping" : "Stop"}
+          </Text>
+        </Pressable>
+      </Pressable>
+
+      <Modal animationType="slide" onRequestClose={() => setExpanded(false)} visible={expanded}>
+        <View style={styles.liveModal}>
+          <View style={styles.previewHeader}>
+            <View style={styles.previewTitleGroup}>
+              <Text style={styles.previewTitle}>Agent live transcript</Text>
+              <Text style={styles.previewMeta}>
+                {tasks.length === 1 ? "1 active run" : `${tasks.length} active runs`}
+              </Text>
+            </View>
+            <Button onPress={() => setExpanded(false)} variant="secondary">Close</Button>
+          </View>
+          <ScrollView contentContainerStyle={styles.liveModalContent}>
+            {tasks.map(({ task, messages }, index) => (
+              <View key={task.id} style={styles.liveTaskGroup}>
+                <View style={styles.timelineHeader}>
+                  <View style={styles.timelineActorGroup}>
+                    <Text style={styles.timelineActor}>{getActorName("agent", task.agent_id)}</Text>
+                    <Text style={styles.timelineDate}>
+                      <LiveElapsed task={task} /> · {task.status}
+                    </Text>
+                  </View>
+                  <Button
+                    disabled={cancellingTaskIds.has(task.id)}
+                    onPress={() => onStop(task.id)}
+                    variant="secondary"
+                  >
+                    {cancellingTaskIds.has(task.id) ? "Stopping" : "Stop"}
+                  </Button>
+                </View>
+                {messages.length === 0 ? (
+                  <Text style={styles.emptyText}>
+                    Live log is not available for this agent provider. Results will appear when the task completes.
+                  </Text>
+                ) : (
+                  messages.map((message) => (
+                    <TaskMessageRow key={`${task.id}-${message.seq}`} message={message} />
+                  ))
+                )}
+                {index < tasks.length - 1 ? <View style={styles.liveTaskSeparator} /> : null}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function LiveElapsed({ task }: { task: AgentTask }) {
+  const start = task.started_at ?? task.dispatched_at ?? task.created_at;
+  const [elapsed, setElapsed] = useState(() => formatElapsed(start));
+
+  useEffect(() => {
+    setElapsed(formatElapsed(start));
+    const interval = setInterval(() => setElapsed(formatElapsed(start)), 1000);
+    return () => clearInterval(interval);
+  }, [start]);
+
+  return <>{elapsed}</>;
+}
+
 const TaskRunHeader = memo(function TaskRunHeader({
   showTitle,
   task,
@@ -1817,6 +1962,16 @@ function isOwnReaction(reaction: ReactionLike, emoji: string, userId: string) {
 function formatDate(date: string | null | undefined) {
   if (!date) return "-";
   return new Date(date).toLocaleDateString();
+}
+
+function formatElapsed(date: string) {
+  const elapsed = Math.max(0, Date.now() - new Date(date).getTime());
+  const seconds = Math.floor(elapsed / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }
 
 function formatBytes(bytes: number) {
@@ -2392,6 +2547,60 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
+  },
+  liveCard: {
+    backgroundColor: colors.background,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  liveCardHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 36,
+  },
+  liveCardTextGroup: {
+    flex: 1,
+    minWidth: 0,
+  },
+  liveCardTitle: {
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  liveStopButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: radii.sm,
+    justifyContent: "center",
+    minHeight: 28,
+    paddingHorizontal: spacing.sm,
+  },
+  liveStopButtonText: {
+    color: colors.foreground,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  liveModal: {
+    backgroundColor: colors.background,
+    flex: 1,
+    paddingTop: Platform.OS === "ios" ? 56 : spacing.lg,
+  },
+  liveModalContent: {
+    gap: spacing.lg,
+    padding: spacing.lg,
+    paddingBottom: 48,
+  },
+  liveTaskGroup: {
+    gap: spacing.md,
+  },
+  liveTaskSeparator: {
+    backgroundColor: colors.border,
+    height: StyleSheet.hairlineWidth,
+    marginTop: spacing.sm,
   },
   taskCard: {
     backgroundColor: colors.card,
