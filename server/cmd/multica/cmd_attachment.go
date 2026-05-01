@@ -32,13 +32,16 @@ var attachmentDownloadCmd = &cobra.Command{
 
 var attachmentUploadCmd = &cobra.Command{
 	Use:   "upload <file-path>",
-	Short: "Upload a file and attach it to an issue or comment",
-	Long:  "Upload a local file to the workspace and attach it to an issue or comment.",
+	Short: "Upload a file and attach it to an issue, comment, or chat message",
+	Long:  "Upload a local file to the workspace and attach it to an issue, comment, or chat message.",
 	Example: `  # Upload a file to an issue
   $ multica attachment upload report.html --issue abc123
 
   # Upload a file to a specific comment
   $ multica attachment upload screenshot.png --comment def456
+
+  # Upload a file to a chat message
+  $ multica attachment upload findings.md --chat-message ghi789
 
   # Upload with a custom display name
   $ multica attachment upload /tmp/output.md --issue abc123 --name "findings.md"`,
@@ -54,6 +57,7 @@ func init() {
 
 	attachmentUploadCmd.Flags().String("issue", "", "Issue ID to attach the file to")
 	attachmentUploadCmd.Flags().String("comment", "", "Comment ID to attach the file to")
+	attachmentUploadCmd.Flags().String("chat-message", "", "Chat message ID to attach the file to")
 	attachmentUploadCmd.Flags().String("name", "", "Custom display name for the attachment (defaults to filename)")
 }
 
@@ -94,14 +98,19 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 
 	issueID, _ := cmd.Flags().GetString("issue")
 	commentID, _ := cmd.Flags().GetString("comment")
-	if issueID == "" && commentID == "" {
-		return fmt.Errorf("either --issue or --comment is required")
+	chatMessageID, _ := cmd.Flags().GetString("chat-message")
+	if issueID == "" && commentID == "" && chatMessageID == "" {
+		return fmt.Errorf("one of --issue, --comment, or --chat-message is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	result, err := client.UploadAttachment(ctx, data, filename, issueID, commentID)
+	result, err := client.UploadAttachmentTo(ctx, data, filename, cli.AttachmentTarget{
+		IssueID:       issueID,
+		CommentID:     commentID,
+		ChatMessageID: chatMessageID,
+	})
 	if err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}

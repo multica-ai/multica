@@ -393,6 +393,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/read", h.MarkChatSessionRead)
 				})
 			})
+			r.Get("/api/chat/messages/{messageId}/attachments", h.ListChatMessageAttachments)
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
 			// Artifacts

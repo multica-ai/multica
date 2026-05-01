@@ -308,9 +308,15 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	messageIDs := make([]pgtype.UUID, len(messages))
+	for i, m := range messages {
+		messageIDs[i] = m.ID
+	}
+	groupedAtt := h.groupChatAttachments(r, messageIDs)
+
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
-		resp[i] = chatMessageToResponse(m)
+		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -509,12 +515,13 @@ type ChatSessionResponse struct {
 }
 
 type ChatMessageResponse struct {
-	ID            string  `json:"id"`
-	ChatSessionID string  `json:"chat_session_id"`
-	Role          string  `json:"role"`
-	Content       string  `json:"content"`
-	TaskID        *string `json:"task_id"`
-	CreatedAt     string  `json:"created_at"`
+	ID            string               `json:"id"`
+	ChatSessionID string               `json:"chat_session_id"`
+	Role          string               `json:"role"`
+	Content       string               `json:"content"`
+	TaskID        *string              `json:"task_id"`
+	CreatedAt     string               `json:"created_at"`
+	Attachments   []AttachmentResponse `json:"attachments"`
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -530,7 +537,10 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	}
 }
 
-func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
+func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
+	if attachments == nil {
+		attachments = []AttachmentResponse{}
+	}
 	return ChatMessageResponse{
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),
@@ -538,5 +548,6 @@ func chatMessageToResponse(m db.ChatMessage) ChatMessageResponse {
 		Content:       m.Content,
 		TaskID:        uuidToPtr(m.TaskID),
 		CreatedAt:     timestampToString(m.CreatedAt),
+		Attachments:   attachments,
 	}
 }

@@ -34,18 +34,19 @@ const maxUploadSize = 100 << 20 // 100 MB
 // ---------------------------------------------------------------------------
 
 type AttachmentResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	IssueID      *string `json:"issue_id"`
-	CommentID    *string `json:"comment_id"`
-	UploaderType string  `json:"uploader_type"`
-	UploaderID   string  `json:"uploader_id"`
-	Filename     string  `json:"filename"`
-	URL          string  `json:"url"`
-	DownloadURL  string  `json:"download_url"`
-	ContentType  string  `json:"content_type"`
-	SizeBytes    int64   `json:"size_bytes"`
-	CreatedAt    string  `json:"created_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	IssueID       *string `json:"issue_id"`
+	CommentID     *string `json:"comment_id"`
+	ChatMessageID *string `json:"chat_message_id"`
+	UploaderType  string  `json:"uploader_type"`
+	UploaderID    string  `json:"uploader_id"`
+	Filename      string  `json:"filename"`
+	URL           string  `json:"url"`
+	DownloadURL   string  `json:"download_url"`
+	ContentType   string  `json:"content_type"`
+	SizeBytes     int64   `json:"size_bytes"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
@@ -72,6 +73,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		s := uuidToString(a.CommentID)
 		resp.CommentID = &s
 	}
+	if a.ChatMessageID.Valid {
+		s := uuidToString(a.ChatMessageID)
+		resp.ChatMessageID = &s
+	}
 	return resp
 }
 
@@ -93,6 +98,28 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
 		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+	}
+	return grouped
+}
+
+// groupChatAttachments loads attachments for multiple chat messages and groups them by message ID.
+func (h *Handler) groupChatAttachments(r *http.Request, messageIDs []pgtype.UUID) map[string][]AttachmentResponse {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	attachments, err := h.Queries.ListAttachmentsByChatMessageIDs(r.Context(), db.ListAttachmentsByChatMessageIDsParams{
+		Column1:     messageIDs,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		slog.Error("failed to load attachments for chat messages", "error", err)
+		return nil
+	}
+	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
+	for _, a := range attachments {
+		mid := uuidToString(a.ChatMessageID)
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
 	}
 	return grouped
 }
@@ -206,6 +233,31 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			}
 			params.CommentID = comment.ID
 		}
+		if chatMessageID := r.FormValue("chat_message_id"); chatMessageID != "" {
+			msg, err := h.Queries.GetChatMessage(r.Context(), parseUUID(chatMessageID))
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid chat_message_id")
+				return
+			}
+			session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+				ID:          msg.ChatSessionID,
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid chat_message_id")
+				return
+			}
+			// The chat session owner (creator) and the assistant agent are
+			// both legitimate uploaders. Other workspace members are not —
+			// chat is per-user.
+			isOwner := uuidToString(session.CreatorID) == userID
+			isAssignedAgent := uploaderType == "agent" && uuidToString(session.AgentID) == uploaderID
+			if !isOwner && !isAssignedAgent {
+				writeError(w, http.StatusForbidden, "not your chat session")
+				return
+			}
+			params.ChatMessageID = msg.ID
+		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
@@ -262,6 +314,59 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("failed to list attachments", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list attachments")
+		return
+	}
+
+	resp := make([]AttachmentResponse, len(attachments))
+	for i, a := range attachments {
+		resp[i] = h.attachmentToResponse(a)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// ListChatMessageAttachments — GET /api/chat/messages/{messageId}/attachments
+// ---------------------------------------------------------------------------
+
+// ListChatMessageAttachments returns the attachments linked to a chat message.
+// Access is gated on chat session ownership: only the session creator can list.
+func (h *Handler) ListChatMessageAttachments(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	messageID := chi.URLParam(r, "messageId")
+	msg, err := h.Queries.GetChatMessage(r.Context(), parseUUID(messageID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat message not found")
+		return
+	}
+	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+		ID:          msg.ChatSessionID,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat message not found")
+		return
+	}
+	if uuidToString(session.CreatorID) != userID {
+		writeError(w, http.StatusForbidden, "not your chat session")
+		return
+	}
+
+	attachments, err := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+		ChatMessageID: msg.ID,
+		WorkspaceID:   parseUUID(workspaceID),
+	})
+	if err != nil {
+		slog.Error("failed to list chat message attachments", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list attachments")
 		return
 	}

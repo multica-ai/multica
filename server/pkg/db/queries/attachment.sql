@@ -1,6 +1,6 @@
 -- name: CreateAttachment :one
-INSERT INTO attachment (id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
-VALUES ($1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), $3, $4, $5, $6, $7, $8)
+INSERT INTO attachment (id, workspace_id, issue_id, comment_id, chat_message_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+VALUES ($1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_message_id), $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListAttachmentsByIssue :many
@@ -11,6 +11,16 @@ ORDER BY created_at ASC;
 -- name: ListAttachmentsByComment :many
 SELECT * FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2
+ORDER BY created_at ASC;
+
+-- name: ListAttachmentsByChatMessage :many
+SELECT * FROM attachment
+WHERE chat_message_id = $1 AND workspace_id = $2
+ORDER BY created_at ASC;
+
+-- name: ListAttachmentsByChatMessageIDs :many
+SELECT * FROM attachment
+WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
 -- name: GetAttachment :one

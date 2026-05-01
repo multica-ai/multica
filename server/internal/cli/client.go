@@ -227,10 +227,30 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 	return id, nil
 }
 
+// AttachmentTarget identifies what an upload should be linked to. Any
+// combination may be empty; at least one is required by the server.
+type AttachmentTarget struct {
+	IssueID       string
+	CommentID     string
+	ChatMessageID string
+}
+
 // UploadAttachment uploads a file via multipart form to /api/upload-file and
 // returns the full server response (attachment record). Either or both of
 // issueID and commentID may be empty.
+//
+// Deprecated: use UploadAttachmentTo for chat-message support; this wrapper
+// is kept so existing call-sites continue to compile.
 func (c *APIClient) UploadAttachment(ctx context.Context, fileData []byte, filename string, issueID string, commentID string) (map[string]any, error) {
+	return c.UploadAttachmentTo(ctx, fileData, filename, AttachmentTarget{
+		IssueID:   issueID,
+		CommentID: commentID,
+	})
+}
+
+// UploadAttachmentTo uploads a file via multipart form to /api/upload-file
+// and links it to the given target (issue, comment, or chat message).
+func (c *APIClient) UploadAttachmentTo(ctx context.Context, fileData []byte, filename string, target AttachmentTarget) (map[string]any, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -242,14 +262,19 @@ func (c *APIClient) UploadAttachment(ctx context.Context, fileData []byte, filen
 		return nil, fmt.Errorf("write file data: %w", err)
 	}
 
-	if issueID != "" {
-		if err := writer.WriteField("issue_id", issueID); err != nil {
+	if target.IssueID != "" {
+		if err := writer.WriteField("issue_id", target.IssueID); err != nil {
 			return nil, fmt.Errorf("write issue_id field: %w", err)
 		}
 	}
-	if commentID != "" {
-		if err := writer.WriteField("comment_id", commentID); err != nil {
+	if target.CommentID != "" {
+		if err := writer.WriteField("comment_id", target.CommentID); err != nil {
 			return nil, fmt.Errorf("write comment_id field: %w", err)
+		}
+	}
+	if target.ChatMessageID != "" {
+		if err := writer.WriteField("chat_message_id", target.ChatMessageID); err != nil {
+			return nil, fmt.Errorf("write chat_message_id field: %w", err)
 		}
 	}
 
