@@ -285,10 +285,22 @@ func (c *APIClient) UploadAttachment(ctx context.Context, fileData []byte, filen
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
 // Downloads are limited to 100 MB to match the upload size limit.
+//
+// When the URL is relative (e.g. "/uploads/..."), as returned by local storage
+// without LOCAL_UPLOAD_BASE_URL, it is resolved against c.BaseURL and auth
+// headers are sent so the request hits the same Multica server.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	sameOrigin := strings.HasPrefix(downloadURL, "/")
+	if sameOrigin {
+		downloadURL = c.BaseURL + downloadURL
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	if sameOrigin {
+		c.setHeaders(req)
 	}
 
 	resp, err := c.HTTPClient.Do(req)

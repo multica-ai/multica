@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.multica.frontend</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/sara/code/firtal-cerebro/.deploy/run-frontend.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/sara/code/firtal-cerebro</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/sara/code/firtal-cerebro/.deploy/logs/frontend.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/sara/code/firtal-cerebro/.deploy/logs/frontend.err.log</string>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>

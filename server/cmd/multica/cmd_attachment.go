@@ -30,10 +30,90 @@ var attachmentDownloadCmd = &cobra.Command{
 	RunE:  runAttachmentDownload,
 }
 
+var attachmentUploadCmd = &cobra.Command{
+	Use:   "upload <file-path>",
+	Short: "Upload a file and attach it to an issue or comment",
+	Long:  "Upload a local file to the workspace and attach it to an issue or comment.",
+	Example: `  # Upload a file to an issue
+  $ multica attachment upload report.html --issue abc123
+
+  # Upload a file to a specific comment
+  $ multica attachment upload screenshot.png --comment def456
+
+  # Upload with a custom display name
+  $ multica attachment upload /tmp/output.md --issue abc123 --name "findings.md"`,
+	Args: exactArgs(1),
+	RunE: runAttachmentUpload,
+}
+
 func init() {
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
+	attachmentCmd.AddCommand(attachmentUploadCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
+
+	attachmentUploadCmd.Flags().String("issue", "", "Issue ID to attach the file to")
+	attachmentUploadCmd.Flags().String("comment", "", "Comment ID to attach the file to")
+	attachmentUploadCmd.Flags().String("name", "", "Custom display name for the attachment (defaults to filename)")
+}
+
+func runAttachmentUpload(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	filePath := args[0]
+	if !filepath.IsAbs(filePath) {
+		if abs, err := filepath.Abs(filePath); err == nil {
+			filePath = abs
+		}
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("cannot read file: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory, not a file", filePath)
+	}
+	const maxSize = 100 << 20 // 100 MB
+	if info.Size() > maxSize {
+		return fmt.Errorf("file is %d bytes, max is %d (100 MB)", info.Size(), maxSize)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+
+	filename, _ := cmd.Flags().GetString("name")
+	if filename == "" {
+		filename = filepath.Base(filePath)
+	}
+
+	issueID, _ := cmd.Flags().GetString("issue")
+	commentID, _ := cmd.Flags().GetString("comment")
+	if issueID == "" && commentID == "" {
+		return fmt.Errorf("either --issue or --comment is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	result, err := client.UploadAttachment(ctx, data, filename, issueID, commentID)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Uploaded: %s\n", strVal(result, "filename"))
+
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"id":       strVal(result, "id"),
+		"filename": strVal(result, "filename"),
+		"url":      strVal(result, "url"),
+		"size":     result["size_bytes"],
+	})
 }
 
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {

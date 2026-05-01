@@ -61,3 +61,10 @@ data/
 # connect binaries
 connect/connect
 connect/sync
+
+# deploy secrets and runtime
+.deploy/.webhook-secret
+.deploy/webhook-hooks.json
+.deploy/logs/
+.deploy/*.key
+.deploy/*.crt

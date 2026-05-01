@@ -13,6 +13,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { ProviderLogo } from "./provider-logo";
+import { AddRuntimeDialog } from "./add-runtime-dialog";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -123,10 +124,13 @@ export function RuntimeList({
     <div className="overflow-y-auto h-full border-r">
       <PageHeader className="justify-between">
         <h1 className="text-sm font-semibold">Runtimes</h1>
-        <span className="text-xs text-muted-foreground">
-          {filteredRuntimes.filter((r) => r.status === "online").length}/
-          {filteredRuntimes.length} online
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {filteredRuntimes.filter((r) => r.status === "online").length}/
+            {filteredRuntimes.length} online
+          </span>
+          <AddRuntimeDialog />
+        </div>
       </PageHeader>
 
       {/* Filter bar */}

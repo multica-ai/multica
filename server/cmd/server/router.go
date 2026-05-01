@@ -132,6 +132,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
+	// Runtime setup (public exchange + script — token-gated)
+	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
+	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries))
@@ -353,6 +357,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/daily", h.GetWorkspaceUsageByDay)
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
 			})
+
+			// Runtime setup token (workspace-scoped, generates one-line install command)
+			r.Post("/api/runtime-setup/tokens", h.CreateRuntimeSetupToken)
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {

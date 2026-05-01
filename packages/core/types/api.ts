@@ -101,6 +101,19 @@ export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {
   token: string;
 }
 
+export interface CreateRuntimeSetupTokenRequest {
+  device_label?: string;
+}
+
+export interface CreateRuntimeSetupTokenResponse {
+  token: string;
+  expires_at: string;
+  install_command: string;
+  server_url: string;
+  workspace_id: string;
+  workspace_slug: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;

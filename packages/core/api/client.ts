@@ -33,6 +33,8 @@ import type {
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
+  CreateRuntimeSetupTokenRequest,
+  CreateRuntimeSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
@@ -778,6 +780,16 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  // Runtime setup tokens — bootstraps a new daemon via one-line installer.
+  async createRuntimeSetupToken(
+    data: CreateRuntimeSetupTokenRequest = {},
+  ): Promise<CreateRuntimeSetupTokenResponse> {
+    return this.fetch("/api/runtime-setup/tokens", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   // File Upload & Attachments

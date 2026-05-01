@@ -93,6 +93,7 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
   };
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button
@@ -214,6 +215,7 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

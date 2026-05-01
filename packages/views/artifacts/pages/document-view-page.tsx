@@ -50,6 +50,41 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function normalizeTitle(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+// Agents sometimes save HTML artifacts as a full <!DOCTYPE html> document
+// (with their own <style>), and inlining that via dangerouslySetInnerHTML
+// leaks the body styles into the host app — that's the "looks weird" we
+// see in JEH-285. Detect full-document bodies and isolate them in an iframe.
+function isFullHtmlDocument(body: string): boolean {
+  const head = body.slice(0, 256).toLowerCase();
+  return head.includes("<!doctype html") || /<html[\s>]/.test(head);
+}
+
+// Authors (humans and agents) often repeat the document title as a leading
+// H1 inside the body. Strip it so the page H1 isn't shown twice. Only
+// applies to inline-rendered bodies (markdown / HTML snippets); full HTML
+// documents render in an iframe so a duplicate H1 there is benign.
+function stripLeadingTitleHeading(body: string, title: string, format: string): string {
+  if (!body || !title) return body;
+  const want = normalizeTitle(title);
+  if (format === "html") {
+    const m = body.match(/^\s*<h1[^>]*>([\s\S]*?)<\/h1>\s*/i);
+    if (m && normalizeTitle((m[1] ?? "").replace(/<[^>]+>/g, "")) === want) {
+      return body.slice(m[0].length);
+    }
+    return body;
+  }
+  // markdown (and md-like default)
+  const m = body.match(/^\s*#\s+([^\n]+)\n+/);
+  if (m && normalizeTitle(m[1] ?? "") === want) {
+    return body.slice(m[0].length);
+  }
+  return body;
+}
+
 /**
  * The "people + things" line under the title — author and the issues / project
  * the document is connected to. Each is clickable: agent goes to the agent
@@ -204,7 +239,14 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     setTitleDraft(artifact.title);
   };
 
+  const renderedBody = stripLeadingTitleHeading(
+    artifact.body ?? "",
+    artifact.title,
+    artifact.format,
+  );
+
   return (
+    <div className="h-full overflow-y-auto">
     <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
@@ -313,16 +355,24 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
             />
           </div>
         ) : artifact.format === "html" ? (
-          <div
-            className="prose prose-sm max-w-none dark:prose-invert"
-            // PDFs come from our storage; HTML body is authored in-app, but
-            // since agents can write artifacts we still scope to the prose
-            // container. Document this as a known trust assumption.
-            dangerouslySetInnerHTML={{ __html: artifact.body }}
-          />
-        ) : artifact.body ? (
+          isFullHtmlDocument(renderedBody) ? (
+            <iframe
+              srcDoc={renderedBody}
+              title={artifact.title}
+              sandbox="allow-scripts allow-same-origin allow-popups"
+              className="h-[80vh] w-full rounded border border-border bg-white"
+            />
+          ) : (
+            <div
+              className="prose prose-sm max-w-none dark:prose-invert"
+              // HTML snippets are authored in-app and rendered inline; agents
+              // can write artifacts so this remains a known trust assumption.
+              dangerouslySetInnerHTML={{ __html: renderedBody }}
+            />
+          )
+        ) : renderedBody ? (
           <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ArtifactBody body={artifact.body} />
+            <ArtifactBody body={renderedBody} />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">No content.</p>
@@ -345,6 +395,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
     </div>
   );
 }
