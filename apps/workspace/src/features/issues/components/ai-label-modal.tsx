@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Tag, Check } from "lucide-react";
+import { Bot, Tag } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -54,12 +54,11 @@ export function AILabelModal({ issueIds, open, onClose }: Props) {
     try {
       const res = await suggestLabelsMut.mutateAsync({ workspaceId: workspace.id, issueIds });
       setResults(res.results);
+      // Pre-select all suggestions by default
       const initialSelected = new Set<string>();
       res.results.forEach((r: IssueLabelResult) => {
         r.suggestions.forEach((s: LabelSuggestion) => {
-          if (s.existing && s.label_id) {
-            initialSelected.add(`${r.issue_id}::${s.label_id}`);
-          }
+          initialSelected.add(`${r.issue_id}::${s.label_id ?? s.name}`);
         });
       });
       setSelected(initialSelected);
@@ -70,12 +69,12 @@ export function AILabelModal({ issueIds, open, onClose }: Props) {
     }
   }
 
-  function toggleLabel(issueId: string, labelId: string) {
-    const key = `${issueId}::${labelId}`;
+  function toggleLabel(issueId: string, key: string) {
+    const fullKey = `${issueId}::${key}`;
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(fullKey)) next.delete(fullKey);
+      else next.add(fullKey);
       return next;
     });
   }
@@ -86,8 +85,14 @@ export function AILabelModal({ issueIds, open, onClose }: Props) {
     try {
       for (const result of results) {
         for (const s of result.suggestions) {
-          if (s.existing && s.label_id && selected.has(`${result.issue_id}::${s.label_id}`)) {
+          const key = `${result.issue_id}::${s.label_id ?? s.name}`;
+          if (!selected.has(key)) continue;
+          if (s.existing && s.label_id) {
+            // Apply existing label by ID
             await addIssueLabel(result.issue_id, { labelId: s.label_id });
+          } else {
+            // Auto-create new label by name (backend find-or-creates it)
+            await addIssueLabel(result.issue_id, { name: s.name });
           }
         }
       }
@@ -120,7 +125,7 @@ export function AILabelModal({ issueIds, open, onClose }: Props) {
           </DialogTitle>
           <DialogDescription>
             AI will analyze {issueIds.length} issue{issueIds.length > 1 ? "s" : ""} and suggest labels.
-            Only existing workspace labels can be applied.
+            New labels will be created automatically when applied.
           </DialogDescription>
         </DialogHeader>
 
@@ -150,23 +155,17 @@ export function AILabelModal({ issueIds, open, onClose }: Props) {
                       <div className="flex flex-wrap gap-2">
                         {result.suggestions.map((s, idx) => {
                           const key = `${result.issue_id}::${s.label_id ?? s.name}`;
-                          const isSelected = s.label_id ? selected.has(`${result.issue_id}::${s.label_id}`) : false;
+                          const isSelected = selected.has(key);
                           return (
                             <div
                               key={idx}
                               className="flex items-center gap-1.5"
                             >
-                              {s.existing && s.label_id ? (
-                                <Checkbox
-                                  id={key}
-                                  checked={isSelected}
-                                  onCheckedChange={() => toggleLabel(result.issue_id, s.label_id!)}
-                                />
-                              ) : (
-                                <span className="h-3.5 w-3.5 flex items-center justify-center opacity-40">
-                                  <Check className="h-3 w-3" />
-                                </span>
-                              )}
+                              <Checkbox
+                                id={key}
+                                checked={isSelected}
+                                onCheckedChange={() => toggleLabel(result.issue_id, s.label_id ?? s.name)}
+                              />
                               <Badge
                                 variant={s.existing ? "secondary" : "outline"}
                                 className="text-xs"
