@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -573,7 +573,7 @@ interface ReadonlyContentProps {
   className?: string;
 }
 
-export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
+export const ReadonlyContent = memo(function ReadonlyContent({ content, className }: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
@@ -591,4 +591,4 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
       <LinkHoverCard {...hover} />
     </div>
   );
-}
+});

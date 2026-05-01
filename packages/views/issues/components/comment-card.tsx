@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -348,7 +348,7 @@ function CommentRow({
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-function CommentCard({
+const CommentCard = memo(function CommentCard({
   issueId,
   entry,
   allReplies,
@@ -604,6 +604,6 @@ function CommentCard({
       </Collapsible>
     </Card>
   );
-}
+});
 
 export { CommentCard, type CommentCardProps };
