@@ -166,3 +166,65 @@ func TestDisabledCollaborationConfigDoesNotAllowAuditedRequests(t *testing.T) {
 		t.Fatalf("expected disabled collaboration config to block audited requests")
 	}
 }
+
+func TestUnsupportedCollaborationScopeDoesNotAllowAuditedRequests(t *testing.T) {
+	policy := FromRuntimeConfig([]byte(`{
+		"multica_policy": {
+			"mode": "supervised_collaboration",
+			"collaboration": {
+				"enabled": true,
+				"scope": "cross_issue",
+				"collaboration_requests": "allow_audited"
+			}
+		}
+	}`))
+
+	if policy.AllowsAuditedCollaborationRequests() {
+		t.Fatalf("expected non-same_issue collaboration scope to block audited requests")
+	}
+}
+
+func TestSupervisedCollaborationBoundsAndTargetAllowlist(t *testing.T) {
+	policy := FromRuntimeConfig([]byte(`{
+		"multica_policy": {
+			"mode": "supervised_collaboration",
+			"collaboration": {
+				"enabled": true,
+				"allowed_agent_targets": ["planner", "builder", "reviewer"],
+				"collaboration_requests": "allow_audited",
+				"max_turns": 8,
+				"max_depth": 2,
+				"ttl_minutes": 120
+			}
+		}
+	}`))
+
+	if !policy.AllowsTargetAgent("Reviewer", "agent-id") {
+		t.Fatalf("expected case-insensitive allowed target name")
+	}
+	if policy.AllowsTargetAgent("security", "agent-id") {
+		t.Fatalf("did not expect unlisted target to be allowed")
+	}
+	if policy.MaxCollaborationTurns() != 8 || policy.MaxCollaborationDepth() != 2 || policy.CollaborationTTLMinutes() != 120 {
+		t.Fatalf("unexpected bounds: turns=%d depth=%d ttl=%d", policy.MaxCollaborationTurns(), policy.MaxCollaborationDepth(), policy.CollaborationTTLMinutes())
+	}
+	if !policy.PreventsSelfHandoff() || !policy.PreventsCycles() {
+		t.Fatalf("expected supervised collaboration to default to self-handoff and cycle prevention")
+	}
+}
+
+func TestSupervisedCollaborationAllowlistCanMatchTargetID(t *testing.T) {
+	policy := FromRuntimeConfig([]byte(`{
+		"multica_policy": {
+			"mode": "supervised_collaboration",
+			"collaboration": {
+				"allowed_agent_targets": ["agent-123"],
+				"collaboration_requests": "allow_audited"
+			}
+		}
+	}`))
+
+	if !policy.AllowsTargetAgent("Some Name", "agent-123") {
+		t.Fatalf("expected target ID allowlist match")
+	}
+}

@@ -257,7 +257,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		if agentPolicy.IsOperatorControlled() {
 			b.WriteString("7. Do NOT change issue status, change assignee, create issues, or mention another agent. A human operator owns lifecycle and handoff changes.\n\n")
 		} else if agentPolicy.IsSupervisedCollaboration() {
-			b.WriteString("7. You may discuss, critique, and recommend a handoff, but do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links. If another agent should join, write a plain handoff recommendation for the operator/controller.\n\n")
+			if agentPolicy.AllowsAuditedCollaborationRequests() {
+				fmt.Fprintf(&b, "7. You may discuss, critique, and recommend a handoff, but do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links. If another agent should join, use the audited controller path: `multica issue collaboration-request create %s --to <agent-name-or-id> --purpose \"<specific same-issue request>\"`.\n\n", ctx.IssueID)
+			} else {
+				b.WriteString("7. You may discuss, critique, and recommend a handoff, but do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links. If another agent should join, write a plain handoff recommendation for the operator/controller.\n\n")
+			}
 		} else {
 			b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 		}
@@ -282,7 +286,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		b.WriteString("3. Complete the requested work and actively discuss trade-offs or review points when useful.\n")
 		b.WriteString("4. Do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links.\n")
-		b.WriteString("5. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` with target agent, reason, expected output, and operator/controller action required.\n")
+		if agentPolicy.AllowsAuditedCollaborationRequests() {
+			fmt.Fprintf(&b, "5. If another agent should join, use the audited controller path: `multica issue collaboration-request create %s --to <agent-name-or-id> --purpose \"<specific same-issue request>\"`. Keep it same-issue, bounded, and specific.\n", ctx.IssueID)
+		} else {
+			b.WriteString("5. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` with target agent, reason, expected output, and operator/controller action required.\n")
+		}
 		fmt.Fprintf(&b, "6. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`.\n\n", ctx.IssueID)
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
@@ -330,7 +338,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
 	b.WriteString("### When a mention IS appropriate\n\n")
 	if agentPolicy.DeniesRawAgentMentions() {
-		b.WriteString("- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` or ask the operator/controller to route the handoff.\n")
+		if agentPolicy.AllowsAuditedCollaborationRequests() {
+			fmt.Fprintf(&b, "- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, use `multica issue collaboration-request create %s --to <agent-name-or-id> --purpose \"<specific same-issue request>\"` instead.\n", ctx.IssueID)
+		} else {
+			b.WriteString("- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` or ask the operator/controller to route the handoff.\n")
+		}
 		b.WriteString("- Escalating to a human owner may still be appropriate when genuinely needed, but avoid noisy human mentions unless the issue requires it.\n\n")
 	} else {
 		b.WriteString("- Escalating to a human owner who is not yet involved.\n")

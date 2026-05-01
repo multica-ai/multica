@@ -1,6 +1,9 @@
 package agentpolicy
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	ModeOperatorControlled      = "operator_controlled"
@@ -15,6 +18,7 @@ const (
 
 	RawAgentMentionsDeny              = "deny"
 	CollaborationRequestsAllowAudited = "allow_audited"
+	CollaborationScopeSameIssue       = "same_issue"
 )
 
 // Policy is the Multica command policy embedded in agent.runtime_config.
@@ -28,8 +32,8 @@ type Policy struct {
 }
 
 // CollaborationPolicy describes bounded agent-to-agent discussion behavior.
-// MHS-20 only parses and evaluates the policy foundation; the server-validated
-// collaboration_request primitive is intentionally implemented in a later slice.
+// MHS-20 introduced the policy foundation; MHS-21 adds the server-validated
+// collaboration_request primitive used instead of raw agent mentions.
 type CollaborationPolicy struct {
 	Enabled               *bool    `json:"enabled"`
 	Scope                 string   `json:"scope"`
@@ -122,6 +126,10 @@ func (p Policy) AllowsAuditedCollaborationRequests() bool {
 	if p.Collaboration.Enabled != nil && !*p.Collaboration.Enabled {
 		return false
 	}
+	scope := strings.TrimSpace(p.Collaboration.Scope)
+	if scope != "" && scope != CollaborationScopeSameIssue {
+		return false
+	}
 	return p.Collaboration.CollaborationRequests == CollaborationRequestsAllowAudited
 }
 
@@ -130,4 +138,63 @@ func (p Policy) DeniesRawAgentMentions() bool {
 		return true
 	}
 	return p.Collaboration.RawAgentMentions == RawAgentMentionsDeny
+}
+
+func (p Policy) PreventsSelfHandoff() bool {
+	if !p.IsSupervisedCollaboration() {
+		return false
+	}
+	if p.Collaboration.PreventSelfHandoff != nil {
+		return *p.Collaboration.PreventSelfHandoff
+	}
+	return true
+}
+
+func (p Policy) PreventsCycles() bool {
+	if !p.IsSupervisedCollaboration() {
+		return false
+	}
+	if p.Collaboration.PreventCycles != nil {
+		return *p.Collaboration.PreventCycles
+	}
+	return true
+}
+
+func (p Policy) MaxCollaborationTurns() int {
+	if p.Collaboration.MaxTurns > 0 {
+		return p.Collaboration.MaxTurns
+	}
+	return 2
+}
+
+func (p Policy) MaxCollaborationDepth() int {
+	if p.Collaboration.MaxDepth > 0 {
+		return p.Collaboration.MaxDepth
+	}
+	return 1
+}
+
+func (p Policy) CollaborationTTLMinutes() int {
+	if p.Collaboration.TTLMinutes > 0 {
+		return p.Collaboration.TTLMinutes
+	}
+	return 120
+}
+
+func (p Policy) AllowsTargetAgent(targetName, targetID string) bool {
+	if !p.AllowsAuditedCollaborationRequests() {
+		return false
+	}
+	if len(p.Collaboration.AllowedAgentTargets) == 0 {
+		return true
+	}
+	targetName = strings.ToLower(strings.TrimSpace(targetName))
+	targetID = strings.ToLower(strings.TrimSpace(targetID))
+	for _, allowed := range p.Collaboration.AllowedAgentTargets {
+		allowed = strings.ToLower(strings.TrimSpace(allowed))
+		if allowed != "" && (allowed == targetName || allowed == targetID) {
+			return true
+		}
+	}
+	return false
 }

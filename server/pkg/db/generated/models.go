@@ -180,6 +180,26 @@ type ChatSession struct {
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 }
 
+type CollaborationRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	FromAgentID      pgtype.UUID        `json:"from_agent_id"`
+	ToAgentID        pgtype.UUID        `json:"to_agent_id"`
+	ParentRequestID  pgtype.UUID        `json:"parent_request_id"`
+	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	TargetTaskID     pgtype.UUID        `json:"target_task_id"`
+	Status           string             `json:"status"`
+	Mode             string             `json:"mode"`
+	Purpose          string             `json:"purpose"`
+	MaxTurns         int32              `json:"max_turns"`
+	Depth            int32              `json:"depth"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Metadata         []byte             `json:"metadata"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Comment struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`

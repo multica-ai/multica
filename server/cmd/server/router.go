@@ -313,6 +313,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
+					r.Post("/collaboration-requests", h.CreateCollaborationRequest)
+					r.Get("/collaboration-requests", h.ListCollaborationRequests)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)

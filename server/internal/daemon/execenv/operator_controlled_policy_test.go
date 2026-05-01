@@ -109,8 +109,8 @@ func TestInjectRuntimeConfigSupervisedCollaborationAssignmentUsesDiscussionOnlyI
 			t.Fatalf("supervised collaboration instructions should not contain %q", forbidden)
 		}
 	}
-	if !strings.Contains(s, "HANDOFF_RECOMMENDATION") {
-		t.Fatalf("expected supervised collaboration handoff recommendation guidance")
+	if !strings.Contains(s, "multica issue collaboration-request create policy-issue-id") {
+		t.Fatalf("expected supervised collaboration audited collaboration request guidance")
 	}
 	if !strings.Contains(s, "Do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links") {
 		t.Fatalf("expected lifecycle/raw mention guardrail in supervised collaboration instructions")
