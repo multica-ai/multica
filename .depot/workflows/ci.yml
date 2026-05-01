@@ -30,7 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build, typecheck, test
-        run: pnpm exec turbo build typecheck test --filter='!@multica/docs'
+        run: pnpm exec turbo build typecheck test --filter="!@multica/docs"
 
   # ─────────────────────────────────────────────
   # Backend: Go build + migrations + tests
@@ -58,7 +58,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.1"
+          go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
       - name: Build
@@ -75,7 +75,7 @@ jobs:
   # (no signing — unsigned smoke only)
   # ─────────────────────────────────────────────
   desktop-smoke:
-    runs-on: depot-macos-latest
+    runs-on: depot-macos-15
     steps:
       - uses: actions/checkout@v4
         with:
