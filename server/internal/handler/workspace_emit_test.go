@@ -60,7 +60,8 @@ func TestWorkspaceEmit(t *testing.T) {
 		req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID+"/members/"+memberID, map[string]any{
 			"role": "admin",
 		})
-		req = withURLParams(req, "id", testWorkspaceID, "memberId", memberID)
+		req = withURLParam(req, "id", testWorkspaceID)
+		req = withURLParam(req, "memberId", memberID)
 		testHandler.UpdateMember(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("UpdateMember: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -86,7 +87,8 @@ func TestWorkspaceEmit(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req := newRequest(http.MethodDelete, "/api/workspaces/"+testWorkspaceID+"/members/"+memberID, nil)
-		req = withURLParams(req, "id", testWorkspaceID, "memberId", memberID)
+		req = withURLParam(req, "id", testWorkspaceID)
+		req = withURLParam(req, "memberId", memberID)
 		testHandler.DeleteMember(w, req)
 		if w.Code != http.StatusNoContent {
 			t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
