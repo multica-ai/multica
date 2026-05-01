@@ -5,7 +5,7 @@ import { Check, Copy, Terminal } from "lucide-react";
 import { useLocale } from "../../i18n";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+  "curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash";
 const SETUP_CMD = "multica setup";
 
 /**

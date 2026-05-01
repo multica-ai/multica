@@ -1,6 +1,6 @@
 import { cn } from "@multica/ui/lib/utils";
 
-export const githubUrl = "https://github.com/multica-ai/multica";
+export const githubUrl = "https://github.com/TheophilusChinomona/multica";
 export const twitterUrl = "https://x.com/MulticaAI";
 
 export function GitHubMark({ className }: { className?: string }) {

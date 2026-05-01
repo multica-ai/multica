@@ -1,0 +1,77 @@
+{
+  "name": "multica self-host fork",
+
+  // Ubuntu 22.04 base — matches what GitHub Codespaces uses.
+  // Go, Node, pnpm, and Docker access are layered in via Features below.
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+
+  "features": {
+    // Pinned to match server/go.mod and .github/workflows/ci.yml.
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.26.1"
+    },
+
+    // Node 22 to match CI; pnpm version matches package.json's
+    // "packageManager" field so corepack-style pinning behaves.
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22",
+      "pnpmVersion": "10.28.2"
+    },
+
+    // Mount the host Docker socket so `make dev` and `make selfhost`
+    // can spin up Postgres / app containers as siblings of this dev
+    // container. Lighter than docker-in-docker and faster on a
+    // Linux host.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": true
+    },
+
+    // Common CLI niceties: rg, jq, less, sudo, etc. The base image
+    // has most of these but the feature ensures consistent versions
+    // across hosts/Codespaces.
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": false,
+      "username": "vscode"
+    }
+  },
+
+  // Make `host.docker.internal` resolve to the Docker host gateway
+  // from inside the container, on Linux too. Lets `make check` /
+  // `make migrate-up` reach a Postgres running on the host (e.g. the
+  // one started by `make selfhost`) when `.env`'s DATABASE_URL is
+  // pointed at `host.docker.internal:5432` instead of `localhost`.
+  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
+
+  // Frontend (3000), Vite renderer (5173 / 5174 desktop), Go
+  // backend (8080), shared pgvector Postgres (5432).
+  "forwardPorts": [3000, 5173, 5174, 8080, 5432],
+
+  // Run after the container is built. Verifies tooling is wired
+  // and pre-fetches workspace deps so the first `pnpm dev:web`
+  // doesn't pay a cold install. Playwright browsers are installed
+  // here too so `make check`'s E2E phase doesn't need a separate
+  // `pnpm exec playwright install` step.
+  "postCreateCommand": "set -eux; go version; node --version; pnpm --version; pnpm install --frozen-lockfile; cd server && go mod download && cd ..; pnpm exec playwright install --with-deps chromium",
+
+  "remoteUser": "vscode",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": false,
+        "editor.formatOnSave": true,
+        "[go]": {
+          "editor.defaultFormatter": "golang.go"
+        }
+      }
+    }
+  }
+}

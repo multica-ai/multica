@@ -56,20 +56,9 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
-  - name: multica
-    ids:
-      - versioned
-    repository:
-      owner: multica-ai
-      name: homebrew-tap
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
-    homepage: "https://github.com/multica-ai/multica"
-    description: "Multica CLI — local agent runtime and management tool for the Multica platform"
-    license: "Apache-2.0"
-    install: |
-      bin.install "multica"
-    test: |
-      system "#{bin}/multica", "version"
+# Homebrew tap publishing intentionally disabled in this fork.
+# The upstream `multica-ai/homebrew-tap` repo isn't writable from this
+# fork's release workflow, and this fork doesn't yet have its own tap.
+# To re-enable: create `TheophilusChinomona/homebrew-tap`, add a
+# HOMEBREW_TAP_GITHUB_TOKEN repo secret with write access to it, then
+# restore a `brews:` block here pointing at that repo.

@@ -68,10 +68,14 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 
 // SendInvitationEmail notifies the invitee that they have been invited to a workspace.
 // invitationID is included in the URL so the email deep-links to /invite/{id}.
+//
+// FRONTEND_ORIGIN is required: this is a self-host fork, so there is no
+// hosted-domain fallback to silently route invite links to. Misconfigurations
+// must fail loudly at send time, not deliver clickless emails to recipients.
 func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
 	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	if appURL == "" {
-		appURL = "https://app.multica.ai"
+		return fmt.Errorf("cannot send invitation email: FRONTEND_ORIGIN is unset, so invite links would not resolve to your self-hosted instance")
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
 

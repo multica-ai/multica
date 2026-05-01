@@ -17,8 +17,8 @@
 开源的 Managed Agents 平台。<br/>
 将编码 Agent 变成真正的队友——分配任务、跟踪进度、积累技能。
 
-[![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
+[![CI](https://github.com/TheophilusChinomona/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/TheophilusChinomona/multica/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/TheophilusChinomona/multica?style=flat)](https://github.com/TheophilusChinomona/multica/stargazers)
 
 [官网](https://multica.ai) · [云服务](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
 
@@ -73,7 +73,7 @@ brew install multica-ai/tap/multica
 ### macOS / Linux（安装脚本）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash
 ```
 
 如果没有 Homebrew，可以使用安装脚本。脚本会安装 Multica CLI：检测到 `brew` 时通过 Homebrew 安装，否则直接下载二进制。
@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.ps1 | iex
 ```
 
 安装完成后，一条命令完成配置、认证和启动：
@@ -93,7 +93,7 @@ multica setup          # 连接 Multica Cloud，登录，启动 daemon
 > **自部署？** 加上 `--with-server` 在本地部署完整的 Multica 服务：
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+> curl -fsSL https://raw.githubusercontent.com/TheophilusChinomona/multica/main/scripts/install.sh | bash -s -- --with-server
 > multica setup self-host
 > ```
 >

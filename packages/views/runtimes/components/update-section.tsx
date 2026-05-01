@@ -11,7 +11,7 @@ import { api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 
 const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
+  "https://api.github.com/repos/TheophilusChinomona/multica/releases/latest";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 let cachedLatestVersion: string | null = null;

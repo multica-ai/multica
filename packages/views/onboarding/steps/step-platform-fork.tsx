@@ -24,12 +24,11 @@ import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { CompactRuntimeRow } from "../components/compact-runtime-row";
 import { useRuntimePicker } from "../components/use-runtime-picker";
-import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
 
 /**
  * Step 3 on **web**. The user is in a browser and hasn't downloaded
  * the desktop app yet, so we can't scan their machine for runtimes.
- * This screen is a fan-out: three clearly clickable cards, each with
+ * This screen is a fan-out: two clearly clickable cards, each with
  * an explicit right-side button that says what clicking does:
  *
  *   1. **Download desktop** — primary card, black bg, "Download" pill.
@@ -40,21 +39,17 @@ import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
  *      probe. When a runtime appears and the user selects it, the
  *      dialog's "Connect & continue" button fires `onNext(runtime)`
  *      and advances the flow.
- *   3. **Cloud waitlist** — alt card, "Join waitlist" pill → opens a
- *      dialog with an email + reason form. Submitting is pure interest
- *      capture; the dialog doesn't advance the flow. The user then
- *      closes the dialog and can hit Skip in the footer.
  *
  * Footer is simplified — no Continue button, since the CLI dialog
  * owns that advancement itself. Only Skip remains.
  */
 
-type DialogState = "cli" | "cloud" | null;
+type DialogState = "cli" | null;
 
 // Single canonical download destination — the /download page owns
 // OS + arch detection, the All-Platforms matrix, release-note links,
-// and the CLI / Cloud alternates. Kept in sync with landing-hero.tsx
-// and landing footer nav, both of which target the same path.
+// and the CLI alternate. Kept in sync with landing-hero.tsx and
+// landing footer nav, both of which target the same path.
 const DOWNLOAD_PAGE_URL = "/download";
 
 export function StepPlatformFork({
@@ -62,24 +57,18 @@ export function StepPlatformFork({
   onNext,
   onBack,
   cliInstructions,
-  onWaitlistSubmitted,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
   /** Platform-specific CLI install card, rendered inside the CLI dialog. */
   cliInstructions?: ReactNode;
-  /** Parent-level latch used to label the onboarding completion path
-   *  as `cloud_waitlist` when the user ends up skipping Step 3 after
-   *  submitting the waitlist form. */
-  onWaitlistSubmitted?: () => void;
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [downloaded, setDownloaded] = useState(false);
-  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Platform signal retained purely for PostHog dimensions — the UI
   // no longer branches on it (Windows / Linux desktop installers now
@@ -120,15 +109,6 @@ export function StepPlatformFork({
     setPersonProperties({ platform_preference: "web" });
   };
 
-  const handleOpenCloud = () => {
-    setDialog("cloud");
-    captureEvent("onboarding_runtime_path_selected", {
-      path: "cloud_waitlist",
-      source: "step3",
-      is_mac: isMac,
-    });
-  };
-
   const handleCliConnect = () => {
     if (!picker.selected) return;
     setDialog(null);
@@ -136,9 +116,6 @@ export function StepPlatformFork({
   };
 
   const footerHint = (() => {
-    if (waitlistSubmitted) {
-      return "You're on the waitlist — pick Skip to keep exploring.";
-    }
     if (downloaded) {
       return "Finish setup on the download page, then come back to this tab.";
     }
@@ -195,15 +172,6 @@ export function StepPlatformFork({
                 actionLabel="Show steps"
                 onAction={handleOpenCli}
               />
-
-              <ForkAlt
-                title="Cloud runtime"
-                subtitle="We host the runtime. Not live yet — join the waitlist."
-                actionLabel={
-                  waitlistSubmitted ? "On the list" : "Join waitlist"
-                }
-                onAction={handleOpenCloud}
-              />
             </div>
           </div>
         </main>
@@ -243,16 +211,6 @@ export function StepPlatformFork({
         canConnect={picker.selected !== null}
         selectedName={picker.selected?.name ?? null}
         cliInstructions={cliInstructions}
-      />
-
-      <CloudWaitlistDialog
-        open={dialog === "cloud"}
-        onClose={() => setDialog(null)}
-        submitted={waitlistSubmitted}
-        onSubmitted={() => {
-          setWaitlistSubmitted(true);
-          onWaitlistSubmitted?.();
-        }}
       />
     </div>
   );
@@ -471,9 +429,10 @@ function formatElapsed(seconds: number) {
  *   2. Progressively reveal troubleshooting hints as elapsed time
  *      crosses thresholds — so a user who stalls mid-setup gets
  *      useful guidance without being dogpiled at t=0.
- *   3. At the 90s+ "stalled" tier, point the user at alternate paths
- *      (Skip / Cloud waitlist) — parallels desktop's EmptyView, which
- *      already exposes the same two exits when no runtime registers.
+ *   3. At the 90s+ "stalled" tier, point the user at the Skip exit
+ *      and at Desktop as a smoother alternative — parallels desktop's
+ *      EmptyView, which exposes the same Skip exit when no runtime
+ *      registers.
  *
  * Elapsed-time counter only ticks while the dialog is open so reopen
  * after closing resets the staging.
@@ -499,7 +458,7 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   //   45–90s means "probably an error in the terminal", 90s+ means
   //   "nothing's coming through, suggest alt paths" (the stalled tier
   //   parallels desktop StepRuntimeConnect's EmptyView — by that point
-  //   it's worth pointing the user at Skip or Cloud waitlist).
+  //   it's worth pointing the user at Skip or Desktop).
   const stage: "normal" | "midway" | "slow" | "stalled" =
     elapsed < 15
       ? "normal"
@@ -566,51 +525,3 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   );
 }
 
-// ------------------------------------------------------------
-// Cloud waitlist dialog
-// ------------------------------------------------------------
-
-/**
- * Modal dialog for the cloud waitlist path. Wraps the shared
- * `CloudWaitlistExpand` form. Submitting it records interest — the
- * dialog does NOT advance the onboarding flow. After submit, the user
- * closes the dialog and can hit Skip in the footer.
- */
-function CloudWaitlistDialog({
-  open,
-  onClose,
-  submitted,
-  onSubmitted,
-}: {
-  open: boolean;
-  onClose: () => void;
-  submitted: boolean;
-  onSubmitted: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
-          <DialogDescription>
-            Cloud runtimes aren&apos;t live yet. Leave your email and
-            we&apos;ll email you when they are.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 overflow-y-auto pt-2">
-          <CloudWaitlistExpand
-            submitted={submitted}
-            onSubmitted={onSubmitted}
-          />
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
-            {submitted ? "Close" : "Cancel"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

@@ -72,11 +72,6 @@ export function OnboardingFlow({
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
   const [, setAgent] = useState<Agent | null>(null);
-  // Sticky flag: Step 3's cloud-waitlist dialog only lives inside
-  // StepPlatformFork's local state, so the completion path for
-  // `runtime=null && waitlist submitted` would be invisible here without
-  // a shell-level record. One way latch; never cleared once set.
-  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
@@ -212,9 +207,8 @@ export function OnboardingFlow({
   // Step 3. Both paths own full-bleed two-column layouts.
   //   - Desktop (no cliInstructions slot) → StepRuntimeConnect drives
   //     the local daemon's runtime list directly.
-  //   - Web → StepPlatformFork offers Download / CLI / Cloud paths.
-  //     Under the CLI path it embeds StepRuntimeConnect for the live
-  //     probe; the Cloud path is a soft exit via the waitlist.
+  //   - Web → StepPlatformFork offers Download / CLI paths. Under the
+  //     CLI path it embeds StepRuntimeConnect for the live probe.
   if (step === "runtime" && workspace) {
     if (!runtimeInstructions) {
       return (
@@ -222,7 +216,6 @@ export function OnboardingFlow({
           wsId={workspace.id}
           onNext={handleRuntimeNext}
           onBack={() => handleBack("runtime")}
-          onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
         />
       );
     }
@@ -232,7 +225,6 @@ export function OnboardingFlow({
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
         cliInstructions={runtimeInstructions}
-        onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
       />
     );
   }
@@ -255,17 +247,14 @@ export function OnboardingFlow({
     );
   }
 
-  // Derive the completion-path label for Step 5 here — runtime +
-  // waitlist state both live in this shell, StepFirstIssue doesn't
-  // have the visibility to compute it itself.
-  //   runtime set          → "full"
-  //   no runtime + waitlist → "cloud_waitlist"
-  //   no runtime, no waitlist → "runtime_skipped"
+  // Derive the completion-path label for Step 5 here — runtime state
+  // lives in this shell, StepFirstIssue doesn't have the visibility to
+  // compute it itself.
+  //   runtime set → "full"
+  //   no runtime  → "runtime_skipped"
   const completionPath: OnboardingCompletionPath = runtime
     ? "full"
-    : waitlistSubmitted
-      ? "cloud_waitlist"
-      : "runtime_skipped";
+    : "runtime_skipped";
 
   return (
     <div className="animate-onboarding-enter flex min-h-full flex-col">
