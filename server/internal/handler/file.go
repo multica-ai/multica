@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -122,6 +123,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contentType := http.DetectContentType(buf[:n])
+	// Override content type for extensions that byte-sniffing commonly misdetects.
+	contentType = overrideContentType(contentType, header.Filename)
 	// Seek back so the full file is uploaded.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read file")
@@ -148,6 +151,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "upload failed")
 		return
 	}
+	// Local storage returns a relative path; resolve it to an absolute URL
+	// using the actual request host so stored URLs are always directly accessible.
+	link = resolveURL(r, link)
 
 	// If workspace context is available, create an attachment record.
 	if workspaceID != "" {
@@ -329,4 +335,39 @@ func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 		keys[i] = h.Storage.KeyFromURL(u)
 	}
 	h.Storage.DeleteKeys(ctx, keys)
+}
+
+// overrideContentType corrects content types that http.DetectContentType commonly misdetects.
+// SVG files, for example, look like plain XML to the byte sniffer.
+func overrideContentType(sniffed, filename string) string {
+	ext := strings.ToLower(path.Ext(filename))
+	switch ext {
+	case ".svg":
+		return "image/svg+xml"
+	case ".webp":
+		return "image/webp"
+	case ".md", ".markdown":
+		return "text/markdown; charset=utf-8"
+	case ".csv":
+		return "text/csv; charset=utf-8"
+	}
+	return sniffed
+}
+
+// resolveURL converts a relative path (e.g. /uploads/foo.png) to an absolute URL
+// using the scheme and host from the incoming HTTP request.
+// Absolute URLs (e.g. from S3/CDN) are returned unchanged.
+func resolveURL(r *http.Request, link string) string {
+	if !strings.HasPrefix(link, "/") {
+		return link // already absolute
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	return scheme + "://" + host + link
 }
