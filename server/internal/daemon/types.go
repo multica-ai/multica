@@ -39,6 +39,11 @@ type Task struct {
 	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
 	UserProfilePrompt     string     `json:"user_profile_prompt,omitempty"`     // compiled per-user communication prompt (JEH-304)
+	// TaskToken is a short-lived (~1h), scope-limited token (mtt_) the
+	// daemon must inject as MULTICA_TOKEN for the spawned agent process.
+	// Falling back to the daemon's own PAT would defeat the security
+	// model — agents must NEVER see the daemon's full token. JEH-324.
+	TaskToken string `json:"task_token,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

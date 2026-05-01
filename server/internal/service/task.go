@@ -171,6 +171,12 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 		return nil, fmt.Errorf("cancel task: %w", err)
 	}
 
+	// Best-effort: cancellation should also drop the task token so a
+	// running agent can't keep posting comments after we say stop.
+	if err := s.Queries.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+		slog.Warn("revoke task tokens on cancel failed (non-fatal)", "task_id", util.UUIDToString(taskID), "error", err)
+	}
+
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
 	// Reconcile agent status
@@ -289,6 +295,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 		task = t
 
+		// Revoke the per-task token in the same transaction so a
+		// completed task can no longer be acted on through its token,
+		// even if the TTL hasn't elapsed.
+		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+			return fmt.Errorf("revoke task tokens: %w", err)
+		}
+
 		if t.ChatSessionID.Valid {
 			// COALESCE in SQL guarantees empty inputs don't wipe the
 			// existing resume pointer; we still surface DB errors.
@@ -399,6 +412,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+
+		// Same revoke-on-terminal-state contract as CompleteTask.
+		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+			return fmt.Errorf("revoke task tokens: %w", err)
+		}
 
 		if t.ChatSessionID.Valid {
 			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{

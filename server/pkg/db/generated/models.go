@@ -469,6 +469,18 @@ type TaskMessage struct {
 	WorkSessionID pgtype.UUID        `json:"work_session_id"`
 }
 
+type TaskToken struct {
+	TokenHash   []byte             `json:"token_hash"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Scope       string             `json:"scope"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+}
+
 type TaskUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	TaskID           pgtype.UUID        `json:"task_id"`

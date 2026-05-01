@@ -193,7 +193,7 @@ func (q *Queries) ListArchivedChatSessionsUnfiled(ctx context.Context, arg ListA
 }
 
 const listArchivedInboxItemsUnfiled = `-- name: ListArchivedInboxItemsUnfiled :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -231,6 +231,7 @@ type ListArchivedInboxItemsUnfiledRow struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -262,6 +263,7 @@ func (q *Queries) ListArchivedInboxItemsUnfiled(ctx context.Context, arg ListArc
 			&i.ActorType,
 			&i.ActorID,
 			&i.Details,
+			&i.Route,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {

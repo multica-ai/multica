@@ -954,10 +954,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	prompt := BuildPrompt(task)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// Pass scope-limited credentials and context so the spawned agent CLI
+	// can call the Multica API and the local daemon (e.g. `multica repo
+	// checkout`). The token is the per-task mtt_ token minted by the
+	// claim endpoint — never the daemon's full PAT (JEH-324). If the
+	// server didn't return one (e.g. older server), fail loud rather
+	// than silently downgrading to the unsafe behavior.
+	if task.TaskToken == "" {
+		return TaskResult{}, fmt.Errorf("server did not issue a task token for %s — refusing to expose daemon token to agent", task.ID)
+	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_TOKEN":        task.TaskToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
 		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,

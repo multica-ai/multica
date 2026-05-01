@@ -162,10 +162,60 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 	})
 
+	// === Task-scoped allowlist ===
+	// Per-task tokens (mtt_) authenticate agents while they execute one
+	// task and may only reach the small set of routes the agent needs:
+	// read/update its own issue, post comments, read its own agent
+	// config, look up workspace members for mentions, upload
+	// attachments. These routes also accept normal user auth.
+	//
+	// Registered before the user-only protected group below so each
+	// path lives in exactly one place — chi panics on duplicates.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(queries))
+		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+
+		// Attachment upload — agents drop screenshots/logs onto their
+		// issue. AllowTaskScope is a no-op (the file resolves which
+		// issue/comment via request body, not URL).
+		r.With(middleware.AllowTaskScope).Post("/api/upload-file", h.UploadFile)
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceMember(queries))
+
+			r.With(middleware.AllowTaskScopeForAgent("id")).Get("/api/agents/{id}", h.GetAgent)
+
+			// Issue routes registered flat (not via r.Route) so they
+			// share the chi routing tree with the user-only sibling
+			// group's nested r.Route("/api/issues/{id}", ...). Mixing
+			// flat and nested registrations of the same prefix causes
+			// chi to dispatch only one of the two trees and return 405
+			// for methods registered in the other.
+			issueScope := middleware.AllowTaskScopeForIssue("id")
+			r.With(issueScope).Get("/api/issues/{id}", h.GetIssue)
+			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
+			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
+			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)
+		})
+
+		// Workspace member listing for mention lookup. The wider
+		// /api/workspaces/{id}/* tree is user-only because it carries
+		// admin actions (invitations, member updates); we register
+		// just /members here under AllowTaskScopeForWorkspace.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+			r.With(middleware.AllowTaskScopeForWorkspace("id")).Get("/api/workspaces/{id}/members", h.ListMembersWithUser)
+		})
+	})
+
 	// Protected API routes
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+		// Everything below this line is user-only. Task-scoped tokens
+		// are rejected with 403; the allowlist group above is the
+		// only place they may operate.
+		r.Use(middleware.RequireUserScope)
 
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/config", h.GetConfig)
@@ -176,7 +226,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Delete("/api/me/profile", h.DeleteMyProfile)
 		r.Patch("/api/me/preferences", h.UpdateMyPreferences)
 		r.Post("/api/cli-token", h.IssueCliToken)
-		r.Post("/api/upload-file", h.UploadFile)
+		// /api/upload-file is registered in the task-allowlist group above
+		// so agents can upload attachments while running a task.
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -186,7 +237,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
-					r.Get("/members", h.ListMembersWithUser)
+					// /members is registered in the task-allowlist group
+					// above so agents can resolve mention targets.
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 				})
@@ -236,11 +288,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetIssue)
-					r.Put("/", h.UpdateIssue)
+					// GET, PUT, /comments are registered in the task-allowlist
+					// group above so agents can read and update their own
+					// issue while running a task.
 					r.Delete("/", h.DeleteIssue)
-					r.Post("/comments", h.CreateComment)
-					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
@@ -332,7 +383,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/", h.ListAgents)
 				r.Post("/", h.CreateAgent)
 				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetAgent)
+					// GET is registered in the task-allowlist group above
+					// so agents can read their own configuration.
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)

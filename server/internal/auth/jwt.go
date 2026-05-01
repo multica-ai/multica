@@ -64,8 +64,29 @@ func GenerateDaemonToken() (string, error) {
 	return "mdt_" + hex.EncodeToString(b), nil
 }
 
+// TaskTokenPrefix is the unique marker for short-lived per-task tokens.
+// These tokens are scope-limited (single issue) and TTL-limited so a
+// compromised agent cannot use them for general API access.
+const TaskTokenPrefix = "mtt_"
+
+// GenerateTaskToken creates a new per-task scoped token: "mtt_" + 40 random hex chars.
+func GenerateTaskToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate task token: %w", err)
+	}
+	return TaskTokenPrefix + hex.EncodeToString(b), nil
+}
+
 // HashToken returns the hex-encoded SHA-256 hash of a token string.
 func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
+}
+
+// HashTokenBytes returns the raw SHA-256 hash for tables that store the
+// hash as BYTEA rather than hex text.
+func HashTokenBytes(token string) []byte {
+	h := sha256.Sum256([]byte(token))
+	return h[:]
 }

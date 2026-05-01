@@ -38,6 +38,51 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Per-task token: tokens starting with "mtt_". Short-lived,
+			// scope-limited; only routes that opt in via AllowTaskScope
+			// can be reached with one of these. Member-facing routes are
+			// guarded by RequireUserScope and reject these.
+			if strings.HasPrefix(tokenString, auth.TaskTokenPrefix) {
+				if queries == nil {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				hash := auth.HashTokenBytes(tokenString)
+				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+				if err != nil {
+					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+
+				// Populate header-based identity so downstream handlers
+				// (resolveActor, RequireWorkspaceMember) can route the
+				// request as if it were "the agent acting on its task".
+				// X-User-ID is the agent owner so workspace membership
+				// resolves; X-Agent-ID/X-Task-ID make resolveActor
+				// produce ("agent", agentID) for comment authorship.
+				agent, err := queries.GetAgent(r.Context(), tt.AgentID)
+				if err != nil {
+					slog.Warn("auth: task token agent missing", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				if agent.OwnerID.Valid {
+					r.Header.Set("X-User-ID", uuidToString(agent.OwnerID))
+				}
+				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
+				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
+
+				ctx := withTaskScope(r.Context(), TaskScopeContext{
+					TaskID:      uuidToString(tt.TaskID),
+					IssueID:     uuidToString(tt.IssueID),
+					AgentID:     uuidToString(tt.AgentID),
+					WorkspaceID: uuidToString(tt.WorkspaceID),
+				})
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
 			// PAT: tokens starting with "mul_"
 			if strings.HasPrefix(tokenString, "mul_") {
 				if queries == nil {
@@ -57,7 +102,7 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				// Best-effort: update last_used_at
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(withUserScope(r.Context())))
 				return
 			}
 
@@ -92,7 +137,7 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				r.Header.Set("X-User-Email", email)
 			}
 
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(withUserScope(r.Context())))
 		})
 	}
 }

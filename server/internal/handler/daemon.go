@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -24,6 +25,36 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
+
+// taskTokenTTL bounds the blast radius of an exfiltrated per-task
+// token. Long enough for any realistic single agent run; short enough
+// that a stolen token expires before it can be reused tomorrow.
+const taskTokenTTL = 1 * time.Hour
+
+// mintTaskToken generates and stores a task-scoped token. Returns the
+// plain-text token to hand to the daemon — only the hash is persisted.
+func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string) (string, error) {
+	raw, err := auth.GenerateTaskToken()
+	if err != nil {
+		return "", fmt.Errorf("generate task token: %w", err)
+	}
+
+	wsUUID := pgtype.UUID{}
+	_ = wsUUID.Scan(workspaceID)
+
+	if err := h.Queries.CreateTaskToken(ctx, db.CreateTaskTokenParams{
+		TokenHash:   auth.HashTokenBytes(raw),
+		TaskID:      task.ID,
+		IssueID:     task.IssueID,
+		AgentID:     task.AgentID,
+		WorkspaceID: wsUUID,
+		Scope:       "task",
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(taskTokenTTL), Valid: true},
+	}); err != nil {
+		return "", fmt.Errorf("persist task token: %w", err)
+	}
+	return raw, nil
+}
 
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
@@ -692,6 +723,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+
+	// Mint a per-task token (mtt_) the daemon will inject as MULTICA_TOKEN
+	// for the spawned agent process. Scoped to the task's issue/agent/
+	// workspace; expires after taskTokenTTL. Replaces the previous
+	// behavior where the daemon shared its full PAT with every agent.
+	if resp.WorkspaceID != "" {
+		token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID)
+		if err != nil {
+			slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to mint task token")
+			return
+		}
+		resp.TaskToken = token
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
