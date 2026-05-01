@@ -75,6 +75,7 @@
     "@tiptap/suggestion": "^3.22.1",
     "cmdk": "^1.1.1",
     "hast-util-to-html": "^4.0.1",
+    "isomorphic-dompurify": "^3.11.0",
     "lowlight": "^3.3.0",
     "mermaid": "^11.4.1",
     "react-markdown": "^10.1.0",

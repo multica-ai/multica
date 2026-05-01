@@ -31,6 +31,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ArtifactBody } from "../components/artifact-body";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
+import { sanitizeHtml } from "../utils/sanitize-html";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -404,9 +405,10 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           ) : (
             <div
               className="prose prose-sm max-w-none dark:prose-invert"
-              // HTML snippets are authored in-app and rendered inline; agents
-              // can write artifacts so this remains a known trust assumption.
-              dangerouslySetInnerHTML={{ __html: renderedBody }}
+              // Agents can author HTML artifacts — sanitize before inline
+              // injection to strip scripts, on*-handlers, and javascript:/data:
+              // URIs. Full <!DOCTYPE> docs take the iframe path above.
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderedBody) }}
             />
           )
         ) : renderedBody ? (
