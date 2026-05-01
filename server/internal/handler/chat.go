@@ -50,6 +50,15 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
+	// Block private agents from being chatted with by non-owner/non-admin members.
+	// Without this, any workspace member could open a chat with a private agent
+	// (e.g. one configured with privileged tools or sensitive instructions) and
+	// trigger it — chat is a direct exfiltration channel because only the
+	// session creator sees the responses. Mirrors canAssignAgent / @mention gates.
+	if !h.canAccessPrivateAgent(r.Context(), agent, userID, workspaceID) {
+		writeError(w, http.StatusForbidden, "cannot start chat with private agent")
+		return
+	}
 
 	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
 		WorkspaceID: parseUUID(workspaceID),

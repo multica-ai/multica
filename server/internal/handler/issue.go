@@ -1155,21 +1155,29 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 	if agent.ArchivedAt.Valid {
 		return false, "cannot assign to archived agent"
 	}
-	if agent.Visibility != "private" {
-		return true, ""
-	}
-	userID := requestUserID(r)
-	if uuidToString(agent.OwnerID) == userID {
-		return true, ""
-	}
-	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
-	if err != nil {
-		return false, "cannot assign to private agent"
-	}
-	if roleAllowed(member.Role, "owner", "admin") {
+	if h.canAccessPrivateAgent(ctx, agent, requestUserID(r), workspaceID) {
 		return true, ""
 	}
 	return false, "cannot assign to private agent"
+}
+
+// canAccessPrivateAgent reports whether userID is allowed to interact with the
+// given agent. Non-private agents are always accessible. Private agents are
+// gated to the agent owner and workspace owners/admins. This is the shared
+// gate used by issue assignment, @mention, and chat session creation — every
+// path that can trigger a private agent must call it.
+func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, userID, workspaceID string) bool {
+	if agent.Visibility != "private" {
+		return true
+	}
+	if uuidToString(agent.OwnerID) == userID {
+		return true
+	}
+	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
+	if err != nil {
+		return false
+	}
+	return roleAllowed(member.Role, "owner", "admin")
 }
 
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
