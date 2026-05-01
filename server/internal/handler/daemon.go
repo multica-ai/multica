@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,8 +14,10 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/profile"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -496,6 +500,45 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// compileProfileForUser loads the user's saved communication profile (if any)
+// and returns the compiled prompt string ready for injection. Returns "" if
+// the user has no saved profile or the lookup fails — the runtime then skips
+// the User Communication Profile section in CLAUDE.md and the agent uses
+// only its baseline behaviour.
+//
+// All reads of the user_profile table go through this single function — see
+// the migration comment in 055_user_profile.up.sql for the rationale.
+func (h *Handler) compileProfileForUser(ctx context.Context, userID pgtype.UUID) string {
+	if !userID.Valid {
+		return ""
+	}
+	row, err := h.Queries.GetUserProfile(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("load user profile failed", "user_id", uuidToString(userID), "error", err)
+		}
+		return ""
+	}
+	displayName := ""
+	if user, err := h.Queries.GetUser(ctx, userID); err == nil {
+		displayName = user.Name
+	}
+	prompt, err := profile.CompileFromRow(
+		row.Persona,
+		row.Language,
+		displayName,
+		int(row.LengthPref),
+		int(row.AutonomyPref),
+		int(row.TechPref),
+		row.AntiPatterns,
+	)
+	if err != nil {
+		slog.Warn("compile user profile failed", "user_id", uuidToString(userID), "error", err)
+		return ""
+	}
+	return prompt
+}
+
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
 // The response includes the agent's name and skills, fetched fresh from the DB.
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
@@ -567,6 +610,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				// Apply the comment author's communication profile when the
+				// author is a member (not an agent). Agents don't have profiles.
+				if comment.AuthorType == "member" {
+					resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), comment.AuthorID)
+				}
 			}
 		}
 
@@ -588,6 +636,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
+			// Apply the chat session creator's communication profile.
+			resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), cs.CreatorID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {

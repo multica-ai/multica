@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -14,18 +16,38 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
+const mockGetMyProfile = vi.fn().mockResolvedValue(null);
+const mockUpsertMyProfile = vi.fn();
+const mockDeleteMyProfile = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getMyProfile: () => mockGetMyProfile(),
+    upsertMyProfile: (data: unknown) => mockUpsertMyProfile(data),
+    deleteMyProfile: () => mockDeleteMyProfile(),
+  },
+}));
+
 import { AgentProfileTab } from "./agent-profile-tab";
+
+function renderTab() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  return render(<AgentProfileTab />, { wrapper: Wrapper });
+}
 
 describe("AgentProfileTab", () => {
   it("renders default profile (grundig, dansk) with the user's name in the preview", () => {
-    render(<AgentProfileTab />);
+    renderTab();
     expect(screen.getByRole("radio", { name: /Den grundige/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText(/USER: Jens \(Den grundige, dansk\)/)).toBeInTheDocument();
   });
 
   it("switching persona updates the preview and slider captions", async () => {
     const user = userEvent.setup();
-    render(<AgentProfileTab />);
+    renderTab();
 
     await user.click(screen.getByRole("radio", { name: /Den utålmodige/ }));
 
@@ -37,7 +59,7 @@ describe("AgentProfileTab", () => {
 
   it("switching language re-localises the persona blurb and preview", async () => {
     const user = userEvent.setup();
-    render(<AgentProfileTab />);
+    renderTab();
 
     await user.click(screen.getByRole("radio", { name: "English" }));
 
@@ -47,7 +69,7 @@ describe("AgentProfileTab", () => {
 
   it("adding an anti-pattern appears in the preview AVOID section", async () => {
     const user = userEvent.setup();
-    render(<AgentProfileTab />);
+    renderTab();
 
     const input = screen.getByPlaceholderText(/Let me know if you need anything else/);
     await user.type(input, "Aldrig opfinde tids-estimater{Enter}");
@@ -58,7 +80,7 @@ describe("AgentProfileTab", () => {
   });
 
   it("blocks adding more than 20 anti-patterns and disables the input at the cap", () => {
-    render(<AgentProfileTab />);
+    renderTab();
 
     const input = screen.getByPlaceholderText(/Let me know if you need anything else/) as HTMLInputElement;
     const addBtn = screen.getByRole("button", { name: /Tilføj/ });
@@ -75,7 +97,7 @@ describe("AgentProfileTab", () => {
 
   it("removing an anti-pattern updates count and preview", async () => {
     const user = userEvent.setup();
-    render(<AgentProfileTab />);
+    renderTab();
 
     const counter = screen.getByText("2 / 20");
     expect(counter).toBeInTheDocument();
@@ -89,23 +111,24 @@ describe("AgentProfileTab", () => {
   });
 
   it("token estimate badge renders and stays under cap for default profile", () => {
-    render(<AgentProfileTab />);
+    renderTab();
     const badge = screen.getByText(/^~\d+ tokens$/);
     const tokens = Number(badge.textContent!.match(/\d+/)![0]);
     expect(tokens).toBeGreaterThan(0);
     expect(tokens).toBeLessThan(200);
   });
 
-  it("Save button is disabled in PR 2 (persistence ships in PR 3)", () => {
-    render(<AgentProfileTab />);
-    const saveBtn = screen.getByRole("button", { name: /Gem profil/ });
-    expect(saveBtn).toBeDisabled();
-    expect(saveBtn).toHaveAttribute("title", expect.stringContaining("næste PR"));
+  it("Save button is disabled until the user changes the profile, then enabled", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    expect(screen.getByRole("button", { name: /Gem profil/ })).toBeDisabled();
+    await user.click(screen.getByRole("radio", { name: /Den utålmodige/ }));
+    expect(screen.getByRole("button", { name: /Gem profil/ })).toBeEnabled();
   });
 
   it("rejects duplicate anti-patterns silently", async () => {
     const user = userEvent.setup();
-    render(<AgentProfileTab />);
+    renderTab();
 
     const input = screen.getByPlaceholderText(/Let me know if you need anything else/);
     await user.type(input, "Hop over edge-cases{Enter}"); // already in default

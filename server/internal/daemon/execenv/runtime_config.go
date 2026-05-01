@@ -63,6 +63,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// User communication profile (JEH-304). The user has explicitly configured
+	// how they want the agent to talk to them. Place this near the top so the
+	// model weights it heavily — agents repeatedly drift back to defaults if it
+	// sits at the bottom.
+	if ctx.UserProfilePrompt != "" {
+		b.WriteString("## User Communication Profile\n\n")
+		b.WriteString("The user invoking this task has set explicit communication preferences. ")
+		b.WriteString("Apply these to every response and tool message you produce. ")
+		b.WriteString("These rules win over any default style you'd normally use.\n\n")
+		b.WriteString("```\n")
+		b.WriteString(ctx.UserProfilePrompt)
+		b.WriteString("\n```\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")

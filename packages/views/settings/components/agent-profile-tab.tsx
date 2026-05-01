@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Plus, RotateCcw, Save, X } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Slider } from "@multica/ui/components/ui/slider";
 import { Input } from "@multica/ui/components/ui/input";
@@ -20,9 +22,37 @@ import {
   compileProfile,
   estimateTokens,
   formatContextPercent,
+  myProfileOptions,
+  upsertMyProfileMutation,
+  deleteMyProfileMutation,
   type Persona,
   type Profile,
+  type Language,
 } from "@multica/core/profile";
+import type { UserProfileResponse } from "@multica/core/types";
+
+function profileFromResponse(row: UserProfileResponse): Profile {
+  return {
+    persona: row.persona,
+    language: row.language,
+    lengthPref: row.length_pref,
+    autonomyPref: row.autonomy_pref,
+    techPref: row.tech_pref,
+    antiPatterns: [...row.anti_patterns],
+  };
+}
+
+function profileEquals(a: Profile, b: Profile): boolean {
+  return (
+    a.persona === b.persona &&
+    a.language === b.language &&
+    a.lengthPref === b.lengthPref &&
+    a.autonomyPref === b.autonomyPref &&
+    a.techPref === b.techPref &&
+    a.antiPatterns.length === b.antiPatterns.length &&
+    a.antiPatterns.every((p, i) => p === b.antiPatterns[i])
+  );
+}
 
 // Slider value -> readable label, language-aware. Used for slider captions.
 function sliderCaption(value: number, language: "da" | "en", axis: "length" | "ask" | "tech"): string {
@@ -40,7 +70,29 @@ function sliderCaption(value: number, language: "da" | "en", axis: "length" | "a
 
 export function AgentProfileTab() {
   const user = useAuthStore((s) => s.user);
+  const qc = useQueryClient();
+  const profileQuery = useQuery(myProfileOptions());
+
+  // Local edit state. Initialised from server data once it arrives; falls back
+  // to the default profile until then. Re-syncs only on server-side changes
+  // (compared via profileEquals) so local edits aren't clobbered by refetch.
   const [profile, setProfile] = useState<Profile>(() => buildDefaultProfile("grundig", "da"));
+  const [savedProfile, setSavedProfile] = useState<Profile | null>(null);
+
+  useEffect(() => {
+    if (profileQuery.isLoading) return;
+    const next = profileQuery.data ? profileFromResponse(profileQuery.data) : null;
+    setSavedProfile(next);
+    setProfile((current) => {
+      if (next && !savedProfile) return next;
+      if (next && savedProfile && profileEquals(savedProfile, current)) return next;
+      return current;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileQuery.data, profileQuery.isLoading]);
+
+  const upsert = useMutation(upsertMyProfileMutation(qc));
+  const reset = useMutation(deleteMyProfileMutation(qc));
 
   const compiled = useMemo(
     () => compileProfile(profile, { displayName: user?.name }),
@@ -49,6 +101,44 @@ export function AgentProfileTab() {
   const estimate = useMemo(() => estimateTokens(compiled, profile.language), [compiled, profile.language]);
   const overCap = estimate.tokens > COMPILED_PROMPT_TOKEN_CAP;
   const t = profile.language;
+  const dirty = savedProfile == null
+    ? !profileEquals(profile, buildDefaultProfile("grundig", "da"))
+    : !profileEquals(profile, savedProfile);
+
+  const handleSave = () => {
+    upsert.mutate(
+      {
+        persona: profile.persona,
+        language: profile.language,
+        length_pref: profile.lengthPref,
+        autonomy_pref: profile.autonomyPref,
+        tech_pref: profile.techPref,
+        anti_patterns: profile.antiPatterns,
+      },
+      {
+        onSuccess: () => {
+          toast.success(t === "da" ? "Profil gemt" : "Profile saved");
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : t === "da" ? "Kunne ikke gemme profil" : "Failed to save profile");
+        },
+      },
+    );
+  };
+
+  const handleReset = () => {
+    reset.mutate(undefined, {
+      onSuccess: () => {
+        const fallback = buildDefaultProfile("grundig", "da");
+        setProfile(fallback);
+        setSavedProfile(null);
+        toast.success(t === "da" ? "Profil nulstillet" : "Profile reset");
+      },
+      onError: (err) => {
+        toast.error(err instanceof Error ? err.message : t === "da" ? "Kunne ikke nulstille" : "Failed to reset");
+      },
+    });
+  };
 
   const handlePersona = (persona: Persona) => {
     const next = buildDefaultProfile(persona, profile.language);
@@ -75,7 +165,7 @@ export function AgentProfileTab() {
     setProfile((p) => ({ ...p, antiPatterns: p.antiPatterns.filter((_, i) => i !== index) }));
   };
 
-  const setLanguage = (lang: "da" | "en") => {
+  const setLanguage = (lang: Language) => {
     setProfile((p) => ({ ...p, language: lang }));
   };
 
@@ -246,11 +336,37 @@ export function AgentProfileTab() {
         </p>
       </section>
 
-      {/* Save button — wired up in PR 3 (see JEH-304). */}
-      <div className="flex items-center justify-end pt-2">
-        <Button size="sm" disabled title={t === "da" ? "Persistens kommer i næste PR" : "Persistence ships in next PR"}>
-          {t === "da" ? "Gem profil" : "Save profile"}
-        </Button>
+      {/* Save / reset */}
+      <div className="flex items-center justify-between pt-2">
+        <div className="text-xs text-muted-foreground">
+          {savedProfile
+            ? (t === "da" ? "Profil er gemt og bruges på tværs af agent-kald." : "Profile is saved and used across agent calls.")
+            : (t === "da" ? "Du har ikke gemt en profil endnu." : "You haven't saved a profile yet.")}
+        </div>
+        <div className="flex items-center gap-2">
+          {savedProfile && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleReset}
+              disabled={reset.isPending || upsert.isPending}
+              title={t === "da" ? "Slet din gemte profil" : "Delete your saved profile"}
+            >
+              <RotateCcw className="h-3 w-3" />
+              {t === "da" ? "Nulstil" : "Reset"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={!dirty || upsert.isPending || overCap}
+          >
+            {upsert.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            {upsert.isPending
+              ? (t === "da" ? "Gemmer..." : "Saving...")
+              : (t === "da" ? "Gem profil" : "Save profile")}
+          </Button>
+        </div>
       </div>
     </div>
   );

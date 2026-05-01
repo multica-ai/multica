@@ -918,6 +918,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		UserProfilePrompt: task.UserProfilePrompt,
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.

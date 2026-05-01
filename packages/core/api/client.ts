@@ -79,6 +79,8 @@ import type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
   WorkSession,
+  UserProfileResponse,
+  UserProfileRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -240,6 +242,28 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  // User communication profile (JEH-304). 404 from GET means "no profile set"
+  // — callers should fall back to the default profile.
+  async getMyProfile(): Promise<UserProfileResponse | null> {
+    try {
+      return await this.fetch<UserProfileResponse>("/api/me/profile");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async upsertMyProfile(data: UserProfileRequest): Promise<UserProfileResponse> {
+    return this.fetch("/api/me/profile", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMyProfile(): Promise<void> {
+    await this.fetch("/api/me/profile", { method: "DELETE" });
   }
 
   // Issues

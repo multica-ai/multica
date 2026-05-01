@@ -39,6 +39,7 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	UserProfilePrompt string              // compiled user communication profile (JEH-304); empty if user has no profile
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

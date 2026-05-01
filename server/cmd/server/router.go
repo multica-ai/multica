@@ -171,6 +171,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Get("/api/me/profile", h.GetMyProfile)
+		r.Put("/api/me/profile", h.UpsertMyProfile)
+		r.Delete("/api/me/profile", h.DeleteMyProfile)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 

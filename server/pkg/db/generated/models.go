@@ -455,6 +455,17 @@ type User struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserProfile struct {
+	UserID       pgtype.UUID        `json:"user_id"`
+	Persona      string             `json:"persona"`
+	Language     string             `json:"language"`
+	LengthPref   int16              `json:"length_pref"`
+	AutonomyPref int16              `json:"autonomy_pref"`
+	TechPref     int16              `json:"tech_pref"`
+	AntiPatterns []byte             `json:"anti_patterns"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type VerificationCode struct {
 	ID        pgtype.UUID        `json:"id"`
 	Email     string             `json:"email"`

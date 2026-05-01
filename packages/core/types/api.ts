@@ -73,6 +73,27 @@ export interface UpdateMeRequest {
   avatar_url?: string;
 }
 
+// User communication profile (JEH-304). Mirrors the user_profile DB row.
+export interface UserProfileResponse {
+  user_id: string;
+  persona: "utalmodig" | "ekspert" | "grundig" | "larling";
+  language: "da" | "en";
+  length_pref: number;
+  autonomy_pref: number;
+  tech_pref: number;
+  anti_patterns: string[];
+  updated_at: string;
+}
+
+export interface UserProfileRequest {
+  persona: "utalmodig" | "ekspert" | "grundig" | "larling";
+  language: "da" | "en";
+  length_pref: number;
+  autonomy_pref: number;
+  tech_pref: number;
+  anti_patterns: string[];
+}
+
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
