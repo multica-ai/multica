@@ -256,6 +256,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(BuildCommentReplyInstructions(ctx.IssueID, ctx.TriggerCommentID))
 		if agentPolicy.IsOperatorControlled() {
 			b.WriteString("7. Do NOT change issue status, change assignee, create issues, or mention another agent. A human operator owns lifecycle and handoff changes.\n\n")
+		} else if agentPolicy.IsSupervisedCollaboration() {
+			b.WriteString("7. You may discuss, critique, and recommend a handoff, but do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links. If another agent should join, write a plain handoff recommendation for the operator/controller.\n\n")
 		} else {
 			b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 		}
@@ -270,6 +272,18 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("3. Complete the requested work without changing issue status, changing assignee, creating issues, or mentioning another agent.\n")
 		fmt.Fprintf(&b, "4. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Do not include any `mention://agent/...` links.\n", ctx.IssueID)
 		b.WriteString("5. If blocked, post a plain comment explaining the blocker and wait for the human operator to change status or assignment.\n\n")
+	} else if agentPolicy.IsSupervisedCollaboration() {
+		// Supervised collaboration allows discussion, but lifecycle and raw agent
+		// handoff triggers stay controlled until collaboration_request is fully
+		// enforced by the server/controller path.
+		b.WriteString("**This is a supervised collaboration assignment.** You may discuss, critique, and recommend handoffs, but lifecycle and agent-trigger actions stay controlled.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks.\n", ctx.IssueID)
+		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
+		b.WriteString("3. Complete the requested work and actively discuss trade-offs or review points when useful.\n")
+		b.WriteString("4. Do NOT change issue status, change assignee, create issues, or include raw `mention://agent/...` links.\n")
+		b.WriteString("5. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` with target agent, reason, expected output, and operator/controller action required.\n")
+		fmt.Fprintf(&b, "6. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`.\n\n", ctx.IssueID)
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
@@ -315,9 +329,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
 	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
 	b.WriteString("### When a mention IS appropriate\n\n")
-	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
-	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
-	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
+	if agentPolicy.DeniesRawAgentMentions() {
+		b.WriteString("- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` or ask the operator/controller to route the handoff.\n")
+		b.WriteString("- Escalating to a human owner may still be appropriate when genuinely needed, but avoid noisy human mentions unless the issue requires it.\n\n")
+	} else {
+		b.WriteString("- Escalating to a human owner who is not yet involved.\n")
+		b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
+		b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
+	}
+
 	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
 	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
 

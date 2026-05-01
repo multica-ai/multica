@@ -23,6 +23,27 @@ const operatorControlledRuntimeConfig = `{
 	}
 }`
 
+const supervisedCollaborationRuntimeConfig = `{
+	"multica_policy": {
+		"schema_version": "mhs19.v1",
+		"mode": "supervised_collaboration",
+		"deny_agent_mentions": false,
+		"allow_comment_without_agent_mentions": true,
+		"collaboration": {
+			"enabled": true,
+			"scope": "same_issue",
+			"allowed_agent_targets": ["planner", "builder", "reviewer"],
+			"raw_agent_mentions": "deny",
+			"collaboration_requests": "allow_audited",
+			"max_turns": 8,
+			"max_depth": 2,
+			"ttl_minutes": 120,
+			"prevent_self_handoff": true,
+			"prevent_cycles": true
+		}
+	}
+}`
+
 func createHandlerTestAgentWithRuntimeConfig(t *testing.T, name, runtimeConfig string) string {
 	t.Helper()
 
@@ -183,5 +204,77 @@ func TestAgentCommandPolicyDeniesBatchStatusAndAssigneeUpdates(t *testing.T) {
 	testHandler.BatchUpdateIssues(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("BatchUpdateIssues assignee: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSupervisedCollaborationDeniesRawAgentMentionAndLifecycleMutation(t *testing.T) {
+	agentID := createHandlerTestAgentWithRuntimeConfig(t, "Supervised Collaboration Agent", supervisedCollaborationRuntimeConfig)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "supervised collaboration should not directly create issues",
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	created := createAgentPolicyTestIssue(t, "supervised collaboration policy target")
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+created.ID+"/comments", map[string]any{
+		"content": "Please review [@Supervised Collaboration Agent](mention://agent/" + agentID + ")",
+	})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateComment with raw agent mention: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+created.ID+"/comments", map[string]any{
+		"content": "DISCUSSION_NOTE: reviewer should inspect the trade-off. HANDOFF_RECOMMENDATION: target=reviewer, reason=quality check.",
+	})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment plain collaboration note: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"status": "done",
+	})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateIssue status: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateIssue assignee: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{created.ID},
+		"updates":   map[string]any{"status": "done"},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("BatchUpdateIssues status: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }
