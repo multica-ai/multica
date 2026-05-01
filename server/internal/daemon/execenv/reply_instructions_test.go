@@ -16,7 +16,7 @@ func TestBuildCommentReplyInstructionsIncludesTriggerID(t *testing.T) {
 	got := BuildCommentReplyInstructions(issueID, triggerID)
 
 	for _, want := range []string{
-		"multica issue comment add " + issueID + " --parent " + triggerID,
+		"forge issue comment add " + issueID + " --parent " + triggerID,
 		"Always use `--content-stdin`",
 		"even when the reply is a single line",
 		"--content-stdin",
@@ -65,7 +65,7 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		triggerID,
-		"multica issue comment add " + issueID + " --parent " + triggerID,
+		"forge issue comment add " + issueID + " --parent " + triggerID,
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(s, want) {

@@ -452,7 +452,7 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "Run `multica issue get") {
+	if strings.Contains(s, "Run `forge issue get") {
 		t.Errorf("autopilot context should not contain issue get workflow\n---\n%s", s)
 	}
 }
@@ -568,8 +568,8 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		"multica issue get",
-		"multica issue comment list",
+		"forge issue get",
+		"forge issue comment list",
 		"Go Conventions",
 		"PR Review",
 		"discovered automatically",
@@ -601,7 +601,7 @@ func TestInjectRuntimeConfigGemini(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		"multica issue get",
+		"forge issue get",
 		"Writing",
 	} {
 		if !strings.Contains(s, want) {
@@ -661,7 +661,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue get") {
+	if !strings.Contains(s, "forge issue get") {
 		t.Error("should reference multica CLI even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
@@ -950,10 +950,10 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			}
 			s := string(data)
 
-			// The workflow must contain an explicit `multica issue comment add`
+			// The workflow must contain an explicit `forge issue comment add`
 			// invocation for this issue — not just a prose mention of posting.
 			mustContain := []string{
-				"multica issue comment add issue-1",
+				"forge issue comment add issue-1",
 				"mandatory",
 			}
 			for _, want := range mustContain {
@@ -966,7 +966,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			// output is not user-visible. This is the second line of defense
 			// in case the agent skips past the workflow steps.
 			for _, want := range []string{
-				"Final results MUST be delivered via `multica issue comment add`",
+				"Final results MUST be delivered via `forge issue comment add`",
 				"does NOT see your terminal output",
 			} {
 				if !strings.Contains(s, want) {
@@ -978,7 +978,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 }
 
 // TestInjectRuntimeConfigDirectsMultiLineWritesToStdin pins the guidance that
-// any multi-line content for `multica issue comment add` must go through
+// any multi-line content for `forge issue comment add` must go through
 // `--content-stdin` + a HEREDOC. Agents that reached for the inline
 // `--content "...\n\n..."` form ended up with literal 4-char `\n` sequences
 // in stored comments because bash does not expand backslash escapes inside
@@ -1073,8 +1073,8 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	}
 
 	for _, absent := range []string{
-		"Run `multica issue get",
-		"Final results MUST be delivered via `multica issue comment add`",
+		"Run `forge issue get",
+		"Final results MUST be delivered via `forge issue comment add`",
 	} {
 		if strings.Contains(s, absent) {
 			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)

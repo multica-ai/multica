@@ -75,7 +75,7 @@ jobs:
   # (no signing — unsigned smoke only)
   # ─────────────────────────────────────────────
   desktop-smoke:
-    runs-on: depot-macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
