@@ -155,7 +155,7 @@ const runtimePricing: Record<string, Pricing> = { ...HARDCODED_PRICING };
 function applyEnvOverrides() {
   const raw =
     (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_MODEL_PRICING_OVERRIDES) ||
-    (typeof window !== "undefined" && (window as Record<string, unknown>).__MODEL_PRICING_OVERRIDES__ as string) ||
+    (typeof window !== "undefined" && (window as unknown as Record<string, unknown>).__MODEL_PRICING_OVERRIDES__ as string) ||
     "";
   if (!raw) return;
   try {
