@@ -11,8 +11,7 @@ import {
 } from "@multica/ui/components/ui/collapsible";
 import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useStickyBottom } from "@multica/ui/hooks/use-sticky-bottom";
-import { JumpToLatestButton } from "@multica/ui/components/common/jump-to-latest-button";
+import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
@@ -34,7 +33,7 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
-  const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  useAutoScroll(scrollRef);
 
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
@@ -55,31 +54,24 @@ export function ChatMessageList({
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
 
   return (
-    <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} style={fadeStyle} className="absolute inset-0 overflow-y-auto">
-        {/* Inner container matches issue / project detail width convention
-         *  (max-w-4xl + mx-auto) so switching between chat and content
-         *  views doesn't jolt the reading width. px-5 is a touch tighter
-         *  than issue-detail's px-8 because the chat window can be narrow. */}
-        <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-          {hasLive && (
-            <div className="w-full space-y-1.5">
-              <TimelineView items={liveTimeline} />
-            </div>
-          )}
-          {isWaiting && !hasLive && !pendingAlreadyPersisted && (
-            <Loader2 className="size-4 animate-spin text-muted-foreground" />
-          )}
-        </div>
+    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
+      {/* Inner container matches issue / project detail width convention
+       *  (max-w-4xl + mx-auto) so switching between chat and content
+       *  views doesn't jolt the reading width. px-5 is a touch tighter
+       *  than issue-detail's px-8 because the chat window can be narrow. */}
+      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} />
+        ))}
+        {hasLive && (
+          <div className="w-full space-y-1.5">
+            <TimelineView items={liveTimeline} />
+          </div>
+        )}
+        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        )}
       </div>
-      <JumpToLatestButton
-        visible={hasNewBelow}
-        onClick={() => scrollToBottom()}
-        label="New message"
-      />
     </div>
   );
 }

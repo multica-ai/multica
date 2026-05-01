@@ -22,7 +22,6 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
   "issues",
   "projects",
   "documents",
-  "attachments",
   "autopilots",
   "agents",
   "inbox",

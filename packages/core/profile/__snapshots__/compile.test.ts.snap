@@ -123,12 +123,12 @@ AUTONOMY:
 TECH: arch:deep, data:deep, ux:deep, code:deep
 
 AVOID:
-- Let me know if you need anything else
-- Great question!
-- tids-estimater"
+- "Let me know if you need anything else"
+- "Great question!"
+- Tids-estimater"
 `;
 
-exports[`compileProfile > snapshot — utalmodig in english renders english labels 1`] = `
+exports[`compileProfile > snapshot — utalmodig in english renders english labels + english anti-patterns 1`] = `
 "USER: Jens (The impatient, english)
 
 STYLE:
@@ -144,7 +144,7 @@ AUTONOMY:
 TECH: arch:deep, data:deep, ux:deep, code:deep
 
 AVOID:
-- Let me know if you need anything else
-- Great question!
-- tids-estimater"
+- "Let me know if you need anything else"
+- "Great question!"
+- Time estimates"
 `;

@@ -27,11 +27,9 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 // @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
-import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-react";
+import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/core/attachments/viewable";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
@@ -64,7 +62,6 @@ const sanitizeSchema = {
       "dataType",
       "dataHref",
       "dataFilename",
-      "dataAttachmentId",
     ],
     code: [
       ...(defaultSchema.attributes?.code ?? []),
@@ -156,77 +153,6 @@ function ReadonlyLink({
   );
 }
 
-function FileCardDiv({
-  node,
-  children,
-  ...props
-}: React.ComponentProps<"div"> & { node?: { properties?: Record<string, unknown> } }) {
-  const wsPaths = useWorkspacePaths();
-  const router = useNavigation();
-  const dataType = node?.properties?.dataType as string | undefined;
-  if (dataType !== "fileCard") {
-    return <div {...props}>{children}</div>;
-  }
-  const rawHref = (node?.properties?.dataHref as string) || "";
-  // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-  const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
-  const filename = (node?.properties?.dataFilename as string) || "";
-  const attachmentId = (node?.properties?.dataAttachmentId as string) || "";
-  // We don't have content_type for inline file cards — fall back to filename
-  // extension via isViewableAttachment("", filename).
-  const viewable = Boolean(attachmentId) && isViewableAttachment("", filename);
-
-  const openViewer = () => {
-    const path = wsPaths.attachmentView(attachmentId);
-    if (router.openInNewTab) {
-      router.openInNewTab(path, filename);
-    } else if (router.getShareableUrl) {
-      window.open(router.getShareableUrl(path), "_blank", "noopener,noreferrer");
-    } else {
-      window.open(path, "_blank", "noopener,noreferrer");
-    }
-  };
-  const openDownload = () => {
-    if (href) window.open(href, "_blank", "noopener,noreferrer");
-  };
-
-  return (
-    <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
-      <FileText className="size-4 shrink-0 text-muted-foreground" />
-      <button
-        type="button"
-        onClick={viewable ? openViewer : openDownload}
-        className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
-        title={viewable ? "Open in viewer" : "Download"}
-      >
-        {filename}
-      </button>
-      {viewable && (
-        <button
-          type="button"
-          aria-label="Open in viewer"
-          title="Open in viewer"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          onClick={openViewer}
-        >
-          <Eye className="size-3.5" />
-        </button>
-      )}
-      {href && (
-        <button
-          type="button"
-          aria-label="Download"
-          title="Download"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          onClick={openDownload}
-        >
-          <Download className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
-
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
@@ -278,7 +204,33 @@ const components: Partial<Components> = {
   },
 
   // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
-  div: FileCardDiv,
+  div: ({ node, children, ...props }) => {
+    const dataType = node?.properties?.dataType as string | undefined;
+    if (dataType === "fileCard") {
+      const rawHref = (node?.properties?.dataHref as string) || "";
+      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
+      const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+      const filename = (node?.properties?.dataFilename as string) || "";
+      return (
+        <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+          <FileText className="size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm">{filename}</p>
+          </div>
+          {href && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              onClick={() => window.open(href, "_blank", "noopener,noreferrer")}
+            >
+              <Download className="size-3.5" />
+            </button>
+          )}
+        </div>
+      );
+    }
+    return <div {...props}>{children}</div>;
+  },
 
   // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
   table: ({ children }) => (
@@ -332,25 +284,10 @@ const components: Partial<Components> = {
 interface ReadonlyContentProps {
   content: string;
   className?: string;
-  /**
-   * Attachments associated with this content. When provided, file-card divs
-   * gain the matching attachment ID so the renderer can route clicks to the
-   * in-app attachment viewer for viewable filetypes (HTML, Markdown, …).
-   */
-  attachments?: Attachment[];
 }
 
-export function ReadonlyContent({ content, className, attachments }: ReadonlyContentProps) {
-  const attachmentsByUrl = useMemo(() => {
-    if (!attachments?.length) return undefined;
-    const map = new Map<string, string>();
-    for (const a of attachments) map.set(a.url, a.id);
-    return map;
-  }, [attachments]);
-  const processed = useMemo(
-    () => preprocessMarkdown(content, attachmentsByUrl),
-    [content, attachmentsByUrl],
-  );
+export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
+  const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 

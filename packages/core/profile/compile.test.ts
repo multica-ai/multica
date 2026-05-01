@@ -26,8 +26,8 @@ describe("compileProfile", () => {
     });
   }
 
-  it("snapshot — utalmodig in english renders english labels", () => {
-    const profile: Profile = { ...buildDefaultProfile("utalmodig"), language: "en" };
+  it("snapshot — utalmodig in english renders english labels + english anti-patterns", () => {
+    const profile = buildDefaultProfile("utalmodig", "en");
     expect(compileProfile(profile, { displayName: "Jens" })).toMatchSnapshot();
   });
 

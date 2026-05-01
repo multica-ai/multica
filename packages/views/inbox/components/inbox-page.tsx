@@ -801,7 +801,6 @@ export function InboxPage() {
       defaultSidebarOpen={false}
       layoutId="multica_inbox_issue_detail_layout"
       highlightCommentId={selected.details?.comment_id ?? undefined}
-      linkSelfInBreadcrumb
       onDelete={() => {
         handleArchive(selected.id);
       }}

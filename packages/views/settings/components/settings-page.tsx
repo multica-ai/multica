@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2 } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
@@ -10,9 +10,11 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { AgentProfileTab } from "./agent-profile-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
+  { value: "agent-profile", label: "Agent Profile", icon: Sparkles },
   { value: "appearance", label: "Appearance", icon: Palette },
   { value: "tokens", label: "API Tokens", icon: Key },
 ];
@@ -78,6 +80,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
       <div className="flex-1 min-w-0 overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto p-6">
           <TabsContent value="profile"><AccountTab /></TabsContent>
+          <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
           <TabsContent value="appearance"><AppearanceTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>

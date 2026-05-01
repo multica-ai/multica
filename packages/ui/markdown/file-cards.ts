@@ -25,11 +25,8 @@ function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
-function toFileCardHtml(filename: string, url: string, attachmentId?: string): string {
-  const idAttr = attachmentId
-    ? ` data-attachment-id="${escapeAttr(attachmentId)}"`
-    : ''
-  return `<div data-type="fileCard" data-href="${escapeAttr(url)}" data-filename="${escapeAttr(filename)}"${idAttr}></div>`
+function toFileCardHtml(filename: string, url: string): string {
+  return `<div data-type="fileCard" data-href="${escapeAttr(url)}" data-filename="${escapeAttr(filename)}"></div>`
 }
 
 /**
@@ -65,19 +62,10 @@ export function isFileCardUrl(url: string, cdnDomain: string): boolean {
  * Handles both `!file[name](url)` (new syntax) and legacy `[name](cdnUrl)`
  * lines. Only standalone lines are matched — inline links are left untouched.
  *
- * When `attachmentsByUrl` is provided, the matching attachment's ID is added
- * as `data-attachment-id` so downstream renderers can route the card to the
- * in-app attachment viewer.
- *
- * @param markdown          Raw markdown string
- * @param cdnDomain         CDN hostname for legacy link detection (e.g. "multica-static.copilothub.ai")
- * @param attachmentsByUrl  Optional map of attachment URL → attachment ID
+ * @param markdown  Raw markdown string
+ * @param cdnDomain CDN hostname for legacy link detection (e.g. "multica-static.copilothub.ai")
  */
-export function preprocessFileCards(
-  markdown: string,
-  cdnDomain: string,
-  attachmentsByUrl?: ReadonlyMap<string, string>,
-): string {
+export function preprocessFileCards(markdown: string, cdnDomain: string): string {
   return markdown
     .split('\n')
     .map((line) => {
@@ -86,8 +74,7 @@ export function preprocessFileCards(
       // New syntax: !file[name](url) — always a file card, no hostname check needed.
       const newMatch = trimmed.match(NEW_FILE_CARD_RE)
       if (newMatch) {
-        const url = newMatch[2]!
-        return toFileCardHtml(newMatch[1]!, url, attachmentsByUrl?.get(url))
+        return toFileCardHtml(newMatch[1]!, newMatch[2]!)
       }
 
       // Legacy: [name](cdnUrl) on its own line — CDN hostname matching.
@@ -96,7 +83,7 @@ export function preprocessFileCards(
       const filename = match[1]!
       const url = match[2]!
       if (!isFileCardUrl(url, cdnDomain)) return line
-      return toFileCardHtml(filename, url, attachmentsByUrl?.get(url))
+      return toFileCardHtml(filename, url)
     })
     .join('\n')
 }

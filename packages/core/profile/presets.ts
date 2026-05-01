@@ -1,13 +1,23 @@
-import type { Persona, Profile } from "./schema";
+import type { Language, Persona, Profile } from "./schema";
 
 // Persona presets seed sliders + curate a small starter set of anti-patterns.
 // Users may then tune any of the values without losing their persona choice.
+
+export interface LocalizedAntiPatterns {
+  da: string[];
+  en: string[];
+}
 
 export interface PersonaPreset {
   id: Persona;
   label: { da: string; en: string };
   blurb: { da: string; en: string };
-  defaults: Omit<Profile, "persona" | "language">;
+  defaults: {
+    lengthPref: number;
+    autonomyPref: number;
+    techPref: number;
+    antiPatterns: LocalizedAntiPatterns;
+  };
 }
 
 export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
@@ -22,11 +32,18 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
       lengthPref: 15,
       autonomyPref: 85,
       techPref: 70,
-      antiPatterns: [
-        "Let me know if you need anything else",
-        "Great question!",
-        "tids-estimater",
-      ],
+      antiPatterns: {
+        da: [
+          "\"Let me know if you need anything else\"",
+          "\"Great question!\"",
+          "Tids-estimater",
+        ],
+        en: [
+          "\"Let me know if you need anything else\"",
+          "\"Great question!\"",
+          "Time estimates",
+        ],
+      },
     },
   },
   ekspert: {
@@ -40,10 +57,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
       lengthPref: 40,
       autonomyPref: 70,
       techPref: 95,
-      antiPatterns: [
-        "Forklar grundlæggende begreber",
-        "Corporate-jargon",
-      ],
+      antiPatterns: {
+        da: ["Forklar grundlæggende begreber", "Corporate-jargon"],
+        en: ["Explaining basic concepts", "Corporate jargon"],
+      },
     },
   },
   grundig: {
@@ -57,10 +74,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
       lengthPref: 75,
       autonomyPref: 30,
       techPref: 80,
-      antiPatterns: [
-        "Hop over edge-cases",
-        "Antag uden at sige det",
-      ],
+      antiPatterns: {
+        da: ["Hop over edge-cases", "Antag uden at sige det"],
+        en: ["Skipping edge cases", "Unstated assumptions"],
+      },
     },
   },
   larling: {
@@ -74,22 +91,28 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
       lengthPref: 70,
       autonomyPref: 25,
       techPref: 35,
-      antiPatterns: [
-        "Spring forklaring over",
-        "Brug jargon uden at definere",
-      ],
+      antiPatterns: {
+        da: ["Spring forklaring over", "Brug jargon uden at definere"],
+        en: ["Skipping explanation", "Using jargon without defining it"],
+      },
     },
   },
 };
 
 export const DEFAULT_PERSONA: Persona = "grundig";
+export const DEFAULT_LANGUAGE: Language = "da";
 
-export function buildDefaultProfile(persona: Persona = DEFAULT_PERSONA): Profile {
+export function buildDefaultProfile(
+  persona: Persona = DEFAULT_PERSONA,
+  language: Language = DEFAULT_LANGUAGE,
+): Profile {
   const preset = PERSONA_PRESETS[persona];
   return {
     persona,
-    language: "da",
-    ...preset.defaults,
-    antiPatterns: [...preset.defaults.antiPatterns],
+    language,
+    lengthPref: preset.defaults.lengthPref,
+    autonomyPref: preset.defaults.autonomyPref,
+    techPref: preset.defaults.techPref,
+    antiPatterns: [...preset.defaults.antiPatterns[language]],
   };
 }

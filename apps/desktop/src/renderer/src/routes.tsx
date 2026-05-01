@@ -19,7 +19,6 @@ import {
   DocumentViewPage,
   DocumentEditPage,
 } from "@multica/views/artifacts/pages";
-import { AttachmentViewPage } from "@multica/views/attachments/pages";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { RuntimesPage } from "@multica/views/runtimes";
@@ -121,11 +120,6 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Edit document" },
           },
           {
-            path: "attachments/:id",
-            element: <AttachmentViewRoute />,
-            handle: { title: "Attachment" },
-          },
-          {
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
@@ -202,9 +196,4 @@ function DocumentViewRoute() {
 function DocumentEditRoute() {
   const params = useParams<{ id: string }>();
   return <DocumentEditPage artifactId={params.id ?? ""} />;
-}
-
-function AttachmentViewRoute() {
-  const params = useParams<{ id: string }>();
-  return <AttachmentViewPage attachmentId={params.id ?? ""} />;
 }
