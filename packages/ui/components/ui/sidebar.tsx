@@ -112,6 +112,8 @@ function SidebarProvider({
   }, [isMobile, setOpen, setOpenMobile])
 
   // Toggle sidebar with keyboard shortcut (Cmd+B / Ctrl+B).
+  // Skip when focus is inside editable content so the shortcut doesn't
+  // steal Cmd+B (bold) from TipTap / contentEditable / inputs.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -120,6 +122,13 @@ function SidebarProvider({
         !event.shiftKey &&
         !event.altKey
       ) {
+        const tag = (event.target as HTMLElement)?.tagName
+        const isEditable =
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          (event.target as HTMLElement)?.isContentEditable
+        if (isEditable) return
         event.preventDefault()
         toggleSidebar()
       }
