@@ -53,6 +53,8 @@ export const queryKeys = {
   settings: {
     all: () => ["settings"] as const,
     tokens: () => ["settings", "tokens"] as const,
+    notificationPreferences: () => ["settings", "notification-preferences"] as const,
+    aiSettings: (workspaceId: string) => ["settings", "ai", workspaceId] as const,
   },
 } as const;
 

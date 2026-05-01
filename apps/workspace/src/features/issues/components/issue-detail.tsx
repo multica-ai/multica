@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -70,9 +71,11 @@ import { useIssueReactions } from "@/features/issues/hooks/use-issue-reactions";
 import { useIssueSubscribers } from "@/features/issues/hooks/use-issue-subscribers";
 import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueDetailQuery } from "@/features/issues/queries";
+import { buildIssueTemplateData } from "@/features/issues/utils/template";
 import { ReactionBar } from "@/components/common/reaction-bar";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
+import { useModalStore } from "@/features/modals";
 import { Link, useRouter } from "@/shared/router";
 import { timeAgo } from "@/shared/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -207,7 +210,7 @@ function RelationList({
 }
 
 // ---------------------------------------------------------------------------
-// Labels + Dependencies section (main content area)
+// Labels + Links section (main content area)
 // ---------------------------------------------------------------------------
 
 function IssueLabelsDepsSection({
@@ -239,10 +242,10 @@ function IssueLabelsDepsSection({
         />
       </div>
 
-      {/* Dependencies */}
+      {/* Links */}
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
-          <span>Dependencies</span>
+          <span>Links</span>
           <div className="flex flex-wrap items-center gap-1">
             <DependencyPicker
               issueId={issue.id}
@@ -262,6 +265,12 @@ function IssueLabelsDepsSection({
               type="related"
               onAdd={onAddDependency}
             />
+            <DependencyPicker
+              issueId={issue.id}
+              dependencies={dependencies}
+              type="copy"
+              onAdd={onAddDependency}
+            />
           </div>
         </div>
         <div className="space-y-2 text-xs">
@@ -276,6 +285,10 @@ function IssueLabelsDepsSection({
           <div className="space-y-1">
             <div className="text-muted-foreground">Related</div>
             <RelationList items={dependencies?.related ?? []} onRemove={onRemoveDependency} />
+          </div>
+          <div className="space-y-1">
+            <div className="text-muted-foreground">Copy</div>
+            <RelationList items={dependencies?.copy ?? []} onRemove={onRemoveDependency} />
           </div>
         </div>
       </div>
@@ -641,7 +654,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleAddIssueDependency = useCallback(
     (dependencyIssueId: string, type: IssueDependencyType) => {
       return addIssueDependency(id, dependencyIssueId, type).catch((error: Error) => {
-        toast.error(error.message || "Failed to update dependencies");
+        toast.error(error.message || "Failed to update links");
       });
     },
     [addIssueDependency, id],
@@ -650,7 +663,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleRemoveIssueDependency = useCallback(
     (dependencyId: string) => {
       return removeIssueDependency(id, dependencyId).catch(() => {
-        toast.error("Failed to update dependencies");
+        toast.error("Failed to update links");
       });
     },
     [id, removeIssueDependency],
@@ -909,6 +922,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 </DropdownMenuSub>
 
                 <DropdownMenuSeparator />
+
+                <DropdownMenuItem onClick={() => useModalStore.getState().open("create-issue", buildIssueTemplateData(issue))}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Create from template
+                </DropdownMenuItem>
 
                 {/* Copy link */}
                 <DropdownMenuItem onClick={() => {

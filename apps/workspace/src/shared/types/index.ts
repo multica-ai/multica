@@ -24,7 +24,7 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, AISettingsResponse, UpdateAISettingsRequest } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry } from "./activity";
@@ -40,3 +40,4 @@ export type {
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
+export type { NotificationPreference, UpdateNotificationPreferenceRequest, TestNotificationPreferenceRequest } from "./notification-preference";

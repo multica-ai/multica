@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Trash2 } from "lucide-react";
+import { X, Trash2, Bot, Tag, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,8 @@ import { useIssueSelectionStore } from "@/features/issues/stores/selection-store
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { AssigneePicker } from "./pickers";
+import { AILabelModal } from "./ai-label-modal";
+import { AIScheduleModal } from "./ai-schedule-modal";
 
 export function BatchActionToolbar() {
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -36,6 +38,8 @@ export function BatchActionToolbar() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [labelModalOpen, setLabelModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const { batchUpdateIssues, batchDeleteIssues } = useIssueMutations();
 
@@ -170,6 +174,32 @@ export function BatchActionToolbar() {
           <Trash2 className="size-3.5 mr-1" />
           Delete
         </Button>
+
+        <div className="w-px h-5 bg-border mx-1" />
+
+        {/* AI Label Suggestions */}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => setLabelModalOpen(true)}
+          className="text-purple-600 hover:text-purple-700 dark:text-purple-400"
+        >
+          <Tag className="size-3.5 mr-1" />
+          AI Labels
+        </Button>
+
+        {/* AI Schedule */}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={loading}
+          onClick={() => setScheduleModalOpen(true)}
+          className="text-purple-600 hover:text-purple-700 dark:text-purple-400"
+        >
+          <CalendarClock className="size-3.5 mr-1" />
+          AI Schedule
+        </Button>
       </div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -194,6 +224,18 @@ export function BatchActionToolbar() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AILabelModal
+        issueIds={ids}
+        open={labelModalOpen}
+        onClose={() => setLabelModalOpen(false)}
+      />
+
+      <AIScheduleModal
+        issueIds={ids}
+        open={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+      />
     </>
   );
 }

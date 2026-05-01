@@ -27,10 +27,12 @@ import { ContentEditor, type ContentEditorRef } from "@/features/editor";
 import { TitleEditor } from "@/features/editor";
 import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, ParentIssuePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
+import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { useWorkspaceStore, useActorName } from "@/features/workspace";
 import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
+import { getCreateIssueInitialValues } from "@/features/issues/utils/template";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -81,24 +83,25 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
   const { getActorName } = useActorName();
-  const { createIssue } = useIssueMutations();
+  const { createIssue, addIssueLabel } = useIssueMutations();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
+  const initialValues = getCreateIssueInitialValues(draft, data);
 
-  const [title, setTitle] = useState(draft.title);
+  const [title, setTitle] = useState(initialValues.title);
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
-  const projectId = typeof data?.project_id === "string" ? data.project_id : undefined;
-  const [priority, setPriority] = useState<IssuePriority>(draft.priority);
+  const [status, setStatus] = useState<IssueStatus>(initialValues.status);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialValues.projectId);
+  const [priority, setPriority] = useState<IssuePriority>(initialValues.priority);
   const [submitting, setSubmitting] = useState(false);
-  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
-  const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
-  const [parentIssueId, setParentIssueId] = useState<string | undefined>(draft.parentIssueId);
-  const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
-  const [startDate, setStartDate] = useState<string | null>(draft.startDate);
-  const [endDate, setEndDate] = useState<string | null>(draft.endDate);
+  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(initialValues.assigneeType);
+  const [assigneeId, setAssigneeId] = useState<string | undefined>(initialValues.assigneeId);
+  const [parentIssueId, setParentIssueId] = useState<string | undefined>(initialValues.parentIssueId);
+  const [dueDate, setDueDate] = useState<string | null>(initialValues.dueDate);
+  const [startDate, setStartDate] = useState<string | null>(initialValues.startDate);
+  const [endDate, setEndDate] = useState<string | null>(initialValues.endDate);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Assignee popover
@@ -157,7 +160,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
-        project_id: projectId,
+        project_id: selectedProjectId,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         parent_issue_id: parentIssueId,
@@ -165,6 +168,16 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         end_date: endDate || undefined,
         due_date: dueDate || undefined,
       });
+
+      if (initialValues.labelIds.length > 0) {
+        const labelResults = await Promise.allSettled(
+          initialValues.labelIds.map((labelId) => addIssueLabel(issue.id, { labelId })),
+        );
+        if (labelResults.some((result) => result.status === "rejected")) {
+          toast.error("Issue created, but some labels could not be copied");
+        }
+      }
+
       clearDraft();
       onClose();
       toast.custom((t) => (
@@ -255,7 +268,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         <div className="px-5 pb-2 shrink-0">
           <TitleEditor
             autoFocus
-            defaultValue={draft.title}
+            defaultValue={initialValues.title}
             placeholder="Issue title"
             className="text-lg font-semibold"
             onChange={(v) => updateTitle(v)}
@@ -267,7 +280,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         <div className="flex-1 min-h-0 overflow-y-auto px-5">
           <ContentEditor
             ref={descEditorRef}
-            defaultValue={draft.description}
+            defaultValue={initialValues.description}
             placeholder="Add description..."
             onUpdate={(md) => setDraft({ description: md })}
             onUploadFile={handleUpload}
@@ -408,10 +421,22 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             </PopoverContent>
           </Popover>
 
+          <ProjectPicker
+            projectId={selectedProjectId ?? null}
+            onUpdate={(updates) => {
+              if ("project_id" in updates) {
+                setSelectedProjectId(updates.project_id ?? undefined);
+              }
+            }}
+            align="start"
+            triggerRender={<PillButton />}
+          />
+
           <ParentIssuePicker
             parentIssueId={parentIssueId ?? null}
             onUpdate={(updates) => updateParentIssue(updates.parent_issue_id)}
             align="start"
+            triggerRender={<PillButton />}
           />
 
           <IssueDateTimePicker

@@ -572,7 +572,7 @@ var openAPITypeDocs = map[reflect.Type]openAPITypeDoc{
 	updateWorkspaceRequestReflectType: {
 		Description: "Partial workspace update payload.",
 		Example: map[string]any{
-			"description": "Workspace for the design systems team.",
+			"description":  "Workspace for the design systems team.",
 			"issue_prefix": "DS",
 		},
 		Fields: map[string]openAPIFieldDoc{
@@ -598,11 +598,11 @@ var openAPITypeDocs = map[reflect.Type]openAPITypeDoc{
 	issueResponseReflectType: {
 		Description: "Issue detail response.",
 		Example: map[string]any{
-			"id":          exampleUUID,
-			"identifier":  "MUL-42",
-			"title":       "Ship Swagger docs",
-			"status":      "todo",
-			"priority":    "high",
+			"id":           exampleUUID,
+			"identifier":   "MUL-42",
+			"title":        "Ship Swagger docs",
+			"status":       "todo",
+			"priority":     "high",
 			"workspace_id": exampleUUID,
 		},
 		Fields: map[string]openAPIFieldDoc{
@@ -631,10 +631,10 @@ var openAPITypeDocs = map[reflect.Type]openAPITypeDoc{
 	createIssueRequestReflectType: {
 		Description: "Payload for creating a new issue.",
 		Example: map[string]any{
-			"title":      "Ship Swagger docs",
+			"title":       "Ship Swagger docs",
 			"description": "Add Swagger UI and generated OpenAPI docs for the Go server.",
-			"status":     "todo",
-			"priority":   "high",
+			"status":      "todo",
+			"priority":    "high",
 		},
 		Fields: map[string]openAPIFieldDoc{
 			"title":           {Description: "Issue title.", Example: "Ship Swagger docs"},
@@ -801,12 +801,12 @@ var openAPITypeDocs = map[reflect.Type]openAPITypeDoc{
 	agentTaskResponseReflectType: {
 		Description: "Agent task queue item response.",
 		Example: map[string]any{
-			"id":          exampleUUID,
-			"agent_id":    exampleUUID,
-			"issue_id":    exampleUUID,
-			"status":      "running",
-			"priority":    100,
-			"created_at":  "2026-05-01T09:00:00Z",
+			"id":         exampleUUID,
+			"agent_id":   exampleUUID,
+			"issue_id":   exampleUUID,
+			"status":     "running",
+			"priority":   100,
+			"created_at": "2026-05-01T09:00:00Z",
 		},
 		Fields: map[string]openAPIFieldDoc{
 			"id":                 {Description: "Task identifier.", Example: exampleUUID},

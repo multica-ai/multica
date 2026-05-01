@@ -15,10 +15,12 @@ export function ProjectPicker({
   projectId,
   onUpdate,
   align,
+  triggerRender,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   align?: "start" | "center" | "end";
+  triggerRender?: React.ReactElement;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -48,6 +50,7 @@ export function ProjectPicker({
       searchable
       searchPlaceholder="Move to project..."
       onSearchChange={setFilter}
+      triggerRender={triggerRender}
       trigger={selectedProject ? (
         <>
           <span className="shrink-0 text-base leading-none">{selectedProject.icon || "📁"}</span>

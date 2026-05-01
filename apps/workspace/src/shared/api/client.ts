@@ -42,6 +42,11 @@ import type {
   BulkCreateIssueItem,
   BulkCreateIssueError,
   BulkCreateIssuesResponse,
+  NotificationPreference,
+  UpdateNotificationPreferenceRequest,
+  TestNotificationPreferenceRequest,
+  AISettingsResponse,
+  UpdateAISettingsRequest,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -612,6 +617,48 @@ export class ApiClient {
     });
   }
 
+  async getAISettings(workspaceId: string): Promise<AISettingsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/ai/settings`);
+  }
+
+  async updateAISettings(workspaceId: string, data: UpdateAISettingsRequest): Promise<AISettingsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/ai/settings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async suggestLabels(workspaceId: string, issueIds: string[]): Promise<{
+    results: Array<{
+      issue_id: string;
+      suggestions: Array<{
+        name: string;
+        existing: boolean;
+        label_id?: string;
+        color?: string;
+      }>;
+    }>;
+  }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/ai/label`, {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds }),
+    });
+  }
+
+  async suggestSchedule(workspaceId: string, issueIds: string[]): Promise<{
+    suggestions: Array<{
+      issue_id: string;
+      start_date: string;
+      end_date: string;
+      reason: string;
+    }>;
+  }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/ai/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds }),
+    });
+  }
+
   // Skills
   async listSkills(): Promise<Skill[]> {
     return this.fetch("/api/skills");
@@ -708,5 +755,25 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreference> {
+    return this.fetch("/api/notification-preferences");
+  }
+
+  async updateNotificationPreferences(data: UpdateNotificationPreferenceRequest): Promise<NotificationPreference> {
+    return this.fetch("/api/notification-preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async testNotificationPreference(data: TestNotificationPreferenceRequest): Promise<void> {
+    await this.fetch("/api/notification-preferences/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
   }
 }

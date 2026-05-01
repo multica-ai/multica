@@ -45,3 +45,23 @@ export interface MemberWithUser {
   email: string;
   avatar_url: string | null;
 }
+
+
+export interface AISettingsResponse {
+  provider: string;
+  api_key_masked: string;
+  has_api_key: boolean;
+  masked_api_key: string;
+  base_url: string;
+  model: string;
+  label_rules: string[];
+  env_key_present: boolean;
+}
+
+export interface UpdateAISettingsRequest {
+  provider?: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+  label_rules?: string[];
+}

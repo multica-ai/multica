@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 
 export const primaryNav = [
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/issues", label: "Issues", icon: ListTodo },
   { href: "/board", label: "Board", icon: Columns3 },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/backlog", label: "Backlog", icon: ListTodo },
   { href: "/today", label: "Today", icon: CalendarDays },
   { href: "/upcoming", label: "Upcoming", icon: CalendarRange },

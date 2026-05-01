@@ -1,11 +1,15 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  AISettingsResponse,
   CreateMemberRequest,
   CreatePersonalAccessTokenResponse,
   MemberWithUser,
+  NotificationPreference,
   PersonalAccessToken,
+  UpdateAISettingsRequest,
   UpdateMeRequest,
   UpdateMemberRequest,
+  UpdateNotificationPreferenceRequest,
   User,
   Workspace,
   WorkspaceRepo,
@@ -153,5 +157,56 @@ export function usePersonalAccessTokenMutations() {
     revokingId: revokeTokenMutation.isPending
       ? revokeTokenMutation.variables ?? null
       : null,
+  };
+}
+
+export function useNotificationPreferenceMutations() {
+  const queryClient = useQueryClient();
+
+  const updateMutation = useMutation({
+    mutationFn: (data: UpdateNotificationPreferenceRequest) =>
+      api.updateNotificationPreferences(data),
+    onSuccess: (pref) => {
+      queryClient.setQueryData<NotificationPreference>(
+        queryKeys.settings.notificationPreferences(),
+        pref,
+      );
+    },
+  });
+
+  return {
+    updatePreferences: (data: UpdateNotificationPreferenceRequest) =>
+      updateMutation.mutateAsync(data),
+    updating: updateMutation.isPending,
+  };
+}
+
+export function useAISettingsQuery(workspaceId: string | null) {
+  return useQuery<AISettingsResponse>({
+    queryKey: queryKeys.settings.aiSettings(workspaceId ?? ""),
+    queryFn: () => api.getAISettings(workspaceId!),
+    enabled: !!workspaceId,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useAISettingsMutations(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+
+  const updateMutation = useMutation({
+    mutationFn: (data: UpdateAISettingsRequest) =>
+      api.updateAISettings(workspaceId!, data),
+    onSuccess: (settings) => {
+      queryClient.setQueryData<AISettingsResponse>(
+        queryKeys.settings.aiSettings(workspaceId ?? ""),
+        settings,
+      );
+    },
+  });
+
+  return {
+    updateAISettings: (data: UpdateAISettingsRequest) =>
+      updateMutation.mutateAsync(data),
+    updating: updateMutation.isPending,
   };
 }

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
 
-interface IssueDraft {
+export interface IssueDraft {
   title: string;
   description: string;
   status: IssueStatus;

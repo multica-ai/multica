@@ -20,7 +20,7 @@ func issueLabelToResponse(label db.IssueLabel) IssueLabelResponse {
 }
 
 func hasDependencyGroups(groups IssueDependencyGroupsResponse) bool {
-	return len(groups.Blocks) > 0 || len(groups.BlockedBy) > 0 || len(groups.Related) > 0
+	return len(groups.Blocks) > 0 || len(groups.BlockedBy) > 0 || len(groups.Related) > 0 || len(groups.Copy) > 0
 }
 
 func (h *Handler) buildIssueDetailResponse(ctx context.Context, issue db.Issue) (IssueResponse, error) {
@@ -169,6 +169,25 @@ func (h *Handler) buildIssueDependencyGroups(ctx context.Context, issue db.Issue
 			groups.Related = append(groups.Related, IssueDependencyEntryResponse{
 				ID:    dependencyID,
 				Type:  "related",
+				Issue: ref,
+			})
+		case "copy":
+			var otherIssueID pgtype.UUID
+			if issueID == currentIssueID {
+				otherIssueID = dependency.DependsOnIssueID
+			} else if dependsOnIssueID == currentIssueID {
+				otherIssueID = dependency.IssueID
+			} else {
+				continue
+			}
+
+			ref, err := loadIssueReference(otherIssueID)
+			if err != nil {
+				return nil, err
+			}
+			groups.Copy = append(groups.Copy, IssueDependencyEntryResponse{
+				ID:    dependencyID,
+				Type:  "copy",
 				Issue: ref,
 			})
 		}

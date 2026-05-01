@@ -43,12 +43,14 @@ export function ParentIssuePicker({
   parentIssue,
   onUpdate,
   align,
+  triggerRender,
 }: {
   issueId?: string;
   parentIssueId: string | null;
   parentIssue?: IssueReference | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   align?: "start" | "center" | "end";
+  triggerRender?: React.ReactElement;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -84,6 +86,7 @@ export function ParentIssuePicker({
       searchable
       searchPlaceholder="Search parent issue..."
       onSearchChange={setFilter}
+      triggerRender={triggerRender}
       trigger={selectedParent ? (
         <>
           <GitMerge className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

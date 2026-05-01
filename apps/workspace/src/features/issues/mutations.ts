@@ -463,3 +463,27 @@ export function useIssueTaskMutations(issueId: string) {
     cancelling: cancelTaskMutation.isPending,
   };
 }
+
+export function useSuggestLabelsMutation() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      issueIds,
+    }: {
+      workspaceId: string;
+      issueIds: string[];
+    }) => api.suggestLabels(workspaceId, issueIds),
+  });
+}
+
+export function useSuggestScheduleMutation() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      issueIds,
+    }: {
+      workspaceId: string;
+      issueIds: string[];
+    }) => api.suggestSchedule(workspaceId, issueIds),
+  });
+}

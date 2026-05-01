@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS worklog_issue;
+DROP TABLE IF EXISTS worklog;

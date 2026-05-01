@@ -15,6 +15,7 @@ const RELATION_LABEL: Record<IssueDependencyType, string> = {
   blocks: "Blocks",
   blocked_by: "Blocked by",
   related: "Related",
+  copy: "Copy",
 };
 
 export function DependencyPicker({
@@ -39,6 +40,7 @@ export function DependencyPicker({
     (dependencies?.blocks ?? []).forEach((entry) => ids.add(entry.issue.id));
     (dependencies?.blocked_by ?? []).forEach((entry) => ids.add(entry.issue.id));
     (dependencies?.related ?? []).forEach((entry) => ids.add(entry.issue.id));
+    (dependencies?.copy ?? []).forEach((entry) => ids.add(entry.issue.id));
     return ids;
   }, [dependencies, issueId]);
 

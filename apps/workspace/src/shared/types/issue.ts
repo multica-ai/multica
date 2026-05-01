@@ -10,7 +10,7 @@ export type IssueStatus =
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
-export type IssueDependencyType = "blocks" | "blocked_by" | "related";
+export type IssueDependencyType = "blocks" | "blocked_by" | "related" | "copy";
 
 export interface IssueReference {
   id: string;
@@ -40,6 +40,7 @@ export interface IssueDependencyGroups {
   blocks?: IssueDependency[];
   blocked_by?: IssueDependency[];
   related?: IssueDependency[];
+  copy?: IssueDependency[];
 }
 
 export interface IssueReaction {

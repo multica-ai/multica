@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarDays, Clock } from "lucide-react";
 import type { UpdateIssueRequest } from "@/shared/types";
 import { Calendar } from "@/components/ui/calendar";
@@ -20,7 +20,8 @@ const DATETIME_FIELD_LABELS: Record<IssueDateTimeField, string> = {
   end_date: "End date",
 };
 
-const HOURS = Array.from({ length: 24 }, (_, index) => 23 - index);
+const DEFAULT_HOUR = 8;
+const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
 const DATE_SHORTCUTS = [
   { label: "Today", getDate: () => new Date() },
@@ -74,8 +75,14 @@ function startOfDay(date: Date): Date {
   return nextDate;
 }
 
+function getDefaultDraftDate(date: Date): Date {
+  const nextDate = startOfDay(date);
+  nextDate.setHours(DEFAULT_HOUR, 0, 0, 0);
+  return nextDate;
+}
+
 function getDraftDate(value: string | null): Date {
-  return parseDateTimeValue(value) ?? startOfDay(new Date());
+  return parseDateTimeValue(value) ?? getDefaultDraftDate(new Date());
 }
 
 function formatDateTime(value: string | null): string {
@@ -125,6 +132,8 @@ export function IssueDateTimePicker({
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState<Date | undefined>(() => getDraftDate(dateTimeValue));
   const [timeInput, setTimeInput] = useState(() => formatTimeInput(getDraftDate(dateTimeValue)));
+  const hourListRef = useRef<HTMLDivElement | null>(null);
+  const minuteListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -136,6 +145,22 @@ export function IssueDateTimePicker({
 
   useEffect(() => {
     setTimeInput(formatTimeInput(draftDate));
+  }, [draftDate]);
+
+  useEffect(() => {
+    if (!draftDate) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const selectedHour = hourListRef.current?.querySelector<HTMLButtonElement>(`[data-time-unit="hour"][data-time-value="${draftDate.getHours()}"]`);
+      const selectedMinute = minuteListRef.current?.querySelector<HTMLButtonElement>(`[data-time-unit="minute"][data-time-value="${draftDate.getMinutes()}"]`);
+
+      selectedHour?.scrollIntoView({ block: "nearest" });
+      selectedMinute?.scrollIntoView({ block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
   }, [draftDate]);
 
   const handleDateSelect = (selectedDate: Date | undefined) => {
@@ -230,7 +255,10 @@ export function IssueDateTimePicker({
           </>
         </PopoverTrigger>
       )}
-      <PopoverContent className="w-auto p-0" align="start">
+      <PopoverContent
+        className="w-[min(22rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto p-0 sm:w-auto sm:max-h-none sm:overflow-visible"
+        align="start"
+      >
         <Calendar
           mode="single"
           selected={draftDate}
@@ -263,12 +291,14 @@ export function IssueDateTimePicker({
           </div>
         </div>
         <div className="flex border-t">
-          <ScrollArea className="h-56 w-1/2 border-r">
-            <div className="flex flex-col p-2">
+          <ScrollArea className="h-40 w-1/2 border-r sm:h-56">
+            <div ref={hourListRef} className="flex flex-col p-2">
               {HOURS.map((hour) => (
                 <Button
                   key={hour}
                   size="sm"
+                  data-time-unit="hour"
+                  data-time-value={hour}
                   variant={draftDate && draftDate.getHours() === hour ? "default" : "ghost"}
                   className="w-full shrink-0 justify-start font-normal"
                   disabled={!draftDate}
@@ -279,12 +309,14 @@ export function IssueDateTimePicker({
               ))}
             </div>
           </ScrollArea>
-          <ScrollArea className="h-56 w-1/2">
-            <div className="flex flex-col p-2">
+          <ScrollArea className="h-40 w-1/2 sm:h-56">
+            <div ref={minuteListRef} className="flex flex-col p-2">
               {MINUTES.map((minute) => (
                 <Button
                   key={minute}
                   size="sm"
+                  data-time-unit="minute"
+                  data-time-value={minute}
                   variant={draftDate && draftDate.getMinutes() === minute ? "default" : "ghost"}
                   className="w-full shrink-0 justify-start font-normal"
                   disabled={!draftDate}
@@ -296,7 +328,7 @@ export function IssueDateTimePicker({
             </div>
           </ScrollArea>
         </div>
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+        <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t bg-popover px-3 py-2">
           <Button
             variant="ghost"
             size="xs"

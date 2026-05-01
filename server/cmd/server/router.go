@@ -126,6 +126,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
+					// AI features
+					r.Get("/ai/settings", h.GetAISettings)
+					r.Post("/ai/settings", h.UpdateAISettings)
+					r.Post("/ai/label", h.SuggestLabelsHandler)
+					r.Post("/ai/schedule", h.SuggestScheduleHandler)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -164,6 +169,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
+					r.Post("/worklogs", h.CreateWorklog)
+					r.Get("/worklogs", h.ListWorklogs)
 					r.Post("/labels", h.AddIssueLabel)
 					r.Delete("/labels/{labelId}", h.RemoveIssueLabel)
 					r.Post("/dependencies", h.AddIssueDependency)
@@ -209,6 +216,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Delete("/", h.DeleteComment)
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
+			})
+
+			r.Route("/api/worklogs/{id}", func(r chi.Router) {
+				r.Patch("/", h.UpdateWorklog)
+				r.Delete("/", h.DeleteWorklog)
 			})
 
 			// Agents

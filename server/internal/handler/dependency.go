@@ -25,6 +25,8 @@ func normalizeDependencyInput(currentIssueID, targetIssueID pgtype.UUID, depende
 		return targetIssueID, currentIssueID, "blocks", nil
 	case "related":
 		return currentIssueID, targetIssueID, "related", nil
+	case "copy":
+		return currentIssueID, targetIssueID, "copy", nil
 	default:
 		return pgtype.UUID{}, pgtype.UUID{}, "", errors.New("invalid dependency type")
 	}
@@ -37,7 +39,7 @@ func dependencyExists(dependencies []db.IssueDependency, sourceIssueID, targetIs
 		if dependency.Type != dependencyType {
 			continue
 		}
-		if dependencyType == "related" {
+		if dependencyType == "related" || dependencyType == "copy" {
 			if (issueID == sourceIssueID && dependsOnIssueID == targetIssueID) || (issueID == targetIssueID && dependsOnIssueID == sourceIssueID) {
 				return true
 			}

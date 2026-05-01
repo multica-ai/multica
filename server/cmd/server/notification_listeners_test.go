@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/ntfy"
@@ -802,4 +806,114 @@ func TestNotification_EndDateChanged(t *testing.T) {
 	if endDetails["to"] != "" {
 		t.Fatalf("expected empty to detail for cleared end date, got %q", endDetails["to"])
 	}
+}
+
+func TestMaybeSendNtfy(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	queries := db.New(testPool)
+
+	// Track ntfy calls via a test HTTP server.
+	var sentCount int
+	ntfySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sentCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ntfySrv.Close()
+
+	ctx := context.Background()
+
+	// Set ntfy URL for the test user.
+	_, err := queries.UpsertNotificationPreference(ctx, db.UpsertNotificationPreferenceParams{
+		UserID:        util.ParseUUID(testUserID),
+		NtfyUrl:       pgTextFrom(ntfySrv.URL),
+		NtfyToken:     pgTextFrom(""),
+		DisabledTypes: []string{},
+	})
+	if err != nil {
+		t.Fatalf("upsert pref: %v", err)
+	}
+	t.Cleanup(func() {
+		queries.UpsertNotificationPreference(ctx, db.UpsertNotificationPreferenceParams{
+			UserID:        util.ParseUUID(testUserID),
+			NtfyUrl:       pgTextFrom(""),
+			NtfyToken:     pgTextFrom(""),
+			DisabledTypes: []string{},
+		})
+	})
+
+	sender := ntfy.New()
+
+	t.Run("SendsWhenEnabled", func(t *testing.T) {
+		sentCount = 0
+		maybeSendNtfy(ctx, queries, sender, testUserID, map[string]any{
+			"type":           "new_comment",
+			"severity":       "info",
+			"title":          "New comment on Issue",
+			"body":           (*string)(nil),
+			"issue_id":       strPtr("some-issue-id"),
+			"recipient_type": "member",
+		})
+		// Wait briefly for the goroutine.
+		time.Sleep(50 * time.Millisecond)
+		if sentCount != 1 {
+			t.Errorf("expected 1 ntfy send, got %d", sentCount)
+		}
+	})
+
+	t.Run("SkipsDisabledType", func(t *testing.T) {
+		// Disable "new_comment" type.
+		queries.UpsertNotificationPreference(ctx, db.UpsertNotificationPreferenceParams{
+			UserID:        util.ParseUUID(testUserID),
+			NtfyUrl:       pgTextFrom(ntfySrv.URL),
+			NtfyToken:     pgTextFrom(""),
+			DisabledTypes: []string{"new_comment"},
+		})
+		sentCount = 0
+		maybeSendNtfy(ctx, queries, sender, testUserID, map[string]any{
+			"type":           "new_comment",
+			"severity":       "info",
+			"title":          "New comment",
+			"body":           (*string)(nil),
+			"issue_id":       (*string)(nil),
+			"recipient_type": "member",
+		})
+		time.Sleep(50 * time.Millisecond)
+		if sentCount != 0 {
+			t.Errorf("expected 0 sends for disabled type, got %d", sentCount)
+		}
+		// Restore empty disabled_types.
+		queries.UpsertNotificationPreference(ctx, db.UpsertNotificationPreferenceParams{
+			UserID:        util.ParseUUID(testUserID),
+			NtfyUrl:       pgTextFrom(ntfySrv.URL),
+			NtfyToken:     pgTextFrom(""),
+			DisabledTypes: []string{},
+		})
+	})
+
+	t.Run("SkipsWhenNoNtfyURL", func(t *testing.T) {
+		// Clear the ntfy URL.
+		queries.UpsertNotificationPreference(ctx, db.UpsertNotificationPreferenceParams{
+			UserID:        util.ParseUUID(testUserID),
+			NtfyUrl:       pgTextFrom(""),
+			NtfyToken:     pgTextFrom(""),
+			DisabledTypes: []string{},
+		})
+		sentCount = 0
+		maybeSendNtfy(ctx, queries, sender, testUserID, map[string]any{
+			"type":     "new_comment",
+			"severity": "info",
+			"title":    "test",
+		})
+		time.Sleep(50 * time.Millisecond)
+		if sentCount != 0 {
+			t.Errorf("expected 0 sends when ntfy_url empty, got %d", sentCount)
+		}
+	})
+}
+
+// pgTextFrom creates a valid pgtype.Text from a string.
+func pgTextFrom(s string) pgtype.Text {
+	return pgtype.Text{String: s, Valid: true}
 }
