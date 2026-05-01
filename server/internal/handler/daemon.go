@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
@@ -825,7 +827,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -836,6 +839,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+
+	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 
 	for _, u := range req.Usage {
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
@@ -849,9 +854,60 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 		}
+
+		// Per-(agent, workspace) live spend rollup. User scope is not yet
+		// wired — task initiator attribution is a separate change. Failures
+		// here are warnings, not 4xx, so the raw token usage above still
+		// lands even if the rollup hits a constraint or DB hiccup.
+		h.recordBudgetSpend(r.Context(), workspaceID, task, u)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// recordBudgetSpend converts a single (model, usage) report into cents and
+// increments the (agent day, agent month, workspace day, workspace month)
+// budget_state rows. Returns nothing — errors are logged but do not fail the
+// request because token tracking and budget tracking should be independent.
+func (h *Handler) recordBudgetSpend(ctx context.Context, workspaceID string, task db.AgentTaskQueue, u TaskUsagePayload) {
+	if workspaceID == "" {
+		return
+	}
+	cents := pricing.ComputeCents(u.Model, pricing.Usage{
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+	})
+	if cents <= 0 {
+		return
+	}
+
+	wsUUID := parseUUID(workspaceID)
+	now := time.Now().UTC()
+	dayStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), Valid: true}
+	monthStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), Valid: true}
+
+	// Each scope has its own (day, month) row. Six writes total per usage
+	// report (agent×2 + workspace×2 = 4 today; user×2 lands when initiator
+	// attribution is plumbed). They can race with concurrent tasks, but
+	// IncrementBudgetState's ON CONFLICT serializes per primary key.
+	rollups := []db.IncrementBudgetStateParams{
+		{WorkspaceID: wsUUID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
+		{WorkspaceID: wsUUID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
+		{WorkspaceID: wsUUID, ScopeType: "workspace", ScopeID: wsUUID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
+		{WorkspaceID: wsUUID, ScopeType: "workspace", ScopeID: wsUUID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
+	}
+	for _, p := range rollups {
+		if err := h.Queries.IncrementBudgetState(ctx, p); err != nil {
+			slog.Warn("budget rollup failed",
+				"workspace_id", workspaceID,
+				"scope_type", p.ScopeType,
+				"window_type", p.WindowType,
+				"cents", cents,
+				"error", err)
+		}
+	}
 }
 
 // GetTaskStatus returns the current status of a task.

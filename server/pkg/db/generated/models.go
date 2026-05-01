@@ -42,6 +42,16 @@ type Agent struct {
 	McpConfig          []byte             `json:"mcp_config"`
 }
 
+type AgentBudgetOverride struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	DailyCapCents   pgtype.Int8        `json:"daily_cap_cents"`
+	MonthlyCapCents pgtype.Int8        `json:"monthly_cap_cents"`
+	Reason          pgtype.Text        `json:"reason"`
+	SetBy           pgtype.UUID        `json:"set_by"`
+	SetAt           pgtype.Timestamptz `json:"set_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -178,6 +188,29 @@ type AutopilotTrigger struct {
 	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BudgetChangeLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChangedBy     pgtype.UUID        `json:"changed_by"`
+	ChangedAt     pgtype.Timestamptz `json:"changed_at"`
+	ScopeType     string             `json:"scope_type"`
+	ScopeID       pgtype.UUID        `json:"scope_id"`
+	Field         string             `json:"field"`
+	OldValueCents pgtype.Int8        `json:"old_value_cents"`
+	NewValueCents pgtype.Int8        `json:"new_value_cents"`
+	Reason        pgtype.Text        `json:"reason"`
+}
+
+type BudgetState struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ScopeType   string             `json:"scope_type"`
+	ScopeID     pgtype.UUID        `json:"scope_id"`
+	WindowType  string             `json:"window_type"`
+	WindowStart pgtype.Date        `json:"window_start"`
+	CentsSpent  int64              `json:"cents_spent"`
+	LastUpdated pgtype.Timestamptz `json:"last_updated"`
 }
 
 type ChatMessage struct {
@@ -458,6 +491,16 @@ type User struct {
 	Preferences []byte             `json:"preferences"`
 }
 
+type UserBudgetOverride struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	DailyCapCents   pgtype.Int8        `json:"daily_cap_cents"`
+	MonthlyCapCents pgtype.Int8        `json:"monthly_cap_cents"`
+	Reason          pgtype.Text        `json:"reason"`
+	SetBy           pgtype.UUID        `json:"set_by"`
+	SetAt           pgtype.Timestamptz `json:"set_at"`
+}
+
 type UserProfile struct {
 	UserID       pgtype.UUID        `json:"user_id"`
 	Persona      string             `json:"persona"`
@@ -507,6 +550,20 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+}
+
+type WorkspaceBudgetConfig struct {
+	WorkspaceID                 pgtype.UUID        `json:"workspace_id"`
+	DefaultUserDailyCapCents    pgtype.Int8        `json:"default_user_daily_cap_cents"`
+	DefaultUserMonthlyCapCents  pgtype.Int8        `json:"default_user_monthly_cap_cents"`
+	DefaultAgentDailyCapCents   pgtype.Int8        `json:"default_agent_daily_cap_cents"`
+	DefaultAgentMonthlyCapCents pgtype.Int8        `json:"default_agent_monthly_cap_cents"`
+	WorkspaceDailyAlarmCents    pgtype.Int8        `json:"workspace_daily_alarm_cents"`
+	WorkspaceDailyHardKillCents pgtype.Int8        `json:"workspace_daily_hard_kill_cents"`
+	ConfiguredAt                pgtype.Timestamptz `json:"configured_at"`
+	ConfiguredBy                pgtype.UUID        `json:"configured_by"`
+	LastModifiedAt              pgtype.Timestamptz `json:"last_modified_at"`
+	LastModifiedBy              pgtype.UUID        `json:"last_modified_by"`
 }
 
 type WorkspaceInvitation struct {
