@@ -201,7 +201,9 @@ export function ModelDropdown({
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  No models available.
+                  {modelsQuery.isError
+                    ? "Could not discover models. Type a model ID manually or try again later."
+                    : "No models available."}
                 </div>
               )}
 

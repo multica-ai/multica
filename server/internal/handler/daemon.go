@@ -675,7 +675,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*pr
 		}
 	}
 
-	if pending := h.ModelListStore.PopPending(runtimeID); pending != nil {
+	if pending, _ := h.ModelListStore.PopPending(ctx, runtimeID); pending != nil {
 		ack.PendingModelList = &protocol.DaemonHeartbeatPendingModelList{ID: pending.ID}
 	}
 

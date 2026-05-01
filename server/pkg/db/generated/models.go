@@ -322,6 +322,17 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ModelListRequest struct {
+	ID        string             `json:"id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Status    string             `json:"status"`
+	Models    []byte             `json:"models"`
+	Supported bool               `json:"supported"`
+	Error     string             `json:"error"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

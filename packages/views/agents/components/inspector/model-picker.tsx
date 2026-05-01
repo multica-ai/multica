@@ -163,7 +163,9 @@ export function ModelPicker({
 
       {!modelsQuery.isLoading && filtered.length === 0 && !canCreate && (
         <p className="px-3 py-3 text-center text-xs text-muted-foreground">
-          No models available
+          {modelsQuery.isError
+            ? "Could not discover models. Type a model ID or try again."
+            : "No models available"}
         </p>
       )}
 
