@@ -763,7 +763,10 @@ export function InboxPage() {
     <FolderSection
       folders={folders}
       selectedFolderId={isFolderView ? folderId : null}
-      onSelect={(id) => setViewMode(id ? { kind: "folder", id } : { kind: "inbox" })}
+      onSelect={(id) => {
+        setSelectedKey("");
+        setViewMode(id ? { kind: "folder", id } : { kind: "inbox" });
+      }}
       onCreate={(name, parentId) =>
         createFolder.mutate(
           { name, parentId },
