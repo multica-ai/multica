@@ -100,6 +100,7 @@ You also need at least one AI agent CLI installed:
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 - Kimi (`kimi` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
+- [Devin](https://docs.devin.ai/) (`devin` on PATH)
 
 ### b) One-command setup
 

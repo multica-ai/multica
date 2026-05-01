@@ -91,20 +91,33 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "devin":
+		return devinStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
-// any effect for the given provider. Today every provider in the
-// registry honours `opts.Model` end-to-end: Hermes routes it through
-// the ACP `session/set_model` RPC before each prompt, which means
-// the UI's dropdown choice is carried all the way down to the LLM
-// call. The helper is retained so we can add a `return false` branch
-// the next time a provider legitimately ignores model selection.
+// any effect for the given provider. Most providers honour
+// `opts.Model` end-to-end: Hermes / Kimi / Kiro route it through the
+// ACP `session/set_model` RPC once, immediately after creating the
+// session and before sending the session's first (and only) prompt,
+// which means the UI's dropdown choice is carried all the way down
+// to the LLM call. The model is fixed for the life of the session;
+// switching mid-task would require a new `session/set_model` round-
+// trip that none of the backends issue today.
+//
+// Devin is the exception — its ACP server does not implement
+// `session/set_model`. Model selection is driven by Devin's own
+// config (`~/.config/devin/config.json` or `--model` at devin
+// invocation), so the daemon-side dropdown would have no effect and
+// is hidden by returning false here.
 func ModelSelectionSupported(providerType string) bool {
-	_ = providerType
+	switch providerType {
+	case "devin":
+		return false
+	}
 	return true
 }
 
@@ -204,6 +217,23 @@ func copilotStaticModels() []Model {
 	return []Model{
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
+	}
+}
+
+// devinStaticModels — Devin for Terminal exposes its catalog through
+// ACP `config_option_update` notifications rather than a CLI flag, and
+// `devin acp` does not implement `session/set_model`. Model selection
+// is therefore driven by the user's Devin config, not by Multica.
+// `ModelSelectionSupported("devin")` returns false so the UI hides
+// the dropdown; we still return a single placeholder entry so other
+// model-aware code paths have something stable to render.
+//
+// TODO: replace this with a CLI-discovery function once Devin supports
+// `session/set_model` (or a stable equivalent) so the daemon can flip
+// the model from the runtime UI.
+func devinStaticModels() []Model {
+	return []Model{
+		{ID: "auto", Label: "Devin (default model)", Provider: "devin", Default: true},
 	}
 }
 

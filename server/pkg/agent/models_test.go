@@ -347,6 +347,41 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	}
 }
 
+func TestDevinModelSelectionUnsupported(t *testing.T) {
+	// Devin's ACP server does not implement session/set_model;
+	// model selection is driven by Devin's own config. Surface
+	// that to the UI by reporting model-selection unsupported so
+	// the runtime dropdown is hidden.
+	if ModelSelectionSupported("devin") {
+		t.Error("devin should report model selection unsupported until session/set_model exists")
+	}
+}
+
+func TestDevinStaticModelsHasDefault(t *testing.T) {
+	models := devinStaticModels()
+	if len(models) == 0 {
+		t.Fatal("devinStaticModels returned no entries")
+	}
+	defaults := 0
+	for _, m := range models {
+		if m.Default {
+			defaults++
+		}
+		if m.ID == "" {
+			t.Errorf("devin model entry has empty ID: %+v", m)
+		}
+		if m.Label == "" {
+			t.Errorf("devin model entry has empty Label: %+v", m)
+		}
+		if m.Provider != "devin" {
+			t.Errorf("devin model entry has wrong Provider: %q (want %q)", m.Provider, "devin")
+		}
+	}
+	if defaults != 1 {
+		t.Errorf("expected exactly one default devin model, got %d", defaults)
+	}
+}
+
 func TestCachedDiscovery(t *testing.T) {
 	calls := 0
 	fn := func() ([]Model, error) {

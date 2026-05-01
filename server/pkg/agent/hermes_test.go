@@ -230,6 +230,118 @@ func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	}
 }
 
+// TestHermesClientAutoApprovesDevinPermissionRequest is the regression
+// guard for the Devin "Tool execution was rejected by the user: Unknown
+// permission option" failure. Devin advertises ACP-spec option IDs
+// (`allow_once` / `allow_always` / `reject_once`) — different from the
+// kimi/kiro vocabulary (`approve` / `approve_for_session` / `reject`).
+// The auto-approval response must echo back whichever option the agent
+// advertised for kind=allow_always, not a hardcoded ID, otherwise the
+// agent treats the unknown ID as a rejection and the model gives up
+// without emitting any final assistant text.
+func TestHermesClientAutoApprovesDevinPermissionRequest(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":17,"method":"session/request_permission","params":{"sessionId":"ses_devin","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"allow_always","name":"Always allow","kind":"allow_always"},{"optionId":"reject_once","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_devin_1","title":"Terminal","content":[]}}}`)
+
+	got := w.String()
+	var resp struct {
+		ID     int `json:"id"`
+		Result struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+	}
+	if resp.ID != 17 {
+		t.Errorf("id: got %d, want 17", resp.ID)
+	}
+	if resp.Result.Outcome.Outcome != "selected" {
+		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+	}
+	if resp.Result.Outcome.OptionID != "allow_always" {
+		t.Errorf("outcome.optionId: got %q, want %q (Devin's kind=allow_always optionId, not kimi's hardcoded approve_for_session)", resp.Result.Outcome.OptionID, "allow_always")
+	}
+}
+
+// TestPickACPAcceptOptionPrefersAllowAlways covers the priority logic
+// directly: allow_always > allow_once, and reject-style options are
+// never selected. Empty options yields empty string so the caller can
+// fall back to the kimi/kiro legacy hardcoded value.
+func TestPickACPAcceptOptionPrefersAllowAlways(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		options []acpPermissionOption
+		want    string
+	}{
+		{
+			name:    "empty",
+			options: nil,
+			want:    "",
+		},
+		{
+			name: "only_reject",
+			options: []acpPermissionOption{
+				{OptionID: "reject", Kind: "reject_once"},
+				{OptionID: "reject_always", Kind: "reject_always"},
+			},
+			want: "",
+		},
+		{
+			name: "allow_once_only",
+			options: []acpPermissionOption{
+				{OptionID: "allow", Kind: "allow_once"},
+				{OptionID: "reject", Kind: "reject_once"},
+			},
+			want: "allow",
+		},
+		{
+			name: "allow_always_wins_over_allow_once",
+			options: []acpPermissionOption{
+				{OptionID: "approve", Kind: "allow_once"},
+				{OptionID: "approve_for_session", Kind: "allow_always"},
+				{OptionID: "reject", Kind: "reject_once"},
+			},
+			want: "approve_for_session",
+		},
+		{
+			name: "devin_style_ids",
+			options: []acpPermissionOption{
+				{OptionID: "allow_once", Kind: "allow_once"},
+				{OptionID: "allow_always", Kind: "allow_always"},
+				{OptionID: "reject_once", Kind: "reject_once"},
+			},
+			want: "allow_always",
+		},
+		{
+			name: "ignore_unknown_kind",
+			options: []acpPermissionOption{
+				{OptionID: "wat", Kind: "ask_user_again"},
+				{OptionID: "yes_keep_going", Kind: "allow_always"},
+			},
+			want: "yes_keep_going",
+		},
+	}
+	for _, tc := range tests {
+		got := pickACPAcceptOption(tc.options)
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestHermesClientReplesMethodNotFoundForUnknownAgentRequest ensures
 // that any agent → client request we don't explicitly handle gets a
 // proper JSON-RPC error back, not silence. Silence would block the

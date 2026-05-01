@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getApi } from "../api";
+import { ApiError, getApi } from "../api";
 import { useAuthStore } from "../auth";
 import {
   captureSignupSource,
@@ -20,6 +20,19 @@ import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
 const logger = createLogger("auth");
+
+// 401 from the cold-start session probe just means "no active session" —
+// expected for any anonymous page load. Logging it as an error pollutes the
+// dev console and trains developers to ignore real auth failures, so route
+// 401s through info and keep error reserved for unexpected breakage
+// (network, 5xx, malformed response).
+function logAuthInitFailure(message: string, err: unknown) {
+  if (err instanceof ApiError && err.status === 401) {
+    logger.info(message, { reason: "no active session" });
+    return;
+  }
+  logger.error(message, err);
+}
 
 export function AuthInitializer({
   children,
@@ -92,7 +105,7 @@ export function AuthInitializer({
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
         .catch((err) => {
-          logger.error("cookie auth init failed", err);
+          logAuthInitFailure("cookie auth init failed", err);
           onAuthFailure();
         });
       return;
@@ -116,7 +129,7 @@ export function AuthInitializer({
         qc.setQueryData(workspaceKeys.list(), wsList);
       })
       .catch((err) => {
-        logger.error("auth init failed", err);
+        logAuthInitFailure("auth init failed", err);
         api.setToken(null);
         setCurrentWorkspace(null, null);
         storage.removeItem("multica_token");

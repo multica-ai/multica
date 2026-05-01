@@ -12,36 +12,55 @@ import (
 	"time"
 )
 
-// kiroBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args. `acp` is the protocol subcommand,
-// and --trust-all-tools covers Kiro's CLI-level tool gate while
-// hermesClient handles ACP session/request_permission auto-approval. In Kiro
-// CLI 2.1.1, `-a` is short for --trust-all-tools, not --agent; --agent remains
-// allowed so users can select a custom Kiro agent.
-var kiroBlockedArgs = map[string]blockedArgMode{
-	"acp":               blockedStandalone,
-	"-a":                blockedStandalone,
-	"--trust-all-tools": blockedStandalone,
-	"--trust-tools":     blockedWithValue,
+// devinBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args. `acp` is the protocol
+// subcommand that drives the ACP JSON-RPC transport for Devin for
+// Terminal; overriding it would break the daemon ↔ Devin communication
+// contract. `--agent-type` is exposed to users so they can opt into
+// Devin's specialized agents (e.g. summarizer).
+var devinBlockedArgs = map[string]blockedArgMode{
+	"acp": blockedStandalone,
 }
 
-// kiroBackend implements Backend by spawning `kiro-cli acp` and communicating
-// via the standard ACP JSON-RPC 2.0 transport over stdin/stdout.
+// devinBackend implements Backend by spawning `devin acp` and communicating
+// via the standard ACP (Agent Client Protocol) JSON-RPC 2.0 transport over
+// stdin/stdout.
 //
-// Kiro CLI advertises loadSession, returns models from session/new, and supports
-// session/set_model, so the existing Hermes/Kimi ACP client can drive it with
-// only provider-specific launch and tool-name normalization.
-type kiroBackend struct {
+// Devin for Terminal (https://docs.devin.ai/) ships an ACP server out of the
+// box via the `devin acp` subcommand. We reuse the existing hermesClient ACP
+// transport since Devin's wire format matches the protocol Hermes / Kimi /
+// Kiro already speak — only the binary, env, and tool-name extraction differ.
+//
+// Notes on Devin's ACP dialect (verified against devin 2026.4.29-0):
+//
+//   - agentCapabilities.loadSession is true, so session/load drives resume.
+//   - Devin emits session/update notifications with the standard ACP
+//     `sessionUpdate` field; hermesClient.normalizeACPUpdate handles this
+//     shape natively.
+//   - Devin does NOT implement session/set_model. Model selection happens
+//     via Devin's own `config_option_update` mechanism (driven by Devin's
+//     UI / config file). When opts.Model is set, we surface a warning in
+//     the daemon log and continue with Devin's default model rather than
+//     failing the task.
+//   - Devin's `acp` subcommand does NOT accept the root-level
+//     --permission-mode flag. Daemon-mode auto-approval is handled
+//     entirely by hermesClient.handleAgentRequest, which inspects the
+//     `options` array advertised on each session/request_permission
+//     request and selects the most permissive accept-style optionId
+//     by canonical ACP `kind` (allow_always > allow_once). For Devin
+//     that resolves to optionId="allow_session"; kimi / kiro resolve
+//     to "approve_for_session" — same code path, agent-specific IDs.
+type devinBackend struct {
 	cfg Config
 }
 
-func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+func (b *devinBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "kiro-cli"
+		execPath = "devin"
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("devin executable not found at %q: %w", execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -50,10 +69,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
+	devinArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, devinBlockedArgs, b.cfg.Logger)...)
+	cmd := exec.CommandContext(runCtx, execPath, devinArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", devinArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -62,22 +81,25 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("kiro stdout pipe: %w", err)
+		return nil, fmt.Errorf("devin stdout pipe: %w", err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("kiro stdin pipe: %w", err)
+		return nil, fmt.Errorf("devin stdin pipe: %w", err)
 	}
-	providerErr := newACPProviderErrorSniffer("kiro")
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	// Forward stderr to the daemon log *and* sniff provider-level
+	// errors out of it so they surface in the task result instead of
+	// being lost as a misleading "empty output" failure.
+	providerErr := newACPProviderErrorSniffer("devin")
+	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[devin:stderr] "), providerErr)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start kiro: %w", err)
+		return nil, fmt.Errorf("start devin: %w", err)
 	}
 
-	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("devin acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -101,7 +123,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				return
 			}
 			if msg.Type == MessageToolUse {
-				msg.Tool = kiroToolNameFromTitle(msg.Tool)
+				msg.Tool = devinToolNameFromTitle(msg.Tool)
 			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -133,20 +155,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("kiro process exited"))
+		c.closeAllPending(fmt.Errorf("devin process exited"))
 	}()
 
 	go func() {
 		// Single cleanup block, ordered explicitly so we never close
 		// msgCh while the reader goroutine could still call trySend
 		// on it. Early-return paths (initialize / session/load /
-		// session/new / session/set_model failures) used to rely on
-		// the deferred close(msgCh) firing without joining the reader
-		// — a textbook send-on-closed-channel race. Blocking on
-		// readerDone here makes the channel closes safe for every
-		// exit path.
+		// session/new / session/prompt failures) used to rely on the
+		// deferred close(msgCh) firing without joining the reader,
+		// which is a textbook send-on-closed-channel race. Block on
+		// readerDone here and the channel closes are guaranteed safe
+		// for every exit path.
 		defer func() {
-			cancel()       // unblock anything bound to runCtx
+			cancel()       // unblock anything bound to runCtx (in-flight RPCs)
 			stdin.Close()  // ask the agent to exit gracefully
 			_ = cmd.Wait() // wait for the process; stdout closes here
 			<-readerDone   // reader's scanner.Scan() returns false, goroutine exits
@@ -169,7 +191,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		})
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("kiro initialize failed: %v", err)
+			finalError = fmt.Sprintf("devin initialize failed: %v", err)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -187,7 +209,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			})
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/load failed: %v", err)
+				finalError = fmt.Sprintf("devin session/load failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
@@ -199,39 +221,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			})
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/new failed: %v", err)
+				finalError = fmt.Sprintf("devin session/new failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
-				finalError = "kiro session/new returned no session ID"
+				finalError = "devin session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 		}
 
 		c.sessionID = sessionID
-		b.cfg.Logger.Info("kiro session created", "session_id", sessionID)
+		b.cfg.Logger.Info("devin session created", "session_id", sessionID)
 
+		// Devin doesn't implement session/set_model — model selection
+		// is driven by Devin's own config_option_update mechanism. Log
+		// a warning so the requested model isn't silently ignored, but
+		// keep the task running with Devin's default model.
 		if opts.Model != "" {
-			if _, err := c.request(runCtx, "session/set_model", map[string]any{
-				"sessionId": sessionID,
-				"modelId":   opts.Model,
-			}); err != nil {
-				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", opts.Model)
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", opts.Model, err)
-				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
-				}
-				return
-			}
-			b.cfg.Logger.Info("kiro session model set", "model", opts.Model)
+			b.cfg.Logger.Warn("devin does not support session/set_model; falling back to Devin's default model", "requested_model", opts.Model)
 		}
 
 		userText := prompt
@@ -242,33 +253,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		promptBlocks := []map[string]any{
 			{"type": "text", "text": userText},
 		}
-		// Kiro's published docs use `content`, while Kiro CLI 2.1.1 still
-		// requires the standard ACP `prompt` field. Send both so either wire
-		// shape can drive the turn.
-		// TODO: drop one field once Kiro lands on a single canonical payload.
 		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"content":   promptBlocks,
 			"prompt":    promptBlocks,
 		})
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("kiro timed out after %s", timeout)
+				finalError = fmt.Sprintf("devin timed out after %s", timeout)
 			} else if runCtx.Err() == context.Canceled {
 				finalStatus = "aborted"
 				finalError = "execution cancelled"
 			} else {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
+				finalError = fmt.Sprintf("devin session/prompt failed: %v", err)
 			}
 		} else {
 			select {
 			case pr := <-promptDone:
 				if pr.stopReason == "cancelled" {
 					finalStatus = "aborted"
-					finalError = "kiro cancelled the prompt"
+					finalError = "devin cancelled the prompt"
 				}
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
@@ -279,7 +285,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("devin finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()
@@ -323,7 +329,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func kiroToolNameFromTitle(title string) string {
+// devinToolNameFromTitle normalizes Devin's ACP tool titles into the
+// canonical snake_case identifiers Multica's UI expects. Devin's tool
+// naming follows Devin for Terminal's documented tool set (read, write,
+// edit, exec, grep, find, etc.), so the mapping is largely a passthrough
+// with a few aliases for cosmetic title variations.
+func devinToolNameFromTitle(title string) string {
 	t := strings.TrimSpace(title)
 	if t == "" {
 		return ""
@@ -335,24 +346,22 @@ func kiroToolNameFromTitle(title string) string {
 
 	lower := strings.ToLower(t)
 	switch lower {
-	case "read", "read file":
+	case "read", "read file", "view":
 		return "read_file"
-	case "write", "write file":
+	case "write", "write file", "create":
 		return "write_file"
-	case "edit", "patch":
+	case "edit", "patch", "apply", "replace":
 		return "edit_file"
-	case "shell", "bash", "terminal", "run command", "run shell command":
+	case "exec", "shell", "bash", "terminal", "run", "run command", "run shell command":
 		return "terminal"
-	case "grep", "search", "find":
+	case "grep", "search", "search files", "find":
 		return "search_files"
-	case "glob":
+	case "glob", "find files":
 		return "glob"
-	case "code":
-		return "code"
-	case "web search":
-		return "web_search"
-	case "fetch", "web fetch":
+	case "fetch", "web fetch", "webfetch":
 		return "web_fetch"
+	case "web search", "websearch":
+		return "web_search"
 	case "todo", "todo write", "todo list", "todo_list":
 		return "todo_write"
 	}

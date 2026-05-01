@@ -47,6 +47,8 @@ type runtimeLocalSkillBundle struct {
 //   - Cursor: official forum guidance referencing the built-in /create-skill flow
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
+//   - Devin: ~/.config/devin/skills/ (user-level, see `devin skills` and
+//     https://docs.devin.ai/devin-for-terminal/skills)
 //
 // Longer-term this mapping would be better colocated with the provider
 // definitions under server/pkg/agent so adding a new runtime can't silently
@@ -78,6 +80,11 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 		return filepath.Join(home, ".cursor", "skills"), true, nil
 	case "kiro":
 		return filepath.Join(home, ".kiro", "skills"), true, nil
+	case "devin":
+		// Devin for Terminal stores user-level skills under
+		// ~/.config/devin/skills/<name>/SKILL.md (XDG-style config dir).
+		// See `devin skills` for the management CLI.
+		return filepath.Join(home, ".config", "devin", "skills"), true, nil
 	default:
 		return "", false, nil
 	}

@@ -147,6 +147,11 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "devin":
+		// Devin for Terminal auto-discovers project-level skills from
+		// .devin/skills/<name>/SKILL.md in the workdir.
+		// See https://docs.devin.ai/devin-for-terminal/skills
+		skillsDir = filepath.Join(workDir, ".devin", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

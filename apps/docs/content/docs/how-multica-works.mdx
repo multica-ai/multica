@@ -13,7 +13,7 @@ Multica is a **distributed** platform. The web interface you see is just the fro
 
 - **Multica server** — the workspaces, issue lists, and comment threads you see all live in its database. It's also a WebSocket hub that pushes real-time updates between you and your teammates. It does **not** execute any agent tasks.
 - **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds.
-- **AI coding tools** — one of the eleven (or several in parallel): [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). Once the daemon has picked up a task, it uses these tools to actually do the work.
+- **AI coding tools** — one of the twelve (or several in parallel): [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Devin](/providers#devin), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). Once the daemon has picked up a task, it uses these tools to actually do the work.
 
 Because the toolchain stays local, **your API keys, code directories, and authorized tools** are only ever used on your machine — the Multica server never sees any of them. This holds whether you self-host or use Cloud.
 
