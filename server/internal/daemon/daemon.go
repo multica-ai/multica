@@ -757,11 +757,17 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			Default:  m.Default,
 		})
 	}
-	d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
+	// Debug: log the actual wire payload so we can see what the UI receives.
+	d.logger.Info("model wire payload", "provider", rt.Provider, "count", len(wire))
+	if err := d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
-	})
+	}); err != nil {
+		d.logger.Error("model list report failed", "provider", rt.Provider, "error", err)
+	} else {
+		d.logger.Info("model list report sent successfully", "provider", rt.Provider)
+	}
 }
 
 func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
