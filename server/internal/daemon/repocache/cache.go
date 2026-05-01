@@ -352,12 +352,13 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID        string // workspace that owns the repo
-	RepoURL            string // remote URL to look up in the cache
-	WorkDir            string // parent directory for the worktree (e.g. task workdir)
-	AgentName          string // for branch naming
-	TaskID             string // for branch naming uniqueness
-	CoAuthoredByEnabled bool  // install prepare-commit-msg hook for Co-authored-by trailer
+	WorkspaceID         string // workspace that owns the repo
+	RepoURL             string // remote URL to look up in the cache
+	WorkDir             string // parent directory for the worktree (e.g. task workdir)
+	Ref                 string // optional branch, tag, or commit to base the worktree on
+	AgentName           string // for branch naming
+	TaskID              string // for branch naming uniqueness
+	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -397,13 +398,20 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		)
 	}
 
-	// Determine the default branch to base the worktree on. getRemoteDefaultBranch
-	// walks origin/HEAD → origin/main, origin/master → bare-HEAD hint into
-	// origin/<same> → single-entry scan of origin/* → bare HEAD (only if
-	// origin/* is empty). Reaching "" here means the cache is in a state we
-	// refuse to guess from (no origin/HEAD, no main/master, bare HEAD doesn't
-	// match any origin/* entry, and origin/* has multiple candidates).
-	baseRef := getRemoteDefaultBranch(barePath)
+	// Determine the ref to base the worktree on. By default this is the remote's
+	// default branch. Callers may request a specific branch, tag, or commit so
+	// review/QA agents can inspect the exact revision without trying to mutate
+	// the daemon-owned worktree metadata themselves.
+	baseRef, err := resolveBaseRef(barePath, params.Ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// getRemoteDefaultBranch walks origin/HEAD → origin/main, origin/master →
+	// bare-HEAD hint into origin/<same> → single-entry scan of origin/* → bare
+	// HEAD (only if origin/* is empty). Reaching "" here means the cache is in a
+	// state we refuse to guess from (no origin/HEAD, no main/master, bare HEAD
+	// doesn't match any origin/* entry, and origin/* has multiple candidates).
 	if baseRef == "" {
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
@@ -477,6 +485,32 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		Path:       worktreePath,
 		BranchName: actualBranch,
 	}, nil
+}
+
+func resolveBaseRef(barePath, requestedRef string) (string, error) {
+	ref := strings.TrimSpace(requestedRef)
+	if ref == "" {
+		return getRemoteDefaultBranch(barePath), nil
+	}
+
+	// Prefer remote-tracking branches for human branch names. Then allow full
+	// local refs, tags, and raw commits that exist in the fetched bare cache.
+	candidates := []string{
+		"refs/remotes/origin/" + ref,
+		"refs/tags/" + ref,
+		ref,
+	}
+	for _, candidate := range candidates {
+		if gitRefExists(barePath, candidate+"^{commit}") {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s", ref, barePath)
+}
+
+func gitRefExists(repoPath, ref string) bool {
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", ref)
+	return cmd.Run() == nil
 }
 
 // createWorktree creates a git worktree at the given path with a new branch.
