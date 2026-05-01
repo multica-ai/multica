@@ -4,6 +4,12 @@ kind: Deployment
 metadata:
   name: agentfarm-backend
   namespace: agentfarm
+  annotations:
+    # Must deploy after ElastiCache (wave 3) so agentfarm-redis-connection
+    # secret exists before the pod template is applied. Wave 0 (default)
+    # creates a deadlock: Deployment blocks waiting for the secret, but
+    # ElastiCache waves 2/3 never run because ArgoCD waits for wave 0.
+    argocd.argoproj.io/sync-wave: "4"
   labels:
     app: agentfarm
     component: backend
