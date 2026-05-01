@@ -18,8 +18,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-forge}
       POSTGRES_USER: ${POSTGRES_USER:-forge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+
     volumes:
       - forge_pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -28,6 +27,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/shivasymbl/forge-backend}:${MULTICA_IMAGE_TAG:-latest}
@@ -64,6 +68,10 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/shivasymbl/forge-web}:${MULTICA_IMAGE_TAG:-latest}
@@ -75,6 +83,10 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   forge_pgdata:

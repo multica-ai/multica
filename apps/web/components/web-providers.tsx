@@ -12,11 +12,11 @@ import { PageviewTracker } from "./pageview-tracker";
 
 // Token in localStorage → keep this session in token mode (e.g. Electron
 // desktop, CLI-auth flow). Users on cookie auth don't hit this path.
-// The multica_token key replaced the legacy multica_token key at Forge launch.
+// The forge_token key replaced the legacy forge_token key at Forge launch.
 function hasLegacyToken(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return Boolean(window.localStorage.getItem("multica_token"));
+    return Boolean(window.localStorage.getItem("forge_token"));
   } catch {
     return false;
   }

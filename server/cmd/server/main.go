@@ -118,8 +118,14 @@ func envDuration(name string, def time.Duration) time.Duration {
 func main() {
 	logger.Init()
 
-	// Warn about missing configuration
-	if os.Getenv("JWT_SECRET") == "" {
+	// Fail-closed: refuse to start in production with the insecure literal default.
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") &&
+		(jwtSecret == "" || jwtSecret == "change-me-in-production") {
+		slog.Error("JWT_SECRET is not set or is still the insecure default. Set a random secret (openssl rand -hex 32) before running in production.")
+		os.Exit(1)
+	}
+	if jwtSecret == "" {
 		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
 	}
 	if os.Getenv("RESEND_API_KEY") == "" {

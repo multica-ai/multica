@@ -252,6 +252,20 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce domain allowlist for ALL users (new and existing) if configured.
+	// This gates login, not just signup — existing accounts outside the allowlist
+	// cannot obtain a verification code.
+	if len(h.cfg.AllowedEmailDomains) > 0 {
+		domain := ""
+		if at := strings.Index(email, "@"); at > 0 {
+			domain = email[at+1:]
+		}
+		if !contains(h.cfg.AllowedEmailDomains, domain) {
+			writeError(w, http.StatusForbidden, "email domain not permitted")
+			return
+		}
+	}
+
 	// Check signup restrictions before sending magic link
 	_, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err != nil {

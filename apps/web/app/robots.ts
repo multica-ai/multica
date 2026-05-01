@@ -1,8 +1,6 @@
 import type { MetadataRoute } from "next";
 
 export default function robots(): MetadataRoute.Robots {
-  const baseUrl = "https://forge.asymbl.app";
-
   return {
     rules: [
       {
@@ -10,6 +8,5 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/"],
       },
     ],
-    sitemap: [`${baseUrl}/sitemap.xml`],
   };
 }

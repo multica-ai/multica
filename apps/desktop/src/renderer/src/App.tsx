@@ -73,7 +73,7 @@ function AppContent() {
   // Sync token and start the daemon whenever the user logs in.
   useEffect(() => {
     if (!user) return;
-    const token = localStorage.getItem("multica_token");
+    const token = localStorage.getItem("forge_token");
     if (!token) return;
     const userId = user.id;
     (async () => {

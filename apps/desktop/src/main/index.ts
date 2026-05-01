@@ -49,6 +49,10 @@ function handleDeepLink(url: string): void {
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
       const token = parsed.searchParams.get("token");
       if (token && mainWindow) {
+        // Validate basic JWT shape before dispatching to renderer.
+        // Prevents a crafted deep-link from injecting an arbitrary string.
+        const parts = token.split(".");
+        if (parts.length !== 3 || !parts[0].startsWith("eyJ") || token.length > 4096) return;
         mainWindow.webContents.send("auth:token", token);
       }
       return;
