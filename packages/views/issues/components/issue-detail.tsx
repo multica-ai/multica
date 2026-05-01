@@ -193,6 +193,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
+  const [showAllTimeline, setShowAllTimeline] = useState(false);
+  const INITIAL_VISIBLE_GROUPS = 50;
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -275,6 +277,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   const loading = issueLoading;
+
+  // When a highlight target is specified, expand the full timeline so the
+  // comment is guaranteed to be rendered before we attempt to scroll to it.
+  useEffect(() => {
+    if (highlightCommentId) setShowAllTimeline(true);
+  }, [highlightCommentId]);
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
@@ -924,7 +932,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   }
                 }
 
-                return groups.map((group) => {
+                // Truncate: show only the most recent groups initially
+                const isTruncated = !showAllTimeline && groups.length > INITIAL_VISIBLE_GROUPS;
+                const hiddenCount = isTruncated ? groups.length - INITIAL_VISIBLE_GROUPS : 0;
+                const visibleGroups = isTruncated ? groups.slice(-INITIAL_VISIBLE_GROUPS) : groups;
+
+                const renderGroup = (group: typeof groups[number]) => {
                   if (group.type === "comment") {
                     const entry = group.entries[0]!;
                     return (
@@ -990,7 +1003,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       })}
                     </div>
                   );
-                });
+                };
+
+                return (
+                  <>
+                    {isTruncated && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border py-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        onClick={() => setShowAllTimeline(true)}
+                      >
+                        Show {hiddenCount} earlier {hiddenCount === 1 ? "entry" : "entries"}
+                      </button>
+                    )}
+                    {visibleGroups.map(renderGroup)}
+                  </>
+                );
               })()}
             </div>
 
