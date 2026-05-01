@@ -111,32 +111,6 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
-  // Toggle sidebar with keyboard shortcut (Cmd+B / Ctrl+B).
-  // Skip when focus is inside editable content so the shortcut doesn't
-  // steal Cmd+B (bold) from TipTap / contentEditable / inputs.
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === "b" &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.shiftKey &&
-        !event.altKey
-      ) {
-        const tag = (event.target as HTMLElement)?.tagName
-        const isEditable =
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT" ||
-          (event.target as HTMLElement)?.isContentEditable
-        if (isEditable) return
-        event.preventDefault()
-        toggleSidebar()
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar])
-
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed"
