@@ -7,6 +7,7 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay 
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
 
 interface CommentInputProps {
   issueId: string;
@@ -15,6 +16,7 @@ interface CommentInputProps {
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
+  const submitOnEnter = useSubmitOnEnter();
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -64,6 +66,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onUploadFile={handleUpload}
           debounceMs={100}
           currentIssueId={issueId}
+          submitOnEnter={submitOnEnter}
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">

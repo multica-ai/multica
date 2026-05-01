@@ -71,6 +71,11 @@ func parseMentions(content string) []mention {
 // subscriber. Publishes an inbox:new event for each notification.
 // If the issue has a parent, parent issue subscribers are also notified
 // (deduplicated against direct subscribers).
+//
+// assigneeMemberID is the user_id of the (member) assignee on the changed
+// issue, used to disambiguate split notification types (priority_changed,
+// due_date_changed) — assignees get a stronger default routing than passive
+// subscribers. Pass "" when the issue has no member assignee.
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -85,10 +90,11 @@ func notifySubscribers(
 	title string,
 	body string,
 	details []byte,
+	assigneeMemberID string,
 ) {
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, assigneeMemberID)
 
 	// Also notify parent issue subscribers if this is a sub-issue.
 	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
@@ -115,14 +121,15 @@ func notifySubscribers(
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, assigneeMemberID)
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
 // subscriberIssueID, but creates inbox items pointing to targetIssueID.
 // This allows querying subscribers from a parent issue while the notification
 // links to the sub-issue where the change actually occurred.
-// Returns the set of member IDs that were notified.
+// Returns the set of member IDs that were notified (excluding subscribers
+// whose preference resolved to 'off').
 func notifyIssueSubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -138,6 +145,7 @@ func notifyIssueSubscribers(
 	title string,
 	body string,
 	details []byte,
+	assigneeMemberID string,
 ) map[string]bool {
 	notified := map[string]bool{}
 
@@ -166,6 +174,12 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		isAssignee := assigneeMemberID != "" && subID == assigneeMemberID
+		route := resolveRoute(ctx, queries, "member", subID, notifType, isAssignee)
+		if route == routeOff {
+			continue
+		}
+
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
@@ -178,6 +192,7 @@ func notifyIssueSubscribers(
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       parseUUID(e.ActorID),
 			Details:       details,
+			Route:         route,
 		})
 		if err != nil {
 			slog.Error("subscriber notification creation failed",
@@ -201,7 +216,12 @@ func notifyIssueSubscribers(
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
-// recipient is the actor. Publishes an inbox:new event on success.
+// recipient is the actor or if their routing preference resolved to 'off'.
+// Publishes an inbox:new event on success.
+//
+// recipientIsAssignee disambiguates split notification types
+// (priority_changed, due_date_changed). For non-split types it has no effect
+// — pass false when not applicable.
 func notifyDirect(
 	ctx context.Context,
 	queries *db.Queries,
@@ -217,9 +237,15 @@ func notifyDirect(
 	title string,
 	body string,
 	details []byte,
+	recipientIsAssignee bool,
 ) {
 	// Skip if recipient is the actor
 	if recipientID == e.ActorID {
+		return
+	}
+
+	route := resolveRoute(ctx, queries, recipientType, recipientID, notifType, recipientIsAssignee)
+	if route == routeOff {
 		return
 	}
 
@@ -235,6 +261,7 @@ func notifyDirect(
 		ActorType:     util.StrToText(e.ActorType),
 		ActorID:       parseUUID(e.ActorID),
 		Details:       details,
+		Route:         route,
 	})
 	if err != nil {
 		slog.Error("direct notification creation failed",
@@ -294,11 +321,17 @@ func notifyMentionedMembers(
 		}
 	}
 
+	ctx := context.Background()
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		// "mentioned" is not a split type; isAssignee value doesn't matter.
+		route := resolveRoute(ctx, queries, "member", id, "mentioned", false)
+		if route == routeOff {
+			continue
+		}
+		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),
@@ -309,6 +342,7 @@ func notifyMentionedMembers(
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       parseUUID(e.ActorID),
 			Details:       details,
+			Route:         route,
 		})
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
@@ -360,6 +394,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.Title,
 				"",
 				emptyDetails,
+				true, // recipient IS the new assignee
 			)
 		}
 
@@ -414,6 +449,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					issue.Title,
 					"",
 					assigneeDetails,
+					true, // recipient IS the new assignee
 				)
 			}
 
@@ -426,6 +462,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					issue.Title,
 					"",
 					assigneeDetails,
+					false, // recipient is no longer assignee
 				)
 			}
 
@@ -438,11 +475,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if issue.AssigneeID != nil {
 				exclude[*issue.AssigneeID] = true
 			}
+			currentAssigneeMemberID := responseAssigneeMemberID(issue.AssigneeType, issue.AssigneeID)
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				exclude, "assignee_changed", "info",
 				issue.Title, "",
-				assigneeDetails)
+				assigneeDetails, currentAssigneeMemberID)
 		}
+
+		assigneeMemberID := responseAssigneeMemberID(issue.AssigneeType, issue.AssigneeID)
 
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
@@ -453,7 +493,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
 				issue.Title, "",
-				statusDetails)
+				statusDetails, assigneeMemberID)
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {
@@ -465,7 +505,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "priority_changed", "info",
 				issue.Title, "",
-				priorityDetails)
+				priorityDetails, assigneeMemberID)
 		}
 
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
@@ -484,7 +524,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "due_date_changed", "info",
 				issue.Title, "",
-				dueDateDetails)
+				dueDateDetails, assigneeMemberID)
 		}
 
 		// Notify NEW @mentions in description
@@ -544,10 +584,20 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 		}
 
+		// Look up the issue to know who the current assignee is — needed for
+		// split-type routing on subscribers (new_comment isn't split, but we
+		// pass it for consistency and so future split types Just Work).
+		commentAssigneeMemberID := ""
+		if issueID != "" {
+			if iss, err := queries.GetIssue(ctx, parseUUID(issueID)); err == nil {
+				commentAssigneeMemberID = issueAssigneeMemberID(iss)
+			}
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			nil, "new_comment", "info",
 			issueTitle, commentContent,
-			commentDetails)
+			commentDetails, commentAssigneeMemberID)
 
 		// Notify @mentions in comment content.
 		mentions := parseMentions(commentContent)
@@ -590,6 +640,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			"reaction_added", "info",
 			issueTitle, "",
 			details,
+			false,
 		)
 	})
 
@@ -630,6 +681,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			"reaction_added", "info",
 			issueTitle, "",
 			details,
+			false,
 		)
 	})
 
@@ -667,7 +719,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, "",
-			emptyDetails)
+			emptyDetails,
+			issueAssigneeMemberID(issue))
 	})
 }
 
@@ -681,6 +734,7 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"recipient_id":   util.UUIDToString(item.RecipientID),
 		"type":           item.Type,
 		"severity":       item.Severity,
+		"route":          item.Route,
 		"issue_id":       util.UUIDToPtr(item.IssueID),
 		"title":          item.Title,
 		"body":           util.TextToPtr(item.Body),

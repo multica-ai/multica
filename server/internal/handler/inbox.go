@@ -20,6 +20,7 @@ type InboxItemResponse struct {
 	RecipientID   string          `json:"recipient_id"`
 	Type          string          `json:"type"`
 	Severity      string          `json:"severity"`
+	Route         string          `json:"route"`
 	IssueID       *string         `json:"issue_id"`
 	ProjectID     *string         `json:"project_id"`
 	Title         string          `json:"title"`
@@ -41,6 +42,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		RecipientID:   uuidToString(i.RecipientID),
 		Type:          i.Type,
 		Severity:      i.Severity,
+		Route:         i.Route,
 		IssueID:       uuidToPtr(i.IssueID),
 		Title:         i.Title,
 		Body:          textToPtr(i.Body),
@@ -61,6 +63,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		RecipientID:   uuidToString(r.RecipientID),
 		Type:          r.Type,
 		Severity:      r.Severity,
+		Route:         r.Route,
 		IssueID:       uuidToPtr(r.IssueID),
 		Title:         r.Title,
 		Body:          textToPtr(r.Body),
@@ -149,6 +152,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 			RecipientID:   uuidToString(item.RecipientID),
 			Type:          item.Type,
 			Severity:      item.Severity,
+			Route:         item.Route,
 			IssueID:       uuidToPtr(item.IssueID),
 			ProjectID:     uuidToPtr(item.ProjectID),
 			Title:         item.Title,

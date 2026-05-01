@@ -16,6 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
+import { ContentEditor, type ContentEditorRef } from "../../editor";
 
 export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const wsId = useWorkspaceId();
@@ -34,6 +35,7 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const [fileSize, setFileSize] = React.useState<number | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
+  const editorRef = React.useRef<ContentEditorRef>(null);
 
   React.useEffect(() => {
     if (artifact && !hydrated) {
@@ -45,19 +47,23 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
     }
   }, [artifact, hydrated]);
 
-  if (isLoading || !artifact) {
+  const canEdit =
+    !!artifact &&
+    artifact.author_type === "member" &&
+    artifact.author_id === userId;
+
+  React.useEffect(() => {
+    if (artifact && !canEdit) {
+      router.push(wsPaths.documentDetail(artifact.id));
+    }
+  }, [artifact, canEdit, router, wsPaths]);
+
+  if (isLoading || !artifact || !canEdit) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Loading…
       </div>
     );
-  }
-
-  const canEdit =
-    artifact.author_type === "member" && artifact.author_id === userId;
-  if (!canEdit) {
-    router.push(wsPaths.documentDetail(artifact.id));
-    return null;
   }
 
   const handleFile = async (file: File | undefined) => {
@@ -68,11 +74,15 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   };
 
   const handleSave = async () => {
+    const nextBody =
+      artifact.format === "md"
+        ? editorRef.current?.getMarkdown() ?? body
+        : body;
     await update.mutateAsync({
       id: artifact.id,
       data: {
         title: title.trim(),
-        body,
+        body: nextBody,
         file_url: artifact.format === "pdf" ? fileUrl : undefined,
         file_size_bytes: artifact.format === "pdf" ? fileSize : undefined,
       },
@@ -82,79 +92,89 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-    <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
-      <div className="mb-3 flex items-center justify-between">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push(wsPaths.documentDetail(artifact.id))}
-        >
-          <ArrowLeft className="mr-1 size-4" /> Cancel
-        </Button>
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={update.isPending || !title.trim()}
-        >
-          {update.isPending ? "Saving…" : "Save"}
-        </Button>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="doc-title">Title</Label>
-          <Input
-            id="doc-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Title"
-          />
+      <div className="mx-auto w-full max-w-5xl px-4 py-4 md:px-8 md:py-6">
+        <div className="mb-3 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push(wsPaths.documentDetail(artifact.id))}
+          >
+            <ArrowLeft className="mr-1 size-4" /> Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={update.isPending || !title.trim()}
+          >
+            {update.isPending ? "Saving…" : "Save"}
+          </Button>
         </div>
 
-        {artifact.format === "pdf" ? (
-          <div className="flex flex-col gap-2">
-            <Label>PDF file</Label>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="application/pdf"
-              className="hidden"
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
-            <div className="flex items-center justify-between rounded border border-border bg-card/40 px-3 py-2 text-xs">
-              <span className="text-muted-foreground">
-                {fileUrl
-                  ? fileUrl.split("/").pop()
-                  : "No PDF uploaded"}
-                {fileSize ? ` · ${(fileSize / 1024).toFixed(1)} KB` : ""}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => fileInput.current?.click()}
-                disabled={upload.isPending}
-              >
-                <Upload className="mr-1 size-4" />
-                {upload.isPending ? "Uploading…" : fileUrl ? "Replace" : "Upload"}
-              </Button>
-            </div>
-          </div>
-        ) : (
+        <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="doc-body">
-              Body ({artifact.format === "html" ? "HTML" : "Markdown"})
-            </Label>
-            <Textarea
-              id="doc-body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={
-                artifact.format === "html" ? "<p>HTML</p>" : "Markdown content"
-              }
-              className="min-h-[60vh] font-mono text-sm"
+            <Label htmlFor="doc-title">Title</Label>
+            <Input
+              id="doc-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Title"
             />
           </div>
-        )}
+
+          {artifact.format === "pdf" ? (
+            <div className="flex flex-col gap-2">
+              <Label>PDF file</Label>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+              <div className="flex items-center justify-between rounded border border-border bg-card/40 px-3 py-2 text-xs">
+                <span className="text-muted-foreground">
+                  {fileUrl
+                    ? fileUrl.split("/").pop()
+                    : "No PDF uploaded"}
+                  {fileSize ? ` · ${(fileSize / 1024).toFixed(1)} KB` : ""}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={upload.isPending}
+                >
+                  <Upload className="mr-1 size-4" />
+                  {upload.isPending ? "Uploading…" : fileUrl ? "Replace" : "Upload"}
+                </Button>
+              </div>
+            </div>
+          ) : artifact.format === "md" ? (
+            <div className="flex flex-col gap-1">
+              <Label>Body</Label>
+              <div className="rounded-md border border-input bg-background px-3 py-2 min-h-[60vh]">
+                {hydrated && (
+                  <ContentEditor
+                    ref={editorRef}
+                    defaultValue={artifact.body}
+                    placeholder="Write something…"
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="doc-body">Body (HTML)</Label>
+              <Textarea
+                id="doc-body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder="<p>HTML</p>"
+                className="min-h-[60vh] font-mono text-sm"
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
     </div>

@@ -336,7 +336,7 @@ func (q *Queries) ListInboxFolders(ctx context.Context, arg ListInboxFoldersPara
 }
 
 const listInboxItemsInFolder = `-- name: ListInboxItemsInFolder :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -345,6 +345,7 @@ JOIN inbox_folder_membership m
   ON m.item_type = 'notification' AND m.item_id = i.id
 JOIN inbox_folder f
   ON f.id = m.folder_id AND f.id = $1 AND f.workspace_id = $2 AND f.user_id = $3
+WHERE i.route = 'inbox'
 ORDER BY i.created_at DESC
 `
 
@@ -370,11 +371,13 @@ type ListInboxItemsInFolderRow struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
-// Inbox items in a specific folder (regardless of archived flag).
+// Inbox-routed items (route='inbox') in a specific folder (regardless of
+// archived flag). Notifications-routed items can't be filed in folders.
 func (q *Queries) ListInboxItemsInFolder(ctx context.Context, arg ListInboxItemsInFolderParams) ([]ListInboxItemsInFolderRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItemsInFolder, arg.ID, arg.WorkspaceID, arg.UserID)
 	if err != nil {
@@ -400,6 +403,7 @@ func (q *Queries) ListInboxItemsInFolder(ctx context.Context, arg ListInboxItems
 			&i.ActorType,
 			&i.ActorID,
 			&i.Details,
+			&i.Route,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -414,7 +418,7 @@ func (q *Queries) ListInboxItemsInFolder(ctx context.Context, arg ListInboxItems
 }
 
 const listInboxItemsUnfiled = `-- name: ListInboxItemsUnfiled :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -423,6 +427,7 @@ WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
   AND i.archived = false
+  AND i.route = 'inbox'
   AND NOT EXISTS (
     SELECT 1 FROM inbox_folder_membership m
     WHERE m.item_type = 'notification' AND m.item_id = i.id
@@ -452,11 +457,13 @@ type ListInboxItemsUnfiledRow struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
-// Inbox items that are not archived and not in any folder.
+// Inbox-routed items (route='inbox') that are not archived and not in any folder.
+// Notifications-routed items live on a separate page; see ListNotificationsItems.
 func (q *Queries) ListInboxItemsUnfiled(ctx context.Context, arg ListInboxItemsUnfiledParams) ([]ListInboxItemsUnfiledRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItemsUnfiled, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
@@ -482,6 +489,89 @@ func (q *Queries) ListInboxItemsUnfiled(ctx context.Context, arg ListInboxItemsU
 			&i.ActorType,
 			&i.ActorID,
 			&i.Details,
+			&i.Route,
+			&i.IssueStatus,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsItems = `-- name: ListNotificationsItems :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'notifications'
+ORDER BY i.created_at DESC
+`
+
+type ListNotificationsItemsParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListNotificationsItemsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+}
+
+// Notifications-routed items (route='notifications') that are not archived.
+// Mirrors ListInboxItemsUnfiled but for the lighter-weight notifications page.
+func (q *Queries) ListNotificationsItems(ctx context.Context, arg ListNotificationsItemsParams) ([]ListNotificationsItemsRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationsItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationsItemsRow{}
+	for rows.Next() {
+		var i ListNotificationsItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.Route,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {

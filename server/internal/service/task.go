@@ -35,6 +35,10 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	if s.IsWorkspacePaused(ctx, issue.WorkspaceID) {
+		slog.Info("task enqueue blocked: workspace paused", "issue_id", util.UUIDToString(issue.ID))
+		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -79,6 +83,10 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if s.IsWorkspacePaused(ctx, issue.WorkspaceID) {
+		slog.Info("mention task enqueue blocked: workspace paused", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -112,6 +120,10 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
 func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
+	if s.IsWorkspacePaused(ctx, chatSession.WorkspaceID) {
+		slog.Info("chat task enqueue blocked: workspace paused", "chat_session_id", util.UUIDToString(chatSession.ID))
+		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")
+	}
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -176,6 +188,14 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
+	}
+
+	// Defense-in-depth: even if a task survived the bulk-cancel during pause
+	// (e.g. created in the brief window between toggle and cancel), don't
+	// claim it. The enqueue gate is the primary guard; this is the safety net.
+	if s.IsWorkspacePaused(ctx, agent.WorkspaceID) {
+		slog.Debug("task claim blocked: workspace paused", "agent_id", util.UUIDToString(agentID))
+		return nil, nil
 	}
 
 	running, err := s.Queries.CountRunningTasks(ctx, agentID)

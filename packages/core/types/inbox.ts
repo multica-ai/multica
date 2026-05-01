@@ -37,6 +37,12 @@ export interface InboxFolderMembership {
   added_at: string;
 }
 
+// Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
+// 'notifications' = lightweight notifications page anchored in the bottom of
+// the sidebar. The route is decided server-side at insert time from the
+// recipient's preferences and is read-only on the client.
+export type InboxRoute = "inbox" | "notifications";
+
 export interface InboxItem {
   id: string;
   workspace_id: string;
@@ -46,6 +52,7 @@ export interface InboxItem {
   actor_id: string | null;
   type: InboxItemType;
   severity: InboxSeverity;
+  route: InboxRoute;
   issue_id: string | null;
   project_id: string | null;
   title: string;

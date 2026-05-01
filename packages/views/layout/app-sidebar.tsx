@@ -72,6 +72,8 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+import { notificationsListOptions } from "@multica/core/notifications/queries";
+import { useArchiveAllNotifications } from "@multica/core/notifications/mutations";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
@@ -92,6 +94,7 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_NOTIFICATIONS: Awaited<ReturnType<typeof api.listNotifications>> = [];
 const EMPTY_PROJECTS: Project[] = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
@@ -234,6 +237,15 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
+  const { data: notifications = EMPTY_NOTIFICATIONS } = useQuery({
+    ...notificationsListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const visibleNotifications = React.useMemo(
+    () => notifications.filter((n) => !n.archived),
+    [notifications],
+  );
+  const archiveAllNotifications = useArchiveAllNotifications();
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: projects = EMPTY_PROJECTS } = useQuery({
     ...projectListOptions(wsId ?? ""),
@@ -637,6 +649,44 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          {wsId && (
+            <AppLink
+              href={p.notifications()}
+              data-testid="sidebar-notifications-link"
+              className={cn(
+                "group/notif flex items-center justify-between gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors",
+                pathname === p.notifications()
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                Notifications
+                {visibleNotifications.length > 0 && (
+                  <span
+                    data-testid="sidebar-notifications-count"
+                    className="rounded-full bg-muted px-1.5 text-[10px] font-semibold normal-case tracking-normal text-muted-foreground"
+                  >
+                    {visibleNotifications.length}
+                  </span>
+                )}
+              </span>
+              {visibleNotifications.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="sidebar-notifications-clear"
+                  className="text-[11px] font-medium normal-case tracking-normal text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/notif:opacity-100"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    archiveAllNotifications.mutate();
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </AppLink>
+          )}
           <div className="border-t pt-2">
             <Popover>
               <PopoverTrigger className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent transition-colors cursor-pointer">

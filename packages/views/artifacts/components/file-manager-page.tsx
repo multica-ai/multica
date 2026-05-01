@@ -689,8 +689,10 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
 
       {/* Main: breadcrumbs, toolbar, list */}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Toolbar — single row on desktop, two-row stack on mobile */}
-        <div className="flex flex-col gap-2 border-b border-border px-4 py-2 md:flex-row md:items-center md:justify-between md:gap-3 md:px-6">
+        {/* Toolbar — single row on desktop, two-row stack on mobile.
+            md:flex-wrap so rows fall to a second line when the main panel is
+            narrow (e.g. with the folder sidebar visible at ~768–900px). */}
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-2 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-3 md:px-6">
           {/* Row 1: folder access + breadcrumb + primary action */}
           <div className="flex min-w-0 items-center gap-2">
             <Sheet open={foldersSheetOpen} onOpenChange={setFoldersSheetOpen}>
@@ -882,7 +884,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col text-sm md:grid md:grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px]">
+            <div className="flex flex-col text-sm md:grid md:min-w-[820px] md:grid-cols-[56px_minmax(0,1fr)_100px_80px_160px_120px_110px_44px]">
               {/* Mobile-only header: just select-all */}
               <div className="flex items-center justify-between border-b border-border bg-muted/20 px-4 py-1.5 text-xs font-medium uppercase text-muted-foreground md:hidden">
                 <label className="flex cursor-pointer items-center gap-2">
@@ -1020,6 +1022,9 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
+                    onDoubleClick={() =>
+                      router.push(wsPaths.documentEdit(a.id))
+                    }
                     className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:items-center md:gap-0 md:border-b-0 md:px-6 md:py-2"
                   >
                     <div

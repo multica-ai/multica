@@ -8,6 +8,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
+import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,7 @@ function ReplyInput({
 }: ReplyInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
   const measureRef = useRef<HTMLDivElement>(null);
+  const submitOnEnter = useSubmitOnEnter();
   const [isEmpty, setIsEmpty] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -111,6 +113,7 @@ function ReplyInput({
               onUploadFile={handleUpload}
               debounceMs={100}
               currentIssueId={issueId}
+              submitOnEnter={submitOnEnter}
             />
           </div>
         </div>

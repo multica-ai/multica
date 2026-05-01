@@ -27,6 +27,7 @@ import { SkillsPage } from "@multica/views/skills";
 import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
+import { NotificationsPage } from "@multica/views/notifications";
 import { SettingsPage } from "@multica/views/settings";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
@@ -153,6 +154,11 @@ export const appRoutes: RouteObject[] = [
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          {
+            path: "notifications",
+            element: <NotificationsPage />,
+            handle: { title: "Notifications" },
+          },
           {
             path: "settings",
             element: (

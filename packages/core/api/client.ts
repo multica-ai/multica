@@ -266,6 +266,15 @@ export class ApiClient {
     await this.fetch("/api/me/profile", { method: "DELETE" });
   }
 
+  // Fork-specific: per-user preferences (composer keybinding, etc.)
+  async updateMyPreferences(patch: Record<string, unknown>): Promise<User> {
+    return this.fetch("/api/me/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
@@ -593,6 +602,25 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
+  // Notifications (route='notifications'). Single-item operations
+  // (mark-read, archive) reuse the inbox endpoints since the route flag is
+  // set server-side at insert time and doesn't change after that.
+  async listNotifications(): Promise<InboxItem[]> {
+    return this.fetch("/api/inbox/notifications");
+  }
+
+  async getUnreadNotificationsCount(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/notifications/unread-count");
+  }
+
+  async markAllNotificationsRead(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/notifications/mark-all-read", { method: "POST" });
+  }
+
+  async archiveAllNotifications(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/notifications/archive-all", { method: "POST" });
+  }
+
   // Inbox folders
   async listInboxFolders(): Promise<InboxFolder[]> {
     return this.fetch("/api/inbox/folders");
@@ -674,6 +702,14 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Fork-specific: workspace kill switch.
+  async pauseWorkspaceTasks(id: string, paused: boolean): Promise<{ workspace: Workspace; cancelled_count: number }> {
+    return this.fetch(`/api/workspaces/${id}/pause-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ paused }),
     });
   }
 

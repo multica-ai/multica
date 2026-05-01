@@ -34,6 +34,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { KillSwitchSection } from "./kill-switch-section";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
@@ -248,6 +249,13 @@ export function WorkspaceTab() {
           </CardContent>
         </Card>
       </section>
+
+      {/* Fork-specific: workspace kill switch (admin/owner only).
+          Gated on the member query settling so non-managers don't see a
+          briefly-enabled toggle flash to disabled after mount. */}
+      {membersFetched && (
+        <KillSwitchSection workspace={workspace} canManage={canManageWorkspace} />
+      )}
 
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in

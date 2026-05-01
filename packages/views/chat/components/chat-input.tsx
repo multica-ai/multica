@@ -13,6 +13,7 @@ import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
+import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
 
 const logger = createLogger("chat.ui");
 
@@ -36,6 +37,7 @@ export function ChatInput({
   leftAdornment,
 }: ChatInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
+  const submitOnEnter = useSubmitOnEnter();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Scope the new-chat draft by agent:
@@ -113,8 +115,10 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Enter sends; Shift-Enter inserts a hard break.
-            submitOnEnter
+            // Driven by user preference (Settings → Account):
+            //   true  → Enter sends, Shift+Enter inserts newline
+            //   false → Cmd/Ctrl+Enter sends, Enter inserts newline
+            submitOnEnter={submitOnEnter}
           />
         </div>
         {leftAdornment && (

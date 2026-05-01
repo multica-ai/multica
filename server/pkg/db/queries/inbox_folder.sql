@@ -68,7 +68,8 @@ JOIN inbox_folder f ON f.id = m.folder_id
 WHERE f.workspace_id = $1 AND f.user_id = $2;
 
 -- name: ListInboxItemsUnfiled :many
--- Inbox items that are not archived and not in any folder.
+-- Inbox-routed items (route='inbox') that are not archived and not in any folder.
+-- Notifications-routed items live on a separate page; see ListNotificationsItems.
 SELECT i.*,
        iss.status as issue_status,
        iss.project_id as project_id
@@ -78,6 +79,7 @@ WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
   AND i.archived = false
+  AND i.route = 'inbox'
   AND NOT EXISTS (
     SELECT 1 FROM inbox_folder_membership m
     WHERE m.item_type = 'notification' AND m.item_id = i.id
@@ -85,7 +87,8 @@ WHERE i.workspace_id = $1
 ORDER BY i.created_at DESC;
 
 -- name: ListInboxItemsInFolder :many
--- Inbox items in a specific folder (regardless of archived flag).
+-- Inbox-routed items (route='inbox') in a specific folder (regardless of
+-- archived flag). Notifications-routed items can't be filed in folders.
 SELECT i.*,
        iss.status as issue_status,
        iss.project_id as project_id
@@ -95,6 +98,22 @@ JOIN inbox_folder_membership m
   ON m.item_type = 'notification' AND m.item_id = i.id
 JOIN inbox_folder f
   ON f.id = m.folder_id AND f.id = $1 AND f.workspace_id = $2 AND f.user_id = $3
+WHERE i.route = 'inbox'
+ORDER BY i.created_at DESC;
+
+-- name: ListNotificationsItems :many
+-- Notifications-routed items (route='notifications') that are not archived.
+-- Mirrors ListInboxItemsUnfiled but for the lighter-weight notifications page.
+SELECT i.*,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'notifications'
 ORDER BY i.created_at DESC;
 
 -- name: ListChatSessionsUnfiled :many

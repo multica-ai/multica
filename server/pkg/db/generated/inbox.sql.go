@@ -13,7 +13,8 @@ import (
 
 const archiveAllInbox = `-- name: ArchiveAllInbox :execrows
 UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND route = 'inbox'
 `
 
 type ArchiveAllInboxParams struct {
@@ -29,9 +30,29 @@ func (q *Queries) ArchiveAllInbox(ctx context.Context, arg ArchiveAllInboxParams
 	return result.RowsAffected(), nil
 }
 
+const archiveAllNotifications = `-- name: ArchiveAllNotifications :execrows
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND route = 'notifications'
+`
+
+type ArchiveAllNotificationsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+func (q *Queries) ArchiveAllNotifications(ctx context.Context, arg ArchiveAllNotificationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveAllNotifications, arg.WorkspaceID, arg.RecipientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const archiveAllReadInbox = `-- name: ArchiveAllReadInbox :execrows
 UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND read = true AND archived = false
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND read = true AND archived = false AND route = 'inbox'
 `
 
 type ArchiveAllReadInboxParams struct {
@@ -49,7 +70,8 @@ func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInb
 
 const archiveCompletedInbox = `-- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
-WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2
+  AND i.archived = false AND i.route = 'inbox'
   AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'))
 `
 
@@ -94,7 +116,7 @@ func (q *Queries) ArchiveInboxByIssue(ctx context.Context, arg ArchiveInboxByIss
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
 `
 
 func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -116,13 +138,15 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+		&i.Route,
 	)
 	return i, err
 }
 
 const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
+  AND read = false AND archived = false AND route = 'inbox'
 `
 
 type CountUnreadInboxParams struct {
@@ -138,13 +162,32 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 	return count, err
 }
 
+const countUnreadNotifications = `-- name: CountUnreadNotifications :one
+SELECT count(*) FROM inbox_item
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
+  AND read = false AND archived = false AND route = 'notifications'
+`
+
+type CountUnreadNotificationsParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+func (q *Queries) CountUnreadNotifications(ctx context.Context, arg CountUnreadNotificationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadNotifications, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+    actor_type, actor_id, details, route
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
 `
 
 type CreateInboxItemParams struct {
@@ -159,6 +202,7 @@ type CreateInboxItemParams struct {
 	ActorType     pgtype.Text `json:"actor_type"`
 	ActorID       pgtype.UUID `json:"actor_id"`
 	Details       []byte      `json:"details"`
+	Route         string      `json:"route"`
 }
 
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
@@ -174,6 +218,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.ActorType,
 		arg.ActorID,
 		arg.Details,
+		arg.Route,
 	)
 	var i InboxItem
 	err := row.Scan(
@@ -192,12 +237,13 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+		&i.Route,
 	)
 	return i, err
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route FROM inbox_item
 WHERE id = $1
 `
 
@@ -220,12 +266,13 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+		&i.Route,
 	)
 	return i, err
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route FROM inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -253,12 +300,13 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+		&i.Route,
 	)
 	return i, err
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -288,9 +336,13 @@ type ListInboxItemsRow struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 }
 
+// Generic non-archived listing across both routes. Used only by tests today;
+// production paths use the route-specific ListInboxItemsUnfiled (route='inbox')
+// and ListNotificationsItems (route='notifications') queries.
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
@@ -316,6 +368,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.ActorType,
 			&i.ActorID,
 			&i.Details,
+			&i.Route,
 			&i.IssueStatus,
 		); err != nil {
 			return nil, err
@@ -330,7 +383,8 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 
 const markAllInboxRead = `-- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND read = false AND route = 'inbox'
 `
 
 type MarkAllInboxReadParams struct {
@@ -346,10 +400,29 @@ func (q *Queries) MarkAllInboxRead(ctx context.Context, arg MarkAllInboxReadPara
 	return result.RowsAffected(), nil
 }
 
+const markAllNotificationsRead = `-- name: MarkAllNotificationsRead :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND read = false AND route = 'notifications'
+`
+
+type MarkAllNotificationsReadParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+func (q *Queries) MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markAllNotificationsRead, arg.WorkspaceID, arg.RecipientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markInboxRead = `-- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
 `
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -371,6 +444,7 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+		&i.Route,
 	)
 	return i, err
 }

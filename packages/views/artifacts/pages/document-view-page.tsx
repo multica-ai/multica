@@ -85,6 +85,28 @@ function stripLeadingTitleHeading(body: string, title: string, format: string): 
   return body;
 }
 
+function slugifyForFilename(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "document"
+  );
+}
+
+function downloadBlob(content: string, mime: string, filename: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * The "people + things" line under the title — author and the issues / project
  * the document is connected to. Each is clickable: agent goes to the agent
@@ -245,14 +267,37 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     artifact.format,
   );
 
+  const handleDownload = () => {
+    const slug = slugifyForFilename(artifact.title);
+    if (artifact.format === "pdf") {
+      if (artifact.file_url) window.open(artifact.file_url, "_blank", "noreferrer");
+      return;
+    }
+    if (artifact.format === "html") {
+      downloadBlob(artifact.body, "text/html;charset=utf-8", `${slug}.html`);
+      return;
+    }
+    downloadBlob(artifact.body, "text/markdown;charset=utf-8", `${slug}.md`);
+  };
+
+  const canDownload =
+    (artifact.format === "pdf" && Boolean(artifact.file_url)) ||
+    ((artifact.format === "html" || artifact.format === "md") &&
+      Boolean(artifact.body));
+
   return (
     <div className="h-full overflow-y-auto">
-    <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+      <div className="mx-auto w-full max-w-5xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
           <ArrowLeft className="mr-1 size-4" /> Documents
         </Button>
         <div className="flex items-center gap-1">
+          {canDownload && (
+            <Button variant="ghost" size="sm" onClick={handleDownload}>
+              <Download className="mr-1 size-4" /> Download
+            </Button>
+          )}
           {canEdit && (
             <>
               <Button variant="ghost" size="sm" onClick={startRename}>
@@ -338,15 +383,6 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
                   ? ` · ${formatBytes(artifact.file_size_bytes)}`
                   : ""}
               </span>
-              <a
-                href={artifact.file_url}
-                download
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent"
-              >
-                <Download className="size-3.5" /> Download
-              </a>
             </div>
             <iframe
               src={artifact.file_url}
@@ -356,10 +392,13 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           </div>
         ) : artifact.format === "html" ? (
           isFullHtmlDocument(renderedBody) ? (
+            // Sandboxed iframe isolates the document's CSS from the app shell
+            // and blocks scripts — agents can write HTML, so this is the
+            // trust boundary.
             <iframe
               srcDoc={renderedBody}
+              sandbox=""
               title={artifact.title}
-              sandbox="allow-scripts allow-same-origin allow-popups"
               className="h-[80vh] w-full rounded border border-border bg-white"
             />
           ) : (
@@ -395,6 +434,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
     </div>
     </div>
   );

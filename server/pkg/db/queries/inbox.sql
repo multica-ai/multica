@@ -1,4 +1,7 @@
 -- name: ListInboxItems :many
+-- Generic non-archived listing across both routes. Used only by tests today;
+-- production paths use the route-specific ListInboxItemsUnfiled (route='inbox')
+-- and ListNotificationsItems (route='notifications') queries.
 SELECT i.*,
        iss.status as issue_status
 FROM inbox_item i
@@ -18,8 +21,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    actor_type, actor_id, details, route
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: MarkInboxRead :one
@@ -38,21 +41,41 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_
 
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
+  AND read = false AND archived = false AND route = 'inbox';
+
+-- name: CountUnreadNotifications :one
+SELECT count(*) FROM inbox_item
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
+  AND read = false AND archived = false AND route = 'notifications';
 
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND read = false AND route = 'inbox';
+
+-- name: MarkAllNotificationsRead :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND read = false AND route = 'notifications';
 
 -- name: ArchiveAllInbox :execrows
 UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND route = 'inbox';
+
+-- name: ArchiveAllNotifications :execrows
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND archived = false AND route = 'notifications';
 
 -- name: ArchiveAllReadInbox :execrows
 UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND read = true AND archived = false;
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND read = true AND archived = false AND route = 'inbox';
 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
-WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
+WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2
+  AND i.archived = false AND i.route = 'inbox'
   AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'));

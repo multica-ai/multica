@@ -1,15 +1,21 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { inboxKeys } from "./queries";
+import { notificationsKeys } from "../notifications/queries";
 import type { InboxItem, IssueStatus } from "../types";
 
 export function onInboxNew(
   qc: QueryClient,
   wsId: string,
-  _item: InboxItem,
+  item: InboxItem,
 ) {
-  // Use invalidateQueries instead of setQueryData — triggers a refetch that
-  // reliably notifies all observers. The inbox list is small so this is cheap.
-  qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  // Route decides which list got a new item. Both are small, so an extra
+  // invalidate is cheaper than missing the right cache.
+  if (item.route === "notifications") {
+    qc.invalidateQueries({ queryKey: notificationsKeys.list(wsId) });
+    qc.invalidateQueries({ queryKey: notificationsKeys.unreadCount(wsId) });
+  } else {
+    qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  }
 }
 
 export function onInboxIssueStatusChanged(
@@ -23,8 +29,15 @@ export function onInboxIssueStatusChanged(
       i.issue_id === issueId ? { ...i, issue_status: status } : i,
     ),
   );
+  qc.setQueryData<InboxItem[]>(notificationsKeys.list(wsId), (old) =>
+    old?.map((i) =>
+      i.issue_id === issueId ? { ...i, issue_status: status } : i,
+    ),
+  );
 }
 
 export function onInboxInvalidate(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: notificationsKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: notificationsKeys.unreadCount(wsId) });
 }

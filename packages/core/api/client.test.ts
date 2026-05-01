@@ -106,4 +106,41 @@ describe("ApiClient", () => {
       { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
     ]);
   });
+
+  it("pauseWorkspaceTasks POSTs to the workspace pause endpoint with the paused flag", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        workspace: { id: "ws-1", settings: { tasks_paused: true } },
+        cancelled_count: 4,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const res = await client.pauseWorkspaceTasks("ws-1", true);
+
+    expect(res.cancelled_count).toBe(4);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/workspaces/ws-1/pause-tasks");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ paused: true }));
+  });
+
+  it("updateMyPreferences PATCHes the preferences endpoint with the partial blob", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: "u-1",
+        preferences: { submit_on_enter: true },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.updateMyPreferences({ submit_on_enter: true });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/me/preferences");
+    expect(init?.method).toBe("PATCH");
+    expect(init?.body).toBe(JSON.stringify({ submit_on_enter: true }));
+  });
 });

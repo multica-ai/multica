@@ -174,6 +174,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/api/me/profile", h.GetMyProfile)
 		r.Put("/api/me/profile", h.UpsertMyProfile)
 		r.Delete("/api/me/profile", h.DeleteMyProfile)
+		r.Patch("/api/me/preferences", h.UpdateMyPreferences)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 
@@ -194,6 +195,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
+					r.Post("/pause-tasks", h.PauseWorkspaceTasks)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
@@ -424,6 +426,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+
+				// Notifications (route='notifications'). Single-item operations
+				// (mark-read, archive) reuse the inbox endpoints above; only the
+				// list/count/bulk endpoints are split.
+				r.Get("/notifications", h.ListNotifications)
+				r.Get("/notifications/unread-count", h.CountUnreadNotifications)
+				r.Post("/notifications/mark-all-read", h.MarkAllNotificationsRead)
+				r.Post("/notifications/archive-all", h.ArchiveAllNotifications)
 				// Folders
 				r.Get("/folders", h.ListInboxFolders)
 				r.Post("/folders", h.CreateInboxFolder)

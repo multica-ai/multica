@@ -25,8 +25,8 @@ export async function loginAsDefault(page: Page): Promise<string> {
   await page.evaluate((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
-  await page.goto(`/${workspace.slug}/issues`);
-  await page.waitForURL("**/issues", { timeout: 10000 });
+  await page.goto(`/${workspace.slug}/issues`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL("**/issues", { timeout: 15000 });
   return workspace.slug;
 }
 
