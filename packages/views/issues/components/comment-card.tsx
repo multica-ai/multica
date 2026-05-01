@@ -40,6 +40,30 @@ import type { TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Flatten a reply tree into a chronological list. Depth-first traversal alone
+// places a sibling's deep descendants before later siblings, scrambling the
+// visible order — sort by created_at after collection to fix that.
+export function flattenReplies(
+  rootId: string,
+  repliesByParent: Map<string, TimelineEntry[]>,
+): TimelineEntry[] {
+  const flat: TimelineEntry[] = [];
+  const visit = (parentId: string) => {
+    const children = repliesByParent.get(parentId) ?? [];
+    for (const child of children) {
+      flat.push(child);
+      visit(child.id);
+    }
+  };
+  visit(rootId);
+  flat.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return flat;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -337,16 +361,7 @@ function CommentCard({
     }
   };
 
-  // Collect all nested replies recursively into a flat list
-  const allNestedReplies: TimelineEntry[] = [];
-  const collectReplies = (parentId: string) => {
-    const children = allReplies.get(parentId) ?? [];
-    for (const child of children) {
-      allNestedReplies.push(child);
-      collectReplies(child.id);
-    }
-  };
-  collectReplies(entry.id);
+  const allNestedReplies = flattenReplies(entry.id, allReplies);
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
