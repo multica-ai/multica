@@ -88,7 +88,7 @@ func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// writeProjectResources writes .forge/project/resources.json into the
+// writeProjectResources writes .multica/project/resources.json into the
 // working directory when the task carries project context. The file is
 // always written when a project is attached (even with zero resources) so
 // agents can rely on its presence as a signal that a project exists.
@@ -96,7 +96,7 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
 	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
 		return nil
 	}
-	dir := filepath.Join(workDir, ".forge", "project")
+	dir := filepath.Join(workDir, ".multica", "project")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `forge issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
@@ -240,26 +240,19 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 }
 
 // renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// There is no issue yet, so we explicitly tell the agent NOT to call
-// `forge issue get` / `status` / `comment add` — those would either error
-// (empty IssueID) or silently target an unrelated issue.
+// This file carries only task data (user input, skills). Behavioral rules
+// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
+// to avoid redundancy and conflicting instructions.
 func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 	b.WriteString("# Quick Create\n\n")
 	b.WriteString("**Trigger:** Quick-create modal\n\n")
-	b.WriteString("There is NO existing Forge issue for this run. Translate the user input below into a single `forge issue create` invocation, then exit.\n\n")
 	b.WriteString("## User input\n\n")
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	b.WriteString("## Rules\n\n")
-	b.WriteString("- Run exactly one `forge issue create` invocation. No retries.\n")
-	b.WriteString("- After it succeeds, print `Created MUL-<n>: <title>` and exit.\n")
-	b.WriteString("- Do NOT run `forge issue get`, `forge issue status`, or `forge issue comment add` — there is nothing to query, transition, or comment on.\n")
-	b.WriteString("- The platform writes the user's success/failure inbox notification automatically based on the CLI exit status.\n\n")
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available, but for quick-create they are usually unnecessary:\n\n")
 		for _, skill := range ctx.AgentSkills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
@@ -287,9 +280,9 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
-	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `forge issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
+	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `multica issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
 	if ctx.AutopilotID != "" {
-		fmt.Fprintf(&b, "Run `forge autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
+		fmt.Fprintf(&b, "Run `multica autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
 	}
 	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
 		b.WriteString("## Autopilot Instructions\n\n")
