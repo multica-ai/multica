@@ -145,6 +145,9 @@ const MODEL_PRICING: Record<
 
   // -- Older Haiku tier (defensive entry for the rare runtime still on it) --
   "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
+
+  // -- Xiaomi MiMo --
+  "mimo/mimo-v2.5-pro": { input: 1,    output: 3,    cacheRead: 0.20, cacheWrite: 0 },
 };
 
 // Resolve a model string to its pricing tier. Two layers of fallback so the
@@ -472,3 +475,4 @@ export function pctChange(current: number, previous: number): number | null {
   if (previous <= 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
+
