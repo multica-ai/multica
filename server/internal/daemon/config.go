@@ -18,7 +18,7 @@ const (
 	DefaultHeartbeatInterval              = 15 * time.Second
 	DefaultAgentTimeout                   = 2 * time.Hour
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
-	DefaultAPITimeout                     = 60 * time.Second // HTTP client timeout for daemon API calls (heartbeat, register, etc.)
+	DefaultAPITimeout                     = 120 * time.Second // HTTP client timeout for daemon API calls (heartbeat, register, etc.)
 	DefaultRuntimeName                    = "Local Agent"
 	DefaultWorkspaceSyncInterval          = 30 * time.Second
 	DefaultHealthPort                     = 19514

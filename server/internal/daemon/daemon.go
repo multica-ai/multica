@@ -81,6 +81,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Apply configured API timeout if non-zero (default 30s in NewClient is preserved for external callers)
 	if cfg.APITimeout > 0 {
 		client.SetTimeout(cfg.APITimeout)
+		logger.Info("API timeout configured", "timeout_seconds", cfg.APITimeout.Seconds())
+	} else {
+		logger.Info("API timeout using default", "timeout_seconds", 30)
 	}
 	return &Daemon{
 		cfg:           cfg,
