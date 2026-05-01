@@ -739,6 +739,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
+	d.logger.Info("model discovery completed", "provider", rt.Provider, "count", len(models), "supported", agent.ModelSelectionSupported(rt.Provider))
 	// map[string]string) so the Default bool round-trips — without
 	// it the UI loses its "default" badge on the advertised pick.
 	type modelWire struct {

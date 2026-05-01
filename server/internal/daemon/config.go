@@ -129,6 +129,21 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
+	if hermesPath == "hermes" {
+		// Try fallback locations before giving up. The daemon may be
+		// started with a minimal PATH that doesn't include ~/.local/bin
+		// or a venv path, so we probe common hermes install locations.
+		home, _ := os.UserHomeDir()
+		for _, candidate := range []string{
+			filepath.Join(home, ".local", "bin", "hermes"),
+			filepath.Join(home, "hermes-agent", ".venv", "bin", "hermes"),
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				hermesPath = candidate
+				break
+			}
+		}
+	}
 	if _, err := exec.LookPath(hermesPath); err == nil {
 		agents["hermes"] = AgentEntry{
 			Path:  hermesPath,
