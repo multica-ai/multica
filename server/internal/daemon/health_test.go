@@ -142,3 +142,109 @@ func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {
 		t.Errorf("active_task_count: got %d, want %d", resp.ActiveTaskCount, want)
 	}
 }
+
+// TestProbeBackendConnectivity covers the three states the helper can
+// return: "connected" when the configured URL responds 2xx on /health,
+// "unreachable" when the request fails (connection refused, non-2xx, or
+// timeout), and "unknown" when no ServerBaseURL is configured.
+func TestProbeBackendConnectivity(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns connected when backend responds 2xx", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/health" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		got := probeBackendConnectivity(context.Background(), srv.URL)
+		if got != "connected" {
+			t.Errorf("got %q, want %q", got, "connected")
+		}
+	})
+
+	t.Run("returns unreachable on non-2xx response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		got := probeBackendConnectivity(context.Background(), srv.URL)
+		if got != "unreachable" {
+			t.Errorf("got %q, want %q", got, "unreachable")
+		}
+	})
+
+	t.Run("returns unreachable when server is closed", func(t *testing.T) {
+		// Spin up + immediately close to get a guaranteed-unreachable URL.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		closedURL := srv.URL
+		srv.Close()
+
+		got := probeBackendConnectivity(context.Background(), closedURL)
+		if got != "unreachable" {
+			t.Errorf("got %q, want %q", got, "unreachable")
+		}
+	})
+
+	t.Run("returns unknown when ServerBaseURL is empty", func(t *testing.T) {
+		got := probeBackendConnectivity(context.Background(), "")
+		if got != "unknown" {
+			t.Errorf("got %q, want %q", got, "unknown")
+		}
+	})
+}
+
+// TestHealthHandlerSurfacesBackendConnectivity verifies the
+// backend_connectivity key appears in the JSON output of the /health
+// response and reflects the current reachability of the configured
+// ServerBaseURL.
+func TestHealthHandlerSurfacesBackendConnectivity(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		cfg: Config{
+			CLIVersion:    "v1.0.0",
+			ServerBaseURL: srv.URL,
+		},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Decode raw to lock in the snake_case wire-level key alongside the typed
+	// struct field, mirroring TestHealthHandlerReportsCLIVersionAndActiveTaskCount.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	if got, want := raw["backend_connectivity"], "connected"; got != want {
+		t.Errorf("backend_connectivity wire key: got %v, want %q", got, want)
+	}
+
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode typed response: %v", err)
+	}
+	if resp.BackendConnectivity != "connected" {
+		t.Errorf("BackendConnectivity field: got %q, want %q", resp.BackendConnectivity, "connected")
+	}
+}
