@@ -144,12 +144,20 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
-		defer cancel()
-		defer close(msgCh)
-		defer close(resCh)
+		// Single cleanup block, ordered explicitly so we never close
+		// msgCh while the reader goroutine could still call trySend
+		// on it. Early-return paths (initialize / session/{new,resume}
+		// / session/prompt failures) used to rely on the deferred
+		// close(msgCh) firing without joining the reader — a textbook
+		// send-on-closed-channel race. Blocking on readerDone here
+		// makes the channel closes safe for every exit path.
 		defer func() {
-			stdin.Close()
-			_ = cmd.Wait()
+			cancel()       // unblock anything bound to runCtx
+			stdin.Close()  // ask the agent to exit gracefully
+			_ = cmd.Wait() // wait for the process; stdout closes here
+			<-readerDone   // reader's scanner.Scan() returns false, goroutine exits
+			close(msgCh)   // safe: the reader was the only msgCh sender, now finished
+			close(resCh)   // safe: only this goroutine sends to resCh
 		}()
 
 		startTime := time.Now()

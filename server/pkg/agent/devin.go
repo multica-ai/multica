@@ -43,10 +43,13 @@ var devinBlockedArgs = map[string]blockedArgMode{
 //     the daemon log and continue with Devin's default model rather than
 //     failing the task.
 //   - Devin's `acp` subcommand does NOT accept the root-level
-//     --permission-mode flag, so daemon-mode auto-approval is handled
-//     entirely by hermesClient.handleAgentRequest replying
-//     "approve_for_session" to every session/request_permission request,
-//     identical to how kimi / kiro are driven.
+//     --permission-mode flag. Daemon-mode auto-approval is handled
+//     entirely by hermesClient.handleAgentRequest, which inspects the
+//     `options` array advertised on each session/request_permission
+//     request and selects the most permissive accept-style optionId
+//     by canonical ACP `kind` (allow_always > allow_once). For Devin
+//     that resolves to optionId="allow_session"; kimi / kiro resolve
+//     to "approve_for_session" — same code path, agent-specific IDs.
 type devinBackend struct {
 	cfg Config
 }
@@ -156,12 +159,21 @@ func (b *devinBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	go func() {
-		defer cancel()
-		defer close(msgCh)
-		defer close(resCh)
+		// Single cleanup block, ordered explicitly so we never close
+		// msgCh while the reader goroutine could still call trySend
+		// on it. Early-return paths (initialize / session/load /
+		// session/new / session/prompt failures) used to rely on the
+		// deferred close(msgCh) firing without joining the reader,
+		// which is a textbook send-on-closed-channel race. Block on
+		// readerDone here and the channel closes are guaranteed safe
+		// for every exit path.
 		defer func() {
-			stdin.Close()
-			_ = cmd.Wait()
+			cancel()       // unblock anything bound to runCtx (in-flight RPCs)
+			stdin.Close()  // ask the agent to exit gracefully
+			_ = cmd.Wait() // wait for the process; stdout closes here
+			<-readerDone   // reader's scanner.Scan() returns false, goroutine exits
+			close(msgCh)   // safe: the reader was the only msgCh sender, now finished
+			close(resCh)   // safe: only this goroutine sends to resCh
 		}()
 
 		startTime := time.Now()

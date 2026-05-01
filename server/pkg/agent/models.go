@@ -101,8 +101,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 // ModelSelectionSupported reports whether setting `agent.model` has
 // any effect for the given provider. Most providers honour
 // `opts.Model` end-to-end: Hermes / Kimi / Kiro route it through the
-// ACP `session/set_model` RPC before each prompt, which means the
-// UI's dropdown choice is carried all the way down to the LLM call.
+// ACP `session/set_model` RPC once, immediately after creating the
+// session and before sending the session's first (and only) prompt,
+// which means the UI's dropdown choice is carried all the way down
+// to the LLM call. The model is fixed for the life of the session;
+// switching mid-task would require a new `session/set_model` round-
+// trip that none of the backends issue today.
 //
 // Devin is the exception — its ACP server does not implement
 // `session/set_model`. Model selection is driven by Devin's own
