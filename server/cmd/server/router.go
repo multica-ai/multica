@@ -204,6 +204,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Route("/api/labels", func(r chi.Router) {
 				r.Get("/", h.ListLabels)
 				r.Post("/", h.CreateLabel)
+				r.Patch("/{id}", h.UpdateLabel)
+				r.Delete("/{id}", h.DeleteLabel)
 			})
 
 			// Attachments
