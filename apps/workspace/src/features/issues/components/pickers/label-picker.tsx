@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Hash, Plus, ChevronRight, Pencil } from "lucide-react";
+import { Hash, Plus, ChevronRight, Pencil, Check } from "lucide-react";
 import type { IssueLabel } from "@/shared/types";
 import { useWorkspaceLabelsQuery } from "@/features/issues/queries";
 import { useWorkspaceLabelMutations } from "@/features/issues/mutations";
@@ -132,6 +132,16 @@ export function LabelPicker({
     });
   }, [filter, workspaceLabels]);
 
+  // Sort: selected items first, then alphabetically
+  const sortedFilteredLabels = useMemo(() => {
+    return [...filteredLabels].sort((a, b) => {
+      const aSelected = selectedIds.has(a.id) ? 0 : 1;
+      const bSelected = selectedIds.has(b.id) ? 0 : 1;
+      if (aSelected !== bSelected) return aSelected - bSelected;
+      return a.name.localeCompare(b.name);
+    });
+  }, [filteredLabels, selectedIds]);
+
   const normalizedFilter = filter.trim().toLowerCase();
   const exactMatch = workspaceLabels.find((label) => label.name.toLowerCase() === normalizedFilter) ?? null;
 
@@ -241,12 +251,12 @@ export function LabelPicker({
         })()
       ) : (
         <>
-          {filteredLabels.map((label) => {
+          {sortedFilteredLabels.map((label) => {
             const selected = selectedIds.has(label.id);
             return (
               <PickerItem
                 key={label.id}
-                selected={selected}
+                selected={false}
                 onClick={async () => {
                   if (selected) {
                     await onRemove(label.id);
@@ -256,6 +266,10 @@ export function LabelPicker({
                   setOpen(false);
                 }}
               >
+                {/* Checkmark on the left — always takes space to keep alignment stable */}
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  {selected && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
+                </span>
                 <span
                   className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
                   style={{ borderColor: label.color, color: label.color }}
@@ -263,10 +277,10 @@ export function LabelPicker({
                   <Hash className="h-3 w-3 shrink-0" />
                   <span>{label.name}</span>
                 </span>
-                {/* Edit button — stops propagation so it doesn't toggle the label */}
+                {/* Edit button always visible on the right */}
                 <button
                   type="button"
-                  className="ml-auto rounded p-0.5 opacity-0 hover:opacity-100 group-hover:opacity-60 hover:bg-accent transition-opacity"
+                  className="ml-auto rounded p-0.5 hover:bg-accent transition-colors"
                   onClick={(e) => {
                     e.stopPropagation();
                     setEditingId(label.id);
@@ -293,7 +307,7 @@ export function LabelPicker({
             </PickerItem>
           ) : null}
 
-          {filteredLabels.length === 0 && (!normalizedFilter || exactMatch) ? <PickerEmpty /> : null}
+          {sortedFilteredLabels.length === 0 && (!normalizedFilter || exactMatch) ? <PickerEmpty /> : null}
         </>
       )}
     </PropertyPicker>
