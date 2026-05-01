@@ -51,6 +51,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -691,7 +692,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between">
+            <SidebarTrigger />
             <HelpLauncher />
           </div>
         </SidebarFooter>
