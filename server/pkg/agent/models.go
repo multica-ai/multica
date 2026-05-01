@@ -477,7 +477,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	// Read responses until we see the one for id=2 (session/new).
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
-	deadline := time.After(12 * time.Second)
+	deadline := time.After(20 * time.Second)
 	done := make(chan []Model, 1)
 	go func() {
 		defer close(done)
