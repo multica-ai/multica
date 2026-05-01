@@ -245,26 +245,19 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 }
 
 // renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// There is no issue yet, so we explicitly tell the agent NOT to call
-// `multica issue get` / `status` / `comment add` — those would either error
-// (empty IssueID) or silently target an unrelated issue.
+// This file carries only task data (user input, skills). Behavioral rules
+// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
+// to avoid redundancy and conflicting instructions.
 func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 	b.WriteString("# Quick Create\n\n")
 	b.WriteString("**Trigger:** Quick-create modal\n\n")
-	b.WriteString("There is NO existing Multica issue for this run. Translate the user input below into a single `multica issue create` invocation, then exit.\n\n")
 	b.WriteString("## User input\n\n")
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	b.WriteString("## Rules\n\n")
-	b.WriteString("- Run exactly one `multica issue create` invocation. No retries.\n")
-	b.WriteString("- After it succeeds, print `Created MUL-<n>: <title>` and exit.\n")
-	b.WriteString("- Do NOT run `multica issue get`, `multica issue status`, or `multica issue comment add` — there is nothing to query, transition, or comment on.\n")
-	b.WriteString("- The platform writes the user's success/failure inbox notification automatically based on the CLI exit status.\n\n")
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
-		b.WriteString("The following skills are available, but for quick-create they are usually unnecessary:\n\n")
 		for _, skill := range ctx.AgentSkills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}

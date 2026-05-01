@@ -44,6 +44,65 @@ func TestGitEnv(t *testing.T) {
 	if !foundHome {
 		t.Error("gitEnv() must include HOME from os.Environ()")
 	}
+
+	// Must set safe.directory=* via GIT_CONFIG env vars.
+	envHas := func(env []string, want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !envHas(env, "GIT_CONFIG_KEY_0=safe.directory") {
+		t.Error("gitEnv() must include GIT_CONFIG_KEY_0=safe.directory (no pre-existing config)")
+	}
+	if !envHas(env, "GIT_CONFIG_VALUE_0=*") {
+		t.Error("gitEnv() must include GIT_CONFIG_VALUE_0=*")
+	}
+}
+
+func TestGitEnvPreservesExistingConfig(t *testing.T) {
+	// GIT_CONFIG_COUNT env vars are process-wide; cannot use t.Setenv in
+	// parallel tests, so run sequentially.
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.https://github.com/.insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "gh:")
+	t.Setenv("GIT_CONFIG_KEY_1", "http.extraHeader")
+	t.Setenv("GIT_CONFIG_VALUE_1", "Authorization: Bearer tok")
+
+	env := gitEnv()
+
+	envHas := func(want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// safe.directory must be appended at index 2 (next available).
+	if !envHas("GIT_CONFIG_COUNT=3") {
+		t.Error("expected GIT_CONFIG_COUNT=3")
+	}
+	if !envHas("GIT_CONFIG_KEY_2=safe.directory") {
+		t.Error("expected GIT_CONFIG_KEY_2=safe.directory")
+	}
+	if !envHas("GIT_CONFIG_VALUE_2=*") {
+		t.Error("expected GIT_CONFIG_VALUE_2=*")
+	}
+
+	// Original entries must still be present.
+	if !envHas("GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf") {
+		t.Error("existing GIT_CONFIG_KEY_0 was lost")
+	}
+	if !envHas("GIT_CONFIG_VALUE_0=gh:") {
+		t.Error("existing GIT_CONFIG_VALUE_0 was lost")
+	}
+	if !envHas("GIT_CONFIG_KEY_1=http.extraHeader") {
+		t.Error("existing GIT_CONFIG_KEY_1 was lost")
+	}
 }
 
 func TestBareDirName(t *testing.T) {
