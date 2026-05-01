@@ -218,6 +218,17 @@ export class ApiClient {
     });
   }
 
+  async updateLabel(id: string, data: { name: string; color: string }): Promise<{ id: string; workspace_id: string; name: string; color: string }> {
+    return this.fetch(`/api/labels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabel(id: string): Promise<void> {
+    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     const search = new URLSearchParams();
     if (this.workspaceId) search.set("workspace_id", this.workspaceId);

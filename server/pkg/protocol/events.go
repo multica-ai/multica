@@ -15,10 +15,10 @@ const (
 	EventWorklogCreated       = "worklog:created"
 	EventWorklogUpdated       = "worklog:updated"
 	EventWorklogDeleted       = "worklog:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"

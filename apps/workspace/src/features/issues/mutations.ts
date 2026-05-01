@@ -487,3 +487,38 @@ export function useSuggestScheduleMutation() {
     }) => api.suggestSchedule(workspaceId, issueIds),
   });
 }
+
+export function useWorkspaceLabelMutations() {
+  const queryClient = useQueryClient();
+  const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
+
+  function invalidateLabels() {
+    queryClient.invalidateQueries({ queryKey: queryKeys.workspace.labels(workspaceId) });
+  }
+
+  const createMutation = useMutation({
+    mutationFn: (data: { name: string; color: string }) => api.createLabel(data),
+    onSuccess: invalidateLabels,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name: string; color: string }) =>
+      api.updateLabel(id, data),
+    onSuccess: invalidateLabels,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteLabel(id),
+    onSuccess: invalidateLabels,
+  });
+
+  return {
+    createLabel: (data: { name: string; color: string }) => createMutation.mutateAsync(data),
+    updateLabel: (id: string, data: { name: string; color: string }) =>
+      updateMutation.mutateAsync({ id, ...data }),
+    deleteLabel: (id: string) => deleteMutation.mutateAsync(id),
+    creating: createMutation.isPending,
+    updating: updateMutation.isPending,
+    deleting: deleteMutation.isPending,
+  };
+}

@@ -56,6 +56,21 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Issue
 	return i, err
 }
 
+const deleteLabel = `-- name: DeleteLabel :exec
+DELETE FROM issue_label
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteLabelParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteLabel(ctx context.Context, arg DeleteLabelParams) error {
+	_, err := q.db.Exec(ctx, deleteLabel, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const getLabelByNameInWorkspace = `-- name: GetLabelByNameInWorkspace :many
 SELECT id, workspace_id, name, color FROM issue_label
 WHERE workspace_id = $1 AND LOWER(name) = LOWER($2)
@@ -191,4 +206,35 @@ type RemoveIssueLabelParams struct {
 func (q *Queries) RemoveIssueLabel(ctx context.Context, arg RemoveIssueLabelParams) error {
 	_, err := q.db.Exec(ctx, removeIssueLabel, arg.IssueID, arg.LabelID)
 	return err
+}
+
+const updateLabel = `-- name: UpdateLabel :one
+UPDATE issue_label
+SET name = $2, color = $3
+WHERE id = $1 AND workspace_id = $4
+RETURNING id, workspace_id, name, color
+`
+
+type UpdateLabelParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Color       string      `json:"color"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (IssueLabel, error) {
+	row := q.db.QueryRow(ctx, updateLabel,
+		arg.ID,
+		arg.Name,
+		arg.Color,
+		arg.WorkspaceID,
+	)
+	var i IssueLabel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Color,
+	)
+	return i, err
 }

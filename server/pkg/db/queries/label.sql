@@ -19,6 +19,16 @@ INSERT INTO issue_label (
     $1, $2, $3
 ) RETURNING *;
 
+-- name: UpdateLabel :one
+UPDATE issue_label
+SET name = $2, color = $3
+WHERE id = $1 AND workspace_id = $4
+RETURNING *;
+
+-- name: DeleteLabel :exec
+DELETE FROM issue_label
+WHERE id = $1 AND workspace_id = $2;
+
 -- name: AddIssueLabel :exec
 INSERT INTO issue_to_label (
     issue_id, label_id

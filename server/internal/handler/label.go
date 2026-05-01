@@ -83,6 +83,56 @@ func (h *Handler) findOrCreateLabel(ctx context.Context, workspaceID string, nam
 	return label, http.StatusCreated, nil
 }
 
+type UpdateLabelRequest struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+	labelID := chi.URLParam(r, "id")
+
+	var req UpdateLabelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "label name is required")
+		return
+	}
+
+	label, err := h.Queries.UpdateLabel(r.Context(), db.UpdateLabelParams{
+		ID:          parseUUID(labelID),
+		WorkspaceID: parseUUID(workspaceID),
+		Name:        name,
+		Color:       normalizeLabelColor(req.Color),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update label")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, issueLabelToResponse(label))
+}
+
+func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+	labelID := chi.URLParam(r, "id")
+
+	if err := h.Queries.DeleteLabel(r.Context(), db.DeleteLabelParams{
+		ID:          parseUUID(labelID),
+		WorkspaceID: parseUUID(workspaceID),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete label")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	workspaceID := resolveWorkspaceID(r)
 

@@ -91,6 +91,20 @@
 - **意图分离**：一次只处理一种意图——探索、决策、执行、审查不要混着来。
 
 
+## 收尾追问规则（成本优化）
+完成任务准备结束之前，必须采用以下提问策略：
+
+1. 若当前环境存在可用的用户提问工具且未被禁用，优先使用工具提问（例如 `ask_user`、`AskUserQuestion`、`request_user_input`）
+2. 若无可用提问工具，则回退为普通文本提问
+
+提问内容使用固定收尾话术：
+
+还有没有补充要做的事情？请一次性列出，我将继续在本轮内处理。
+
+原则上未经用户明确同意结束任务，才能结束本轮，否则继续追问直到用户明确结束。”
+
+“全部做完之后向我汇报，并ask我下一步任务，不要退出”
+
 # Repository Guidelines
 
 This file provides guidance to AI agents when working with code in this repository.
