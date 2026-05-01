@@ -16,18 +16,22 @@ import (
 )
 
 type S3Storage struct {
-	client    *s3.Client
-	bucket    string
-	cdnDomain string // if set, returned URLs use this instead of bucket name
+	client              *s3.Client
+	bucket              string
+	publicBaseURL       string // base URL for generated file links, e.g. https://cdn.example.com
+	usingCustomEndpoint bool   // true for R2/MinIO — limits unsupported S3 features
 }
 
-// NewS3StorageFromEnv creates an S3Storage from environment variables.
+	// NewS3StorageFromEnv creates an S3Storage from environment variables.
 // Returns nil if S3_BUCKET is not set.
 //
 // Environment variables:
 //   - S3_BUCKET (required)
 //   - S3_REGION (default: us-west-2)
 //   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional; falls back to default credential chain)
+//   - AWS_ENDPOINT_URL (optional; for S3-compatible stores like Cloudflare R2)
+//   - CLOUDFRONT_DOMAIN (optional; CDN domain used as the base URL for public file links)
+//     When using R2 without a custom domain, set this to your R2 public bucket URL.
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
@@ -60,11 +64,41 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain)
+	// S3-compatible custom endpoint (e.g. Cloudflare R2, MinIO).
+	// AWS_ENDPOINT_URL follows the same convention as the AWS CLI.
+	var s3ClientOpts []func(*s3.Options)
+	usingCustomEndpoint := false
+	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	if endpointURL != "" {
+		usingCustomEndpoint = true
+		s3ClientOpts = append(s3ClientOpts, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpointURL)
+			// Cloudflare R2 and other S3-compatible stores use path-style addressing.
+			o.UsePathStyle = true
+		})
+	}
+
+	// Determine the base URL used to construct public file links:
+	//   1. CLOUDFRONT_DOMAIN if set (CDN or R2 custom domain)
+	//   2. Standard AWS virtual-hosted URL: https://{bucket}.s3.{region}.amazonaws.com
+	// When using a custom endpoint without a CDN domain, CLOUDFRONT_DOMAIN must be set
+	// to the bucket's public access URL (e.g. R2 public dev URL or custom domain).
+	var publicBaseURL string
+	if cdnDomain != "" {
+		publicBaseURL = "https://" + strings.TrimRight(cdnDomain, "/")
+	} else if !usingCustomEndpoint {
+		publicBaseURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucket, region)
+	} else {
+		// Custom endpoint without CDN domain — warn and leave empty; Upload will error.
+		slog.Warn("AWS_ENDPOINT_URL is set but CLOUDFRONT_DOMAIN is not; file URLs will be invalid. Set CLOUDFRONT_DOMAIN to your bucket's public URL.")
+	}
+
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "public_base_url", publicBaseURL)
 	return &S3Storage{
-		client:    s3.NewFromConfig(cfg),
-		bucket:    bucket,
-		cdnDomain: cdnDomain,
+		client:              s3.NewFromConfig(cfg, s3ClientOpts...),
+		bucket:              bucket,
+		publicBaseURL:       publicBaseURL,
+		usingCustomEndpoint: usingCustomEndpoint,
 	}
 }
 
@@ -84,13 +118,11 @@ func sanitizeFilename(name string) string {
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
-// e.g. "https://multica-static.copilothub.ai/abc123.png" → "abc123.png"
+// e.g. "https://cdn.example.com/abc123.png" → "abc123.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
-	// Strip the "https://domain/" prefix.
-	for _, prefix := range []string{
-		"https://" + s.cdnDomain + "/",
-		"https://" + s.bucket + "/",
-	} {
+	// Strip the publicBaseURL prefix if it matches.
+	if s.publicBaseURL != "" {
+		prefix := s.publicBaseURL + "/"
 		if strings.HasPrefix(rawURL, prefix) {
 			return strings.TrimPrefix(rawURL, prefix)
 		}
@@ -125,23 +157,49 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+
+	// Use inline disposition for media types that browsers can preview natively;
+	// everything else should be downloaded as an attachment.
+	disposition := fmt.Sprintf(`attachment; filename="%s"`, safe)
+	if isPreviewable(contentType) {
+		disposition = fmt.Sprintf(`inline; filename="%s"`, safe)
+	}
+
+	input := &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
 		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
-		ContentDisposition: aws.String(fmt.Sprintf(`inline; filename="%s"`, safe)),
+		ContentDisposition: aws.String(disposition),
 		CacheControl:       aws.String("max-age=432000,public"),
-		StorageClass:       types.StorageClassIntelligentTiering,
-	})
+	}
+	// IntelligentTiering is AWS S3-specific; R2 and other compatible stores reject it.
+	if !s.usingCustomEndpoint {
+		input.StorageClass = types.StorageClassIntelligentTiering
+	}
+
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 
-	domain := s.bucket
-	if s.cdnDomain != "" {
-		domain = s.cdnDomain
+	if s.publicBaseURL == "" {
+		return "", fmt.Errorf("s3 storage: publicBaseURL is empty; set CLOUDFRONT_DOMAIN to your bucket's public URL")
 	}
-	link := fmt.Sprintf("https://%s/%s", domain, key)
+	link := s.publicBaseURL + "/" + key
 	return link, nil
+}
+
+// isPreviewable reports whether a content type should be displayed inline in the browser.
+func isPreviewable(contentType string) bool {
+	for _, prefix := range []string{"image/", "video/", "audio/"} {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+	switch contentType {
+	case "application/pdf", "text/plain":
+		return true
+	}
+	return false
 }
