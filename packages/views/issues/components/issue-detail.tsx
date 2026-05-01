@@ -35,6 +35,8 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { useStickyBottom } from "@multica/ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/ui/components/common/jump-to-latest-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -321,13 +323,15 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+  /** When true, the issue identifier+title in the breadcrumb links to the issue detail page. Used when this view is embedded (e.g. inbox) so users can navigate to the dedicated issue page. */
+  linkSelfInBreadcrumb?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -364,6 +368,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Issue pages render long timelines; don't yank the user to the bottom on
+  // mount, but offer a "jump to latest" pill once they scroll up far enough.
+  const { isAtBottom, scrollToBottom } = useStickyBottom(scrollContainerRef, {
+    initialScroll: false,
+  });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
@@ -440,7 +449,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   const loading = issueLoading;
 
-  // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
+  // Jump to highlighted comment once timeline loads. Instant (not smooth) —
+  // a multi-second smooth-scroll animation is exactly the inbox-yank behavior
+  // users hate. The 2s pulse on `highlightedId` is enough to draw the eye.
   useEffect(() => {
     if (!highlightCommentId || timeline.length === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
@@ -448,7 +459,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     if (el) {
       didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ block: "center" });
         setHighlightedId(highlightCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
@@ -716,12 +727,28 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0 text-muted-foreground">
-              {issue.identifier}
-            </span>
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
+            {linkSelfInBreadcrumb ? (
+              <AppLink
+                href={paths.issueDetail(issue.id)}
+                className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {issue.title}
+                </span>
+              </AppLink>
+            ) : (
+              <>
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {issue.title}
+                </span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <Tooltip>
@@ -1020,8 +1047,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               }}
             />
 
-        {/* Content — scrollable */}
-        <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+        {/* Content — scrollable. The relative wrapper anchors the
+            jump-to-latest pill to the viewport rather than the scroll content. */}
+        <div className="relative flex-1 min-h-0">
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -1449,6 +1478,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </Tabs>
           </div>
         </div>
+        </div>
+        <JumpToLatestButton
+          visible={!isAtBottom && timeline.length > 0}
+          onClick={() => scrollToBottom()}
+          label="Latest"
+        />
         </div>
       </div>
       </ResizablePanel>
