@@ -749,14 +749,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// Load the latest user message for the chat prompt.
-			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				// Find the last user message.
-				for i := len(msgs) - 1; i >= 0; i-- {
-					if msgs[i].Role == "user" {
-						resp.ChatMessage = msgs[i].Content
-						break
-					}
+			// Load every user message newer than the last assistant reply,
+			// in chronological order. Coalescing on enqueue means a single
+			// queued task may need to absorb multiple user messages that
+			// arrived while the prior turn was running — pulling them all
+			// here ensures the agent's next response addresses all of them.
+			if msgs, err := h.Queries.ListUserMessagesSinceLastAssistant(r.Context(), cs.ID); err == nil {
+				for _, m := range msgs {
+					resp.ChatMessages = append(resp.ChatMessages, m.Content)
 				}
 			}
 		}

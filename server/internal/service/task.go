@@ -136,7 +136,13 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
+	// Coalesce: if a queued task already exists for this session, return it.
+	// The daemon picks up every user message newer than the last assistant
+	// reply at claim time, so a single queued successor is enough to absorb
+	// any number of new messages that arrive while the prior turn is running.
+	// Race-safety is enforced by a partial unique index on
+	// (chat_session_id) WHERE status = 'queued' (migration 057).
+	task, err := s.Queries.CreateOrGetQueuedChatTask(ctx, db.CreateOrGetQueuedChatTaskParams{
 		AgentID:       chatSession.AgentID,
 		RuntimeID:     agent.RuntimeID,
 		Priority:      2, // medium priority for chat

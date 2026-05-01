@@ -131,7 +131,7 @@ type AgentTaskResponse struct {
 	TriggerCommentID      *string        `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
-	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	ChatMessages          []string       `json:"chat_messages,omitempty"`           // user messages newer than the last assistant reply (oldest first)
 	UserProfilePrompt     string         `json:"user_profile_prompt,omitempty"`     // compiled per-user communication prompt (JEH-304)
 	// TaskToken is a short-lived per-task token (mtt_ prefix) the daemon
 	// injects as MULTICA_TOKEN for the spawned agent process. Scoped to

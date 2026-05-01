@@ -10,6 +10,8 @@ import {
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { Button } from "@multica/ui/components/ui/button";
+import { Square } from "lucide-react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -67,10 +69,12 @@ export function ChatInput({
 
   const handleSend = () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || disabled) {
+    // Sending while the agent is mid-stream is allowed: the backend coalesces
+    // the new message into the next turn (see EnqueueChatTask). Only block
+    // empty input and archived sessions.
+    if (!content || disabled) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
-        isRunning,
         disabled,
       });
       return;
@@ -133,11 +137,19 @@ export function ChatInput({
             disabled={!!disabled}
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
+          {isRunning && onStop && (
+            <Button
+              size="icon-sm"
+              variant="secondary"
+              onClick={onStop}
+              aria-label="Stop"
+            >
+              <Square className="fill-current" />
+            </Button>
+          )}
           <SubmitButton
             onClick={handleSend}
             disabled={isEmpty || !!disabled}
-            running={isRunning}
-            onStop={onStop}
           />
         </div>
         {isDragOver && <FileDropOverlay />}

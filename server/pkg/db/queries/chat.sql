@@ -63,13 +63,39 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListUserMessagesSinceLastAssistant :many
+-- Returns user messages newer than the most recent assistant message in the
+-- session, in chronological order. Falls back to ALL user messages when no
+-- assistant message exists yet (first turn of the conversation).
+-- Used by the daemon claim path to bundle every user message that arrived
+-- during the prior agent turn into a single follow-up prompt — without this,
+-- the agent would only ever see the latest user message and earlier ones
+-- sent mid-stream would be silently dropped.
+SELECT cm.* FROM chat_message cm
+WHERE cm.chat_session_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at > COALESCE(
+      (SELECT MAX(prev.created_at) FROM chat_message prev
+       WHERE prev.chat_session_id = $1 AND prev.role = 'assistant'),
+      '-infinity'::timestamptz
+  )
+ORDER BY cm.created_at ASC;
+
 -- name: GetChatMessage :one
 SELECT * FROM chat_message
 WHERE id = $1;
 
--- name: CreateChatTask :one
+-- name: CreateOrGetQueuedChatTask :one
+-- Race-safe enqueue with coalescing. Inserts a queued chat task; if one is
+-- already queued for this session, returns the existing row instead. Backed
+-- by a partial unique index on (chat_session_id) WHERE status = 'queued'
+-- (migration 057). The DO UPDATE branch is a no-op write — the assignment
+-- to priority is what makes RETURNING surface the existing row instead of
+-- producing zero rows.
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
+ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
+DO UPDATE SET priority = agent_task_queue.priority
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one

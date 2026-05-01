@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS agent_task_queue_chat_session_queued_unique;
