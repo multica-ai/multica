@@ -124,10 +124,8 @@ export function formatTokens(n: number): string {
 // Iteration order matters: the resolver's startsWith() fallback walks this
 // object in insertion order, so MORE SPECIFIC keys (e.g. claude-sonnet-4-5)
 // must precede SHORTER prefixes (e.g. claude-sonnet-4) of the same family.
-const MODEL_PRICING: Record<
-  string,
-  { input: number; output: number; cacheRead: number; cacheWrite: number }
-> = {
+type Pricing = { input: number; output: number; cacheRead: number; cacheWrite: number };
+const HARDCODED_PRICING: Record<string, Pricing> = {
   // -- Current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -145,14 +143,57 @@ const MODEL_PRICING: Record<
 
   // -- Older Haiku tier (defensive entry for the rare runtime still on it) --
   "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
-
-  // -- Xiaomi MiMo --
-  "mimo/mimo-v2.5-pro": { input: 1,    output: 3,    cacheRead: 0.20, cacheWrite: 0 },
-  "mimo/mimo-v2.5":     { input: 0.40, output: 2,    cacheRead: 0.08, cacheWrite: 0 },
-  "mimo/mimo-v2-pro":   { input: 1,    output: 3,    cacheRead: 0.20, cacheWrite: 0 },
-  "mimo/mimo-v2-omni":  { input: 0.40, output: 2,    cacheRead: 0.08, cacheWrite: 0 },
-  "mimo/mimo-v2-flash": { input: 0.09, output: 0.29, cacheRead: 0.045, cacheWrite: 0 },
 };
+
+// Runtime pricing map: starts with hardcoded values, then merges env overrides
+// and OpenRouter data on first access.
+const runtimePricing: Record<string, Pricing> = { ...HARDCODED_PRICING };
+
+// Merge env var overrides (NEXT_PUBLIC_MODEL_PRICING_OVERRIDES).
+// Format: JSON object matching the Pricing shape, e.g.:
+//   {"mimo/mimo-v2.5-pro":{"input":1,"output":3,"cacheRead":0.2,"cacheWrite":0}}
+function applyEnvOverrides() {
+  const raw =
+    (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_MODEL_PRICING_OVERRIDES) ||
+    (typeof window !== "undefined" && (window as Record<string, unknown>).__MODEL_PRICING_OVERRIDES__ as string) ||
+    "";
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Pricing>;
+    for (const [key, val] of Object.entries(parsed)) {
+      if (val && typeof val.input === "number") runtimePricing[key] = val;
+    }
+  } catch { /* ignore malformed JSON */ }
+}
+
+// Fetch pricing from OpenRouter and merge missing models.
+// Only fills in models NOT already present (hardcoded + env always win).
+let openRouterFetched = false;
+async function fetchOpenRouterPricing() {
+  if (openRouterFetched) return;
+  openRouterFetched = true;
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models");
+    if (!res.ok) return;
+    const data = await res.json() as { data?: Array<{ id: string; pricing?: { prompt?: string; completion?: string; input_cache_read?: string } }> };
+    if (!data.data) return;
+    for (const m of data.data) {
+      if (runtimePricing[m.id]) continue; // don't override existing
+      const p = m.pricing;
+      if (!p?.prompt || !p?.completion) continue;
+      const input = parseFloat(p.prompt) * 1_000_000;
+      const output = parseFloat(p.completion) * 1_000_000;
+      const cacheRead = p.input_cache_read ? parseFloat(p.input_cache_read) * 1_000_000 : 0;
+      if (!isNaN(input) && !isNaN(output)) {
+        runtimePricing[m.id] = { input, output, cacheRead, cacheWrite: 0 };
+      }
+    }
+  } catch { /* network error — silently ignore */ }
+}
+
+// Initialize: apply env overrides immediately, kick off OpenRouter fetch.
+applyEnvOverrides();
+fetchOpenRouterPricing();
 
 // Resolve a model string to its pricing tier. Two layers of fallback so the
 // daemon-reported model name doesn't have to match the keys exactly:
@@ -165,12 +206,12 @@ const MODEL_PRICING: Record<
 // so callers can distinguish "$0 spend" from "spent but model not priced".
 function resolvePricing(model: string) {
   if (!model) return undefined;
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  if (runtimePricing[model]) return runtimePricing[model];
 
   const stripped = model.replace(/-(20\d{6}|latest)$/, "");
-  if (stripped !== model && MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
+  if (stripped !== model && runtimePricing[stripped]) return runtimePricing[stripped];
 
-  for (const [key, p] of Object.entries(MODEL_PRICING)) {
+  for (const [key, p] of Object.entries(runtimePricing)) {
     if (model.startsWith(key) || stripped.startsWith(key)) return p;
   }
   return undefined;
@@ -479,4 +520,3 @@ export function pctChange(current: number, previous: number): number | null {
   if (previous <= 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
-
