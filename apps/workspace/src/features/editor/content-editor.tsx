@@ -37,6 +37,7 @@ import type { UploadResult } from "@/shared/hooks/use-file-upload";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { EditorToolbar } from "./editor-toolbar";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,8 @@ interface ContentEditorProps {
   onUpdate?: (markdown: string) => void;
   placeholder?: string;
   editable?: boolean;
+  /** Show formatting toolbar above the editor (only visible when editable) */
+  toolbar?: boolean;
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
@@ -73,6 +76,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onUpdate,
       placeholder: placeholderText = "",
       editable = true,
+      toolbar = false,
       className,
       debounceMs = 300,
       onSubmit,
@@ -197,6 +201,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     }));
 
     if (!editor) return null;
+
+    // When toolbar is enabled, wrap editor in a bordered container with the
+    // toolbar rendered above. className applies to the outer wrapper so that
+    // spacing / positioning props (e.g. mt-5) still work as expected.
+    if (toolbar && editable) {
+      return (
+        <div className={cn("rounded-md border", className)}>
+          <EditorToolbar editor={editor} />
+          <EditorContent editor={editor} />
+        </div>
+      );
+    }
 
     return <EditorContent editor={editor} />;
   },

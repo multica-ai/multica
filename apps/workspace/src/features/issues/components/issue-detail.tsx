@@ -615,9 +615,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Description embeds are inline markdown content — they should not appear in
+  // the issue attachment list, so we intentionally omit issueId here.
   const handleDescriptionUpload = useCallback(
-    (file: File) => uploadWithToast(file, { issueId: id }),
-    [uploadWithToast, id],
+    (file: File) => uploadWithToast(file),
+    [uploadWithToast],
   );
 
   const handleDelete = async () => {
@@ -1015,6 +1017,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             key={id}
             defaultValue={issue.description || ""}
             placeholder="Add description..."
+            toolbar
             onUpdate={(md) => handleUpdateField({ description: md || undefined })}
             onUploadFile={handleDescriptionUpload}
             debounceMs={1500}
