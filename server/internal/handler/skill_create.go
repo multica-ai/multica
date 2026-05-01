@@ -37,9 +37,9 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 
 	skill, err := qtx.CreateSkill(ctx, db.CreateSkillParams{
 		WorkspaceID: input.WorkspaceID,
-		Name:        input.Name,
-		Description: input.Description,
-		Content:     input.Content,
+		Name:        sanitizeNullBytes(input.Name),
+		Description: sanitizeNullBytes(input.Description),
+		Content:     sanitizeNullBytes(input.Content),
 		Config:      config,
 		CreatedBy:   input.CreatorID,
 	})
@@ -51,8 +51,8 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 	for _, f := range input.Files {
 		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
 			SkillID: skill.ID,
-			Path:    f.Path,
-			Content: f.Content,
+			Path:    sanitizeNullBytes(f.Path),
+			Content: sanitizeNullBytes(f.Content),
 		})
 		if err != nil {
 			return SkillWithFilesResponse{}, err

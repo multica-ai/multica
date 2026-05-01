@@ -52,6 +52,7 @@ var validCompletionPaths = map[string]struct{}{
 	analytics.OnboardingPathRuntimeSkipped: {},
 	analytics.OnboardingPathCloudWaitlist:  {},
 	analytics.OnboardingPathSkipExisting:   {},
+	analytics.OnboardingPathInviteAccept:   {},
 }
 
 // CompleteOnboarding marks the authenticated user as having completed

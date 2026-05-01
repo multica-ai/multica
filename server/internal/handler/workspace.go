@@ -201,6 +201,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Becoming a workspace member is the physical event that "completes" onboarding —
+	// keep this atomic with CreateMember so `member` and `onboarded_at`
+	// can never disagree. COALESCE in MarkUserOnboarded keeps it idempotent.
+	if _, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return

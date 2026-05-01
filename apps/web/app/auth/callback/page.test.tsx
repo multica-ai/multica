@@ -2,13 +2,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { paths } from "@multica/core/paths";
 
-const { mockPush, mockSearchParams, mockLoginWithGoogle, mockListWorkspaces } =
-  vi.hoisted(() => ({
-    mockPush: vi.fn(),
-    mockSearchParams: new URLSearchParams(),
-    mockLoginWithGoogle: vi.fn(),
-    mockListWorkspaces: vi.fn(),
-  }));
+const {
+  mockPush,
+  mockSearchParams,
+  mockLoginWithGoogle,
+  mockListWorkspaces,
+  mockListMyInvitations,
+  mockSetQueryData,
+} = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+  mockSearchParams: new URLSearchParams(),
+  mockLoginWithGoogle: vi.fn(),
+  mockListWorkspaces: vi.fn(),
+  mockListMyInvitations: vi.fn(),
+  mockSetQueryData: vi.fn(),
+}));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
   id: "user-1",
@@ -28,7 +36,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+  useQueryClient: () => ({ setQueryData: mockSetQueryData }),
 }));
 
 // Preserve the real sanitizeNextUrl so the "drop unsafe ?next=" behavior is
@@ -46,12 +54,16 @@ vi.mock("@multica/core/auth", async () => {
 });
 
 vi.mock("@multica/core/workspace/queries", () => ({
-  workspaceKeys: { list: () => ["workspaces"] },
+  workspaceKeys: {
+    list: () => ["workspaces"],
+    myInvitations: () => ["invitations", "mine"],
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
+    listMyInvitations: mockListMyInvitations,
     googleLogin: vi.fn(),
   },
 }));
@@ -69,6 +81,7 @@ describe("CallbackPage", () => {
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
+    mockListMyInvitations.mockResolvedValue([]);
   });
 
   it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
@@ -78,16 +91,39 @@ describe("CallbackPage", () => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
     expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    // nextUrl is a fast path — listMyInvitations should not be queried.
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with no next= and zero workspaces lands on /onboarding", async () => {
+  it("unonboarded user with no next= and no pending invitations lands on /onboarding", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
+    expect(mockListMyInvitations).toHaveBeenCalled();
   });
 
-  it("unonboarded user with existing workspace lands in that workspace, not /onboarding", async () => {
+  it("unonboarded user with pending invitations lands on /invitations", async () => {
+    mockListMyInvitations.mockResolvedValue([
+      {
+        id: "inv-1",
+        workspace_id: "ws-1",
+        workspace_name: "Acme",
+        role: "member",
+        status: "pending",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.invitations());
+    });
+    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+  });
+
+  it("onboarded user with workspace lands in that workspace", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
     mockListWorkspaces.mockResolvedValue([
       {
         id: "ws-1",
@@ -106,7 +142,9 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    // Already-onboarded users skip the listMyInvitations check; new invites
+    // surface in the sidebar instead of the wall.
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
   it("onboarded user ignores unsafe next= targets and lands on the default destination", async () => {
@@ -133,6 +171,14 @@ describe("CallbackPage", () => {
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
+    });
+  });
+
+  it("falls through to /onboarding when listMyInvitations errors", async () => {
+    mockListMyInvitations.mockRejectedValue(new Error("network"));
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
   });
 });

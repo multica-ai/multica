@@ -414,6 +414,16 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Accepting an invite is the physical event that "completes" onboarding for an
+	// invitee — atomic with CreateMember so the invariant
+	// "member row exists ↔ onboarded_at != null" cannot be violated.
+	// COALESCE in MarkUserOnboarded keeps this idempotent for users joining
+	// additional workspaces after their first.
+	if _, err := qtx.MarkUserOnboarded(r.Context(), user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return

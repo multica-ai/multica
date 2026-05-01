@@ -284,6 +284,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.21",
+        date: "2026-04-30",
+        title: "Quick Capture 全面升级、Mermaid 图表与 Typed Project Resources",
+        changes: [],
+        features: [
+          "Quick Capture 取代旧的 New Issue 弹窗 —— 支持连续创建、文件上传，并能根据粘贴的 URL 自动丰富标题与描述",
+          "Markdown 内联渲染 Mermaid 图表，复杂图支持全屏 lightbox",
+          "Project 支持单独绑定 repo，无需依赖 workspace 默认配置",
+          "Agent / 评论 / Runtime / Skill 全面接入权限感知 UI，没有权限的操作不再展示",
+        ],
+        improvements: [
+          "Daemon `/tasks/claim` 轮询走 Redis 空认领 fast-path，空闲态 DB 压力下降，长期 open 的 Issue 自动回收磁盘",
+          "Multica Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
+          "Desktop 拦截 Cmd+R / Ctrl+R / F5 防止意外刷新，开发模式与 Updates 设置中均展示真实版本号",
+        ],
+        fixes: [
+          "Quick Create 不再凭空脑补需求，并自动把发起人订阅到 Issue",
+          "Inbox 点击通知后立即跳到目标评论；从 Issue 详情页 Mark as Done 时自动归档",
+          "Task rerun 启动全新 session，跳过被污染的 resume 状态",
+          "受邀成员登录后路由到所在 workspace，不再强制带去 `/onboarding`",
+        ],
+      },
+      {
         version: "0.2.20",
         date: "2026-04-29",
         title: "Create Issue by Agent、Agent Presence v3 与 Daemon WebSocket 心跳",

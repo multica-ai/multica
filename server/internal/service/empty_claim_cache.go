@@ -37,13 +37,12 @@ const (
 )
 
 // EmptyClaimCacheTTL bounds how long a cached "no queued task" verdict
-// stays believable. Choice tradeoff: too long means a missed
-// invalidation delays claim until the TTL expires; too short means the
-// fast path almost never triggers. 30s matches DefaultPollInterval so
-// the worst-case staleness is one extra poll cycle — already the
-// no-cache baseline — while still collapsing the steady-state warm
-// empty path to a single Redis GET pair.
-const EmptyClaimCacheTTL = 30 * time.Second
+// stays believable. Enqueue invalidates the verdict by bumping the
+// per-runtime version before waking the daemon, so a longer TTL keeps
+// the steady-state idle poll path off Postgres. The TTL remains the
+// safety net for a missed invalidation, e.g. a transient Redis failure
+// during Bump.
+const EmptyClaimCacheTTL = 3 * time.Minute
 
 // emptyClaimVersionTTL keeps the version counter alive long enough that
 // a rarely-polled runtime doesn't reset to 0 between an enqueue's

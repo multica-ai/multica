@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "@multica/views/navigation";
@@ -12,7 +12,10 @@ import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { pinKeys } from "@multica/core/pins";
 import { projectKeys } from "@multica/core/projects";
 import { issueKeys } from "@multica/core/issues/queries";
-import { workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  memberListOptions,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -50,11 +53,26 @@ export function StarterContentPrompt() {
     null,
   );
 
+  // Member-list fetch is the proxy we use to detect "did this user CREATE
+  // this workspace, or were they invited into it?" An invitee is by definition
+  // not the only member (the inviter is also there); a fresh self-created
+  // workspace has exactly one member — the creator. `starter_content_state`
+  // is a user-level field and can't represent (user, workspace) state directly,
+  // so we layer this membership check on top until that field is migrated to
+  // the `member` table. See follow-up issue: starter_content_state per-workspace.
+  const { data: members = [] } = useQuery({
+    ...memberListOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
+  const isSoloMember =
+    members.length === 1 && members[0]?.user_id === user?.id;
+
   const shouldShow =
     !!user &&
     !!workspace &&
     user.onboarded_at != null &&
-    user.starter_content_state == null;
+    user.starter_content_state == null &&
+    isSoloMember;
 
   if (!shouldShow || !workspace || !user) return null;
 

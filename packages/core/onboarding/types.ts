@@ -16,7 +16,8 @@ export type OnboardingCompletionPath =
   | "full" // Reached Step 5 (first_issue) with a runtime connected
   | "runtime_skipped" // Step 3 skipped (no runtime) but still completed
   | "cloud_waitlist" // Submitted the cloud waitlist form and skipped Step 3
-  | "skip_existing"; // "I've done this before" from Welcome
+  | "skip_existing" // "I've done this before" from Welcome
+  | "invite_accept"; // Accepted at least one invite from /invitations
 
 export type TeamSize = "solo" | "team" | "other";
 

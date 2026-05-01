@@ -17,6 +17,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// sanitizeNullBytes removes null bytes (0x00) from strings.
+// PostgreSQL rejects null bytes in text columns with
+// "invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)".
+func sanitizeNullBytes(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
+}
+
 // --- Response structs ---
 
 type SkillResponse struct {
@@ -289,13 +296,13 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		ID: parseUUID(id),
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = pgtype.Text{String: sanitizeNullBytes(*req.Description), Valid: true}
 	}
 	if req.Content != nil {
-		params.Content = pgtype.Text{String: *req.Content, Valid: true}
+		params.Content = pgtype.Text{String: sanitizeNullBytes(*req.Content), Valid: true}
 	}
 	if req.Config != nil {
 		config, _ := json.Marshal(req.Config)
@@ -323,8 +330,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		for _, f := range req.Files {
 			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 				SkillID: skill.ID,
-				Path:    f.Path,
-				Content: f.Content,
+				Path:    sanitizeNullBytes(f.Path),
+				Content: sanitizeNullBytes(f.Content),
 			})
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
@@ -1188,8 +1195,8 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 
 	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
-		Path:    req.Path,
-		Content: req.Content,
+		Path:    sanitizeNullBytes(req.Path),
+		Content: sanitizeNullBytes(req.Content),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
