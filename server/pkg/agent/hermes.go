@@ -461,13 +461,55 @@ func (c *hermesClient) handleLine(line string) {
 	}
 }
 
+// acpPermissionOption mirrors a single entry in the `options` array of
+// an ACP `session/request_permission` request. We only need optionId +
+// kind for the auto-approval reply; the human-facing `name` is ignored.
+type acpPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
+}
+
+// pickACPAcceptOption inspects the options the agent advertised on a
+// `session/request_permission` request and returns the optionId of the
+// most permissive accept-style option, or "" if none of the options
+// represent acceptance. Selection priority follows the ACP spec's
+// canonical kinds:
+//
+//  1. allow_always — agent caches the decision for the rest of the session
+//  2. allow_once   — one-time approval (still works, just slower because
+//     every subsequent invocation round-trips through us again)
+//
+// `optionId` strings are agent-specific (kimi / kiro use
+// "approve_for_session"; devin uses "allow_always"; future providers
+// may use anything else), so dispatching on the standard `kind` field
+// keeps the auto-approve behaviour portable.
+func pickACPAcceptOption(options []acpPermissionOption) string {
+	var allowOnce string
+	for _, opt := range options {
+		switch opt.Kind {
+		case "allow_always":
+			return opt.OptionID
+		case "allow_once":
+			if allowOnce == "" {
+				allowOnce = opt.OptionID
+			}
+		}
+	}
+	return allowOnce
+}
+
 // handleAgentRequest replies to JSON-RPC requests the agent sends
 // us (agent → client direction). The only one we care about today is
 // `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we auto-approve every action. Using
-// `approve_for_session` rather than `approve` means subsequent
+// actually prompt a user, so we auto-approve every action.
+//
+// We prefer `kind=allow_always` over `allow_once` so subsequent
 // identical actions (every Shell invocation, every file write) don't
-// round-trip through us — the agent remembers them locally.
+// round-trip through us — the agent remembers them locally. The
+// optionId we send back is whatever the agent advertised for that
+// kind: kimi / kiro use "approve_for_session", devin uses "allow_always",
+// so dispatching on the standard ACP `kind` keeps the response
+// portable across providers.
 func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
@@ -480,17 +522,33 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		var params struct {
+			Options []acpPermissionOption `json:"options"`
+		}
+		if rawParams, ok := raw["params"]; ok {
+			_ = json.Unmarshal(rawParams, &params)
+		}
+		optionID := pickACPAcceptOption(params.Options)
+		if optionID == "" {
+			// Defensive fallback for an agent that emits no options
+			// or only reject-style options. "approve_for_session" is
+			// the legacy hardcoded value kimi/kiro originally accepted;
+			// agents that don't recognise it will reject the tool and
+			// log "Unknown permission option", which is still a clearer
+			// failure mode than silence.
+			optionID = "approve_for_session"
+		}
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "option_id", optionID)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
