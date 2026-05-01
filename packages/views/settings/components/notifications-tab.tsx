@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, User, Inbox, Eye } from "lucide-react";
+import { Bell, User, Inbox, Eye, UserPlus } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Label } from "@multica/ui/components/ui/label";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
@@ -13,6 +14,8 @@ import {
   getRouteChoice,
   type RoutingKey,
   type RouteChoice,
+  getAutoSubscribe,
+  type AutoSubscribeReason,
 } from "@multica/core/notifications";
 
 interface RowSpec {
@@ -20,6 +23,35 @@ interface RowSpec {
   label: string;
   hint: string;
 }
+
+interface AutoSubscribeRowSpec {
+  reason: AutoSubscribeReason;
+  label: string;
+  hint: string;
+}
+
+const autoSubscribeRows: AutoSubscribeRowSpec[] = [
+  {
+    reason: "creator",
+    label: "Issues you create",
+    hint: "Stay in the loop on issues you opened.",
+  },
+  {
+    reason: "assignee",
+    label: "Issues assigned to you",
+    hint: "Get updates on issues that are your responsibility.",
+  },
+  {
+    reason: "mentioned",
+    label: "Issues where you're @-mentioned",
+    hint: "Off by default — opt in if every mention should subscribe you.",
+  },
+  {
+    reason: "commenter",
+    label: "Issues you comment on",
+    hint: "Off by default — opt in to follow every issue you reply to.",
+  },
+];
 
 const personalRows: RowSpec[] = [
   {
@@ -100,6 +132,7 @@ export function NotificationsTab() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [savingKey, setSavingKey] = useState<RoutingKey | null>(null);
+  const [savingAutoSub, setSavingAutoSub] = useState<AutoSubscribeReason | null>(null);
 
   const handleChange = async (key: RoutingKey, next: RouteChoice) => {
     if (!user) return;
@@ -117,6 +150,28 @@ export function NotificationsTab() {
       );
     } finally {
       setSavingKey(null);
+    }
+  };
+
+  const handleAutoSubscribeChange = async (
+    reason: AutoSubscribeReason,
+    next: boolean,
+  ) => {
+    if (!user) return;
+    setSavingAutoSub(reason);
+    try {
+      const existing =
+        (user.preferences?.auto_subscribe as Record<string, boolean>) ?? {};
+      const updated = await api.updateMyPreferences({
+        auto_subscribe: { ...existing, [reason]: next },
+      });
+      setUser(updated);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update preference",
+      );
+    } finally {
+      setSavingAutoSub(null);
     }
   };
 
@@ -166,7 +221,71 @@ export function NotificationsTab() {
         savingKey={savingKey}
         onChange={handleChange}
       />
+
+      <AutoSubscribeSection
+        rows={autoSubscribeRows}
+        user={user}
+        savingReason={savingAutoSub}
+        onChange={handleAutoSubscribeChange}
+      />
     </div>
+  );
+}
+
+interface AutoSubscribeSectionProps {
+  rows: AutoSubscribeRowSpec[];
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  savingReason: AutoSubscribeReason | null;
+  onChange: (reason: AutoSubscribeReason, next: boolean) => void | Promise<void>;
+}
+
+function AutoSubscribeSection({
+  rows,
+  user,
+  savingReason,
+  onChange,
+}: AutoSubscribeSectionProps) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2">
+        <UserPlus className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">Auto-subscribe</h3>
+        <span className="text-xs text-muted-foreground">
+          — Decide when you become a follower of an issue
+        </span>
+      </div>
+      <Card>
+        <CardContent className="p-0">
+          {rows.map((row, idx) => {
+            const value = getAutoSubscribe(
+              user?.preferences as Record<string, unknown> | undefined,
+              row.reason,
+            );
+            return (
+              <div
+                key={row.reason}
+                className={cn(
+                  "flex items-start justify-between gap-4 px-4 py-3",
+                  idx > 0 && "border-t",
+                )}
+              >
+                <div>
+                  <Label className="text-sm font-medium">{row.label}</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {row.hint}
+                  </p>
+                </div>
+                <Switch
+                  checked={value}
+                  disabled={savingReason === row.reason || !user}
+                  onCheckedChange={(next) => void onChange(row.reason, next)}
+                />
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
 

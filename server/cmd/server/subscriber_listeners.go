@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -9,6 +10,23 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// autoSubscribeDefaults — when a user has no override in user.preferences
+// these defaults decide whether the listener auto-subscribes them.
+// Reasons map 1:1 to the strings written to issue_subscriber.reason.
+//
+// Defaults follow the principle "subscribe me only when it's my task":
+//   - creator / assignee  → on  (you own it, follow it)
+//   - mentioned / commenter → off (opt-in via Settings → Notifications)
+//
+// Keep this map in sync with AUTO_SUBSCRIBE_DEFAULTS in
+// packages/core/notifications/auto-subscribe.ts.
+var autoSubscribeDefaults = map[string]bool{
+	"creator":   true,
+	"assignee":  true,
+	"mentioned": false,
+	"commenter": false,
+}
 
 // registerSubscriberListeners wires up event bus listeners that auto-subscribe
 // relevant users to issues. This ensures creators, assignees, and commenters
@@ -28,18 +46,18 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		// Subscribe the creator
-		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
+		maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
 
 		// Subscribe the assignee if exists and different from creator
 		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
 			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
-			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+			maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 		}
 
 		// Subscribe @mentioned users in description
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
-				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
+				maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 			}
 		}
 	})
@@ -58,7 +76,7 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// Subscribe new assignee if assignee changed
 		if assigneeChanged, _ := payload["assignee_changed"].(bool); assigneeChanged {
 			if issue.AssigneeType != nil && issue.AssigneeID != nil {
-				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+				maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 			}
 		}
 
@@ -74,7 +92,7 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
-						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
+						maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 					}
 				}
 			}
@@ -105,8 +123,56 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		addSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter")
+		maybeAddSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter")
 	})
+}
+
+// shouldAutoSubscribe returns whether a user should be auto-subscribed for a
+// given reason. Agents always subscribe (they have no preferences UI and rely
+// on subscription for their own task pickup). Members consult
+// user.preferences.auto_subscribe.<reason>, falling back to autoSubscribeDefaults.
+func shouldAutoSubscribe(ctx context.Context, queries *db.Queries, userType, userID, reason string) bool {
+	if userType != "member" {
+		return true
+	}
+	def, known := autoSubscribeDefaults[reason]
+	if !known {
+		// Unknown reason — preserve old "always subscribe" behavior so future
+		// reasons don't silently turn into opt-in by accident.
+		return true
+	}
+	prefs, err := queries.GetUserPreferences(ctx, parseUUID(userID))
+	if err != nil || len(prefs) == 0 {
+		return def
+	}
+	var blob map[string]any
+	if err := json.Unmarshal(prefs, &blob); err != nil {
+		slog.Warn("preferences unmarshal failed for auto_subscribe", "user_id", userID, "error", err)
+		return def
+	}
+	block, _ := blob["auto_subscribe"].(map[string]any)
+	if block == nil {
+		return def
+	}
+	override, present := block[reason]
+	if !present {
+		return def
+	}
+	v, ok := override.(bool)
+	if !ok {
+		return def
+	}
+	return v
+}
+
+// maybeAddSubscriber wraps addSubscriber with the user's auto-subscribe
+// preference check. If the user has opted out of this reason, no row is
+// inserted and no subscriber:added event is published.
+func maybeAddSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	if !shouldAutoSubscribe(context.Background(), queries, userType, userID, reason) {
+		return
+	}
+	addSubscriber(bus, queries, workspaceID, issueID, userType, userID, reason)
 }
 
 // extractIssueFields normalizes an issue payload that may be either a

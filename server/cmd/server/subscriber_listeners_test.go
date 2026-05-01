@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,6 +12,35 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// setUserAutoSubscribePrefs replaces the user's preferences.auto_subscribe
+// block wholesale. Existing keys outside auto_subscribe are preserved.
+func setUserAutoSubscribePrefs(t *testing.T, userID string, autoSub map[string]bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	var existingRaw []byte
+	if err := testPool.QueryRow(ctx, `SELECT preferences FROM "user" WHERE id = $1`, userID).Scan(&existingRaw); err != nil {
+		t.Fatalf("read prefs: %v", err)
+	}
+	blob := map[string]any{}
+	if len(existingRaw) > 0 {
+		_ = json.Unmarshal(existingRaw, &blob)
+	}
+	asBlock := map[string]any{}
+	for k, v := range autoSub {
+		asBlock[k] = v
+	}
+	blob["auto_subscribe"] = asBlock
+
+	raw, err := json.Marshal(blob)
+	if err != nil {
+		t.Fatalf("marshal prefs: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE "user" SET preferences = $1::jsonb WHERE id = $2`, raw, userID); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+}
 
 // subscriberTest helpers — reuse the integration test fixtures from TestMain
 // (testPool, testUserID, testWorkspaceID are set in integration_test.go).
@@ -272,19 +302,9 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 	}
 }
 
-func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
-	queries := db.New(testPool)
-	bus := events.New()
-	registerSubscriberListeners(bus, queries)
-
-	commenterEmail := "subscriber-commenter-test@multica.ai"
-	commenterID := createTestUser(t, commenterEmail)
-	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
-
-	issueID := createTestIssue(t, testWorkspaceID, testUserID)
-	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
-
-	bus.Publish(events.Event{
+// commentEvent builds a comment:created event for a member commenter.
+func commentEvent(issueID, commenterID string) events.Event {
+	return events.Event{
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
@@ -299,10 +319,220 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 				Type:       "comment",
 			},
 		},
-	})
+	}
+}
+
+// Default for "commenter" is false — opt-in. Without an explicit override the
+// commenter must NOT be auto-subscribed.
+func TestSubscriberCommentCreated_CommenterNotSubscribedByDefault(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	commenterEmail := "subscriber-commenter-default-test@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(commentEvent(issueID, commenterID))
+
+	if isSubscribed(t, queries, issueID, "member", commenterID) {
+		t.Fatal("expected commenter to NOT be subscribed by default")
+	}
+}
+
+// When the user opts in to auto_subscribe.commenter, the listener must
+// subscribe them.
+func TestSubscriberCommentCreated_CommenterSubscribesWhenOptIn(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	commenterEmail := "subscriber-commenter-optin-test@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	setUserAutoSubscribePrefs(t, commenterID, map[string]bool{"commenter": true})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(commentEvent(issueID, commenterID))
 
 	if !isSubscribed(t, queries, issueID, "member", commenterID) {
-		t.Fatal("expected commenter to be subscribed after comment:created")
+		t.Fatal("expected commenter to be subscribed when auto_subscribe.commenter=true")
+	}
+}
+
+// Default for "mentioned" is false — opt-in. A user mentioned in the
+// description must NOT be auto-subscribed unless they opt in.
+func TestSubscriberIssueCreated_MentionedNotSubscribedByDefault(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	mentionedEmail := "subscriber-mentioned-default-test@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	desc := "Hey [@Mentioned](mention://member/" + mentionedID + ") please look"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &desc,
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("expected mentioned user NOT to be subscribed by default")
+	}
+}
+
+// When the mentioned user has auto_subscribe.mentioned=true, the listener
+// must subscribe them.
+func TestSubscriberIssueCreated_MentionedSubscribesWhenOptIn(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	mentionedEmail := "subscriber-mentioned-optin-test@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	setUserAutoSubscribePrefs(t, mentionedID, map[string]bool{"mentioned": true})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	desc := "Hey [@Mentioned](mention://member/" + mentionedID + ") please look"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &desc,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("expected mentioned user to be subscribed when auto_subscribe.mentioned=true")
+	}
+}
+
+// A user can opt OUT of being subscribed when assigned by setting
+// auto_subscribe.assignee=false.
+func TestSubscriberIssueUpdated_AssigneeOptOut(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	assigneeEmail := "subscriber-assignee-optout-test@multica.ai"
+	assigneeID := createTestUser(t, assigneeEmail)
+	t.Cleanup(func() { cleanupTestUser(t, assigneeEmail) })
+
+	setUserAutoSubscribePrefs(t, assigneeID, map[string]bool{"assignee": false})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	assigneeType := "member"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "test issue",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &assigneeType,
+				AssigneeID:   &assigneeID,
+			},
+			"assignee_changed": true,
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", assigneeID) {
+		t.Fatal("expected assignee NOT to be subscribed when auto_subscribe.assignee=false")
+	}
+}
+
+// Agents have no preferences UI — they must always auto-subscribe so their
+// task pickup keeps working.
+func TestSubscriberIssueCreated_AgentAlwaysSubscribesAsAssignee(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	// Pick an existing agent in the test workspace (any agent ID works for
+	// subscription — we don't FK-validate agent existence here).
+	var agentID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Skipf("no agent in test workspace: %v", err)
+	}
+
+	assigneeType := "agent"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "test issue",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &assigneeType,
+				AssigneeID:   &agentID,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "agent", agentID) {
+		t.Fatal("expected agent assignee to always be subscribed")
 	}
 }
 
