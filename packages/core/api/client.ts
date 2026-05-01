@@ -876,6 +876,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/attachments`);
   }
 
+  async getAttachment(id: string): Promise<Attachment> {
+    return this.fetch(`/api/attachments/${id}`);
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
   }

@@ -29,6 +29,7 @@ function workspaceScoped(slug: string) {
       folderId ? `${ws}/documents/new?folder=${encode(folderId)}` : `${ws}/documents/new`,
     documentDetail: (id: string) => `${ws}/documents/${encode(id)}`,
     documentEdit: (id: string) => `${ws}/documents/${encode(id)}/edit`,
+    attachmentView: (id: string) => `${ws}/attachments/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
