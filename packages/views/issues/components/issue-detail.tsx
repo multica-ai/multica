@@ -301,7 +301,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useLayoutEffect(() => {
     if (!highlightCommentId) return;
     activitySectionRef.current?.scrollIntoView({ behavior: "instant", block: "start" });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [highlightCommentId]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
