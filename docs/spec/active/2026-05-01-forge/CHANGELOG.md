@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0] - 2026-05-01
+
+### Approved
+
+- Spec approved by shivasymbl <sdevinarayanan@asymbl.com> at 2026-05-01T08:57:17Z
+- Status: in-review → approved
+- Implementation in progress (Phase 1 Task 1.2 underway)
+- PR #1 open: https://github.com/shivasymbl/forge/pull/1
+
 ## [1.0.0] - 2026-05-01
 
 ### Added

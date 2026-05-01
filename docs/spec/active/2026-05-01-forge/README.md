@@ -2,9 +2,10 @@
 project_id: SPEC-2026-05-01-001
 project_name: "Forge — Asymbl AI Agent Management Platform"
 slug: forge
-status: in-review
+status: approved
 created: 2026-05-01T11:30:00Z
-approved: null
+approved: 2026-05-01T08:57:17Z
+approved_by: "shivasymbl <sdevinarayanan@asymbl.com>"
 started: null
 completed: null
 expires: 2026-08-01T11:30:00Z
