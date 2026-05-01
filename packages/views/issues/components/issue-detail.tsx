@@ -5,6 +5,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
+  Archive,
   Calendar,
   ChevronDown,
   ChevronLeft,
@@ -547,6 +548,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   }
                 />
                 <TooltipContent side="bottom">Mark as done</TooltipContent>
+              </Tooltip>
+            )}
+            {onDone && issue.status === "done" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => { onDone(); }}
+                    >
+                      <Archive />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Archive</TooltipContent>
               </Tooltip>
             )}
             <Tooltip>

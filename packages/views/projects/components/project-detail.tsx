@@ -134,11 +134,6 @@ function ProjectIssuesContent({
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const viewState = projectViewStore.getState();
-      if (viewState.sortBy !== "position") {
-        viewState.setSortBy("position");
-        viewState.setSortDirection("asc");
-      }
       const updates: Partial<{ status: IssueStatus; position: number }> = { status: newStatus };
       if (newPosition !== undefined) updates.position = newPosition;
       updateIssueMutation.mutate(
