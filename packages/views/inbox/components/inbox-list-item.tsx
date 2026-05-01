@@ -22,11 +22,13 @@ export { timeAgo };
 export function InboxListItem({
   item,
   isSelected,
+  isAgentActive,
   onClick,
   onArchive,
 }: {
   item: InboxItem;
   isSelected: boolean;
+  isAgentActive?: boolean;
   onClick: () => void;
   onArchive: () => void;
 }) {
@@ -79,8 +81,19 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-            <InboxDetailLabel item={item} />
+          <p className={`flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+            {isAgentActive && (
+              <span
+                title="Agent is working"
+                className="relative inline-flex size-2 shrink-0 items-center justify-center"
+              >
+                <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+              </span>
+            )}
+            <span className="truncate">
+              <InboxDetailLabel item={item} />
+            </span>
           </p>
           <span className={`shrink-0 text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
             {timeAgo(item.created_at)}

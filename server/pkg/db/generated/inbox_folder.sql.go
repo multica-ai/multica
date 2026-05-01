@@ -123,6 +123,158 @@ func (q *Queries) GetMaxInboxFolderPosition(ctx context.Context, arg GetMaxInbox
 	return max_position, err
 }
 
+const listArchivedChatSessionsUnfiled = `-- name: ListArchivedChatSessionsUnfiled :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1
+  AND cs.creator_id = $2
+  AND cs.status = 'archived'
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_folder_membership m
+    WHERE m.item_type = 'chat_session' AND m.item_id = cs.id
+  )
+ORDER BY cs.updated_at DESC
+`
+
+type ListArchivedChatSessionsUnfiledParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+type ListArchivedChatSessionsUnfiledRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	HasUnread   bool               `json:"has_unread"`
+}
+
+// Archived (creator-owned) chat sessions not in any folder. Same shape as
+// ListChatSessionsUnfiled so the unified inbox merger can reuse it.
+func (q *Queries) ListArchivedChatSessionsUnfiled(ctx context.Context, arg ListArchivedChatSessionsUnfiledParams) ([]ListArchivedChatSessionsUnfiledRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedChatSessionsUnfiled, arg.WorkspaceID, arg.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedChatSessionsUnfiledRow{}
+	for rows.Next() {
+		var i ListArchivedChatSessionsUnfiledRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArchivedInboxItemsUnfiled = `-- name: ListArchivedInboxItemsUnfiled :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = true
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_folder_membership m
+    WHERE m.item_type = 'notification' AND m.item_id = i.id
+  )
+ORDER BY i.created_at DESC
+`
+
+type ListArchivedInboxItemsUnfiledParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListArchivedInboxItemsUnfiledRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+}
+
+// Archived inbox items not in any folder. Backs the "show archived" view in
+// the inbox kebab menu — folders show their own archived state already.
+func (q *Queries) ListArchivedInboxItemsUnfiled(ctx context.Context, arg ListArchivedInboxItemsUnfiledParams) ([]ListArchivedInboxItemsUnfiledRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedInboxItemsUnfiled, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedInboxItemsUnfiledRow{}
+	for rows.Next() {
+		var i ListArchivedInboxItemsUnfiledRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.IssueStatus,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatSessionsInFolder = `-- name: ListChatSessionsInFolder :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
        (cs.unread_since IS NOT NULL)::bool AS has_unread

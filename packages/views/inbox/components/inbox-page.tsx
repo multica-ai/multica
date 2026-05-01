@@ -18,7 +18,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   inboxListOptions,
+  inboxArchivedListOptions,
   inboxListInFolderOptions,
+  activeIssueTasksOptions,
   deduplicateInboxItems,
 } from "@multica/core/inbox/queries";
 import {
@@ -63,6 +65,8 @@ import type { InboxItem, InboxItemType, InboxFolder, InboxFolderItemType } from 
 import {
   chatSessionsOptions,
   chatSessionsInFolderOptions,
+  archivedChatSessionsOptions,
+  pendingChatTasksOptions,
 } from "@multica/core/chat/queries";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -90,7 +94,10 @@ import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
 import { InboxChatPanel } from "./inbox-chat-panel";
 
-type ViewMode = { kind: "inbox" } | { kind: "folder"; id: string };
+type ViewMode =
+  | { kind: "inbox" }
+  | { kind: "archived" }
+  | { kind: "folder"; id: string };
 
 type GroupByMode = "none" | "project" | "agent" | "type";
 
@@ -119,41 +126,74 @@ export function InboxPage() {
 
   const wsId = useWorkspaceId();
   const isFolderView = viewMode.kind === "folder";
+  const isArchivedView = viewMode.kind === "archived";
   const folderId = isFolderView ? viewMode.id : "";
 
-  // Query both shapes; only one is enabled at a time. Doing it this way keeps
+  // Query each shape; only one is enabled at a time. Doing it this way keeps
   // hook order stable and lets each query keep its own queryKey type.
   const inboxDefaultQuery = useQuery({
     ...inboxListOptions(wsId),
-    enabled: !isFolderView,
+    enabled: !isFolderView && !isArchivedView,
   });
   const inboxInFolderQuery = useQuery({
     ...inboxListInFolderOptions(wsId, folderId),
     enabled: isFolderView && !!folderId,
   });
+  const inboxArchivedQuery = useQuery({
+    ...inboxArchivedListOptions(wsId),
+    enabled: isArchivedView,
+  });
   const rawItems = isFolderView
     ? inboxInFolderQuery.data ?? []
-    : inboxDefaultQuery.data ?? [];
-  const loading = isFolderView ? inboxInFolderQuery.isLoading : inboxDefaultQuery.isLoading;
+    : isArchivedView
+      ? inboxArchivedQuery.data ?? []
+      : inboxDefaultQuery.data ?? [];
+  const loading = isFolderView
+    ? inboxInFolderQuery.isLoading
+    : isArchivedView
+      ? inboxArchivedQuery.isLoading
+      : inboxDefaultQuery.isLoading;
   const items = useMemo(
     () =>
       isFolderView
         ? rawItems.filter((i) => !i.archived)
-        : deduplicateInboxItems(rawItems),
-    [rawItems, isFolderView],
+        : isArchivedView
+          ? rawItems
+          : deduplicateInboxItems(rawItems),
+    [rawItems, isFolderView, isArchivedView],
   );
 
   const chatDefaultQuery = useQuery({
     ...chatSessionsOptions(wsId),
-    enabled: !isFolderView,
+    enabled: !isFolderView && !isArchivedView,
   });
   const chatInFolderQuery = useQuery({
     ...chatSessionsInFolderOptions(wsId, folderId),
     enabled: isFolderView && !!folderId,
   });
+  const chatArchivedQuery = useQuery({
+    ...archivedChatSessionsOptions(wsId),
+    enabled: isArchivedView,
+  });
   const chatSessions = isFolderView
     ? chatInFolderQuery.data ?? []
-    : chatDefaultQuery.data ?? [];
+    : isArchivedView
+      ? chatArchivedQuery.data ?? []
+      : chatDefaultQuery.data ?? [];
+
+  // Workspace-wide "agent is working" signals: which issues and chat sessions
+  // currently have an in-flight task. Used to render the small live indicator
+  // on each row in the inbox list.
+  const { data: activeIssueTasksData } = useQuery(activeIssueTasksOptions(wsId));
+  const activeIssueIds = useMemo(
+    () => new Set(activeIssueTasksData?.issue_ids ?? []),
+    [activeIssueTasksData],
+  );
+  const { data: pendingChatTasksData } = useQuery(pendingChatTasksOptions(wsId));
+  const activeChatSessionIds = useMemo(
+    () => new Set((pendingChatTasksData?.tasks ?? []).map((t) => t.chat_session_id)),
+    [pendingChatTasksData],
+  );
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
@@ -411,11 +451,17 @@ export function InboxPage() {
   );
 
   const currentFolder = isFolderView ? folders.find((f) => f.id === folderId) : null;
+  const headerTitle = isFolderView
+    ? currentFolder?.name ?? "Folder"
+    : isArchivedView
+      ? "Archived"
+      : "Inbox";
+  const showBack = isFolderView || isArchivedView;
 
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-2">
-        {isFolderView && (
+        {showBack && (
           <Button
             variant="ghost"
             size="icon-sm"
@@ -426,10 +472,8 @@ export function InboxPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
         )}
-        <h1 className="truncate text-sm font-semibold">
-          {isFolderView ? currentFolder?.name ?? "Folder" : "Inbox"}
-        </h1>
-        {!isFolderView && unreadCount > 0 && (
+        <h1 className="truncate text-sm font-semibold">{headerTitle}</h1>
+        {!isFolderView && !isArchivedView && unreadCount > 0 && (
           <span className="text-xs text-muted-foreground">{unreadCount}</span>
         )}
       </div>
@@ -495,23 +539,37 @@ export function InboxPage() {
               </>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleMarkAllRead}>
-              <CheckCheck className="h-4 w-4" />
-              Mark all as read
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleArchiveAll}>
+            <DropdownMenuItem
+              onClick={() => {
+                setSelectedKey("");
+                setViewMode(isArchivedView ? { kind: "inbox" } : { kind: "archived" });
+              }}
+            >
               <Archive className="h-4 w-4" />
-              Archive all
+              {isArchivedView ? "Show active" : "Show archived"}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleArchiveAllRead}>
-              <BookCheck className="h-4 w-4" />
-              Archive all read
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleArchiveCompleted}>
-              <ListChecks className="h-4 w-4" />
-              Archive completed
-            </DropdownMenuItem>
+            {!isArchivedView && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleMarkAllRead}>
+                  <CheckCheck className="h-4 w-4" />
+                  Mark all as read
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleArchiveAll}>
+                  <Archive className="h-4 w-4" />
+                  Archive all
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleArchiveAllRead}>
+                  <BookCheck className="h-4 w-4" />
+                  Archive all read
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleArchiveCompleted}>
+                  <ListChecks className="h-4 w-4" />
+                  Archive completed
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -548,6 +606,7 @@ export function InboxPage() {
     if (entry.kind === "chat") {
       const session = entry.session;
       const agent = agentMap.get(session.agent_id);
+      const isAgentActive = activeChatSessionIds.has(session.id);
       return (
         <DraggableRow
           key={`chat:${session.id}`}
@@ -576,7 +635,8 @@ export function InboxPage() {
                   {session.title || agent?.name || "Chat"}
                 </span>
               </div>
-              <span className={`text-xs ${session.has_unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+              <span className={`flex items-center gap-1.5 text-xs ${session.has_unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+                {isAgentActive && <AgentRunningPip />}
                 {agent?.name} · {timeAgo(session.updated_at)}
               </span>
             </div>
@@ -596,6 +656,7 @@ export function InboxPage() {
       );
     }
     const item = entry.item;
+    const isAgentActive = !!item.issue_id && activeIssueIds.has(item.issue_id);
     return (
       <DraggableRow
         key={`notif:${item.id}`}
@@ -604,6 +665,7 @@ export function InboxPage() {
         <InboxListItem
           item={item}
           isSelected={(item.issue_id ?? item.id) === selectedKey}
+          isAgentActive={isAgentActive}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
         />
@@ -742,14 +804,18 @@ export function InboxPage() {
     );
   };
 
+  const emptyMessage = isFolderView
+    ? "Empty folder"
+    : isArchivedView
+      ? "No archived items"
+      : "No notifications";
+
   const listBody = (
     <div>
       {mergedEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm">
-            {isFolderView ? "Empty folder" : "No notifications"}
-          </p>
+          <p className="text-sm">{emptyMessage}</p>
         </div>
       ) : groupedEntries ? (
         groupedEntries.map((group) => renderGroup(group, 0, ""))
@@ -964,6 +1030,22 @@ export function InboxPage() {
         )}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Active agent indicator — tiny pulsing dot
+// -----------------------------------------------------------------------------
+
+function AgentRunningPip() {
+  return (
+    <span
+      title="Agent is working"
+      className="relative inline-flex size-2 shrink-0 items-center justify-center"
+    >
+      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
+      <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+    </span>
   );
 }
 

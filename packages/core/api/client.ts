@@ -569,9 +569,16 @@ export class ApiClient {
   }
 
   // Inbox
-  async listInbox(params?: { folder?: string }): Promise<InboxItem[]> {
-    const query = params?.folder ? `?folder=${params.folder}` : "";
-    return this.fetch(`/api/inbox${query}`);
+  async listInbox(params?: { folder?: string; archived?: boolean }): Promise<InboxItem[]> {
+    const qs = new URLSearchParams();
+    if (params?.folder) qs.set("folder", params.folder);
+    if (params?.archived) qs.set("archived", "1");
+    const query = qs.toString();
+    return this.fetch(`/api/inbox${query ? `?${query}` : ""}`);
+  }
+
+  async listActiveIssueTasks(): Promise<{ issue_ids: string[] }> {
+    return this.fetch("/api/inbox/active-issue-tasks");
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {

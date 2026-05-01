@@ -193,6 +193,17 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 ORDER BY created_at DESC;
 
+-- name: ListActiveIssueIDsInWorkspace :many
+-- Returns the set of issue IDs in this workspace with at least one in-flight
+-- task (queued, dispatched, or running). Used by the inbox list to render an
+-- "agent is working" indicator without an N+1 of per-issue lookups.
+SELECT DISTINCT atq.issue_id
+FROM agent_task_queue atq
+JOIN issue iss ON iss.id = atq.issue_id
+WHERE iss.workspace_id = $1
+  AND atq.issue_id IS NOT NULL
+  AND atq.status IN ('queued', 'dispatched', 'running');
+
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1

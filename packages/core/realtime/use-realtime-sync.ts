@@ -149,7 +149,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat / task events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read",
-      "task:message", "task:completed", "task:failed",
+      "task:dispatch", "task:message", "task:completed", "task:failed", "task:cancelled",
     ]);
 
     const unsubAny = ws.onAny((msg) => {
@@ -414,9 +414,24 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Active-issue-tasks query is consumed by the inbox list; refresh whenever
+    // any task starts or settles. Chat tasks separately invalidate the
+    // chat-pending aggregate below.
+    const invalidateActiveIssueTasks = () => {
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(id) });
+    };
+
+    const unsubTaskDispatch = ws.on("task:dispatch", () => {
+      invalidateActiveIssueTasks();
+    });
+
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
-      if (!payload.chat_session_id) return; // issue tasks handled elsewhere
+      if (!payload.chat_session_id) {
+        invalidateActiveIssueTasks();
+        return;
+      }
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -429,7 +444,10 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
-      if (!payload.chat_session_id) return;
+      if (!payload.chat_session_id) {
+        invalidateActiveIssueTasks();
+        return;
+      }
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -438,6 +456,10 @@ export function useRealtimeSync(
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
+    });
+
+    const unsubTaskCancelled = ws.on("task:cancelled", () => {
+      invalidateActiveIssueTasks();
     });
 
     const unsubChatSessionRead = ws.on("chat:session_read", (p) => {
@@ -510,8 +532,10 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubTaskDispatch();
       unsubTaskCompleted();
       unsubTaskFailed();
+      unsubTaskCancelled();
       unsubChatSessionRead();
       unsubArtifactCreated();
       unsubArtifactUpdated();

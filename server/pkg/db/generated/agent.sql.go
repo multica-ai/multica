@@ -637,6 +637,38 @@ func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPen
 	return has_pending, err
 }
 
+const listActiveIssueIDsInWorkspace = `-- name: ListActiveIssueIDsInWorkspace :many
+SELECT DISTINCT atq.issue_id
+FROM agent_task_queue atq
+JOIN issue iss ON iss.id = atq.issue_id
+WHERE iss.workspace_id = $1
+  AND atq.issue_id IS NOT NULL
+  AND atq.status IN ('queued', 'dispatched', 'running')
+`
+
+// Returns the set of issue IDs in this workspace with at least one in-flight
+// task (queued, dispatched, or running). Used by the inbox list to render an
+// "agent is working" indicator without an N+1 of per-issue lookups.
+func (q *Queries) ListActiveIssueIDsInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveIssueIDsInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')

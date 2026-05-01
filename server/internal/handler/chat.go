@@ -118,6 +118,18 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		for _, s := range raw {
 			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
 		}
+	case status == "archived":
+		raw, err := h.Queries.ListArchivedChatSessionsUnfiled(r.Context(), db.ListArchivedChatSessionsUnfiledParams{
+			WorkspaceID: parseUUID(workspaceID),
+			CreatorID:   parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+			return
+		}
+		for _, s := range raw {
+			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
+		}
 	default:
 		raw, err := h.Queries.ListChatSessionsUnfiled(r.Context(), db.ListChatSessionsUnfiledParams{
 			WorkspaceID: parseUUID(workspaceID),

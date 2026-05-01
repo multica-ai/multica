@@ -9,6 +9,7 @@ import {
   FileDropOverlay,
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -127,6 +128,11 @@ export function ChatInput({
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+          <FileUploadButton
+            size="sm"
+            disabled={!!disabled}
+            onSelect={(file) => editorRef.current?.uploadFile(file)}
+          />
           <SubmitButton
             onClick={handleSend}
             disabled={isEmpty || !!disabled}

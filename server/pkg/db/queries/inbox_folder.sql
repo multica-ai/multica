@@ -86,6 +86,39 @@ WHERE i.workspace_id = $1
   )
 ORDER BY i.created_at DESC;
 
+-- name: ListArchivedInboxItemsUnfiled :many
+-- Archived inbox items not in any folder. Backs the "show archived" view in
+-- the inbox kebab menu — folders show their own archived state already.
+SELECT i.*,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = true
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_folder_membership m
+    WHERE m.item_type = 'notification' AND m.item_id = i.id
+  )
+ORDER BY i.created_at DESC;
+
+-- name: ListArchivedChatSessionsUnfiled :many
+-- Archived (creator-owned) chat sessions not in any folder. Same shape as
+-- ListChatSessionsUnfiled so the unified inbox merger can reuse it.
+SELECT cs.*,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1
+  AND cs.creator_id = $2
+  AND cs.status = 'archived'
+  AND NOT EXISTS (
+    SELECT 1 FROM inbox_folder_membership m
+    WHERE m.item_type = 'chat_session' AND m.item_id = cs.id
+  )
+ORDER BY cs.updated_at DESC;
+
 -- name: ListInboxItemsInFolder :many
 -- Inbox-routed items (route='inbox') in a specific folder (regardless of
 -- archived flag). Notifications-routed items can't be filed in folders.

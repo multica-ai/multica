@@ -133,6 +133,42 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Query().Get("archived") == "1" {
+		archived, err := h.Queries.ListArchivedInboxItemsUnfiled(r.Context(), db.ListArchivedInboxItemsUnfiledParams{
+			WorkspaceID:   parseUUID(workspaceID),
+			RecipientType: "member",
+			RecipientID:   parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list inbox")
+			return
+		}
+		resp := make([]InboxItemResponse, len(archived))
+		for i, item := range archived {
+			resp[i] = InboxItemResponse{
+				ID:            uuidToString(item.ID),
+				WorkspaceID:   uuidToString(item.WorkspaceID),
+				RecipientType: item.RecipientType,
+				RecipientID:   uuidToString(item.RecipientID),
+				Type:          item.Type,
+				Severity:      item.Severity,
+				IssueID:       uuidToPtr(item.IssueID),
+				ProjectID:     uuidToPtr(item.ProjectID),
+				Title:         item.Title,
+				Body:          textToPtr(item.Body),
+				Read:          item.Read,
+				Archived:      item.Archived,
+				CreatedAt:     timestampToString(item.CreatedAt),
+				IssueStatus:   textToPtr(item.IssueStatus),
+				ActorType:     textToPtr(item.ActorType),
+				ActorID:       uuidToPtr(item.ActorID),
+				Details:       json.RawMessage(item.Details),
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	items, err := h.Queries.ListInboxItemsUnfiled(r.Context(), db.ListInboxItemsUnfiledParams{
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: "member",
@@ -343,4 +379,27 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// ListActiveIssueTasks returns the set of issue IDs in the current workspace
+// that have at least one in-flight task. Drives the "agent is working"
+// indicator on inbox list rows so users can see which conversations have an
+// agent currently executing without opening each one.
+func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+
+	ids, err := h.Queries.ListActiveIssueIDsInWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list active issue tasks")
+		return
+	}
+
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, uuidToString(id))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issue_ids": out})
 }

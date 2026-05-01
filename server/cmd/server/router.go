@@ -420,6 +420,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
+				r.Get("/active-issue-tasks", h.ListActiveIssueTasks)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
