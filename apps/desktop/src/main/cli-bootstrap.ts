@@ -18,7 +18,7 @@ const GITHUB_LATEST_BASE =
   "https://github.com/multica-ai/multica/releases/latest/download";
 
 function binaryName(): string {
-  return process.platform === "win32" ? "multica.exe" : "multica";
+  return process.platform === "win32" ? "forge.exe" : "forge";
 }
 
 export function managedCliPath(): string {
@@ -102,7 +102,7 @@ async function installFresh(): Promise<string> {
   }
   const url = `${GITHUB_LATEST_BASE}/${assetName}`;
 
-  const workDir = join(tmpdir(), `multica-cli-${Date.now()}`);
+  const workDir = join(tmpdir(), `forge-cli-${Date.now()}`);
   await mkdir(workDir, { recursive: true });
 
   try {
