@@ -35,6 +35,8 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { useStickyBottom } from "@multica/ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/ui/components/common/jump-to-latest-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -364,6 +366,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Issue pages render long timelines; don't yank the user to the bottom on
+  // mount, but offer a "jump to latest" pill once they scroll up far enough.
+  const { isAtBottom, scrollToBottom } = useStickyBottom(scrollContainerRef, {
+    initialScroll: false,
+  });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
@@ -1020,8 +1027,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               }}
             />
 
-        {/* Content — scrollable */}
-        <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+        {/* Content — scrollable. The relative wrapper anchors the
+            jump-to-latest pill to the viewport rather than the scroll content. */}
+        <div className="relative flex-1 min-h-0">
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -1449,6 +1458,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </Tabs>
           </div>
         </div>
+        </div>
+        <JumpToLatestButton
+          visible={!isAtBottom && timeline.length > 0}
+          onClick={() => scrollToBottom()}
+          label="Latest"
+        />
         </div>
       </div>
       </ResizablePanel>
