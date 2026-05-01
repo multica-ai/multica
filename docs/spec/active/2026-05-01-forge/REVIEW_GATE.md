@@ -50,6 +50,14 @@ codex review --diff v0.0.1-fork..HEAD
 8. **Release binary names**: cli/update.go asset names (multica-cli-*, multica_*) and GitHub release URL point at upstream repo — update when Forge gets its own release pipeline (Phase 2).
 9. **Config directory migration**: Existing `~/.multica/` configs will not auto-migrate to `~/.forge/`. Users upgrading from a multica install need to copy manually.
 
+## Best-Practices P2 Deferred Items
+
+Flagged by best-practices review, intentionally deferred to Phase 2:
+
+10. **Docker Compose resource limits**: No `deploy.resources.limits` set on any service. Add CPU/memory limits before production hardening to prevent runaway containers from starving the host.
+11. **Postgres healthcheck `start_period`**: The postgres service healthcheck lacks a `start_period`, so compose may mark it unhealthy before the DB finishes initializing on first boot. Add `start_period: 30s` to the healthcheck block.
+12. **MULTICA_* env var rename**: All 15 `MULTICA_*` env var keys in `.env.example` and the Go server are kept for upstream compatibility. Renaming requires a coordinated change across the Go server, all deployment configs, and existing customer installs — deferred to Phase 2. A clarifying comment has been added to `.env.example`.
+
 ## Acceptance Criteria Verification
 
 Before approving for Phase 2:
