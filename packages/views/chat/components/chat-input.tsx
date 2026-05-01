@@ -1,10 +1,17 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
-import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { useCallback, useRef, useState } from "react";
+import {
+  ContentEditor,
+  type ContentEditorRef,
+  useFileDropZone,
+  FileDropOverlay,
+} from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
 
 const logger = createLogger("chat.ui");
@@ -45,6 +52,16 @@ export function ChatInput({
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
 
+  const { uploadWithToast } = useFileUpload(api);
+  const handleUpload = useCallback(
+    (file: File) => uploadWithToast(file),
+    [uploadWithToast],
+  );
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    enabled: !disabled,
+  });
+
   const handleSend = () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || isRunning || disabled) {
@@ -74,7 +91,10 @@ export function ChatInput({
 
   return (
     <div className="px-5 pb-3 pt-0">
-      <div className="relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand">
+      <div
+        {...dropZoneProps}
+        className="relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand"
+      >
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // Remount the editor when the active session changes so its
@@ -88,6 +108,7 @@ export function ChatInput({
               setInputDraft(draftKey, md);
             }}
             onSubmit={handleSend}
+            onUploadFile={handleUpload}
             debounceMs={100}
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
@@ -109,6 +130,7 @@ export function ChatInput({
             onStop={onStop}
           />
         </div>
+        {isDragOver && <FileDropOverlay />}
       </div>
     </div>
   );
