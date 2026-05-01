@@ -115,8 +115,8 @@ export function DaemonSettingsTab() {
             {cliInstalled === null
               ? "Checking…"
               : cliInstalled
-                ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."}
+                ? "forge CLI is installed and available in PATH."
+                : "forge CLI not found. Install it to enable daemon management."}
           </p>
           {cliInstalled === false && (
             <Button
@@ -125,7 +125,7 @@ export function DaemonSettingsTab() {
               className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
-                  "https://github.com/multica-ai/multica#cli-installation",
+                  "https://github.com/shivasymbl/forge#cli-installation",
                 )
               }
             >

@@ -1,6 +1,6 @@
 // Package execenv manages isolated per-task execution environments for the daemon.
 // Each task gets its own directory with injected context files. Repositories are
-// checked out on demand by the agent via `multica repo checkout`.
+// checked out on demand by the agent via `forge repo checkout`.
 package execenv
 
 import (
@@ -31,7 +31,7 @@ type ProjectResourceForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspacesRoot string            // base path for all envs (e.g., ~/forge_workspaces)
 	WorkspaceID    string            // workspace UUID — tasks are grouped under this
 	TaskID         string            // task UUID — used for directory name
 	AgentName      string            // for git branch naming only
@@ -99,7 +99,7 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 
 // Prepare creates an isolated execution environment for a task.
 // The workdir starts empty (no repo checkouts). The agent checks out repos
-// on demand via `multica repo checkout <url>`.
+// on demand via `forge repo checkout <url>`.
 func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.WorkspacesRoot == "" {
 		return nil, fmt.Errorf("execenv: workspaces root is required")

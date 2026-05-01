@@ -8,44 +8,50 @@
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8080 (also used by CLI/daemon)
 
-name: multica
+name: forge
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    container_name: forge-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-multica}
-      POSTGRES_USER: ${POSTGRES_USER:-multica}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-forge}
+      POSTGRES_USER: ${POSTGRES_USER:-forge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
+
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - forge_pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d ${POSTGRES_DB:-forge}"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   backend:
-    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/shivasymbl/forge-backend}:${MULTICA_IMAGE_TAG:-latest}
+    container_name: forge-backend
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "${PORT:-8080}:8080"
     volumes:
-      - backend_uploads:/app/data/uploads
+      - forge_backend_uploads:/app/data/uploads
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge}?sslmode=disable
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-forge@asymbl.app}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
@@ -58,13 +64,18 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
-      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
-      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
-      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   frontend:
-    image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_WEB_IMAGE:-ghcr.io/shivasymbl/forge-web}:${MULTICA_IMAGE_TAG:-latest}
+    container_name: forge-web
     depends_on:
       - backend
     ports:
@@ -72,7 +83,11 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
-  pgdata:
-  backend_uploads:
+  forge_pgdata:
+  forge_backend_uploads:

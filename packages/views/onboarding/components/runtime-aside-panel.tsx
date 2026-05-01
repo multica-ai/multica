@@ -40,7 +40,7 @@ export function RuntimeAsidePanel() {
       </section>
 
       <a
-        href="https://multica.ai/docs/daemon-runtimes"
+        href="https://forge.asymbl.app/docs/daemon-runtimes"
         target="_blank"
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"

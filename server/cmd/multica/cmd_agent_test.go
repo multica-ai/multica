@@ -28,7 +28,7 @@ func freshAgentUpdateCmd() *cobra.Command {
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
 // the cross-workspace contamination bug (#1235). Inside a daemon-spawned
 // agent task (MULTICA_AGENT_ID / MULTICA_TASK_ID set), the CLI must NOT
-// silently read the user-global ~/.multica/config.json to recover a missing
+// silently read the user-global ~/.forge/config.json to recover a missing
 // workspace — that fallback is how agent operations leaked into an
 // unrelated workspace when the daemon failed to inject the right value.
 //

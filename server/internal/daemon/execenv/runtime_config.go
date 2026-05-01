@@ -73,12 +73,12 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 }
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
-// about the Multica runtime environment and available CLI tools.
+// about the Forge runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
-	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("# Forge Agent Runtime\n\n")
+	b.WriteString("You are a coding agent in the Forge platform. Use the `forge` CLI to interact with the platform.\n\n")
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -104,50 +104,50 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
-	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X] [--limit N] [--offset N] --output json` — List issues in workspace (default limit: 50; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true)\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--limit N] [--offset N] [--since <RFC3339>] --output json` — List comments on an issue (supports pagination; includes id, parent_id for threading)\n")
-	b.WriteString("- `multica issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
-	b.WriteString("- `multica issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
-	b.WriteString("- `multica label list --output json` — List all labels defined in the workspace (returns id + name + color)\n")
-	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
-	b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
-	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
-	b.WriteString("- `multica repo checkout <url>` — Check out a repository into the working directory (creates a git worktree with a dedicated branch)\n")
-	b.WriteString("- `multica issue runs <issue-id> --output json` — List all execution runs for an issue (status, timestamps, errors)\n")
-	b.WriteString("- `multica issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run (supports incremental fetch)\n")
-	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
-	b.WriteString("- `multica autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
-	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
-	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
+	b.WriteString("- `forge issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
+	b.WriteString("- `forge issue list [--status X] [--priority X] [--assignee X] [--limit N] [--offset N] --output json` — List issues in workspace (default limit: 50; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true)\n")
+	b.WriteString("- `forge issue comment list <issue-id> [--limit N] [--offset N] [--since <RFC3339>] --output json` — List comments on an issue (supports pagination; includes id, parent_id for threading)\n")
+	b.WriteString("- `forge issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
+	b.WriteString("- `forge issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
+	b.WriteString("- `forge label list --output json` — List all labels defined in the workspace (returns id + name + color)\n")
+	b.WriteString("- `forge workspace get --output json` — Get workspace details and context\n")
+	b.WriteString("- `forge workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
+	b.WriteString("- `forge agent list --output json` — List agents in workspace\n")
+	b.WriteString("- `forge repo checkout <url>` — Check out a repository into the working directory (creates a git worktree with a dedicated branch)\n")
+	b.WriteString("- `forge issue runs <issue-id> --output json` — List all execution runs for an issue (status, timestamps, errors)\n")
+	b.WriteString("- `forge issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run (supports incremental fetch)\n")
+	b.WriteString("- `forge attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
+	b.WriteString("- `forge autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
+	b.WriteString("- `forge autopilot get <id> --output json` — Get autopilot details including triggers\n")
+	b.WriteString("- `forge autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
 
 	b.WriteString("### Write\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	b.WriteString("- `multica issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use `--unassign` to remove assignee)\n")
-	b.WriteString("- `multica issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `multica label list`)\n")
-	b.WriteString("- `multica issue label remove <issue-id> <label-id>` — Detach a label from an issue\n")
-	b.WriteString("- `multica issue subscriber add <issue-id> [--user <name>]` — Subscribe a member or agent to issue updates (defaults to the caller when `--user` is omitted)\n")
-	b.WriteString("- `multica issue subscriber remove <issue-id> [--user <name>]` — Unsubscribe a member or agent\n")
-	b.WriteString("- `multica issue comment add <issue-id> --content-stdin [--parent <comment-id>] [--attachment <path>]` — Post a comment. Agent-authored comments should always pipe content via stdin, even for short single-line replies. Use `--parent` to reply to a specific comment; `--attachment` may be repeated.\n")
+	b.WriteString("- `forge issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
+	b.WriteString("- `forge issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
+	b.WriteString("- `forge issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	b.WriteString("- `forge issue assign <id> --to <name>` — Assign an issue to a member or agent by name (use `--unassign` to remove assignee)\n")
+	b.WriteString("- `forge issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `forge label list`)\n")
+	b.WriteString("- `forge issue label remove <issue-id> <label-id>` — Detach a label from an issue\n")
+	b.WriteString("- `forge issue subscriber add <issue-id> [--user <name>]` — Subscribe a member or agent to issue updates (defaults to the caller when `--user` is omitted)\n")
+	b.WriteString("- `forge issue subscriber remove <issue-id> [--user <name>]` — Unsubscribe a member or agent\n")
+	b.WriteString("- `forge issue comment add <issue-id> --content-stdin [--parent <comment-id>] [--attachment <path>]` — Post a comment. Agent-authored comments should always pipe content via stdin, even for short single-line replies. Use `--parent` to reply to a specific comment; `--attachment` may be repeated.\n")
 	b.WriteString("  - **For comment content, you MUST pipe via stdin; this is mandatory for multi-line content (anything with line breaks, paragraphs, code blocks, backticks, or quotes).** Do not use inline `--content` and do not write `\\n` escapes. Use a HEREDOC instead:\n")
 	b.WriteString("\n")
 	b.WriteString("    ```\n")
-	b.WriteString("    cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin\n")
+	b.WriteString("    cat <<'COMMENT' | forge issue comment add <issue-id> --content-stdin\n")
 	b.WriteString("    First paragraph.\n")
 	b.WriteString("\n")
 	b.WriteString("    Second paragraph with `code` and \"quotes\".\n")
 	b.WriteString("    COMMENT\n")
 	b.WriteString("    ```\n")
 	b.WriteString("\n")
-	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
-	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
-	b.WriteString("- `multica label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `multica label list` first)\n")
-	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
-	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
-	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("  - The same rule applies to `--description` on `forge issue create` and `forge issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
+	b.WriteString("- `forge issue comment delete <comment-id>` — Delete a comment\n")
+	b.WriteString("- `forge label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `forge label list` first)\n")
+	b.WriteString("- `forge autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
+	b.WriteString("- `forge autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
+	b.WriteString("- `forge autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
+	b.WriteString("- `forge autopilot delete <id>` — Delete an autopilot\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
@@ -160,7 +160,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
+		b.WriteString("Use `forge repo checkout <url>` to check out a repository into your working directory.\n\n")
 		for _, repo := range ctx.Repos {
 			fmt.Fprintf(&b, "- %s\n", repo.URL)
 		}
@@ -168,7 +168,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).
-	// The full structured payload is also available at .multica/project/resources.json
+	// The full structured payload is also available at .forge/project/resources.json
 	// so skills can consume it programmatically.
 	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
@@ -176,12 +176,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
 		if len(ctx.ProjectResources) > 0 {
-			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			b.WriteString("Project resources (also written to `.forge/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
 			}
 			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code.\n\n")
+			b.WriteString("For `github_repo` resources, use `forge repo checkout <url>` to fetch the code.\n\n")
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
@@ -193,11 +193,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Chat task: interactive assistant mode
 		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
-		b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
-		b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
-		b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
+		b.WriteString("- You have full access to the `forge` CLI to look up issues, workspace info, members, agents, etc.\n")
+		b.WriteString("- If asked about issues, use `forge issue list --output json` or `forge issue get <id> --output json`\n")
+		b.WriteString("- If asked about the workspace, use `forge workspace get --output json`\n")
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
-		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
+		b.WriteString("- If the task requires code changes, use `forge repo checkout <url>` to get the code first\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
 	} else if ctx.QuickCreatePrompt != "" {
 		// Quick-create task: detailed field / output rules live in the
@@ -208,15 +208,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// that doesn't propagate the user message into its working context
 		// (or a resumed session) still avoids the assignment-task workflow
 		// pointing at an empty issue id.
-		b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
+		b.WriteString("**This task was triggered by quick-create.** There is NO existing Forge issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
 		b.WriteString("Hard guardrails (apply even if the user message is missing):\n")
-		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
-		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
+		b.WriteString("- Run exactly one `forge issue create` invocation, then exit.\n")
+		b.WriteString("- Do NOT call `forge issue get`, `forge issue status`, or `forge issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `forge issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
-		b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
+		b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Forge issue for this run.\n\n")
 		fmt.Fprintf(&b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
 		if ctx.AutopilotID != "" {
 			fmt.Fprintf(&b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
@@ -236,15 +236,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("\n\n")
 		}
 		if ctx.AutopilotID != "" {
-			fmt.Fprintf(&b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
+			fmt.Fprintf(&b, "- Run `forge autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 		}
 		b.WriteString("- Complete the autopilot instructions directly\n")
-		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+		b.WriteString("- Do not run `forge issue get`, `forge issue comment add`, or `forge issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
+		fmt.Fprintf(&b, "1. Run `forge issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `forge issue comment list %s --output json` to read the conversation\n", ctx.IssueID)
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
@@ -255,14 +255,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "1. Run `forge issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `forge issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
-		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Run `forge issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
-		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `forge issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "6. When done, run `forge issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "7. If blocked, run `forge issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -301,20 +301,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
 	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
 	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
-	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
+	b.WriteString("Use `forge issue list --output json` to look up issue IDs, and `forge workspace members --output json` for member IDs.\n\n")
 
 	b.WriteString("## Attachments\n\n")
 	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
 	b.WriteString("Use the download command to fetch attachment files locally:\n\n")
-	b.WriteString("```\nmultica attachment download <attachment-id>\n```\n\n")
+	b.WriteString("```\nforge attachment download <attachment-id>\n```\n\n")
 	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
 	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
 
-	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
-	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
-	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
-	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
+	b.WriteString("## Important: Always Use the `forge` CLI\n\n")
+	b.WriteString("All interactions with Forge platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `forge` CLI. ")
+	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Forge URLs or APIs directly. ")
+	b.WriteString("Forge resource URLs require authenticated access that only the `forge` CLI can provide.\n\n")
+	b.WriteString("If you need to perform an operation that is not covered by any existing `forge` command, ")
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
 	b.WriteString("## Output\n\n")
@@ -322,12 +322,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	case ctx.AutopilotRunID != "":
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
 	case ctx.QuickCreatePrompt != "":
-		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
-		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
-		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
+		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `forge issue create` succeeded.\n\n")
+		b.WriteString("- Do NOT call `forge issue comment add` — the issue you just created has no conversation context for this run.\n")
+		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `forge issue create`.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
-		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		b.WriteString("⚠️ **Final results MUST be delivered via `forge issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
 		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")

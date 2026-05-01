@@ -1,0 +1,170 @@
+name: Build & Deploy Forge
+
+on:
+  push:
+    branches:
+      - main
+      - plan/forge-asymbl-fork  # also trigger on the working branch during development
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/shivasymbl/forge-backend
+  WEB_IMAGE: ghcr.io/shivasymbl/forge-web
+  DROPLET_HOST: 209.38.78.178
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Build backend (Go binary → Docker)
+  # ─────────────────────────────────────────────
+  build-backend:
+    runs-on: depot-ubuntu-24.04-4
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend
+        uses: depot/build-push-action@v1
+        with:
+          project: kx9jqgpx56
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.BACKEND_IMAGE }}:latest
+          cache-to: type=inline
+
+  # ─────────────────────────────────────────────
+  # Job 2: Build frontend (Next.js → Docker)
+  # ─────────────────────────────────────────────
+  build-frontend:
+    runs-on: depot-ubuntu-24.04-4
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.WEB_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend
+        uses: depot/build-push-action@v1
+        with:
+          project: kx9jqgpx56
+          file: Dockerfile.web
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://forge.asymbl.app
+            NEXT_PUBLIC_WS_URL=wss://forge.asymbl.app/ws
+          cache-from: type=registry,ref=${{ env.WEB_IMAGE }}:latest
+          cache-to: type=inline
+
+  # ─────────────────────────────────────────────
+  # Job 3: Deploy to DigitalOcean droplet
+  # Runs only after both builds succeed
+  # ─────────────────────────────────────────────
+  deploy:
+    needs: [build-backend, build-frontend]
+    runs-on: depot-ubuntu-24.04-2
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get image SHA tags
+        id: tags
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "sha=${SHA}" >> $GITHUB_OUTPUT
+          echo "backend_tag=sha-${SHA}" >> $GITHUB_OUTPUT
+          echo "web_tag=sha-${SHA}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to droplet
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.DROPLET_HOST }}
+          username: root
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            set -e
+            echo "=== Deploying Forge sha-${{ steps.tags.outputs.sha }} ==="
+
+            # Login to GHCR
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u shivasymbl --password-stdin
+
+            # Refresh Doppler secrets
+            doppler secrets download \
+              --token "${{ secrets.DOPPLER_TOKEN }}" \
+              --project forge \
+              --config prd \
+              --no-file \
+              --format docker > /root/.env
+
+            # Update image tags in env
+            sed -i "s|MULTICA_IMAGE_TAG=.*|MULTICA_IMAGE_TAG=sha-${{ steps.tags.outputs.sha }}|" /root/.env
+
+            # Pull new images
+            docker compose -f /root/docker-compose.selfhost.yml --env-file /root/.env pull backend frontend
+
+            # Zero-downtime restart: backend then frontend
+            docker compose -f /root/docker-compose.selfhost.yml --env-file /root/.env up -d --no-deps backend
+            sleep 5
+            docker compose -f /root/docker-compose.selfhost.yml --env-file /root/.env up -d --no-deps frontend
+
+            echo "=== Deploy complete ==="
+            docker compose -f /root/docker-compose.selfhost.yml ps
+
+      - name: Smoke test
+        run: |
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://forge.asymbl.app)
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test FAILED — forge.asymbl.app returned $STATUS"
+            exit 1
+          fi
+          echo "Smoke test PASSED — forge.asymbl.app returned 200"

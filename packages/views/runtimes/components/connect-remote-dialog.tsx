@@ -115,15 +115,15 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 // Step 1: Installation instructions
 // ---------------------------------------------------------------------------
 
-const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/shivasymbl/forge/main/scripts/install.sh | bash";
 
-const CONFIGURE_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai`;
+const CONFIGURE_CMD = `forge config set server_url https://forge.asymbl.app
+forge config set app_url https://forge.asymbl.app`;
 
-const LOGIN_CMD = "multica login --token <YOUR_TOKEN>";
+const LOGIN_CMD = "forge login --token <YOUR_TOKEN>";
 
-const START_CMD = `multica daemon start --device-name "my-ec2-instance"
-multica daemon status`;
+const START_CMD = `forge daemon start --device-name "my-ec2-instance"
+forge daemon status`;
 
 function CodeBlock({
   code,
@@ -173,8 +173,8 @@ function InstructionsStep({
       <DialogHeader>
         <DialogTitle>Connect a remote machine</DialogTitle>
         <DialogDescription>
-          Run these commands on your remote machine (e.g. AWS EC2) to install the
-          Multica CLI and register it as a runtime.
+          Run these commands on your remote machine (e.g. a DigitalOcean droplet)
+          to install the Forge CLI and register it as a runtime.
         </DialogDescription>
       </DialogHeader>
 
@@ -269,13 +269,13 @@ function InstructionsStep({
               <li>
                 Check status:{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon status
+                  forge daemon status
                 </code>
               </li>
               <li>
                 View logs:{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon logs -f
+                  forge daemon logs -f
                 </code>
               </li>
               <li>
@@ -288,7 +288,7 @@ function InstructionsStep({
                 Desktop auto-scans only your local machine. Remote machines must
                 run{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon
+                  forge daemon
                 </code>{" "}
                 separately.
               </li>
@@ -330,7 +330,7 @@ function WaitingStep({ onBack }: { onBack: () => void }) {
         <p className="text-sm text-muted-foreground">
           Run{" "}
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-            multica daemon status
+            forge daemon status
           </code>{" "}
           on the remote machine to verify it&apos;s running.
         </p>

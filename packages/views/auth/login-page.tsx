@@ -135,7 +135,7 @@ export function LoginPage({
       })
       .catch(() => {
         // Cookie auth failed — fall back to localStorage token
-        const token = localStorage.getItem("multica_token");
+        const token = localStorage.getItem("forge_token");
         if (!token) return;
 
         api.setToken(token);
@@ -148,7 +148,7 @@ export function LoginPage({
           })
           .catch(() => {
             api.setToken(null);
-            localStorage.removeItem("multica_token");
+            localStorage.removeItem("forge_token");
           });
       });
   }, [cliCallback]);
@@ -196,7 +196,7 @@ export function LoginPage({
         if (cliCallback) {
           // CLI path: get token directly for the redirect URL
           const { token } = await api.verifyCode(email, value);
-          localStorage.setItem("multica_token", token);
+          localStorage.setItem("forge_token", token);
           api.setToken(token);
           onTokenObtained?.();
           redirectToCliCallback(cliCallback.url, token, cliCallback.state);
@@ -245,7 +245,7 @@ export function LoginPage({
 
       if (authSourceRef.current === "localStorage") {
         // Session was detected via localStorage — reuse that token directly.
-        const stored = localStorage.getItem("multica_token");
+        const stored = localStorage.getItem("forge_token");
         if (!stored) throw new Error("token missing");
         token = stored;
       } else {
@@ -294,7 +294,7 @@ export function LoginPage({
             {logo && <div className="mx-auto mb-4">{logo}</div>}
             <CardTitle className="text-2xl">Authorize CLI</CardTitle>
             <CardDescription>
-              Allow the CLI to access Multica as{" "}
+              Allow the CLI to access Forge as{" "}
               <span className="font-medium text-foreground">
                 {existingUser.email}
               </span>
@@ -403,9 +403,9 @@ export function LoginPage({
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           {logo && <div className="mx-auto mb-4">{logo}</div>}
-          <CardTitle className="text-2xl">Sign in to Multica</CardTitle>
+          <CardTitle className="text-2xl">Sign in to Forge</CardTitle>
           <CardDescription>
-            Enter your email to get a login code
+            Enter your Asymbl email to get a sign-in code
           </CardDescription>
         </CardHeader>
         <CardContent>

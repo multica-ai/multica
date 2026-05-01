@@ -1,0 +1,56 @@
+Forge — Asymbl Internal Notice
+================================
+
+This repository is a fork of Multica (github.com/multica-ai/multica),
+published at github.com/shivasymbl/forge.
+
+Upstream license
+----------------
+The upstream Multica project is distributed under a modified Apache
+License 2.0. The full text is preserved in `LICENSE` (unchanged).
+
+Two relevant restrictions from the upstream license apply to this fork:
+
+1. Hosted/embedded service restriction (§1.a):
+   Cannot offer Multica/Forge as a hosted service to third parties or
+   embed it in a product sold to third parties without a commercial
+   license from Multica, Inc.
+
+   *This fork's posture*: internal use only within Asymbl. Forge is
+   not offered as a service to external parties. Compliant with §1.a.
+
+2. Logo / copyright restriction (§1.b):
+   Cannot remove or modify the Multica LOGO or copyright information
+   in the frontend (apps/web/).
+
+   *This fork's posture*: the logo has been replaced with the Asymbl
+   brand mark for internal team identification. This is a known
+   deviation from the upstream license. Risk acknowledged by the
+   stakeholder (Asymbl) for internal-only use.
+
+   Mitigations:
+   - Forge is never exposed to non-Asymbl users
+   - Forge is never offered as a service or SaaS to anyone
+   - Multica's copyright text in source files is preserved
+   - If Multica's commercial team objects, the Multica logo will be
+     re-applied immediately and a commercial license negotiated
+
+Asymbl-specific changes
+-----------------------
+The diff between upstream Multica and this fork consists of:
+
+- Brand replacement (logo, color palette, name strings) — internal only
+- Email domain restriction middleware (gate signup to @asymbl.com)
+- Email template polish (Asymbl branding)
+- Renamed CLI binary (`forge` instead of `multica`)
+- Mac desktop app rebrand (`com.asymbl.forge` bundle ID)
+- Custom Docker image names and Compose configuration
+
+All Asymbl-authored modifications inherit Apache License 2.0 terms.
+
+Contact
+-------
+For questions about this fork: shivnath@asymbl.com
+For upstream Multica licensing: support@multica.ai
+
+(c) 2026 Asymbl, Inc. — Internal use only.

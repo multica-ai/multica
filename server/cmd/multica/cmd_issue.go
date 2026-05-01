@@ -486,7 +486,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
-	// before invoking the agent, the agent's `multica issue create` call
+	// before invoking the agent, the agent's `forge issue create` call
 	// inherits the env var and tags the new issue with origin_type=
 	// quick_create + origin_id=<task_id>. The completion handler then
 	// locates the issue deterministically by origin instead of "most

@@ -14,11 +14,11 @@ import (
 // plugin-backed skills (e.g. `name = "superpowers:brainstorming"`) only get a
 // `name`. Codex CLI 0.114's TOML deserializer treats `path` as a required
 // field, so it rejects the plugin entries with `missing field path` and
-// refuses to start. Multica copies the user's `~/.codex/config.toml` verbatim
+// refuses to start. Forge copies the user's `~/.codex/config.toml` verbatim
 // into each task's isolated codex-home, which propagates the broken entries
 // into the per-task config and blocks `codex thread/start`.
 //
-// Stripping the whole `[[skills.config]]` array sidesteps the issue: Multica
+// Stripping the whole `[[skills.config]]` array sidesteps the issue: Forge
 // writes the agent's currently assigned skills directly to
 // `codex-home/skills/<name>/SKILL.md`, and Codex auto-discovers them from
 // that directory. The user-level skill registry is irrelevant to a per-task

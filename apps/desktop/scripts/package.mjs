@@ -314,7 +314,22 @@ export function builderArgsForTarget(
   return builderArgs;
 }
 
+function prebuildCleanup() {
+  // Kill zombie hdiutil/dmgbuild processes left over from failed DMG builds.
+  // These hold disk-image device locks that cause subsequent hdiutil invocations
+  // to fail with "Resource busy". Run this before every package invocation.
+  for (const proc of ["hdiutil", "dmgbuild"]) {
+    try { execFileSync("pkill", ["-f", proc], { stdio: "ignore" }); } catch {}
+  }
+  // Remove stale temp DMG files from /tmp that can trigger the same lock.
+  try {
+    execFileSync("sh", ["-c", "rm -f /tmp/*.dmg 2>/dev/null || true"], { stdio: "ignore" });
+  } catch {}
+}
+
 function main() {
+  prebuildCleanup();
+
   const passthrough = stripLeadingSeparator(process.argv.slice(2));
   const parsed = parsePackageArgs(passthrough);
   const buildMatrix = resolveBuildMatrix(parsed);

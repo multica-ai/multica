@@ -81,7 +81,7 @@ export function WSProvider({
 
     // In token mode we need a token from storage; in cookie mode the HttpOnly
     // cookie is sent automatically with the WS upgrade request.
-    const token = cookieAuth ? null : storage.getItem("multica_token");
+    const token = cookieAuth ? null : storage.getItem("forge_token");
     if (!cookieAuth && !token) return;
 
     const ws = new WSClient(wsUrl, {

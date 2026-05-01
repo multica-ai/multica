@@ -11,8 +11,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// multica issue label {list|add|remove} — manages the labels attached to a
-// specific issue. The label itself is managed via `multica label ...`.
+// forge issue label {list|add|remove} — manages the labels attached to a
+// specific issue. The label itself is managed via `forge label ...`.
 
 var issueLabelCmd = &cobra.Command{
 	Use:   "label",

@@ -108,10 +108,10 @@ func init() {
 	})
 }
 
-var rootHelpTemplate = `Work seamlessly with Multica from the command line.
+var rootHelpTemplate = `Work seamlessly with Forge from the command line.
 
 USAGE
-  multica <command> <subcommand> [flags]
+  forge <command> <subcommand> [flags]
 {{range .Groups}}
 {{.Title}}
 {{formatCommandList (commandsInGroup $.Commands .ID)}}
@@ -119,17 +119,17 @@ USAGE
 FLAGS
 {{.LocalFlags.FlagUsages}}
 EXAMPLES
-  $ multica login
-  $ multica issue list --output json
-  $ multica daemon start
-  $ multica agent list --output json
+  $ forge login
+  $ forge issue list --output json
+  $ forge daemon start
+  $ forge agent list --output json
 
 ENVIRONMENT VARIABLES
   MULTICA_SERVER_URL    Override the default server URL
   MULTICA_WORKSPACE_ID  Set the active workspace
 
 LEARN MORE
-  Use ` + "`multica <command> <subcommand> --help`" + ` for more information about a command.
+  Use ` + "`forge <command> <subcommand> --help`" + ` for more information about a command.
 `
 
 var subHelpTemplate = `{{.Short}}
@@ -169,5 +169,5 @@ EXAMPLES
 {{- end}}
 
 LEARN MORE
-  Use ` + "`multica <command> <subcommand> --help`" + ` for more information about a command.
+  Use ` + "`forge <command> <subcommand> --help`" + ` for more information about a command.
 `

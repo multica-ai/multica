@@ -19,7 +19,7 @@ const daemonIDFileName = "daemon.id"
 
 // EnsureDaemonID returns a stable UUID for this daemon instance, persisting
 // it to disk on first call. Identity is machine-scoped: every profile on the
-// same machine shares one UUID stored at `~/.multica/daemon.id`. Profile
+// same machine shares one UUID stored at `~/.forge/daemon.id`. Profile
 // boundaries are about which backend/account a daemon is talking to, not
 // about the physical machine's identity, so a single host running both the
 // CLI-spawned daemon and the desktop-spawned daemon (or toggling profiles)
@@ -182,7 +182,7 @@ func LegacyDaemonIDs(hostname, profile string) []string {
 	return out
 }
 
-// LegacyDaemonUUIDs scans `~/.multica/profiles/*/daemon.id` and returns every
+// LegacyDaemonUUIDs scans `~/.forge/profiles/*/daemon.id` and returns every
 // UUID that survives parsing. These are identities that were minted per
 // profile before daemon identity became machine-scoped; runtime rows
 // registered under them — potentially on multiple backends (prod/dev/self-

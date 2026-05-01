@@ -11,7 +11,7 @@ import { api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 
 const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
+  "https://api.github.com/repos/shivasymbl/forge/releases/latest";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 let cachedLatestVersion: string | null = null;
@@ -177,7 +177,7 @@ export function UpdateSection({
         {isManaged ? (
           <span
             className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-            title="The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI."
+            title="The CLI binary is managed by Forge Desktop — update Desktop to upgrade the CLI."
           >
             Managed by Desktop
           </span>

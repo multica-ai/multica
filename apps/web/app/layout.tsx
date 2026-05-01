@@ -60,40 +60,47 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#05070b" },
-  ],
+  themeColor: "#ffffff",
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.multica.ai"),
+  metadataBase: new URL("https://forge.asymbl.app"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: "Forge — Asymbl Agent Operations",
+    template: "%s | Forge",
   },
   description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+    "Asymbl's internal platform for orchestrating AI coding agents alongside human teammates.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    shortcut: ["/favicon.svg"],
+    icon: [
+      { url: "/brand/favicon.png", type: "image/png", sizes: "any" },
+      { url: "/brand/favicon-32.png", type: "image/png", sizes: "32x32" },
+      { url: "/brand/favicon-16.png", type: "image/png", sizes: "16x16" },
+    ],
+    shortcut: ["/brand/favicon.png"],
+    apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180" }],
   },
   openGraph: {
     type: "website",
-    siteName: "Multica",
+    siteName: "Forge",
     locale: "en_US",
   },
   twitter: {
-    card: "summary_large_image",
-    site: "@multica_hq",
-    creator: "@multica_hq",
+    card: "summary",
   },
   alternates: {
     canonical: "/",
   },
+  // Internal tool — never index in search engines
   robots: {
-    index: true,
-    follow: true,
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
   },
 };
 

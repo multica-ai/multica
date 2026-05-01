@@ -96,7 +96,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+// FetchLatestRelease fetches the latest release tag from the forge GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
@@ -122,7 +122,7 @@ func FetchLatestRelease() (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+// IsBrewInstall checks whether the running forge binary was installed via Homebrew.
 func IsBrewInstall() bool {
 	exePath, err := os.Executable()
 	if err != nil {

@@ -10,15 +10,15 @@ import { Readable } from "stream";
 
 import { selectPlatformReleaseAssetName } from "./cli-release-asset";
 
-// Desktop prefers the bundled `multica` CLI shipped inside the app for
+// Desktop prefers the bundled `forge` CLI shipped inside the app for
 // same-repo builds, but it can also repair or bootstrap a managed copy in
 // userData on first launch when the bundled binary is missing or unusable.
 
 const GITHUB_LATEST_BASE =
-  "https://github.com/multica-ai/multica/releases/latest/download";
+  "https://github.com/shivasymbl/forge/releases/latest/download";
 
 function binaryName(): string {
-  return process.platform === "win32" ? "multica.exe" : "multica";
+  return process.platform === "win32" ? "forge.exe" : "forge";
 }
 
 export function managedCliPath(): string {
@@ -102,7 +102,7 @@ async function installFresh(): Promise<string> {
   }
   const url = `${GITHUB_LATEST_BASE}/${assetName}`;
 
-  const workDir = join(tmpdir(), `multica-cli-${Date.now()}`);
+  const workDir = join(tmpdir(), `forge-cli-${Date.now()}`);
   await mkdir(workDir, { recursive: true });
 
   try {
@@ -144,7 +144,7 @@ async function installFresh(): Promise<string> {
 }
 
 /**
- * Returns the path to a usable `multica` binary. If one is already present at
+ * Returns the path to a usable `forge` binary. If one is already present at
  * the managed userData location, returns it immediately. Otherwise downloads
  * the latest release asset for the current platform and installs it.
  */

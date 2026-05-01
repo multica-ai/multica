@@ -21,7 +21,7 @@ func BuildCommentReplyInstructions(issueID, triggerCommentID string) string {
 			"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
 			"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
+			"    cat <<'COMMENT' | forge issue comment add %s --parent %s --content-stdin\n"+
 			"    First paragraph.\n"+
 			"\n"+
 			"    Second paragraph.\n"+

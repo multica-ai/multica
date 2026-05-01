@@ -1,22 +1,29 @@
-import { useState, useEffect } from "react";
+import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
-interface MulticaIconProps extends React.ComponentProps<"span"> {
-  /**
-   * If true, play a one-time entrance spin animation.
-   */
+/**
+ * AsymblLogo — Forge brand mark.
+ *
+ * Renders the Asymbl bracket-and-dot mark from a transparent PNG so it can sit
+ * on light or dark backgrounds without recolouring (the mark uses fixed brand
+ * colors: light blue bracket + red circle).
+ *
+ * Backwards-compatible re-export as `MulticaIcon` keeps existing call sites
+ * working without touching every import. The original Multica clip-path
+ * asterisk is replaced; the spin/animation props are accepted but no-ops
+ * because the Asymbl mark is not a spinning glyph.
+ *
+ * Source assets live in `/brand/` (see apps/web/public/brand/).
+ */
+
+interface AsymblLogoProps extends ComponentProps<"span"> {
+  /** Accepted for API compatibility with the prior MulticaIcon — has no visual effect. */
   animate?: boolean;
-  /**
-   * If true, disable hover spin animation.
-   */
+  /** Accepted for API compatibility with the prior MulticaIcon — has no visual effect. */
   noSpin?: boolean;
-  /**
-   * If true, show a border around the icon.
-   */
+  /** If true, wrap the mark in a bordered rounded square. */
   bordered?: boolean;
-  /**
-   * Size of the bordered icon: "sm" (default), "md", "lg"
-   */
+  /** Size of the bordered icon: "sm" (default), "md", "lg". */
   size?: "sm" | "md" | "lg";
 }
 
@@ -26,36 +33,17 @@ const borderedSizes = {
   lg: { wrapper: "p-2.5", icon: "size-5" },
 };
 
-/**
- * Pure CSS 8-pointed asterisk icon matching the Multica logo.
- * Uses currentColor so it adapts to light/dark themes automatically.
- * Clip-path polygon traced from the original SVG path coordinates.
- */
-export function MulticaIcon({
+const ASSET_SRC = "/brand/asymbl-mark.png";
+const ASSET_ALT = "Asymbl";
+
+export function AsymblLogo({
   className,
-  animate = false,
-  noSpin = false,
+  animate: _animate,
+  noSpin: _noSpin,
   bordered = false,
   size = "sm",
   ...props
-}: MulticaIconProps) {
-  const [entranceDone, setEntranceDone] = useState(!animate);
-
-  useEffect(() => {
-    if (!animate) return;
-    const timer = setTimeout(() => setEntranceDone(true), 600);
-    return () => clearTimeout(timer);
-  }, [animate]);
-
-  const clipPath = `polygon(
-    45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%,
-    81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%,
-    100% 45%, 62.1% 45%, 88.9% 18.2%, 81.8% 11.1%,
-    55% 37.9%, 55% 0%, 45% 0%, 45% 37.9%,
-    18.2% 11.1%, 11.1% 18.2%, 37.9% 45%, 0% 45%,
-    0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%
-  )`;
-
+}: AsymblLogoProps) {
   if (bordered) {
     const sizeConfig = borderedSizes[size];
     return (
@@ -65,41 +53,32 @@ export function MulticaIcon({
           sizeConfig.wrapper,
           className
         )}
-        aria-hidden="true"
         {...props}
       >
-        <span
-          className={cn(
-            "block",
-            sizeConfig.icon,
-            !entranceDone && "animate-entrance-spin",
-            entranceDone && !noSpin && "hover:animate-spin"
-          )}
-        >
-          <span
-            className="block size-full bg-current"
-            style={{ clipPath }}
-          />
-        </span>
+        <img
+          src={ASSET_SRC}
+          alt={ASSET_ALT}
+          className={cn("block", sizeConfig.icon)}
+        />
       </span>
     );
   }
 
   return (
     <span
-      className={cn(
-        "inline-block size-[1em]",
-        !entranceDone && "animate-entrance-spin",
-        entranceDone && !noSpin && "hover:animate-spin",
-        className
-      )}
-      aria-hidden="true"
+      className={cn("inline-block size-[1em]", className)}
       {...props}
     >
-      <span
-        className="block size-full bg-current"
-        style={{ clipPath }}
+      <img
+        src={ASSET_SRC}
+        alt={ASSET_ALT}
+        className="block size-full object-contain"
       />
     </span>
   );
 }
+
+// Backwards-compatible alias so existing imports keep working without
+// touching every consumer file. Renaming the file would force a much larger
+// diff and complicate cherry-picking upstream Multica patches.
+export const MulticaIcon = AsymblLogo;

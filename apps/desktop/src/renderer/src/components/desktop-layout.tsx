@@ -93,8 +93,8 @@ function useInternalLinkHandler() {
       const tabId = store.openTab(path, path, icon);
       store.setActiveTab(tabId);
     };
-    window.addEventListener("multica:navigate", handler);
-    return () => window.removeEventListener("multica:navigate", handler);
+    window.addEventListener("forge:navigate", handler);
+    return () => window.removeEventListener("forge:navigate", handler);
   }, []);
 }
 
@@ -122,7 +122,7 @@ function DesktopInboxBridge() {
       if (!slug) return;
       const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
       window.dispatchEvent(
-        new CustomEvent("multica:navigate", { detail: { path: inboxPath } }),
+        new CustomEvent("forge:navigate", { detail: { path: inboxPath } }),
       );
     });
   }, []);

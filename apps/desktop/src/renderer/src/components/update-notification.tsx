@@ -117,7 +117,7 @@ export function UpdateNotification() {
                   bridge so the URL hits the same allow-list as every
                   other outbound link. */}
               <button
-                onClick={() => window.desktopAPI.openExternal("https://multica.ai/changelog")}
+                onClick={() => window.desktopAPI.openExternal("https://forge.asymbl.app/changelog")}
                 className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
               >
                 See changes

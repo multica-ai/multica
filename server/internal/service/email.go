@@ -25,7 +25,7 @@ func NewEmailService() *EmailService {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	from := os.Getenv("RESEND_FROM_EMAIL")
 	if from == "" {
-		from = "noreply@multica.ai"
+		from = "forge@asymbl.app"
 	}
 
 	var client *resend.Client
@@ -52,13 +52,17 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 	params := &resend.SendEmailRequest{
 		From:    s.fromEmail,
 		To:      []string{to},
-		Subject: "Your Multica verification code",
+		Subject: "Your Forge verification code",
 		Html: fmt.Sprintf(
-			`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-				<h2>Your verification code</h2>
-				<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
-				<p>This code expires in 10 minutes.</p>
-				<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
+			`<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #FFFFFF; padding: 32px 24px;">
+				<div style="text-align: center; margin-bottom: 24px;">
+					<img src="https://forge.asymbl.app/brand/asymbl-logo-color.png" alt="Asymbl" height="36" style="height: 36px; width: auto;" />
+				</div>
+				<h2 style="color: #032D60; font-size: 22px; margin: 0 0 8px;">Your verification code</h2>
+				<p style="color: #595959; font-size: 14px; margin: 0 0 24px;">Enter this code to sign in to Forge.</p>
+				<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0; color: #032D60;">%s</p>
+				<p style="color: #595959; font-size: 14px;">This code expires in 10 minutes.</p>
+				<p style="color: #888; font-size: 12px; margin-top: 32px; padding-top: 16px; border-top: 1px solid #E8F4FC;">If you didn't request this code, you can safely ignore this email.</p>
 			</div>`, code),
 	}
 
@@ -71,7 +75,7 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
 	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	if appURL == "" {
-		appURL = "https://app.multica.ai"
+		appURL = "https://forge.asymbl.app"
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
 
@@ -85,6 +89,8 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 	return err
 }
 
+// SendInvitationEmail body uses Forge branding (Asymbl light-mode palette).
+
 // buildInvitationParams assembles the Resend request for an invitation email.
 // Separated from SendInvitationEmail so the sanitization behavior is unit-testable
 // without needing to mock the Resend SDK.
@@ -97,15 +103,19 @@ func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL strin
 	return &resend.SendEmailRequest{
 		From:    from,
 		To:      []string{to},
-		Subject: fmt.Sprintf("%s invited you to %s on Multica", subjectInviter, subjectWorkspace),
+		Subject: fmt.Sprintf("%s invited you to %s on Forge", subjectInviter, subjectWorkspace),
 		Html: fmt.Sprintf(
-			`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-				<h2>You're invited to join %s</h2>
-				<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
-				<p style="margin: 24px 0;">
-					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
+			`<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 520px; margin: 0 auto; background: #FFFFFF; padding: 32px 24px;">
+				<div style="text-align: center; margin-bottom: 24px;">
+					<img src="https://forge.asymbl.app/brand/asymbl-logo-color.png" alt="Asymbl" height="36" style="height: 36px; width: auto;" />
+				</div>
+				<h2 style="color: #032D60; font-size: 22px; margin: 0 0 12px;">You're invited to join %s</h2>
+				<p style="color: #595959; font-size: 15px; line-height: 1.5;"><strong style="color: #032D60;">%s</strong> invited you to collaborate in the <strong style="color: #032D60;">%s</strong> workspace on Forge.</p>
+				<p style="margin: 32px 0;">
+					<a href="%s" style="display: inline-block; padding: 12px 28px; background: #DD7001; color: #FFFFFF; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px;">Accept invitation</a>
 				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+				<p style="color: #595959; font-size: 14px;">You'll need to sign in to accept or decline the invitation.</p>
+				<p style="color: #888; font-size: 12px; margin-top: 32px; padding-top: 16px; border-top: 1px solid #E8F4FC;">Forge is Asymbl's internal workspace for AI-augmented work. <a href="https://forge.asymbl.app" style="color: #385CAE;">forge.asymbl.app</a></p>
 			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL),
 	}
 }

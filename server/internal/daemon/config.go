@@ -43,11 +43,11 @@ type Config struct {
 	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName                     string
 	RuntimeName                    string
-	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
+	CLIVersion                     string                // forge CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
-	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	WorkspacesRoot                 string                // base path for execution envs (default: ~/forge_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -260,7 +260,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	legacyDaemonIDs := LegacyDaemonIDs(host, profile)
 	// Pre-change (#1220) daemon identity was stored per profile, which means
 	// the same machine could end up with multiple leftover daemon.id files
-	// — e.g. ~/.multica/daemon.id (default) plus ~/.multica/profiles/<x>/
+	// — e.g. ~/.forge/daemon.id (default) plus ~/.forge/profiles/<x>/
 	// daemon.id. Surface those UUIDs so the server can merge their runtime
 	// rows into the canonical machine UUID. Fatal-free: a broken profiles
 	// dir shouldn't block startup.
@@ -282,7 +282,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		runtimeName = overrides.RuntimeName
 	}
 
-	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
+	// Workspaces root: override > env > default (~/forge_workspaces or ~/forge_workspaces_<profile>)
 	workspacesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
 	if overrides.WorkspacesRoot != "" {
 		workspacesRoot = overrides.WorkspacesRoot
@@ -293,9 +293,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			return Config{}, fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
 		}
 		if profile != "" {
-			workspacesRoot = filepath.Join(home, "multica_workspaces_"+profile)
+			workspacesRoot = filepath.Join(home, "forge_workspaces_"+profile)
 		} else {
-			workspacesRoot = filepath.Join(home, "multica_workspaces")
+			workspacesRoot = filepath.Join(home, "forge_workspaces")
 		}
 	}
 	workspacesRoot, err = filepath.Abs(workspacesRoot)

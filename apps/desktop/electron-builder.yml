@@ -1,5 +1,5 @@
-appId: ai.multica.desktop
-productName: Multica
+appId: com.asymbl.forge
+productName: Forge
 directories:
   buildResources: build
 files:
@@ -9,34 +9,51 @@ files:
   - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
 protocols:
-  - name: Multica
+  - name: Forge
     schemes:
-      - multica
+      - forge
 asarUnpack:
   - resources/**
 mac:
   entitlementsInherit: build/entitlements.mac.plist
+  hardenedRuntime: true
+  gatekeeperAssess: false
   target:
     - dmg
     - zip
-  # Hardcoded name avoids the `@multica/desktop-*` subdirectory that
+  # Hardcoded name avoids the `@asymbl/forge-desktop-*` subdirectory that
   # `${name}` produces for scoped package names.
-  # Naming scheme: multica-desktop-<version>-<platform>-<arch>.<ext>
+  # Naming scheme: forge-desktop-<version>-<platform>-<arch>.<ext>
   # so the filename alone surfaces kind, version, platform, and CPU arch.
-  artifactName: multica-desktop-${version}-mac-${arch}.${ext}
-  # Notarize via notarytool. Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
-  # + APPLE_TEAM_ID env vars at package time. Non-mac contributors are
-  # unaffected because `pnpm package` already requires the Developer ID
-  # signing cert — notarization is a strict superset.
+  artifactName: forge-desktop-${version}-mac-${arch}.${ext}
   notarize: true
+  # Notarize via notarytool when APPLE_ID env var is present.
+  # Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID at package time.
+  # Skipped silently when those vars are absent (local/unsigned builds).
 dmg:
-  artifactName: multica-desktop-${version}-mac-${arch}.${ext}
+  # appdmg handles DMG creation reliably on macOS without hdiutil race conditions.
+  # sign: false — no codesigning for internal unsigned builds.
+  sign: false
+  writeUpdateInfo: false
+  format: UDZO
+  contents:
+    - x: 140
+      y: 170
+      type: file
+    - x: 380
+      y: 170
+      type: link
+      path: /Applications
+  window:
+    width: 520
+    height: 340
+  artifactName: forge-desktop-${version}-mac-${arch}.${ext}
 linux:
   target:
     - AppImage
     - deb
     - rpm
-  artifactName: multica-desktop-${version}-linux-${arch}.${ext}
+  artifactName: forge-desktop-${version}-linux-${arch}.${ext}
 rpm:
   # Disable RPM build-id symlinks. Electron apps embed the upstream Electron
   # binary, whose GNU build-id is identical across every app shipping the same
@@ -48,15 +65,16 @@ rpm:
 win:
   target:
     - nsis
-  artifactName: multica-desktop-${version}-windows-${arch}.${ext}
+  artifactName: forge-desktop-${version}-windows-${arch}.${ext}
 publish:
   provider: github
-  owner: multica-ai
-  repo: multica
+  owner: shivasymbl
+  repo: forge
   # Align with our CLI release flow which pre-creates a *published* GitHub
   # Release via `gh release create`. The electron-builder default of
   # `releaseType: draft` conflicts with `existingType=release` and causes
   # uploads of the DMG/ZIP/blockmaps/latest-mac.yml to be silently skipped,
   # which breaks electron-updater auto-update on installed clients.
   releaseType: release
+copyright: "Copyright © 2026 Asymbl"
 npmRebuild: false

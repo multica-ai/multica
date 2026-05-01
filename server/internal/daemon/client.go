@@ -39,7 +39,7 @@ func isWorkspaceNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "workspace not found")
 }
 
-// Client handles HTTP communication with the Multica server daemon API.
+// Client handles HTTP communication with the Forge server daemon API.
 type Client struct {
 	baseURL string
 	token   string

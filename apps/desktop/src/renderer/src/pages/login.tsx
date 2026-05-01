@@ -7,7 +7,7 @@ const WEB_URL = import.meta.env.VITE_APP_URL || "http://localhost:3000";
 export function DesktopLoginPage() {
   const handleGoogleLogin = () => {
     // Open web login page in the default browser with platform=desktop flag.
-    // The web callback will redirect back via multica:// deep link with the token.
+    // The web callback will redirect back via forge:// deep link with the token.
     window.desktopAPI.openExternal(
       `${WEB_URL}/login?platform=desktop`,
     );

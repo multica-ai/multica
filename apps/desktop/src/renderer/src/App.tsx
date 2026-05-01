@@ -31,12 +31,12 @@ function AppContent() {
   const [bootstrapping, setBootstrapping] = useState(false);
 
   // Tell the main process which backend URL we talk to, so daemon-manager
-  // can pick the matching CLI profile (server_url from ~/.multica config).
+  // can pick the matching CLI profile (server_url from ~/.forge config).
   useEffect(() => {
     window.daemonAPI.setTargetApiUrl(DAEMON_TARGET_API_URL);
   }, []);
 
-  // Listen for invite IDs delivered via deep link (multica://invite/<id>).
+  // Listen for invite IDs delivered via deep link (forge://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
   // in, InvitePage's queries will fail and render the "not found" state,
   // which is acceptable; the expected pre-flight happens in the web app
@@ -47,7 +47,7 @@ function AppContent() {
     });
   }, []);
 
-  // Listen for auth token delivered via deep link (multica://auth/callback?token=...).
+  // Listen for auth token delivered via deep link (forge://auth/callback?token=...).
   // daemonAPI.syncToken is handled separately by the [user] effect below, which
   // fires whenever a user logs in (deep link, session restore, account switch).
   useEffect(() => {
@@ -73,7 +73,7 @@ function AppContent() {
   // Sync token and start the daemon whenever the user logs in.
   useEffect(() => {
     if (!user) return;
-    const token = localStorage.getItem("multica_token");
+    const token = localStorage.getItem("forge_token");
     if (!token) return;
     const userId = user.id;
     (async () => {

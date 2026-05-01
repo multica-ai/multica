@@ -1,0 +1,6 @@
+# Forge — Asymbl internal AI agent management platform
+# Default reviewer for all changes
+*       @shivasymbl
+
+# Spec documents — explicit review required
+/docs/spec/    @shivasymbl

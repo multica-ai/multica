@@ -66,7 +66,7 @@ export function LabsTab() {
                   <p className="text-sm text-muted-foreground">
                     Automatically add{" "}
                     <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                      Co-authored-by: multica-agent &lt;github@multica.ai&gt;
+                      Co-authored-by: forge-agent &lt;github@asymbl.com&gt;
                     </code>{" "}
                     to commits made by agents.
                   </p>
