@@ -37,7 +37,7 @@ multica setup self-host
 
 The `multica setup self-host` command will:
 1. Configure CLI to connect to localhost:8080 / localhost:3000
-2. Open a browser for login — use verification code `888888` with any email
+2. Open a browser for login — read the verification code from the backend container log (`docker compose -f docker-compose.selfhost.yml logs backend`) or configure `RESEND_API_KEY` for emailed codes
 3. Discover workspaces automatically
 4. Start the daemon in the background
 

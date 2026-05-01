@@ -373,16 +373,20 @@ done
 
 #### 2. Create a test user and token (automated auth)
 
-In non-production environments the verification code is fixed at `888888`:
+In dev (no `RESEND_API_KEY`) the backend prints the verification code to its log instead of emailing it. Send the code, scrape it from the backend log, then verify:
 
 ```bash
 curl -s -X POST "$SERVER/auth/send-code" \
   -H "Content-Type: application/json" \
   -d '{"email": "dev@localhost"}'
 
+# Read the latest dev verification code straight from the database
+CODE=$(psql "$DATABASE_URL" -tAc \
+  "SELECT code FROM verification_code WHERE email = 'dev@localhost' ORDER BY created_at DESC LIMIT 1")
+
 JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
   -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
+  -d "{\"email\": \"dev@localhost\", \"code\": \"$CODE\"}" | jq -r '.token')
 
 PAT=$(curl -s -X POST "$SERVER/api/tokens" \
   -H "Authorization: Bearer $JWT" \
@@ -476,7 +480,7 @@ This automatically:
 3. Starts and manages its own daemon instance
 4. Connects to the local backend
 
-Login in the Desktop UI with `dev@localhost` and code `888888`.
+Login in the Desktop UI with `dev@localhost` — read the verification code from the backend log (or query the `verification_code` table directly).
 
 If the backend runs on a non-default port (worktree), create
 `apps/desktop/.env.development.local`:

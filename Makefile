@@ -67,7 +67,7 @@ selfhost:
 		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
 		echo ""; \
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or set APP_ENV=development in .env (private networks only) to enable code 888888."; \
+		echo "        or read the verification code from the backend container log."; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \

@@ -50,6 +50,8 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      # 64 bytes — satisfies the >= 32-byte requirement enforced by auth.JWTSecret().
+      JWT_SECRET: ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad
     steps:
       - name: Checkout
         uses: actions/checkout@v6

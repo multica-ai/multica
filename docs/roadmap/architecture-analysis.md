@@ -71,7 +71,7 @@ Eneste eksterne kald: `clawhub.ai` (skill marketplace, opt-in) og `copilothub.ai
 
 ## Auth
 
-- Email + verification code (master code `888888` i dev)
+- Email + verification code (printed til backend-loggen i dev når `RESEND_API_KEY` er unset)
 - Google OAuth (kræver konfiguration)
 - Personal Access Tokens (`mul_*`) for CLI/daemon
 - JWT sessions (30 dage)

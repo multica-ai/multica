@@ -22,6 +22,7 @@ postgres_port=5432
 backend_port=$((18080 + offset))
 frontend_port=$((13000 + offset))
 frontend_origin="http://localhost:${frontend_port}"
+jwt_secret="$(openssl rand -hex 32)"
 
 cat > "$ENV_FILE" <<EOF
 POSTGRES_DB=${postgres_db}
@@ -31,7 +32,7 @@ POSTGRES_PORT=${postgres_port}
 DATABASE_URL=postgres://multica:multica@localhost:${postgres_port}/${postgres_db}?sslmode=disable
 
 PORT=${backend_port}
-JWT_SECRET=change-me-in-production
+JWT_SECRET=${jwt_secret}
 MULTICA_SERVER_URL=ws://localhost:${backend_port}/ws
 MULTICA_APP_URL=${frontend_origin}
 

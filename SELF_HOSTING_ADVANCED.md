@@ -11,7 +11,7 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
-| `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
+| `JWT_SECRET` | **Mandatory.** Secret key for signing JWT tokens. Must be at least 32 bytes — the backend refuses to boot otherwise. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
 ### Email (Required for Authentication)
@@ -23,7 +23,7 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-> **Note:** The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled), which protects publicly reachable instances. For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` — never do this on a public instance.
+> **Note:** Without `RESEND_API_KEY` configured, verification codes are printed to the backend log instead of emailed (look for `[DEV] Verification code for ...:`). Useful for local development on a single machine; configure Resend before exposing the instance to other users.
 
 ### Google OAuth (Optional)
 

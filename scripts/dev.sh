@@ -33,6 +33,22 @@ else
   fi
 fi
 
+# Ensure a JWT_SECRET is set — the backend refuses to boot without one (>= 32 bytes).
+# Generate a fresh per-developer secret if missing or too short.
+if ! grep -qE '^JWT_SECRET=.{32,}$' "$ENV_FILE"; then
+  echo "==> Generating random JWT_SECRET in $ENV_FILE..."
+  JWT=$(openssl rand -hex 32)
+  if grep -q '^JWT_SECRET=' "$ENV_FILE"; then
+    if [ "$(uname)" = "Darwin" ]; then
+      sed -i '' "s|^JWT_SECRET=.*|JWT_SECRET=$JWT|" "$ENV_FILE"
+    else
+      sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$JWT|" "$ENV_FILE"
+    fi
+  else
+    echo "JWT_SECRET=$JWT" >> "$ENV_FILE"
+  fi
+fi
+
 echo "==> Using $ENV_FILE"
 
 set -a
