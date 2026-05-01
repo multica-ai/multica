@@ -177,6 +177,5 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
         </div>
       </div>
     </div>
-    </div>
   );
 }

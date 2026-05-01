@@ -438,6 +438,5 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
       </AlertDialog>
       </div>
     </div>
-    </div>
   );
 }
