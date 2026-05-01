@@ -2,13 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
-import { CalendarRange, ChevronRight, ListTodo, Search, X } from "lucide-react";
+import {
+  CalendarRange,
+  ChevronRight,
+  ListTodo,
+  Search,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ALL_STATUSES, STATUS_CONFIG } from "@/features/issues/config";
+import {
+  STATUS_CONFIG,
+  PRIORITY_CONFIG,
+  PRIORITY_ORDER,
+} from "@/features/issues/config";
 import { useIssuesListQuery } from "@/features/issues/queries";
 import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
 import { registerViewStoreForWorkspaceSync } from "@/features/issues/stores/view-store";
@@ -24,9 +34,9 @@ import { IssuesHeader } from "@/features/issues/components/issues-header";
 import { FlatIssueList } from "@/features/issues/components/flat-issue-list";
 import { BatchActionToolbar } from "@/features/issues/components/batch-action-toolbar";
 import { StatusIcon } from "@/features/issues/components";
+import { PriorityIcon } from "@/features/issues/components/priority-icon";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { useWorkspaceStore, WorkspaceAvatar } from "@/features/workspace";
-import type { IssueStatus } from "@/shared/types";
 
 type DateFilterField = "due" | "start" | "end";
 
@@ -182,11 +192,35 @@ function IssueListDateFilter({
   );
 }
 
+/** A single removable filter chip */
+function FilterChip({
+  icon,
+  label,
+  onRemove,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/60 px-2 py-0.5 text-xs text-foreground">
+      {icon}
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-0.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+        aria-label={`Remove ${label} filter`}
+      >
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
+
 function IssueListFiltersRow({
   searchQuery,
   onSearchChange,
-  statusFilters,
-  onToggleStatus,
   projectId,
   onProjectChange,
   dueFrom,
@@ -203,8 +237,6 @@ function IssueListFiltersRow({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  statusFilters: IssueStatus[];
-  onToggleStatus: (status: IssueStatus) => void;
   projectId: string | null;
   onProjectChange: (value: string | null) => void;
   dueFrom: string;
@@ -219,12 +251,40 @@ function IssueListFiltersRow({
   total: number;
   visibleCount: number;
 }) {
+  // Read all view-store filters directly (this component is inside ViewStoreProvider)
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const toggleStatusFilter = useViewStore((s) => s.toggleStatusFilter);
+  const priorityFilters = useViewStore((s) => s.priorityFilters);
+  const togglePriorityFilter = useViewStore((s) => s.togglePriorityFilter);
+  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
+  const toggleAssigneeFilter = useViewStore((s) => s.toggleAssigneeFilter);
+  const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const toggleCreatorFilter = useViewStore((s) => s.toggleCreatorFilter);
+  const clearViewFilters = useViewStore((s) => s.clearFilters);
+
+  // Resolve actor display names
+  const members = useWorkspaceStore((s) => s.members);
+  const agents = useWorkspaceStore((s) => s.agents);
+
+  const getActorName = (type: "member" | "agent", id: string) => {
+    if (type === "member") return members.find((m) => m.user_id === id)?.name ?? id;
+    return agents.find((a) => a.id === id)?.name ?? id;
+  };
+
   const activeDateFilterCount = [dueFrom, dueTo, startFrom, startTo, endFrom, endTo].filter(Boolean).length;
+  const hasViewFilters = statusFilters.length > 0 || priorityFilters.length > 0 || assigneeFilters.length > 0 || creatorFilters.length > 0;
   const hasServerFilters = Boolean(searchQuery.trim() || projectId || activeDateFilterCount > 0);
+  const hasAnyFilters = hasViewFilters || hasServerFilters;
+
+  const handleClearAll = () => {
+    clearViewFilters();
+    onReset();
+  };
 
   return (
-    <div className="border-b px-4 py-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+    <div className="border-b px-4 py-3 space-y-3">
+      {/* Search + project + date row */}
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -279,38 +339,100 @@ function IssueListFiltersRow({
               }
             }}
           />
-
-          {hasServerFilters ? (
-            <Button variant="ghost" size="sm" onClick={onReset}>
-              Reset search
-            </Button>
-          ) : null}
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>
-          {isSearching ? "Searching issues..." : `${visibleCount} visible · ${total} matched`}
-        </span>
-      </div>
+      {/* Active filter chips */}
+      {hasAnyFilters && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Status chips */}
+          {statusFilters.map((status) => (
+            <FilterChip
+              key={`status-${status}`}
+              icon={<StatusIcon status={status} className="size-3" />}
+              label={STATUS_CONFIG[status].label}
+              onRemove={() => toggleStatusFilter(status)}
+            />
+          ))}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {ALL_STATUSES.map((status) => {
-          const selected = statusFilters.includes(status);
-          return (
-            <Button
-              key={status}
-              type="button"
-              variant={selected ? "secondary" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 rounded-full px-3"
-              onClick={() => onToggleStatus(status)}
-            >
-              <StatusIcon status={status} className="h-3.5 w-3.5" />
-              <span>{STATUS_CONFIG[status].label}</span>
-            </Button>
-          );
-        })}
+          {/* Priority chips */}
+          {priorityFilters.map((priority) => (
+            <FilterChip
+              key={`priority-${priority}`}
+              icon={
+                <span className={`inline-flex ${PRIORITY_CONFIG[priority].badgeText}`}>
+                  <PriorityIcon priority={priority} className="size-3" inheritColor />
+                </span>
+              }
+              label={PRIORITY_CONFIG[priority].label}
+              onRemove={() => togglePriorityFilter(priority)}
+            />
+          ))}
+
+          {/* Assignee chips */}
+          {assigneeFilters.map((filter) => (
+            <FilterChip
+              key={`assignee-${filter.type}-${filter.id}`}
+              label={`Assignee: ${getActorName(filter.type, filter.id)}`}
+              onRemove={() => toggleAssigneeFilter(filter)}
+            />
+          ))}
+
+          {/* Creator chips */}
+          {creatorFilters.map((filter) => (
+            <FilterChip
+              key={`creator-${filter.type}-${filter.id}`}
+              label={`Creator: ${getActorName(filter.type, filter.id)}`}
+              onRemove={() => toggleCreatorFilter(filter)}
+            />
+          ))}
+
+          {/* Date chips */}
+          {(dueFrom || dueTo) && (
+            <FilterChip
+              label={`Due: ${formatDateRangeSummary(dueFrom, dueTo)}`}
+              onRemove={() => {
+                onDateChange("dueFrom", "");
+                onDateChange("dueTo", "");
+              }}
+            />
+          )}
+          {(startFrom || startTo) && (
+            <FilterChip
+              label={`Start: ${formatDateRangeSummary(startFrom, startTo)}`}
+              onRemove={() => {
+                onDateChange("startFrom", "");
+                onDateChange("startTo", "");
+              }}
+            />
+          )}
+          {(endFrom || endTo) && (
+            <FilterChip
+              label={`End: ${formatDateRangeSummary(endFrom, endTo)}`}
+              onRemove={() => {
+                onDateChange("endFrom", "");
+                onDateChange("endTo", "");
+              }}
+            />
+          )}
+
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {/* Stats row */}
+      <div className="flex items-center text-xs text-muted-foreground">
+        <span>
+          {isSearching
+            ? "Searching issues..."
+            : `${visibleCount} visible · ${total} matched`}
+        </span>
       </div>
     </div>
   );
@@ -321,7 +443,6 @@ function IssueListPageContent() {
   const scope = useIssuesScopeStore((state) => state.scope);
   const setViewMode = useViewStore((state) => state.setViewMode);
   const statusFilters = useViewStore((state) => state.statusFilters);
-  const toggleStatusFilter = useViewStore((state) => state.toggleStatusFilter);
   const priorityFilters = useViewStore((state) => state.priorityFilters);
   const assigneeFilters = useViewStore((state) => state.assigneeFilters);
   const includeNoAssignee = useViewStore((state) => state.includeNoAssignee);
@@ -471,8 +592,6 @@ function IssueListPageContent() {
       <IssueListFiltersRow
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        statusFilters={statusFilters}
-        onToggleStatus={toggleStatusFilter}
         projectId={projectId}
         onProjectChange={setProjectId}
         dueFrom={dueFrom}
