@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/agentpolicy"
 )
 
 // formatProjectResource renders a single resource as a human-readable bullet.
@@ -76,6 +78,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
+	agentPolicy := agentpolicy.FromRuntimeConfig(ctx.AgentRuntimeConfig)
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -249,9 +252,24 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 		b.WriteString("5. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
-		b.WriteString("6. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
+		b.WriteString("6. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered. ")
 		b.WriteString(BuildCommentReplyInstructions(ctx.IssueID, ctx.TriggerCommentID))
-		b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		if agentPolicy.IsOperatorControlled() {
+			b.WriteString("7. Do NOT change issue status, change assignee, create issues, or mention another agent. A human operator owns lifecycle and handoff changes.\n\n")
+		} else {
+			b.WriteString("7. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+		}
+	} else if agentPolicy.IsOperatorControlled() {
+		// Operator-controlled assignment: the server enforces write policy for
+		// status/assignee/issue-create/agent-mention commands, so do not instruct
+		// the agent to run commands that will be rejected.
+		b.WriteString("**This is an operator-controlled assignment.** A human operator owns issue lifecycle changes.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks.\n", ctx.IssueID)
+		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
+		b.WriteString("3. Complete the requested work without changing issue status, changing assignee, creating issues, or mentioning another agent.\n")
+		fmt.Fprintf(&b, "4. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Do not include any `mention://agent/...` links.\n", ctx.IssueID)
+		b.WriteString("5. If blocked, post a plain comment explaining the blocker and wait for the human operator to change status or assignment.\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
