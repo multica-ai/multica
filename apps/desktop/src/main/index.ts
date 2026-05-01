@@ -91,13 +91,20 @@ function createWindow(): void {
     ...(is.dev ? { icon: DEV_ICON_PATH } : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
-      sandbox: false,
-      webSecurity: false,
+      contextIsolation: true,
+      sandbox: false, // preload imports Node APIs (fs, path); sandbox mode requires pure contextBridge — Phase 2 migration
+      // webSecurity disabled only in dev so localhost WS connections aren't blocked.
+      // In production the onBeforeSendHeaders Origin-strip (below) handles the
+      // WebSocket upgrade without needing to disable the same-origin policy.
+      webSecurity: !is.dev,
     },
   });
 
-  // Strip Origin header from WebSocket upgrade requests so the server's
-  // origin whitelist doesn't reject connections from localhost dev origins.
+  // Strip Origin header from WebSocket upgrade requests once per session.
+  // Using the default session singleton (not per-window) so this only
+  // registers once even when createWindow() is called again on dock reopen.
+  // Previous registration is replaced, not duplicated, because
+  // onBeforeSendHeaders replaces the existing listener for the same filter.
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["wss://*/*", "ws://*/*"] },
     (details, callback) => {
@@ -113,6 +120,28 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
     return { action: "deny" };
+  });
+
+  // Block main-window navigation away from the app origin.
+  // Without this a malicious link could navigate the preload-equipped window
+  // to an attacker-controlled origin and use IPC/daemonAPI as an exfil channel.
+  const appOrigin = is.dev
+    ? process.env["ELECTRON_RENDERER_URL"] ?? "http://localhost:8080"
+    : "forge://app";
+  mainWindow.webContents.on("will-navigate", (e, url) => {
+    try {
+      const target = new URL(url);
+      const allowed = new URL(appOrigin);
+      if (target.origin !== allowed.origin) e.preventDefault();
+    } catch {
+      e.preventDefault();
+    }
+  });
+
+  // Null the reference on close so IPC handlers don't hold a destroyed
+  // BrowserWindow alive across dock-reopen cycles.
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 
   // Prevent Cmd+R / Ctrl+R / Shift+Cmd+R / Shift+Ctrl+R / F5 from

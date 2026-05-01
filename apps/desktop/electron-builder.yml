@@ -26,12 +26,10 @@ mac:
   # Naming scheme: forge-desktop-<version>-<platform>-<arch>.<ext>
   # so the filename alone surfaces kind, version, platform, and CPU arch.
   artifactName: forge-desktop-${version}-mac-${arch}.${ext}
-  # Notarize via notarytool. Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
-  # + APPLE_TEAM_ID env vars at package time. Non-mac contributors are
-  # unaffected because `pnpm package` already requires the Developer ID
-  # signing cert — notarization is a strict superset.
   notarize: true
-  copyright: "Copyright © 2026 Asymbl"
+  # Notarize via notarytool when APPLE_ID env var is present.
+  # Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID at package time.
+  # Skipped silently when those vars are absent (local/unsigned builds).
 dmg:
   artifactName: forge-desktop-${version}-mac-${arch}.${ext}
 linux:
@@ -62,4 +60,5 @@ publish:
   # uploads of the DMG/ZIP/blockmaps/latest-mac.yml to be silently skipped,
   # which breaks electron-updater auto-update on installed clients.
   releaseType: release
+copyright: "Copyright © 2026 Asymbl"
 npmRebuild: false
