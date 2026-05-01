@@ -227,6 +227,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if h.denyAgentMentionIfNeeded(w, r, uuidToString(issue.WorkspaceID), authorType, authorID, req.Content) {
 		return
 	}
+	if authorType == "agent" && h.denyCollaborationTaskScopeIfNeeded(w, r, issue, req.Content) {
+		return
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same

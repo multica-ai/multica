@@ -40,8 +40,14 @@ func TestInjectRuntimeConfigOperatorControlledAssignmentOmitsStatusCommands(t *t
 			t.Fatalf("operator-controlled runtime config should not contain %q", forbidden)
 		}
 	}
-	if !strings.Contains(s, "Do not include any `mention://agent/...` links") {
+	if !strings.Contains(s, "do not include any `mention://agent/...` links") {
 		t.Fatalf("expected agent mention guardrail in operator-controlled instructions")
+	}
+	if strings.Contains(s, "--content \"...\"") {
+		t.Fatalf("operator-controlled instructions should not use inline --content example")
+	}
+	if !strings.Contains(s, "--content-stdin") {
+		t.Fatalf("expected stdin-based comment guidance")
 	}
 }
 
@@ -117,6 +123,40 @@ func TestInjectRuntimeConfigSupervisedCollaborationAssignmentUsesDiscussionOnlyI
 	}
 	if !strings.Contains(s, "For this task's policy, do NOT use `mention://agent/...` links") {
 		t.Fatalf("expected global mention guidance to honor supervised collaboration raw mention denial")
+	}
+	if strings.Contains(s, "--content \"...\"") {
+		t.Fatalf("supervised collaboration instructions should not use inline --content example")
+	}
+}
+
+func TestInjectRuntimeConfigSupervisedCollaborationWithoutIssueOmitsCollaborationRequestCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		ChatSessionID: "chat-session-id",
+		AgentRuntimeConfig: []byte(`{
+			"multica_policy": {
+				"mode": "supervised_collaboration",
+				"collaboration": {
+					"collaboration_requests": "allow_audited"
+				}
+			}
+		}`),
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	if strings.Contains(s, "multica issue collaboration-request create") {
+		t.Fatalf("non-issue supervised collaboration task should not include collaboration-request command")
+	}
+	if !strings.Contains(s, "HANDOFF_RECOMMENDATION") {
+		t.Fatalf("expected non-issue supervised collaboration to fall back to handoff recommendation guidance")
 	}
 }
 

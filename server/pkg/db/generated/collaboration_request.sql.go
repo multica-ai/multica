@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveCollaborationRequestsForPair = `-- name: CountActiveCollaborationRequestsForPair :one
+SELECT count(*) FROM collaboration_request
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND from_agent_id = $3
+  AND to_agent_id = $4
+  AND status IN ('accepted', 'queued')
+  AND expires_at > now()
+`
+
+type CountActiveCollaborationRequestsForPairParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	FromAgentID pgtype.UUID `json:"from_agent_id"`
+	ToAgentID   pgtype.UUID `json:"to_agent_id"`
+}
+
+func (q *Queries) CountActiveCollaborationRequestsForPair(ctx context.Context, arg CountActiveCollaborationRequestsForPairParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveCollaborationRequestsForPair,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.FromAgentID,
+		arg.ToAgentID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countActiveReverseCollaborationRequests = `-- name: CountActiveReverseCollaborationRequests :one
 SELECT count(*) FROM collaboration_request
 WHERE issue_id = $1
@@ -88,6 +117,38 @@ func (q *Queries) CreateCollaborationRequest(ctx context.Context, arg CreateColl
 		arg.ExpiresAt,
 		arg.Metadata,
 	)
+	var i CollaborationRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.FromAgentID,
+		&i.ToAgentID,
+		&i.ParentRequestID,
+		&i.TriggerCommentID,
+		&i.TargetTaskID,
+		&i.Status,
+		&i.Mode,
+		&i.Purpose,
+		&i.MaxTurns,
+		&i.Depth,
+		&i.ExpiresAt,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveCollaborationRequestByTargetTask = `-- name: GetActiveCollaborationRequestByTargetTask :one
+SELECT id, workspace_id, issue_id, from_agent_id, to_agent_id, parent_request_id, trigger_comment_id, target_task_id, status, mode, purpose, max_turns, depth, expires_at, metadata, created_at, updated_at FROM collaboration_request
+WHERE target_task_id = $1
+  AND status IN ('accepted', 'queued')
+  AND expires_at > now()
+`
+
+func (q *Queries) GetActiveCollaborationRequestByTargetTask(ctx context.Context, targetTaskID pgtype.UUID) (CollaborationRequest, error) {
+	row := q.db.QueryRow(ctx, getActiveCollaborationRequestByTargetTask, targetTaskID)
 	var i CollaborationRequest
 	err := row.Scan(
 		&i.ID,

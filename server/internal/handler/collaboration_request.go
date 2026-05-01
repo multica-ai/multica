@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/agentpolicy"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -18,9 +20,10 @@ import (
 )
 
 const (
-	collaborationRequestSchemaVersion  = "mhs21.v1"
-	collaborationRequestStatusAccepted = "accepted"
-	collaborationRequestModeDiscussion = "discussion_only"
+	collaborationRequestSchemaVersion   = "mhs21.v1"
+	collaborationRequestStatusAccepted  = "accepted"
+	collaborationRequestModeDiscussion  = "discussion_only"
+	collaborationRequestMaxPurposeBytes = 8000
 )
 
 type CollaborationRequestResponse struct {
@@ -91,7 +94,7 @@ Controller note: this audited request was accepted by the server controller. The
 		toAgent.Name,
 		uuidToString(toAgent.ID),
 		req.Mode,
-		req.Purpose,
+		purposeForAudit(req.Purpose),
 		req.MaxTurns,
 		req.Depth,
 		ttlMinutes,
@@ -105,6 +108,82 @@ func encodeCollaborationMetadata(values map[string]any) []byte {
 		return []byte(`{}`)
 	}
 	return metadata
+}
+
+func (h *Handler) denyCollaborationTaskScopeIfNeeded(w http.ResponseWriter, r *http.Request, issue db.Issue, content string) bool {
+	taskIDHeader := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+	if taskIDHeader == "" {
+		return false
+	}
+	taskID, err := util.ParseUUID(taskIDHeader)
+	if err != nil {
+		return false
+	}
+	request, err := h.Queries.GetActiveCollaborationRequestByTargetTask(r.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to evaluate collaboration task scope")
+		return true
+	}
+	if uuidToString(request.IssueID) != uuidToString(issue.ID) || uuidToString(request.WorkspaceID) != uuidToString(issue.WorkspaceID) {
+		writeError(w, http.StatusForbidden, "collaboration task can only write to its requested issue")
+		return true
+	}
+	if containsAgentMention(content) {
+		writeError(w, http.StatusForbidden, "collaboration task cannot include raw agent mentions")
+		return true
+	}
+	return false
+}
+
+func (h *Handler) requireCollaborationSourceTask(w http.ResponseWriter, r *http.Request, issue db.Issue, fromAgentID pgtype.UUID) (db.AgentTaskQueue, bool) {
+	taskIDHeader := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+	if taskIDHeader == "" {
+		writeError(w, http.StatusForbidden, "collaboration requests require an agent task context")
+		return db.AgentTaskQueue{}, false
+	}
+	taskID, ok := parseUUIDOrBadRequest(w, taskIDHeader, "X-Task-ID")
+	if !ok {
+		return db.AgentTaskQueue{}, false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+	if err != nil || task.AgentID != fromAgentID {
+		writeError(w, http.StatusForbidden, "collaboration request task does not match agent actor")
+		return db.AgentTaskQueue{}, false
+	}
+	if !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusForbidden, "collaboration request task must belong to the same issue")
+		return db.AgentTaskQueue{}, false
+	}
+	if task.Status != "dispatched" && task.Status != "running" {
+		writeError(w, http.StatusForbidden, "collaboration request task must be active")
+		return db.AgentTaskQueue{}, false
+	}
+	return task, true
+}
+
+func targetPolicyAllowsDiscussionOnlyCollaboration(policy agentpolicy.Policy) bool {
+	if !policy.IsSupervisedCollaboration() {
+		return false
+	}
+	if !policy.DeniesRawAgentMentions() {
+		return false
+	}
+	return policy.DeniesAnyCommand(
+		agentpolicy.CommandIssueCreate,
+		agentpolicy.CommandIssueUpdateStatus,
+		agentpolicy.CommandIssueStatus,
+		agentpolicy.CommandIssueUpdateAssignee,
+		agentpolicy.CommandIssueAssign,
+	)
+}
+
+func purposeForAudit(purpose string) string {
+	purpose = strings.ReplaceAll(purpose, "\r\n", "\n")
+	purpose = strings.ReplaceAll(purpose, "\r", "\n")
+	return strings.ReplaceAll(purpose, "\n", "\n  ")
 }
 
 func (h *Handler) ListCollaborationRequests(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +232,10 @@ func (h *Handler) CreateCollaborationRequest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusForbidden, "invalid agent actor")
 		return
 	}
+	sourceTask, ok := h.requireCollaborationSourceTask(w, r, issue, fromAgentID)
+	if !ok {
+		return
+	}
 	fromAgent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID:          fromAgentID,
 		WorkspaceID: issue.WorkspaceID,
@@ -175,6 +258,10 @@ func (h *Handler) CreateCollaborationRequest(w http.ResponseWriter, r *http.Requ
 	req.Purpose = strings.TrimSpace(req.Purpose)
 	if req.Purpose == "" {
 		writeError(w, http.StatusBadRequest, "purpose is required")
+		return
+	}
+	if len(req.Purpose) > collaborationRequestMaxPurposeBytes {
+		writeError(w, http.StatusBadRequest, "purpose is too large")
 		return
 	}
 	if containsAgentMention(req.Purpose) {
@@ -208,6 +295,11 @@ func (h *Handler) CreateCollaborationRequest(w http.ResponseWriter, r *http.Requ
 	}
 	if !toAgent.RuntimeID.Valid {
 		writeError(w, http.StatusBadRequest, "target agent has no runtime")
+		return
+	}
+	targetPolicy := agentpolicy.FromRuntimeConfig(toAgent.RuntimeConfig)
+	if !targetPolicyAllowsDiscussionOnlyCollaboration(targetPolicy) {
+		writeError(w, http.StatusForbidden, "target agent policy must be supervised collaboration and discussion-only")
 		return
 	}
 	if !policy.AllowsTargetAgent(toAgent.Name, uuidToString(toAgent.ID)) {
@@ -263,6 +355,20 @@ func (h *Handler) CreateCollaborationRequest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusForbidden, "collaboration request depth exceeds policy")
 		return
 	}
+	activePairCount, err := h.Queries.CountActiveCollaborationRequestsForPair(r.Context(), db.CountActiveCollaborationRequestsForPairParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		FromAgentID: fromAgent.ID,
+		ToAgentID:   toAgent.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to evaluate active collaboration request policy")
+		return
+	}
+	if activePairCount > 0 {
+		writeError(w, http.StatusConflict, "active collaboration request already exists for this agent pair")
+		return
+	}
 	if policy.PreventsCycles() {
 		count, err := h.Queries.CountActiveReverseCollaborationRequests(r.Context(), db.CountActiveReverseCollaborationRequestsParams{
 			IssueID:     issue.ID,
@@ -283,7 +389,7 @@ func (h *Handler) CreateCollaborationRequest(w http.ResponseWriter, r *http.Requ
 	expiresAt := time.Now().UTC().Add(time.Duration(ttlMinutes) * time.Minute)
 	metadata := encodeCollaborationMetadata(map[string]any{
 		"schema_version":       collaborationRequestSchemaVersion,
-		"requested_by_task_id": r.Header.Get("X-Task-ID"),
+		"requested_by_task_id": uuidToString(sourceTask.ID),
 	})
 	created, err := h.Queries.CreateCollaborationRequest(r.Context(), db.CreateCollaborationRequestParams{
 		WorkspaceID:     issue.WorkspaceID,

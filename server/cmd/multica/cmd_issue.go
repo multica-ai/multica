@@ -1070,6 +1070,14 @@ func runIssueCollaborationRequestCreate(cmd *cobra.Command, args []string) error
 	if !hasPurpose || strings.TrimSpace(purpose) == "" {
 		return fmt.Errorf("--purpose or --purpose-stdin is required")
 	}
+	maxTurns, _ := cmd.Flags().GetInt("max-turns")
+	if maxTurns <= 0 && cmd.Flags().Changed("max-turns") {
+		return fmt.Errorf("--max-turns must be positive")
+	}
+	ttlMinutes, _ := cmd.Flags().GetInt("ttl-minutes")
+	if ttlMinutes < 0 {
+		return fmt.Errorf("--ttl-minutes must be zero or positive")
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1093,11 +1101,11 @@ func runIssueCollaborationRequestCreate(cmd *cobra.Command, args []string) error
 	if v, _ := cmd.Flags().GetString("mode"); v != "" {
 		body["mode"] = v
 	}
-	if v, _ := cmd.Flags().GetInt("max-turns"); v > 0 {
-		body["max_turns"] = v
+	if maxTurns > 0 {
+		body["max_turns"] = maxTurns
 	}
-	if v, _ := cmd.Flags().GetInt("ttl-minutes"); v > 0 {
-		body["ttl_minutes"] = v
+	if ttlMinutes > 0 {
+		body["ttl_minutes"] = ttlMinutes
 	}
 	if v, _ := cmd.Flags().GetString("parent-request"); v != "" {
 		body["parent_request_id"] = v

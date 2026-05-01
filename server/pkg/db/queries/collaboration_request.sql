@@ -50,6 +50,21 @@ WHERE issue_id = $1
   AND status IN ('accepted', 'queued')
   AND expires_at > now();
 
+-- name: CountActiveCollaborationRequestsForPair :one
+SELECT count(*) FROM collaboration_request
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND from_agent_id = $3
+  AND to_agent_id = $4
+  AND status IN ('accepted', 'queued')
+  AND expires_at > now();
+
+-- name: GetActiveCollaborationRequestByTargetTask :one
+SELECT * FROM collaboration_request
+WHERE target_task_id = $1
+  AND status IN ('accepted', 'queued')
+  AND expires_at > now();
+
 -- name: GetCollaborationRequestDepth :one
 SELECT depth FROM collaboration_request
 WHERE id = $1 AND workspace_id = $2 AND issue_id = $3;

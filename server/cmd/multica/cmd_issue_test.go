@@ -604,6 +604,22 @@ func TestIssueCollaborationRequestCreateValidatesRequiredFlags(t *testing.T) {
 	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--purpose or --purpose-stdin is required") {
 		t.Fatalf("expected purpose validation error, got %v", err)
 	}
+
+	cmd = newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	_ = cmd.Flags().Set("purpose", "review")
+	_ = cmd.Flags().Set("max-turns", "0")
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--max-turns must be positive") {
+		t.Fatalf("expected max-turns validation error, got %v", err)
+	}
+
+	cmd = newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	_ = cmd.Flags().Set("purpose", "review")
+	_ = cmd.Flags().Set("ttl-minutes", "-1")
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--ttl-minutes must be zero or positive") {
+		t.Fatalf("expected ttl-minutes validation error, got %v", err)
+	}
 }
 
 func TestValidIssueStatuses(t *testing.T) {

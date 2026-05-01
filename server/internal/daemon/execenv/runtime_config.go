@@ -274,7 +274,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history — this is mandatory, not optional. Earlier comments often carry context the issue body lacks.\n", ctx.IssueID)
 		b.WriteString("   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		b.WriteString("3. Complete the requested work without changing issue status, changing assignee, creating issues, or mentioning another agent.\n")
-		fmt.Fprintf(&b, "4. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Do not include any `mention://agent/...` links.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "4. **Post your final results as a plain comment — this step is mandatory**: pipe a HEREDOC into `multica issue comment add %s --content-stdin`. Do not use inline `--content`; do not include any `mention://agent/...` links.\n", ctx.IssueID)
 		b.WriteString("5. If blocked, post a plain comment explaining the blocker and wait for the human operator to change status or assignment.\n\n")
 	} else if agentPolicy.IsSupervisedCollaboration() {
 		// Supervised collaboration allows discussion, but lifecycle and raw agent
@@ -291,7 +291,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else {
 			b.WriteString("5. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` with target agent, reason, expected output, and operator/controller action required.\n")
 		}
-		fmt.Fprintf(&b, "6. **Post your final results as a plain comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`.\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "6. **Post your final results as a plain comment — this step is mandatory**: pipe a HEREDOC into `multica issue comment add %s --content-stdin`. Do not use inline `--content`.\n\n", ctx.IssueID)
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
@@ -300,7 +300,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "   - If the output is very large or truncated, use pagination: `--limit 30` to get the latest 30 comments, or `--since <timestamp>` to fetch only recent ones\n")
 		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
-		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: pipe a HEREDOC into `multica issue comment add %s --content-stdin`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
@@ -338,7 +338,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
 	b.WriteString("### When a mention IS appropriate\n\n")
 	if agentPolicy.DeniesRawAgentMentions() {
-		if agentPolicy.AllowsAuditedCollaborationRequests() {
+		if agentPolicy.AllowsAuditedCollaborationRequests() && ctx.IssueID != "" {
 			fmt.Fprintf(&b, "- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, use `multica issue collaboration-request create %s --to <agent-name-or-id> --purpose \"<specific same-issue request>\"` instead.\n", ctx.IssueID)
 		} else {
 			b.WriteString("- For this task's policy, do NOT use `mention://agent/...` links. If another agent should join, write a plain `HANDOFF_RECOMMENDATION` or ask the operator/controller to route the handoff.\n")

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/agentpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -66,6 +67,9 @@ func (h *Handler) denyAgentMentionIfNeeded(w http.ResponseWriter, r *http.Reques
 }
 
 func containsAgentMention(content string) bool {
+	if strings.Contains(strings.ToLower(content), "mention://agent") {
+		return true
+	}
 	for _, mention := range util.ParseMentions(content) {
 		if mention.Type == "agent" {
 			return true
