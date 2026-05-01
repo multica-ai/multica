@@ -453,12 +453,14 @@ func TestCollaborationTargetTaskCommentScope(t *testing.T) {
 	}
 	targetTaskID := *created.TargetTaskID
 
-	postTargetComment := func(issueID, content string) *httptest.ResponseRecorder {
+	postTargetComment := func(issueID, content string, parentID *string) *httptest.ResponseRecorder {
 		t.Helper()
+		body := map[string]any{"content": content}
+		if parentID != nil {
+			body["parent_id"] = *parentID
+		}
 		w := httptest.NewRecorder()
-		req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
-			"content": content,
-		})
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
 		req = withURLParam(req, "id", issueID)
 		req.Header.Set("X-Agent-ID", targetID)
 		req.Header.Set("X-Task-ID", targetTaskID)
@@ -466,18 +468,18 @@ func TestCollaborationTargetTaskCommentScope(t *testing.T) {
 		return w
 	}
 
-	w = postTargetComment(issueID, "Review complete: this stays on the requested issue.")
+	w = postTargetComment(issueID, "Review complete: this stays on the requested issue.", created.TriggerCommentID)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("same issue target comment expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
 	otherIssueID := createCollaborationTestIssue(t, "forbidden different issue")
-	w = postTargetComment(otherIssueID, "Trying to comment outside the requested issue.")
+	w = postTargetComment(otherIssueID, "Trying to comment outside the requested issue.", nil)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("different issue target comment expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	w = postTargetComment(issueID, "Please ask mention://agent/00000000-0000-0000-0000-000000000001 next.")
+	w = postTargetComment(issueID, "Please ask mention://agent/00000000-0000-0000-0000-000000000001 next.", created.TriggerCommentID)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("agent mention target comment expected 403, got %d: %s", w.Code, w.Body.String())
 	}
