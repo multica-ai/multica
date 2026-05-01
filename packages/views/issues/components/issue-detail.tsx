@@ -323,13 +323,15 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+  /** When true, the issue identifier+title in the breadcrumb links to the issue detail page. Used when this view is embedded (e.g. inbox) so users can navigate to the dedicated issue page. */
+  linkSelfInBreadcrumb?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -723,12 +725,28 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0 text-muted-foreground">
-              {issue.identifier}
-            </span>
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
+            {linkSelfInBreadcrumb ? (
+              <AppLink
+                href={paths.issueDetail(issue.id)}
+                className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {issue.title}
+                </span>
+              </AppLink>
+            ) : (
+              <>
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {issue.title}
+                </span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <Tooltip>
