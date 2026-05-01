@@ -130,38 +130,40 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const StatusIcon = statusCfg.icon;
 
   return (
-    <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
+    <div className="group/row flex flex-col gap-2 border-b px-4 py-3 text-sm transition-colors hover:bg-accent/40 sm:h-11 sm:flex-row sm:items-center sm:gap-2 sm:border-b-0 sm:px-5 sm:py-0">
       <AppLink
         href={wsPaths.autopilotDetail(autopilot.id)}
-        className="flex min-w-0 flex-1 items-center gap-2"
+        className="flex min-w-0 items-center gap-2 sm:flex-1"
       >
         <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{autopilot.title}</span>
       </AppLink>
 
-      {/* Agent */}
-      <span className="flex w-32 items-center gap-1.5 shrink-0">
-        <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard showStatusDot />
-        <span className="truncate text-xs text-muted-foreground">
-          {getActorName("agent", autopilot.assignee_id)}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-xs sm:contents sm:pl-0">
+        {/* Agent */}
+        <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground sm:w-32 sm:shrink-0">
+          <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard showStatusDot />
+          <span className="truncate">
+            {getActorName("agent", autopilot.assignee_id)}
+          </span>
         </span>
-      </span>
 
-      {/* Mode */}
-      <span className="w-24 shrink-0 text-center text-xs text-muted-foreground">
-        {EXECUTION_MODE_LABELS[autopilot.execution_mode] ?? autopilot.execution_mode}
-      </span>
+        {/* Mode */}
+        <span className="text-muted-foreground sm:w-24 sm:shrink-0 sm:text-center">
+          {EXECUTION_MODE_LABELS[autopilot.execution_mode] ?? autopilot.execution_mode}
+        </span>
 
-      {/* Status */}
-      <span className={cn("flex w-20 items-center justify-center gap-1 shrink-0 text-xs", statusCfg.color)}>
-        <StatusIcon className="h-3 w-3" />
-        {statusCfg.label}
-      </span>
+        {/* Status */}
+        <span className={cn("flex items-center gap-1 sm:w-20 sm:shrink-0 sm:justify-center", statusCfg.color)}>
+          <StatusIcon className="h-3 w-3" />
+          {statusCfg.label}
+        </span>
 
-      {/* Last run */}
-      <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
-      </span>
+        {/* Last run */}
+        <span className="text-muted-foreground tabular-nums sm:w-20 sm:shrink-0 sm:text-right">
+          {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -198,7 +200,7 @@ export function AutopilotsPage() {
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <>
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5">
+            <div className="sticky top-0 z-[1] hidden h-8 items-center gap-2 border-b bg-muted/30 px-5 sm:flex">
               <span className="shrink-0 w-4" />
               <Skeleton className="h-3 w-12 flex-1 max-w-[48px]" />
               <Skeleton className="h-3 w-12 shrink-0" />
@@ -206,9 +208,9 @@ export function AutopilotsPage() {
               <Skeleton className="h-3 w-10 shrink-0" />
               <Skeleton className="h-3 w-12 shrink-0" />
             </div>
-            <div className="p-5 pt-1 space-y-1">
+            <div className="space-y-2 p-4 sm:space-y-1 sm:p-5 sm:pt-1">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-full" />
+                <Skeleton key={i} className="h-[72px] w-full sm:h-11" />
               ))}
             </div>
           </>
@@ -246,7 +248,7 @@ export function AutopilotsPage() {
         ) : (
           <>
             {/* Column headers */}
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
+            <div className="sticky top-0 z-[1] hidden h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground sm:flex">
               <span className="shrink-0 w-4" />
               <span className="min-w-0 flex-1">Name</span>
               <span className="w-32 shrink-0">Agent</span>
