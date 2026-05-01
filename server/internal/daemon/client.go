@@ -106,6 +106,12 @@ func (c *Client) Token() string {
 	return c.token
 }
 
+// SetTimeout updates the HTTP client timeout duration.
+// Used by the daemon to apply configured API timeout values.
+func (c *Client) SetTimeout(d time.Duration) {
+	c.client.Timeout = d
+}
+
 func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error) {
 	var resp struct {
 		Task *Task `json:"task"`

@@ -78,6 +78,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	// Apply configured API timeout if non-zero (default 30s in NewClient is preserved for external callers)
+	if cfg.APITimeout > 0 {
+		client.SetTimeout(cfg.APITimeout)
+	}
 	return &Daemon{
 		cfg:           cfg,
 		client:        client,
