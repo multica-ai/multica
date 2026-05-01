@@ -449,7 +449,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   const loading = issueLoading;
 
-  // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
+  // Jump to highlighted comment once timeline loads. Instant (not smooth) —
+  // a multi-second smooth-scroll animation is exactly the inbox-yank behavior
+  // users hate. The 2s pulse on `highlightedId` is enough to draw the eye.
   useEffect(() => {
     if (!highlightCommentId || timeline.length === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
@@ -457,7 +459,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     if (el) {
       didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ block: "center" });
         setHighlightedId(highlightCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
