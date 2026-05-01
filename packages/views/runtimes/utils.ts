@@ -148,6 +148,10 @@ const MODEL_PRICING: Record<
 
   // -- Xiaomi MiMo --
   "mimo/mimo-v2.5-pro": { input: 1,    output: 3,    cacheRead: 0.20, cacheWrite: 0 },
+  "mimo/mimo-v2.5":     { input: 0.40, output: 2,    cacheRead: 0.08, cacheWrite: 0 },
+  "mimo/mimo-v2-pro":   { input: 1,    output: 3,    cacheRead: 0.20, cacheWrite: 0 },
+  "mimo/mimo-v2-omni":  { input: 0.40, output: 2,    cacheRead: 0.08, cacheWrite: 0 },
+  "mimo/mimo-v2-flash": { input: 0.09, output: 0.29, cacheRead: 0.045, cacheWrite: 0 },
 };
 
 // Resolve a model string to its pricing tier. Two layers of fallback so the
