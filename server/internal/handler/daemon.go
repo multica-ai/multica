@@ -31,6 +31,38 @@ import (
 // that a stolen token expires before it can be reused tomorrow.
 const taskTokenTTL = 1 * time.Hour
 
+// workspaceIDForTask returns the workspace UUID that owns this task,
+// resolved via issue_id, chat_session_id, or autopilot_run_id —
+// matching the resolution priority in ClaimTaskByRuntime.
+func (h *Handler) workspaceIDForTask(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
+	if task.IssueID.Valid {
+		issue, err := h.Queries.GetIssue(ctx, task.IssueID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		return issue.WorkspaceID, nil
+	}
+	if task.ChatSessionID.Valid {
+		cs, err := h.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		return cs.WorkspaceID, nil
+	}
+	if task.AutopilotRunID.Valid {
+		run, err := h.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		ap, err := h.Queries.GetAutopilot(ctx, run.AutopilotID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		return ap.WorkspaceID, nil
+	}
+	return pgtype.UUID{}, nil
+}
+
 // mintTaskToken generates and stores a task-scoped token. Returns the
 // plain-text token to hand to the daemon — only the hash is persisted.
 func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string) (string, error) {
@@ -580,6 +612,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Verify the caller owns this runtime's workspace.
 	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return
+	}
+
+	// Peek at queued tasks for this runtime and cancel any that
+	// exceed the workspace or agent budget cap. The actual claim
+	// below then picks the next still-allowed task. The
+	// peek->check->mark pattern races with concurrent claims, but
+	// that's fine: another runtime that picks the same task would
+	// run the same check.
+	if pending, err := h.Queries.ListPendingTasksByRuntime(r.Context(), parseUUID(runtimeID)); err == nil {
+		for _, candidate := range pending {
+			wsID, _ := h.workspaceIDForTask(r.Context(), candidate)
+			decision := h.BudgetService.CheckPreClaim(r.Context(), wsID, candidate.AgentID)
+			if !decision.Allowed {
+				slog.Info("task claim blocked by budget", "task_id", uuidToString(candidate.ID), "reason", decision.Reason)
+				_ = h.Queries.MarkTaskBlockedByBudget(r.Context(), db.MarkTaskBlockedByBudgetParams{
+					ID:    candidate.ID,
+					Error: pgtype.Text{String: decision.Reason, Valid: true},
+				})
+			}
+		}
 	}
 
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))

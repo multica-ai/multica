@@ -943,6 +943,25 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const markTaskBlockedByBudget = `-- name: MarkTaskBlockedByBudget :exec
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), error = $2
+WHERE id = $1 AND status = 'queued'
+`
+
+type MarkTaskBlockedByBudgetParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Error pgtype.Text `json:"error"`
+}
+
+// Move a queued task to 'cancelled' with a budget reason. Used by the
+// pre-claim check so a task that exceeds the daily cap doesn't sit in
+// the queue forever waiting for a runtime that will never accept it.
+func (q *Queries) MarkTaskBlockedByBudget(ctx context.Context, arg MarkTaskBlockedByBudgetParams) error {
+	_, err := q.db.Exec(ctx, markTaskBlockedByBudget, arg.ID, arg.Error)
+	return err
+}
+
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1

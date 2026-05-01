@@ -68,6 +68,14 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
 RETURNING *;
 
+-- name: MarkTaskBlockedByBudget :exec
+-- Move a queued task to 'cancelled' with a budget reason. Used by the
+-- pre-claim check so a task that exceeds the daily cap doesn't sit in
+-- the queue forever waiting for a runtime that will never accept it.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), error = $2
+WHERE id = $1 AND status = 'queued';
+
 -- name: CancelAgentTasksByIssue :exec
 UPDATE agent_task_queue
 SET status = 'cancelled'
