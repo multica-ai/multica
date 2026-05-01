@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag, Bell } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -12,11 +12,13 @@ import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { AITab } from "./ai-tab";
 import { LabelsTab } from "./labels-tab";
+import { NotificationsTab } from "./notifications-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
   { value: "appearance", label: "Appearance", icon: Palette },
   { value: "tokens", label: "API Tokens", icon: Key },
+  { value: "notifications", label: "Notifications", icon: Bell },
 ];
 
 const workspaceTabs = [
@@ -111,6 +113,7 @@ export default function SettingsPage() {
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="ai"><AITab /></TabsContent>
+          <TabsContent value="notifications"><NotificationsTab /></TabsContent>
         </div>
       </div>
     </Tabs>
