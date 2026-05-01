@@ -49,9 +49,20 @@ func allowedOrigins() []string {
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
-	s3 := storage.NewS3StorageFromEnv()
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	h := handler.New(queries, pool, hub, bus, emailSvc, s3, cfSigner)
+
+	// Choose storage backend: S3 if configured, local filesystem otherwise.
+	var fileStorage storage.Storage
+	var localUploadDir string
+	if s3 := storage.NewS3StorageFromEnv(); s3 != nil {
+		fileStorage = s3
+	} else {
+		local := storage.NewLocalStorage()
+		fileStorage = local
+		localUploadDir = local.Dir()
+	}
+
+	h := handler.New(queries, pool, hub, bus, emailSvc, fileStorage, cfSigner)
 
 	r := chi.NewRouter()
 
@@ -66,6 +77,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Serve locally uploaded files when running without S3 (development mode).
+	if localUploadDir != "" {
+		r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(localUploadDir))))
+	}
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
