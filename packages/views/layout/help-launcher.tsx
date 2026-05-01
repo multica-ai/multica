@@ -9,8 +9,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useModalStore } from "@multica/core/modals";
 
-const DOCS_URL = "https://multica.ai/docs";
-const CHANGELOG_URL = "https://multica.ai/changelog";
+const DOCS_URL = "https://forge.asymbl.app/docs";
+const CHANGELOG_URL = "https://forge.asymbl.app/changelog";
 
 export function HelpLauncher() {
   return (

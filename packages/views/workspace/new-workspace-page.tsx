@@ -57,7 +57,7 @@ export function NewWorkspacePage({
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
-              Welcome to Multica
+              Welcome to Forge
             </h1>
             <p className="mt-3 text-muted-foreground">
               One workspace where you and your AI teammates work side by side —

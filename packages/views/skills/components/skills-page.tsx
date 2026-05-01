@@ -81,7 +81,7 @@ function PageHeaderBar({
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
           Instructions any agent in this workspace can use.{" "}
           <a
-            href="https://multica.ai/docs/skills"
+            href="https://forge.asymbl.app/docs/skills"
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"

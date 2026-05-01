@@ -67,7 +67,7 @@ export function CliInstallInstructions() {
           Code, Codex, Cursor, …) for the daemon to do real work. Also
           works on servers and remote dev boxes.
         </p>
-        <Step n={1} label="Install the Multica CLI" cmd={INSTALL_CMD} />
+        <Step n={1} label="Install the Forge CLI" cmd={INSTALL_CMD} />
         <Step n={2} label="Start the daemon" cmd={SETUP_CMD} />
       </CardContent>
     </Card>

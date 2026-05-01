@@ -768,7 +768,7 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
       <div className="text-center space-y-1">
         <h3 className="text-base font-semibold">
-          {agentName ? `Hi, I'm ${agentName}` : "Welcome to Multica"}
+          {agentName ? `Hi, I'm ${agentName}` : "Welcome to Forge"}
         </h3>
         <p className="text-sm text-muted-foreground">Try asking</p>
       </div>

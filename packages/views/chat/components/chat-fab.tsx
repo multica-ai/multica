@@ -34,10 +34,10 @@ export function ChatFab() {
 
   // Tooltip text communicates the state that isn't carried by the icon/badge.
   const tooltip = isRunning
-    ? "Multica is working..."
+    ? "Forge is working..."
     : unreadSessionCount > 0
       ? `${unreadSessionCount} unread ${unreadSessionCount === 1 ? "chat" : "chats"}`
-      : "Ask Multica";
+      : "Ask Forge";
 
   return (
     <Tooltip>

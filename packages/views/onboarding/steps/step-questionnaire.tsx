@@ -205,8 +205,8 @@ export function StepQuestionnaire({
 
               <QuestionBlock
                 num={3}
-                question="What do you want to do with Multica?"
-                ariaLabel="What do you want to do with Multica?"
+                question="What do you want to do with Forge?"
+                ariaLabel="What do you want to do with Forge?"
               >
                 <OptionCard
                   selected={answers.use_case === "coding"}
@@ -330,7 +330,7 @@ function WhyWeAsk() {
       </section>
 
       <a
-        href="https://multica.ai/docs/agents"
+        href="https://forge.asymbl.app/docs/agents"
         target="_blank"
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"

@@ -520,7 +520,7 @@ function PageHeaderBar({
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
           AI teammates that pick up issues, comment, and update status.{" "}
           <a
-            href="https://multica.ai/docs/agents"
+            href="https://forge.asymbl.app/docs/agents"
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
@@ -825,7 +825,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <h2 className="mt-4 text-base font-semibold">No agents yet</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
         Create an agent and assign it issues, like any teammate. Local agents
-        run on your machine; cloud agents run on Multica&rsquo;s runtime.
+        run on your machine; cloud agents run on Forge&rsquo;s runtime.
       </p>
       <Button type="button" onClick={onCreate} size="sm" className="mt-5">
         <Plus className="h-3 w-3" />

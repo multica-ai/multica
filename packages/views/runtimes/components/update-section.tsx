@@ -177,7 +177,7 @@ export function UpdateSection({
         {isManaged ? (
           <span
             className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-            title="The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI."
+            title="The CLI binary is managed by Forge Desktop — update Desktop to upgrade the CLI."
           >
             Managed by Desktop
           </span>

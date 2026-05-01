@@ -54,7 +54,7 @@ export default function NotFound() {
         className="mt-12 inline-flex h-10 items-center rounded-full px-6 text-sm font-medium transition hover:opacity-90"
         style={{ background: INK, color: CREAM }}
       >
-        Back to Multica
+        Back to Forge
       </a>
     </section>
   );
