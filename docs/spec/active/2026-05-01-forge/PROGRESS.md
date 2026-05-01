@@ -27,8 +27,8 @@ Implementation tracking against the spec plan.
 
 | ID  | Description                              | Status      | Started    | Completed | Notes |
 | --- | ---------------------------------------- | ----------- | ---------- | --------- | ----- |
-| 1.1 | Initialize Forge repo                    | in-progress | 2026-05-01 |           | Fork created at github.com/shivasymbl/forge, remotes wired |
-| 1.2 | Web frontend brand replacement           | pending     |            |           |       |
+| 1.1 | Initialize Forge repo                    | done        | 2026-05-01 | 2026-05-01 | Fork at github.com/shivasymbl/forge, CODEOWNERS + LICENSE.asymbl, tag v0.0.1-fork, draft PR #1 |
+| 1.2 | Web frontend brand replacement           | in-progress | 2026-05-01 |           | Done: layout.tsx metadata, favicon route, login page, connect-remote dialog, email templates. Pending: sidebar logo, modal copy, project/issue page strings, ~60 more files |
 | 1.3 | Logo + favicon swap                      | pending     |            |           |       |
 | 1.4 | Tailwind theme — Asymbl light-mode       | pending     |            |           |       |
 | 1.5 | Package & component renames              | pending     |            |           |       |
