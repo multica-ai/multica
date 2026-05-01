@@ -58,7 +58,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare claude command: %w", err)
+	}
+	sandboxOwned := true
+	defer func() {
+		if sandboxOwned {
+			sandboxCleanup()
+		}
+	}()
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -101,6 +111,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
+	sandboxOwned = false
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -109,6 +120,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer sandboxCleanup()
 		if mcpConfigPath != "" {
 			defer os.Remove(mcpConfigPath)
 		}

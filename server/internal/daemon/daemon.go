@@ -519,6 +519,7 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Logger:         d.logger,
+		Sandbox:        d.buildSandboxConfig(rt.Provider, nil),
 	})
 	if err != nil {
 		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
@@ -995,6 +996,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Sandbox:        d.buildSandboxConfig(provider, task.Agent),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

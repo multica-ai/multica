@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -46,6 +47,14 @@ type Config struct {
 	PollInterval       time.Duration
 	HeartbeatInterval  time.Duration
 	AgentTimeout       time.Duration
+
+	// EnableSandbox toggles the macOS sandbox-exec wrapper for spawned
+	// agent processes. Default true on darwin, false elsewhere.
+	EnableSandbox bool
+	// SandboxAllowlist is the daemon-level outbound network allowlist
+	// (host:port pairs) that the seatbelt profile permits. Loopback to
+	// HealthPort and the Multica server host are auto-added at spawn time.
+	SandboxAllowlist []string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -263,6 +272,20 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Sandbox: enabled by default on darwin (kernel-level Seatbelt), no-op
+	// elsewhere. The env var lets operators force-disable it for debugging
+	// or force-enable it on non-darwin platforms (where it currently has no
+	// effect — the agent.prepareCommand helper short-circuits to a regular
+	// exec on non-darwin).
+	enableSandbox := runtime.GOOS == "darwin"
+	switch strings.TrimSpace(os.Getenv("MULTICA_ENABLE_SANDBOX")) {
+	case "false", "0", "no", "off":
+		enableSandbox = false
+	case "true", "1", "yes", "on":
+		enableSandbox = true
+	}
+	sandboxAllowlist := splitCSV(os.Getenv("MULTICA_SANDBOX_NETWORK_ALLOWLIST"))
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -300,7 +323,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:       pollInterval,
 		HeartbeatInterval:  heartbeatInterval,
 		AgentTimeout:       agentTimeout,
+		EnableSandbox:      enableSandbox,
+		SandboxAllowlist:   sandboxAllowlist,
 	}, nil
+}
+
+// splitCSV trims and splits a comma-separated list, dropping empty entries.
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.

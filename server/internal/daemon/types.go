@@ -50,6 +50,10 @@ type AgentData struct {
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
+	// SandboxAllowlist is an admin-set list of additional outbound hosts
+	// (host:port) that this specific agent is allowed to reach when the
+	// macOS sandbox is enabled. Merged on top of the daemon-wide allowlist.
+	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

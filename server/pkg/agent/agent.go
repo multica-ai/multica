@@ -88,6 +88,10 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, or pi)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	// Sandbox, when non-nil and Enabled, wraps the spawned process with
+	// macOS sandbox-exec and a deny-by-default Seatbelt profile. Backends
+	// that have their own sandbox (codex) ignore this field.
+	Sandbox *SandboxConfig
 }
 
 // New creates a Backend for the given agent type.

@@ -37,7 +37,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare cursor command: %w", err)
+	}
+	sandboxOwned := true
+	defer func() {
+		if sandboxOwned {
+			sandboxCleanup()
+		}
+	}()
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 20 * time.Second
 	if opts.Cwd != "" {
@@ -56,6 +66,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
+	sandboxOwned = false
 
 	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -66,6 +77,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer sandboxCleanup()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {

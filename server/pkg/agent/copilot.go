@@ -197,7 +197,17 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare copilot command: %w", err)
+	}
+	sandboxOwned := true
+	defer func() {
+		if sandboxOwned {
+			sandboxCleanup()
+		}
+	}()
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -216,6 +226,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
+	sandboxOwned = false
 
 	b.cfg.Logger.Info("copilot started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -226,6 +237,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer sandboxCleanup()
 
 		startTime := time.Now()
 		seedModel := opts.Model
