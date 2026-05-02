@@ -196,6 +196,74 @@ func TestListUserMessagesSinceLastAssistant_NoAssistantYet(t *testing.T) {
 	}
 }
 
+// TestClaimTask_PopulatesBackwardsCompatChatMessage guards the JEH-330
+// daemon-API breaking change: the backend now returns chat_messages
+// (plural) but pre-JEH-330 daemons read chat_message (singular) and
+// would build an empty prompt without it. A live regression hit prod
+// when a pre-JEH-330 runtime claimed a chat task and the agent
+// received "Tom besked modtaget" — the bug here is exactly that the
+// JSON contract dropped chat_message. This test asserts the response
+// has BOTH fields populated so old binaries keep working.
+func TestClaimTask_PopulatesBackwardsCompatChatMessage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+	ctx := context.Background()
+
+	insertChatMessage(t, sessionID, "user", "first message")
+	insertChatMessage(t, sessionID, "user", "second message")
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT a.id, a.runtime_id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id WHERE cs.id = $1`,
+		sessionID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("lookup agent/runtime: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'queued', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("queue chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ChatMessage  string   `json:"chat_message"`
+			ChatMessages []string `json:"chat_messages"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if len(resp.Task.ChatMessages) != 2 {
+		t.Fatalf("ChatMessages: expected 2 entries, got %d", len(resp.Task.ChatMessages))
+	}
+	if resp.Task.ChatMessage != "second message" {
+		t.Fatalf("ChatMessage backwards-compat field: expected %q (latest user msg), got %q",
+			"second message", resp.Task.ChatMessage)
+	}
+}
+
 func insertChatMessage(t *testing.T, sessionID, role, content string) {
 	t.Helper()
 	if _, err := testHandler.Queries.CreateChatMessage(context.Background(), db.CreateChatMessageParams{

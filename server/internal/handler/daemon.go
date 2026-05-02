@@ -758,6 +758,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				for _, m := range msgs {
 					resp.ChatMessages = append(resp.ChatMessages, m.Content)
 				}
+				// Backwards-compat: pre-JEH-330 daemons read chat_message
+				// (singular) and don't know about chat_messages. Set it to
+				// the most recent user message so old binaries still build
+				// a non-empty prompt. Drop once all runtimes have upgraded.
+				if n := len(resp.ChatMessages); n > 0 {
+					resp.ChatMessage = resp.ChatMessages[n-1]
+				}
 			}
 		}
 	}
