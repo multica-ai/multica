@@ -1,11 +1,20 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { DEFAULT_LOCALE, loadMessages } from "@multica/i18n";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { LocaleSync } from "@/components/locale-sync";
 import "./globals.css";
+
+// PR #1: locale fixed to DEFAULT_LOCALE at build/render time so the root
+// layout stays static (Router Cache preserved). Per-user locale switching
+// — backed by the future user.locale field on the server — lands once
+// the backend exposes it; until then everyone sees zh-CN.
+const SSR_LOCALE = DEFAULT_LOCALE;
+const SSR_MESSAGES = loadMessages(SSR_LOCALE);
 
 // Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
 // Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
@@ -104,18 +113,20 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="en"
+      lang={SSR_LOCALE}
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
         <LocaleSync />
-        <ThemeProvider>
-          <WebProviders>
-            {children}
-          </WebProviders>
-          <Toaster />
-        </ThemeProvider>
+        <NextIntlClientProvider locale={SSR_LOCALE} messages={SSR_MESSAGES as Record<string, string>}>
+          <ThemeProvider>
+            <WebProviders>
+              {children}
+            </WebProviders>
+            <Toaster />
+          </ThemeProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

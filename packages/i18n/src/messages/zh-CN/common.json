@@ -1,0 +1,16 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "close": "关闭",
+    "retry": "重试"
+  },
+  "states": {
+    "loading": "加载中…",
+    "empty": "暂无数据",
+    "error": "出错了"
+  }
+}

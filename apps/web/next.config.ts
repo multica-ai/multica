@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
+import createNextIntlPlugin from "next-intl/plugin";
 
 // Load root .env so REMOTE_API_URL is available to next.config.ts
 config({ path: resolve(__dirname, "../../.env") });
+
+// next-intl request config — locale + messages resolved per request from cookie.
+// URL [locale] segment lands later (PR #11). Until then, locale is cookie-driven.
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const remoteApiUrl = process.env.REMOTE_API_URL || "http://localhost:8080";
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
@@ -24,7 +29,7 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
-  transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
+  transpilePackages: ["@multica/core", "@multica/i18n", "@multica/ui", "@multica/views"],
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),
@@ -69,4 +74,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withNextIntl(nextConfig);

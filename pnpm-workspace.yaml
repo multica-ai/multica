@@ -39,6 +39,11 @@ catalog:
   # Product analytics
   posthog-js: "^1.176.1"
 
+  # Internationalization
+  next-intl: "^4.4.0"
+  use-intl: "^4.4.0"
+  date-fns: "^4.1.0"
+
   # Testing
   vitest: "^4.1.0"
   jsdom: "^29.0.1"

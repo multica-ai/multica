@@ -1,0 +1,31 @@
+{
+  "name": "@multica/i18n",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react/index.ts",
+    "./format": "./src/format.ts",
+    "./locales": "./src/locales.ts",
+    "./messages/*": "./src/messages/*"
+  },
+  "dependencies": {
+    "use-intl": "catalog:",
+    "date-fns": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
