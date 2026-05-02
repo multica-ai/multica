@@ -240,7 +240,7 @@ function WelcomeIllustration() {
         actor={{ kind: "agent", name: "Review Agent", provider: "openclaw" }}
         issueId="MCA-42"
         content="Reviewed Monday's draft — left 4 notes on tone. Standing by for the new one."
-        status="in_review"
+        status="needs_review"
       />
       <MockActivityCard
         className="translate-x-6 rotate-[1deg]"
@@ -286,7 +286,7 @@ function MockActivityCard({
   actor: ActivityActor;
   issueId: string;
   content: React.ReactNode;
-  status?: Extract<IssueStatus, "in_progress" | "done" | "in_review">;
+  status?: Extract<IssueStatus, "in_progress" | "done" | "needs_review">;
   timestamp?: string;
   className?: string;
 }) {

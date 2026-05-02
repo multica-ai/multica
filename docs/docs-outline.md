@@ -36,7 +36,7 @@
 - ⬜ Not started
 - 🔍 Source research（正在读源码验证）
 - ✍️ Drafting（正在写初稿）
-- 👀 In review（待 review）
+- 👀 Needs review（待 review）
 - ✅ Shipped
 
 ### 1.4 Flag（只在需要决策时填）
@@ -198,7 +198,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ## 板块 1：Welcome & Quickstart
 
-### 1.1 Welcome — 👀 In review [v1]
+### 1.1 Welcome — 👀 Needs review [v1]
 
 - **Source files**: `README.md`, `docs/docs-rewrite-plan.md`（定位段）, `apps/docs/content/docs/index.mdx`（现状）
 - **目标读者**: P0 新用户 / evaluator（第一次听说 Multica）
@@ -336,7 +336,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 - **写什么**（1500-2000 字）:
   - **Issues 部分**:
     - Polymorphic assignee（member/agent/null）——第一次正式提"可以分配给 agent"
-    - Status 枚举（backlog/todo/in_progress/in_review/done/blocked/cancelled），**无强制 FSM**
+    - Status 枚举（backlog/todo/in_progress/needs_review/done/blocked/cancelled），**无强制 FSM**
     - Priority / Label / Subscription / Reaction / Dependency / Bulk 操作
     - Issue number per-workspace 自增
     - Comment reply 树、@mention

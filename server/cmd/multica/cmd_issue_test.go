@@ -507,7 +507,7 @@ func TestValidIssueStatuses(t *testing.T) {
 		"backlog":     true,
 		"todo":        true,
 		"in_progress": true,
-		"in_review":   true,
+		"needs_review": true,
 		"done":        true,
 		"blocked":     true,
 		"cancelled":   true,

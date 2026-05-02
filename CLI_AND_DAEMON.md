@@ -341,7 +341,7 @@ multica issue assign <id> --unassign
 multica issue status <id> in_progress
 ```
 
-Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
+Valid statuses: `backlog`, `todo`, `in_progress`, `needs_review`, `done`, `blocked`, `cancelled`.
 
 ### Comments
 

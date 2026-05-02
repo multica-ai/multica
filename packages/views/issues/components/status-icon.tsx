@@ -92,7 +92,7 @@ function InProgressIcon() {
   return <ProgressCircle progress={0.5} />;
 }
 
-function InReviewIcon() {
+function NeedsReviewIcon() {
   return <ProgressCircle progress={0.75} />;
 }
 
@@ -147,7 +147,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
   todo: TodoIcon,
   in_progress: InProgressIcon,
-  in_review: InReviewIcon,
+  needs_review: NeedsReviewIcon,
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,

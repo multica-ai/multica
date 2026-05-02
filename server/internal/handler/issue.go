@@ -382,7 +382,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// Status priority: active issues first
 	statusRank := `CASE i.status
 		WHEN 'in_progress' THEN 0
-		WHEN 'in_review' THEN 1
+		WHEN 'needs_review' THEN 1
 		WHEN 'todo' THEN 2
 		WHEN 'blocked' THEN 3
 		WHEN 'backlog' THEN 4
