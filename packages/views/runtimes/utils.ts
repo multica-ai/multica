@@ -29,38 +29,11 @@ export function formatTokens(n: number): string {
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Pricing per million tokens (USD)
-const MODEL_PRICING: Record<
-  string,
-  { input: number; output: number; cacheRead: number; cacheWrite: number }
-> = {
-  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  "claude-sonnet-4-5": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-opus-4-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-};
-
+// Cost is computed server-side against pkg/pricing (the same authoritative
+// table used for budget enforcement) and returned as cost_cents. We just
+// convert to USD here — there is no duplicate price list on the frontend.
 export function estimateCost(usage: RuntimeUsage): number {
-  const model = usage.model;
-  let pricing = MODEL_PRICING[model];
-  if (!pricing) {
-    for (const [key, p] of Object.entries(MODEL_PRICING)) {
-      if (model.startsWith(key)) {
-        pricing = p;
-        break;
-      }
-    }
-  }
-  if (!pricing) return 0;
-
-  return (
-    (usage.input_tokens * pricing.input +
-      usage.output_tokens * pricing.output +
-      usage.cache_read_tokens * pricing.cacheRead +
-      usage.cache_write_tokens * pricing.cacheWrite) /
-    1_000_000
-  );
+  return usage.cost_cents / 100;
 }
 
 // ---------------------------------------------------------------------------

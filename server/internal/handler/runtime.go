@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -71,6 +72,11 @@ type RuntimeUsageResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// CostCents is the row's cost computed against pkg/pricing — the same
+	// authoritative table used for budget enforcement. Returning it from the
+	// API keeps the dashboard from carrying a duplicate (and drifting)
+	// pricing table on the frontend.
+	CostCents int64 `json:"cost_cents"`
 }
 
 // GetRuntimeUsage returns daily token usage for a runtime, aggregated from
@@ -112,6 +118,12 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			CostCents: pricing.ComputeCents(row.Model, pricing.Usage{
+				InputTokens:      row.InputTokens,
+				OutputTokens:     row.OutputTokens,
+				CacheReadTokens:  row.CacheReadTokens,
+				CacheWriteTokens: row.CacheWriteTokens,
+			}),
 		}
 	}
 
