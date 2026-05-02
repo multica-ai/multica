@@ -777,19 +777,45 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If none of the issue/chat/autopilot lookups above resolved a
+	// workspace, the task is orphaned: chat_session_id (033) and
+	// autopilot_run_id (042) are ON DELETE SET NULL, so a task can
+	// outlive its parent and end up with every link NULL. Such a task
+	// cannot be run — there is nowhere to attribute output to and no
+	// scope to mint a token against. Pre-fix, the mint-token block below
+	// was guarded with `if resp.WorkspaceID != ""` and silently skipped;
+	// the daemon then received a task with no task_token and JEH-324's
+	// fail-loud check refused to spawn the agent, leaving the row in
+	// 'dispatched' until the daemon's StartTask + FailTask round-trip
+	// landed. Mark the task failed inline so the operator can see why,
+	// then return null so the daemon polls for the next valid task.
+	if resp.WorkspaceID == "" {
+		slog.Warn("task orphaned: no resolvable workspace, failing instead of dispatching tokenless",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"agent_id", uuidToString(task.AgentID),
+			"issue_id_valid", task.IssueID.Valid,
+			"chat_session_id_valid", task.ChatSessionID.Valid,
+			"autopilot_run_id_valid", task.AutopilotRunID.Valid,
+		)
+		if _, err := h.TaskService.FailTask(r.Context(), task.ID, "task orphaned: parent issue, chat session, or autopilot was deleted before claim", "", ""); err != nil {
+			slog.Warn("failed to mark orphan task as failed", "task_id", uuidToString(task.ID), "error", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+
 	// Mint a per-task token (mtt_) the daemon will inject as MULTICA_TOKEN
 	// for the spawned agent process. Scoped to the task's issue/agent/
 	// workspace; expires after taskTokenTTL. Replaces the previous
 	// behavior where the daemon shared its full PAT with every agent.
-	if resp.WorkspaceID != "" {
-		token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID)
-		if err != nil {
-			slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
-		}
-		resp.TaskToken = token
+	token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID)
+	if err != nil {
+		slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
 	}
+	resp.TaskToken = token
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

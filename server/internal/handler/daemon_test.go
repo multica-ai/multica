@@ -1222,3 +1222,99 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 		t.Fatalf("expected workspace_id %q, got %q", testWorkspaceID, resp.Task.WorkspaceID)
 	}
 }
+
+// Regression test for JEH-357: a task whose parent (chat_session,
+// autopilot_run, or workspace) was deleted ends up with every FK NULL
+// thanks to ON DELETE SET NULL. Pre-fix, ClaimTaskByRuntime silently
+// skipped the token mint, the daemon refused to spawn the agent
+// (JEH-324 fail-loud), and the row stayed 'dispatched' until the
+// daemon's StartTask + FailTask round-trip eventually landed.
+//
+// After the fix the handler must:
+//  1. Return 200 with task=null (so the daemon polls for the next task).
+//  2. Mark the orphan as 'failed' inline with a clear error so the
+//     queue is not blocked and the operator can see why.
+func TestClaimTask_OrphanTask_FailsAndReturnsNull(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Insert a queued task with every parent FK NULL — exactly the shape
+	// produced when ON DELETE SET NULL fires on chat_session_id or
+	// autopilot_run_id and there is no issue_id.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			chat_session_id, autopilot_run_id
+		)
+		VALUES ($1, $2, NULL, 'queued', 0, NULL, NULL)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create orphan task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-orphan")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID        string `json:"id"`
+			TaskToken string `json:"task_token"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task != nil {
+		t.Fatalf("orphan task: expected task=nil in response, got %+v", resp.Task)
+	}
+
+	// The orphan must be marked failed so the daemon doesn't keep claiming
+	// it on every poll cycle. A queued/dispatched orphan would just keep
+	// burning daemon capacity.
+	var status, errMsg string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(error, '') FROM agent_task_queue WHERE id = $1`,
+		taskID,
+	).Scan(&status, &errMsg); err != nil {
+		t.Fatalf("post-check: read task: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("expected orphan task status 'failed', got %q (error=%q)", status, errMsg)
+	}
+	if !strings.Contains(errMsg, "orphan") {
+		t.Fatalf("expected orphan error message to mention 'orphan', got %q", errMsg)
+	}
+
+	// And no token row should have been created for the orphan.
+	var tokenCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM task_token WHERE task_id = $1`,
+		taskID,
+	).Scan(&tokenCount); err != nil {
+		t.Fatalf("post-check: count task_token rows: %v", err)
+	}
+	if tokenCount != 0 {
+		t.Fatalf("expected 0 task_token rows for orphan task, got %d", tokenCount)
+	}
+}
