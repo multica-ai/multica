@@ -438,9 +438,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
-				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				// List is member-accessible; provider field is stripped for non-admins
+				// in the handler so agents can show online/offline status to all users.
 				r.Get("/", h.ListAgentRuntimes)
+				// All per-runtime management routes require admin/owner.
 				r.Route("/{runtimeId}", func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)
 					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)

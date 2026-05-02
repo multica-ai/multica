@@ -84,13 +84,9 @@ export function AgentsPage() {
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  // Derive role before the runtimes query so enabled:false prevents the
-  // request entirely for members — stops 403 spam on focus/mount.
-  const _myRoleFast = members.find((m) => m.user_id === currentUser?.id)?.role ?? null;
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
-    ...runtimeListOptions(wsId),
-    enabled: _myRoleFast === "owner" || _myRoleFast === "admin",
-  });
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+    runtimeListOptions(wsId),
+  );
   const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
 
   // Single source of truth for derived agent state. The hook owns the

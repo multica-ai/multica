@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -364,6 +365,9 @@ func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
+	member, hasMember := middleware.MemberFromContext(r.Context())
+	isAdmin := hasMember && (member.Role == "owner" || member.Role == "admin")
+
 	var runtimes []db.AgentRuntime
 	var err error
 
@@ -387,7 +391,15 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentRuntimeResponse, len(runtimes))
 	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
+		item := runtimeToResponse(rt)
+		if !isAdmin {
+			// Strip infrastructure-revealing fields for non-admins.
+			// Members need runtime status/name for agent presence display,
+			// but not the provider type (hermes/openclaw) or launch command.
+			item.Provider = ""
+			item.LaunchHeader = ""
+		}
+		resp[i] = item
 	}
 
 	writeJSON(w, http.StatusOK, resp)
