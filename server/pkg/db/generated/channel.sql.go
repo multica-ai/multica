@@ -418,6 +418,66 @@ func (q *Queries) ListChannelMembershipsForActor(ctx context.Context, arg ListCh
 	return items, nil
 }
 
+const listChannelUnreadCountsForActor = `-- name: ListChannelUnreadCountsForActor :many
+SELECT
+    cm.channel_id,
+    cm.last_read_at,
+    cm.last_read_message_id,
+    COUNT(msg.id)::bigint AS unread_count
+FROM channel_membership cm
+LEFT JOIN channel_message msg ON
+    msg.channel_id = cm.channel_id
+    AND msg.parent_message_id IS NULL
+    AND msg.deleted_at IS NULL
+    AND NOT (msg.author_type = cm.member_type AND msg.author_id = cm.member_id)
+    AND (cm.last_read_at IS NULL OR msg.created_at > cm.last_read_at)
+WHERE cm.member_type = $1 AND cm.member_id = $2
+GROUP BY cm.channel_id, cm.last_read_at, cm.last_read_message_id
+`
+
+type ListChannelUnreadCountsForActorParams struct {
+	MemberType string      `json:"member_type"`
+	MemberID   pgtype.UUID `json:"member_id"`
+}
+
+type ListChannelUnreadCountsForActorRow struct {
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	LastReadAt        pgtype.Timestamptz `json:"last_read_at"`
+	LastReadMessageID pgtype.UUID        `json:"last_read_message_id"`
+	UnreadCount       int64              `json:"unread_count"`
+}
+
+// Per-channel unread counts for an actor's memberships. Counts only
+// top-level messages (parent_message_id IS NULL) — thread replies have
+// their own unread surface, not the channel-level badge — and excludes
+// the actor's own messages so posting doesn't bump the unread badge for
+// yourself. last_read_at is the cutoff; NULL means "never read" and
+// everything counts. Returns one row per channel the actor belongs to.
+func (q *Queries) ListChannelUnreadCountsForActor(ctx context.Context, arg ListChannelUnreadCountsForActorParams) ([]ListChannelUnreadCountsForActorRow, error) {
+	rows, err := q.db.Query(ctx, listChannelUnreadCountsForActor, arg.MemberType, arg.MemberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelUnreadCountsForActorRow{}
+	for rows.Next() {
+		var i ListChannelUnreadCountsForActorRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.LastReadAt,
+			&i.LastReadMessageID,
+			&i.UnreadCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelsForActor = `-- name: ListChannelsForActor :many
 SELECT c.id, c.workspace_id, c.name, c.display_name, c.description, c.kind, c.visibility, c.created_by_type, c.created_by_id, c.retention_days, c.metadata, c.archived_at, c.created_at, c.updated_at FROM channel c
 WHERE c.workspace_id = $1

@@ -545,12 +545,16 @@ export function useRealtimeSync(
 
     // Channel messages: invalidate the per-channel message list when a new
     // message arrives. The list query key is independent of wsId so we don't
-    // need workspace context here.
+    // need workspace context here. Also refresh the workspace channels list
+    // so the sidebar's unread count and "last_read_message_id" cursor
+    // recompute against the new latest-message timestamp.
     const unsubChannelMessage = ws.on("channel:message", (p) => {
       const payload = p as { channel_id: string };
       if (payload?.channel_id) {
         qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
       }
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     });
     // Phase 4 reactions: invalidate both the channel timeline (for the
     // reaction chip under the parent message) AND the thread cache (in case

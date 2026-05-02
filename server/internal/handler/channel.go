@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,11 @@ type ChannelResponse struct {
 	ArchivedAt     *string `json:"archived_at"`
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
+	// Per-actor unread state. Only populated by ListChannels (the sidebar
+	// uses these for the badge + first-unread anchor). GetChannel and
+	// other endpoints leave them zero/null since they're cheap there.
+	UnreadCount       int64   `json:"unread_count"`
+	LastReadMessageID *string `json:"last_read_message_id"`
 }
 
 func channelToResponse(c db.Channel) ChannelResponse {
@@ -230,9 +236,39 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list channels")
 		return
 	}
+
+	// Batch-fetch unread counts for the actor's memberships in one query
+	// rather than N+1. Best-effort: a query failure renders the list with
+	// zeroed counts so the page doesn't 500 over a sidebar-only feature.
+	unreadByChannel := map[string]struct {
+		count    int64
+		lastRead pgtype.UUID
+	}{}
+	if rows, err := h.Queries.ListChannelUnreadCountsForActor(r.Context(), db.ListChannelUnreadCountsForActorParams{
+		MemberType: actorType,
+		MemberID:   actorUUID,
+	}); err == nil {
+		for _, row := range rows {
+			unreadByChannel[uuidToString(row.ChannelID)] = struct {
+				count    int64
+				lastRead pgtype.UUID
+			}{count: row.UnreadCount, lastRead: row.LastReadMessageID}
+		}
+	} else {
+		slog.Warn("ListChannels: unread counts query failed", "error", err)
+	}
+
 	out := make([]ChannelResponse, len(chs))
 	for i, c := range chs {
-		out[i] = channelToResponse(c)
+		resp := channelToResponse(c)
+		if u, ok := unreadByChannel[resp.ID]; ok {
+			resp.UnreadCount = u.count
+			if u.lastRead.Valid {
+				s := uuidToString(u.lastRead)
+				resp.LastReadMessageID = &s
+			}
+		}
+		out[i] = resp
 	}
 	writeJSON(w, http.StatusOK, out)
 }

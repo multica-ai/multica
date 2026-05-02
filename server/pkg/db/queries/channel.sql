@@ -86,6 +86,28 @@ SELECT * FROM channel_membership
 WHERE channel_id = $1
 ORDER BY joined_at ASC;
 
+-- name: ListChannelUnreadCountsForActor :many
+-- Per-channel unread counts for an actor's memberships. Counts only
+-- top-level messages (parent_message_id IS NULL) — thread replies have
+-- their own unread surface, not the channel-level badge — and excludes
+-- the actor's own messages so posting doesn't bump the unread badge for
+-- yourself. last_read_at is the cutoff; NULL means "never read" and
+-- everything counts. Returns one row per channel the actor belongs to.
+SELECT
+    cm.channel_id,
+    cm.last_read_at,
+    cm.last_read_message_id,
+    COUNT(msg.id)::bigint AS unread_count
+FROM channel_membership cm
+LEFT JOIN channel_message msg ON
+    msg.channel_id = cm.channel_id
+    AND msg.parent_message_id IS NULL
+    AND msg.deleted_at IS NULL
+    AND NOT (msg.author_type = cm.member_type AND msg.author_id = cm.member_id)
+    AND (cm.last_read_at IS NULL OR msg.created_at > cm.last_read_at)
+WHERE cm.member_type = $1 AND cm.member_id = $2
+GROUP BY cm.channel_id, cm.last_read_at, cm.last_read_message_id;
+
 -- name: ListChannelMembershipsForActor :many
 -- Used to determine which channels an actor belongs to without scanning the
 -- full channel table. Membership is the source of truth for private/DM access.

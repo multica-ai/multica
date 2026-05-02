@@ -120,8 +120,29 @@ export function useSendChannelMessage(channelId: string) {
 }
 
 export function useMarkChannelRead(channelId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (messageId: string) => api.markChannelRead(channelId, { message_id: messageId }),
+    // Optimistically clear the unread badge in the sidebar so the user
+    // gets instant feedback. The server will eventually return the same
+    // shape (or a more accurate count if a message arrived between the
+    // optimistic write and the response) when the list refetches.
+    onMutate: (messageId: string) => {
+      qc.setQueryData<Channel[] | undefined>(channelKeys.list(wsId), (current) => {
+        if (!current) return current;
+        return current.map((c) =>
+          c.id === channelId
+            ? { ...c, unread_count: 0, last_read_message_id: messageId }
+            : c,
+        );
+      });
+    },
+    // After the mutation settles (success OR failure) refetch the canonical
+    // counts. On failure this also rolls back the optimistic write.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    },
   });
 }
 

@@ -26,6 +26,10 @@ export interface Channel {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Per-actor unread state. Populated by ListChannels (sidebar uses it for
+   * the badge + first-unread anchor); 0 / null on detail/get endpoints. */
+  unread_count: number;
+  last_read_message_id: string | null;
 }
 
 export interface ChannelMembership {
