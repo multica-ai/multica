@@ -319,6 +319,9 @@ func renderChannelMentionContext(ctx TaskContextForEnv) string {
 	if ctx.ChannelKind != "" {
 		fmt.Fprintf(&b, "**Kind:** %s\n", ctx.ChannelKind)
 	}
+	if ctx.ChannelID != "" {
+		fmt.Fprintf(&b, "**Channel ID:** `%s`\n", ctx.ChannelID)
+	}
 	if ctx.ChannelMessageID != "" {
 		fmt.Fprintf(&b, "**Message ID:** %s\n", ctx.ChannelMessageID)
 	}
@@ -331,6 +334,29 @@ func renderChannelMentionContext(ctx TaskContextForEnv) string {
 	}
 	b.WriteString("\n")
 
+	// Recent history is rendered as a transcript before the triggering
+	// message, oldest first. Server-side fetch (last 50 by default) means
+	// the agent doesn't pay a tool-call latency for "what's been said
+	// here lately?" on every mention.
+	if len(ctx.ChannelHistory) > 0 {
+		b.WriteString("## Recent channel history\n\n")
+		b.WriteString("Older messages first; the triggering message is in its own section below.\n\n")
+		for _, m := range ctx.ChannelHistory {
+			who := m.AuthorName
+			if m.AuthorType == "agent" {
+				who += " (agent)"
+			}
+			ts := m.CreatedAt
+			if len(ts) >= 19 {
+				ts = ts[:19] + "Z"
+			}
+			fmt.Fprintf(&b, "**[%s] %s:**\n", ts, who)
+			b.WriteString("> ")
+			b.WriteString(strings.ReplaceAll(m.Content, "\n", "\n> "))
+			b.WriteString("\n\n")
+		}
+	}
+
 	if ctx.ChannelMessageContent != "" {
 		b.WriteString("## Triggering message\n\n")
 		b.WriteString("> ")
@@ -342,7 +368,13 @@ func renderChannelMentionContext(ctx TaskContextForEnv) string {
 	b.WriteString("Respond conversationally as a teammate. Your final stdout is captured ")
 	b.WriteString("as your reply and posted to the channel as a `channel_message` from your ")
 	b.WriteString("agent identity. There is no separate `multica` command to call.\n\n")
-	b.WriteString("Do NOT run `multica issue ...` commands — there is no issue here.\n")
+	b.WriteString("Do NOT run `multica issue ...` commands — there is no issue here.\n\n")
+	if ctx.ChannelID != "" {
+		b.WriteString("If you need messages older than the window above (e.g. earlier context the user is referencing), run:\n\n")
+		fmt.Fprintf(&b, "```\nmultica channel history %s --before <RFC3339-timestamp> --limit 50 --output json\n```\n\n", ctx.ChannelID)
+		b.WriteString("Use the oldest `created_at` from the current window as `--before` to paginate further back. ")
+		b.WriteString("Only do this when the agent genuinely needs more context — every fetch costs a round-trip and tokens.\n")
+	}
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("\n## Available skills\n\n")

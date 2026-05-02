@@ -211,6 +211,32 @@ SET status = 'completed', completed_at = now(), result = $2, session_id = $3, wo
 WHERE id = $1 AND status = 'running'
 RETURNING *;
 
+-- name: GetLastChannelMentionSession :one
+-- Returns the most recent channel-mention task's session_id and work_dir for a
+-- given (agent_id, channel_id) pair. Phase 3 channel-mention tasks have all
+-- four FK columns NULL — workspace_id and channel_id live in the JSONB
+-- context — so this query filters on context->>'type' and ->>'channel_id'.
+--
+-- Mirrors GetLastTaskSession's leniency: 'completed' tasks plus 'failed' tasks
+-- whose failure_reason is not a known "poisoned" terminal state. Without this
+-- a daemon crash mid-reply would silently drop the conversation and the next
+-- @mention would start the agent fresh, defeating the whole point of
+-- channel-session continuity.
+SELECT session_id, work_dir FROM agent_task_queue
+WHERE agent_id = $1
+  AND issue_id IS NULL
+  AND chat_session_id IS NULL
+  AND autopilot_run_id IS NULL
+  AND context->>'type' = 'channel_mention'
+  AND context->>'channel_id' = sqlc.arg('channel_id')::text
+  AND (
+    status = 'completed'
+    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+  )
+  AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
 -- name: GetLastTaskSession :one
 -- Returns the session_id and work_dir from the most recent task for a given
 -- (agent_id, issue_id) pair, used for session resumption. We accept both

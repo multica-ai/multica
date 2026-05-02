@@ -70,6 +70,19 @@ type TaskContextForEnv struct {
 	ChannelMessageContent string
 	ChannelAuthorType     string
 	ChannelAuthorName     string
+	// ChannelHistory is recent messages older than the trigger, oldest
+	// first. renderChannelMentionContext embeds these so the agent has a
+	// transcript without needing to fetch.
+	ChannelHistory []ChannelHistoryEntry
+}
+
+// ChannelHistoryEntry is the daemon-side rendering shape for one message.
+type ChannelHistoryEntry struct {
+	ID         string
+	CreatedAt  string
+	AuthorType string
+	AuthorName string
+	Content    string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

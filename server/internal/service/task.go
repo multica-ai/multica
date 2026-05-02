@@ -1490,6 +1490,13 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
 	}
+	// Channel-mention tasks (Phase 3) also lack an issue / chat / autopilot
+	// link — workspace_id lives in the context JSONB. Same failure mode as
+	// quick-create: without this, the daemon's /start /progress /complete
+	// /fail calls all 404 and the agent reply silently fails.
+	if cm, ok := s.parseChannelMentionContext(task); ok {
+		return cm.WorkspaceID
+	}
 	return ""
 }
 
@@ -1624,6 +1631,26 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+// parseChannelMentionContext mirrors parseQuickCreateContext for Phase 3
+// channel-mention tasks. Same constraints — no issue / chat / autopilot
+// link — and the workspace lives in the context JSONB.
+func (s *TaskService) parseChannelMentionContext(task db.AgentTaskQueue) (ChannelMentionContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return ChannelMentionContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return ChannelMentionContext{}, false
+	}
+	var cm ChannelMentionContext
+	if err := json.Unmarshal(task.Context, &cm); err != nil {
+		return ChannelMentionContext{}, false
+	}
+	if cm.Type != ChannelMentionContextType {
+		return ChannelMentionContext{}, false
+	}
+	return cm, true
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

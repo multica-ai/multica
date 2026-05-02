@@ -187,6 +187,9 @@ func buildChannelMentionPrompt(task Task) string {
 	if task.ChannelName != "" {
 		fmt.Fprintf(&b, "**Channel:** #%s\n", task.ChannelName)
 	}
+	if task.ChannelID != "" {
+		fmt.Fprintf(&b, "**Channel ID:** `%s`\n", task.ChannelID)
+	}
 	if task.Agent != nil && task.Agent.Name != "" {
 		fmt.Fprintf(&b, "**You are:** %s\n", task.Agent.Name)
 	}
@@ -198,6 +201,27 @@ func buildChannelMentionPrompt(task Task) string {
 		fmt.Fprintf(&b, "**Mentioned by:** %s\n", who)
 	}
 	b.WriteString("\n")
+	// Include recent channel history directly in the user prompt — not just
+	// in CLAUDE.md — because resumed Claude Code sessions tend to trust
+	// their conversation memory over re-read context files. With history in
+	// the per-turn prompt the model sees a fresh snapshot it can't miss.
+	if len(task.ChannelHistory) > 0 {
+		b.WriteString("Recent channel history (oldest first; triggering message is below this section):\n\n")
+		for _, m := range task.ChannelHistory {
+			who := m.AuthorName
+			if m.AuthorType == "agent" {
+				who += " (agent)"
+			}
+			ts := m.CreatedAt
+			if len(ts) >= 19 {
+				ts = ts[:19] + "Z"
+			}
+			fmt.Fprintf(&b, "[%s] %s:\n", ts, who)
+			b.WriteString("> ")
+			b.WriteString(strings.ReplaceAll(m.Content, "\n", "\n> "))
+			b.WriteString("\n\n")
+		}
+	}
 	if task.ChannelMessageContent != "" {
 		b.WriteString("Triggering message:\n\n> ")
 		b.WriteString(strings.ReplaceAll(task.ChannelMessageContent, "\n", "\n> "))
@@ -212,5 +236,9 @@ func buildChannelMentionPrompt(task Task) string {
 	b.WriteString("- Do not @-mention other agents in your reply unless absolutely necessary — repeated cross-agent mentions can produce notification storms.\n")
 	b.WriteString("- Keep replies concise. Markdown (code blocks, lists, links) renders correctly in the channel.\n")
 	b.WriteString("- If the request is ambiguous, ask one clarifying question rather than guessing.\n")
+	b.WriteString("- When the user asks about earlier messages in this channel, treat the Recent channel history above as the source of truth — your conversation memory only covers prior @-mentions of you, not other people's chatter.\n")
+	if task.ChannelID != "" {
+		fmt.Fprintf(&b, "- If the user references a message older than the window above, run `multica channel history %s --before <oldest-timestamp-you-have> --output json` to fetch more.\n", task.ChannelID)
+	}
 	return b.String()
 }

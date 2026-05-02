@@ -984,6 +984,50 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 	return i, err
 }
 
+const getLastChannelMentionSession = `-- name: GetLastChannelMentionSession :one
+SELECT session_id, work_dir FROM agent_task_queue
+WHERE agent_id = $1
+  AND issue_id IS NULL
+  AND chat_session_id IS NULL
+  AND autopilot_run_id IS NULL
+  AND context->>'type' = 'channel_mention'
+  AND context->>'channel_id' = $2::text
+  AND (
+    status = 'completed'
+    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+  )
+  AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLastChannelMentionSessionParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	ChannelID string      `json:"channel_id"`
+}
+
+type GetLastChannelMentionSessionRow struct {
+	SessionID pgtype.Text `json:"session_id"`
+	WorkDir   pgtype.Text `json:"work_dir"`
+}
+
+// Returns the most recent channel-mention task's session_id and work_dir for a
+// given (agent_id, channel_id) pair. Phase 3 channel-mention tasks have all
+// four FK columns NULL — workspace_id and channel_id live in the JSONB
+// context — so this query filters on context->>'type' and ->>'channel_id'.
+//
+// Mirrors GetLastTaskSession's leniency: 'completed' tasks plus 'failed' tasks
+// whose failure_reason is not a known "poisoned" terminal state. Without this
+// a daemon crash mid-reply would silently drop the conversation and the next
+// @mention would start the agent fresh, defeating the whole point of
+// channel-session continuity.
+func (q *Queries) GetLastChannelMentionSession(ctx context.Context, arg GetLastChannelMentionSessionParams) (GetLastChannelMentionSessionRow, error) {
+	row := q.db.QueryRow(ctx, getLastChannelMentionSession, arg.AgentID, arg.ChannelID)
+	var i GetLastChannelMentionSessionRow
+	err := row.Scan(&i.SessionID, &i.WorkDir)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2

@@ -70,6 +70,20 @@ type Task struct {
 	ChannelKind           string `json:"channel_kind,omitempty"`
 	ChannelMessageID      string `json:"channel_message_id,omitempty"`
 	ChannelMessageContent string `json:"channel_message_content,omitempty"`
+	// ChannelHistory carries recent channel messages older than the
+	// triggering one, oldest first. Server-side default is the last 50
+	// (configurable via CHANNEL_AGENT_CONTEXT_MESSAGES). renderChannelMentionContext
+	// embeds these into issue_context.md so the agent has a transcript.
+	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
+}
+
+// ChannelHistoryMessage mirrors handler.ChannelHistoryMessage on the wire.
+type ChannelHistoryMessage struct {
+	ID         string `json:"id"`
+	CreatedAt  string `json:"created_at"`
+	AuthorType string `json:"author_type"`
+	AuthorName string `json:"author_name"`
+	Content    string `json:"content"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

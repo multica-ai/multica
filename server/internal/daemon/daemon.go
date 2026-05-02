@@ -1266,6 +1266,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ChannelMessageContent: task.ChannelMessageContent,
 		ChannelAuthorType:     task.TriggerAuthorType,
 		ChannelAuthorName:     task.TriggerAuthorName,
+		ChannelHistory:        convertChannelHistoryForEnv(task.ChannelHistory),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -1818,6 +1819,23 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL}
 	}
 	return result
+}
+
+func convertChannelHistoryForEnv(msgs []ChannelHistoryMessage) []execenv.ChannelHistoryEntry {
+	if len(msgs) == 0 {
+		return nil
+	}
+	out := make([]execenv.ChannelHistoryEntry, len(msgs))
+	for i, m := range msgs {
+		out[i] = execenv.ChannelHistoryEntry{
+			ID:         m.ID,
+			CreatedAt:  m.CreatedAt,
+			AuthorType: m.AuthorType,
+			AuthorName: m.AuthorName,
+			Content:    m.Content,
+		}
+	}
+	return out
 }
 
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {

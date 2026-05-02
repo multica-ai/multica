@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/channel"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -68,6 +70,117 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 		return db.AgentRuntime{}, false
 	}
 	return rt, true
+}
+
+// channelAgentContextWindow returns how many recent messages to inject
+// into the agent's context for a channel-mention task. Reads
+// CHANNEL_AGENT_CONTEXT_MESSAGES at call time so operators can adjust
+// without a deploy. Default 50; capped at 200 (the channel list limit).
+func channelAgentContextWindow() int32 {
+	const defaultN = 50
+	const maxN = 200
+	v := os.Getenv("CHANNEL_AGENT_CONTEXT_MESSAGES")
+	if v == "" {
+		return defaultN
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultN
+	}
+	if int32(n) > maxN {
+		return maxN
+	}
+	return int32(n)
+}
+
+// loadChannelHistoryForTask fetches the last N messages in the channel
+// older than the triggering message and resolves author names. Returns
+// oldest-first so the rendered context reads naturally as a transcript.
+// Best-effort: any DB error returns an empty slice and the agent simply
+// gets less context, rather than failing the claim.
+func (h *Handler) loadChannelHistoryForTask(ctx context.Context, cm service.ChannelMentionContext) []ChannelHistoryMessage {
+	if cm.ChannelID == "" {
+		return nil
+	}
+	channelUUID, err := util.ParseUUID(cm.ChannelID)
+	if err != nil {
+		return nil
+	}
+
+	// Anchor on the triggering message's created_at — we want messages
+	// strictly older than it, so the agent doesn't see the trigger twice
+	// (it has its own dedicated section in the rendered context).
+	var before *pgtype.Timestamptz
+	if cm.MessageID != "" {
+		if msgUUID, err := util.ParseUUID(cm.MessageID); err == nil {
+			if msg, err := h.Queries.GetChannelMessage(ctx, msgUUID); err == nil {
+				ts := msg.CreatedAt
+				before = &ts
+			}
+		}
+	}
+
+	rows, err := h.ChannelMessageService.List(ctx, channel.ListMessagesParams{
+		ChannelID:       channelUUID,
+		BeforeCreatedAt: before,
+		Limit:           channelAgentContextWindow(),
+	})
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+
+	// Batch-resolve author display names so a 50-message context costs
+	// at most one query per unique author rather than one per row.
+	memberNames := map[string]string{}
+	agentNames := map[string]string{}
+	for _, m := range rows {
+		switch m.AuthorType {
+		case "member":
+			memberNames[uuidToString(m.AuthorID)] = ""
+		case "agent":
+			agentNames[uuidToString(m.AuthorID)] = ""
+		}
+	}
+	for id := range memberNames {
+		if uid, err := util.ParseUUID(id); err == nil {
+			if u, err := h.Queries.GetUser(ctx, uid); err == nil {
+				memberNames[id] = u.Name
+			}
+		}
+	}
+	for id := range agentNames {
+		if aid, err := util.ParseUUID(id); err == nil {
+			if a, err := h.Queries.GetAgent(ctx, aid); err == nil {
+				agentNames[id] = a.Name
+			}
+		}
+	}
+
+	out := make([]ChannelHistoryMessage, 0, len(rows))
+	// rows arrive newest-first from the timeline query; reverse so the
+	// agent sees a natural top-to-bottom transcript.
+	for i := len(rows) - 1; i >= 0; i-- {
+		m := rows[i]
+		authorID := uuidToString(m.AuthorID)
+		var name string
+		switch m.AuthorType {
+		case "member":
+			name = memberNames[authorID]
+		case "agent":
+			name = agentNames[authorID]
+		}
+		if name == "" {
+			name = m.AuthorType
+		}
+		out = append(out, ChannelHistoryMessage{
+			ID:         uuidToString(m.ID),
+			CreatedAt:  timestampToString(m.CreatedAt),
+			AuthorType: m.AuthorType,
+			AuthorName: name,
+			Content:    m.Content,
+		})
+	}
+	return out
 }
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
@@ -1111,6 +1224,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				// Channel-session continuity: cluster mentions in the
+				// same channel for this agent into a logical session and
+				// resume the prior agent CLI session_id (e.g. Claude Code
+				// --resume) so the agent recalls earlier messages without
+				// re-fetching channel history. Mirrors the chat-session
+				// pattern but keyed on (agent, channel) since channel
+				// tasks have no chat_session_id.
+				if !task.ForceFreshSession && cm.ChannelID != "" {
+					if prior, err := h.Queries.GetLastChannelMentionSession(r.Context(), db.GetLastChannelMentionSessionParams{
+						AgentID:   task.AgentID,
+						ChannelID: cm.ChannelID,
+					}); err == nil && prior.SessionID.Valid {
+						resp.PriorSessionID = prior.SessionID.String
+						if prior.WorkDir.Valid {
+							resp.PriorWorkDir = prior.WorkDir.String
+						}
+					}
+				}
+				// Inject recent channel history into the wire so the agent
+				// has conversational context without needing a tool call.
+				// Window size is configurable via CHANNEL_AGENT_CONTEXT_MESSAGES.
+				resp.ChannelHistory = h.loadChannelHistoryForTask(r.Context(), cm)
 			}
 		}
 	}

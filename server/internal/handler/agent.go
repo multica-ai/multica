@@ -180,7 +180,24 @@ type AgentTaskResponse struct {
 	ChannelKind           string `json:"channel_kind,omitempty"`
 	ChannelMessageID      string `json:"channel_message_id,omitempty"`
 	ChannelMessageContent string `json:"channel_message_content,omitempty"`
+	// ChannelHistory carries the most recent N messages from the channel
+	// (oldest first, excluding the triggering message itself) so the agent
+	// has conversational context without an extra round-trip. N defaults
+	// to 50 and is overridable via CHANNEL_AGENT_CONTEXT_MESSAGES on the
+	// server. The daemon renders these into issue_context.md.
+	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
 	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "channel_mention" | "direct" — used by the activity row to label tasks that have no linked issue
+}
+
+// ChannelHistoryMessage is the minimal shape the daemon needs to render
+// recent channel history into the agent's context. Author names are
+// pre-resolved server-side so the daemon doesn't need DB access.
+type ChannelHistoryMessage struct {
+	ID         string `json:"id"`
+	CreatedAt  string `json:"created_at"`
+	AuthorType string `json:"author_type"` // "member" | "agent"
+	AuthorName string `json:"author_name"`
+	Content    string `json:"content"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
