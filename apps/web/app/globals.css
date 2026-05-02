@@ -21,7 +21,6 @@
 html, body {
   direction: ltr;
   width: 100%;
-  overflow-x: hidden;
 }
 
 /* Navigation & sidebars: LTR */
