@@ -880,6 +880,20 @@ func (d *Daemon) reportLocalSkillResultWithRetry(ctx context.Context, kind, runt
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
 func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *PendingUpdate) {
+	// Operator-managed daemons (custom builds, distro packages, anything where
+	// the upgrade is expected to flow through the package manager rather than
+	// a server push) opt out by setting MULTICA_DISABLE_AUTO_UPDATE=1. The
+	// daemon refuses cleanly so the server-side prompt records "failed" with
+	// a human reason instead of silently getting downgraded the next heartbeat.
+	if v := os.Getenv("MULTICA_DISABLE_AUTO_UPDATE"); v == "1" || strings.EqualFold(v, "true") {
+		d.logger.Info("refusing CLI self-update: MULTICA_DISABLE_AUTO_UPDATE is set", "runtime_id", runtimeID, "update_id", update.ID)
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "CLI auto-update disabled (MULTICA_DISABLE_AUTO_UPDATE=1). Update the binary out-of-band.",
+		})
+		return
+	}
+
 	// Desktop-managed daemons share their CLI binary with the Electron app,
 	// which is responsible for shipping and replacing it. Letting the daemon
 	// self-update would just get overwritten on the next Desktop launch and
