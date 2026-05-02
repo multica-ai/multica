@@ -131,8 +131,14 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     autocapture: false,
     capture_heatmaps: false,
     capture_dead_clicks: false,
-    capture_exceptions: false,
-    disable_session_recording: true,
+    // Capture JS exceptions automatically for error tracking.
+    capture_exceptions: true,
+    // Session recording for debugging member issues.
+    disable_session_recording: false,
+    session_recording: {
+      maskAllInputs: true,
+      maskTextSelector: "[data-ph-no-capture]",
+    },
     disable_surveys: true,
   });
   // Register super-properties — attached to every event emitted from this
