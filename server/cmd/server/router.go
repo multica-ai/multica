@@ -191,6 +191,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			// flat and nested registrations of the same prefix causes
 			// chi to dispatch only one of the two trees and return 405
 			// for methods registered in the other.
+			//
+			// Static GET siblings of /{id} (e.g. /search,
+			// /child-progress) MUST also be registered here, before the
+			// {id} line — once a flat /{id} GET exists in this tree,
+			// chi greedily routes /search → GetIssue with id="search"
+			// and the user-only nested registration becomes
+			// unreachable. RequireUserScope keeps them user-only so a
+			// task token still gets 403, not 200.
+			r.With(middleware.RequireUserScope).Get("/api/issues/search", h.SearchIssues)
+			r.With(middleware.RequireUserScope).Get("/api/issues/child-progress", h.ChildIssueProgress)
 			issueScope := middleware.AllowTaskScopeForIssue("id")
 			r.With(issueScope).Get("/api/issues/{id}", h.GetIssue)
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
@@ -281,8 +291,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
-				r.Get("/search", h.SearchIssues)
-				r.Get("/child-progress", h.ChildIssueProgress)
+				// /search and /child-progress are registered flat in the
+				// task-allowlist group above (with RequireUserScope) so
+				// they share chi's routing tree with /{id} — see the
+				// comment there.
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/batch-update", h.BatchUpdateIssues)

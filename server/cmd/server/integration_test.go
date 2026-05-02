@@ -515,6 +515,76 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 	}
 }
 
+// TestSearchIssuesNotShadowedByIDRoute is a regression guard for JEH-378.
+// JEH-324 added a flat GET /api/issues/{id} registration in the task-
+// allowlist group, which made chi greedily route /api/issues/search to
+// GetIssue with id="search" instead of SearchIssues — returning 404
+// "issue not found" and breaking the cmd+k search palette. The fix
+// registers /search and /child-progress as flat siblings of /{id} in
+// the same routing tree. This test exercises the full router so any
+// future re-shadowing fails here, not silently in production.
+func TestSearchIssuesNotShadowedByIDRoute(t *testing.T) {
+	// Create an issue so the search has something to find — and so a
+	// 200 with zero results would still be a regression (the request
+	// would never reach SearchIssues at all).
+	createResp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Searchable router shadow regression",
+		"status": "todo",
+	})
+	if createResp.StatusCode != 201 {
+		body, _ := io.ReadAll(createResp.Body)
+		createResp.Body.Close()
+		t.Fatalf("setup CreateIssue: expected 201, got %d: %s", createResp.StatusCode, body)
+	}
+	var created map[string]any
+	readJSON(t, createResp, &created)
+	issueID := created["id"].(string)
+	t.Cleanup(func() {
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	resp := authRequest(t, "GET", "/api/issues/search?q=Searchable+router+shadow", nil)
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("SearchIssues: got 404 %q — /api/issues/search is being shadowed by GET /api/issues/{id}", body)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("SearchIssues: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	// SearchIssues returns an object with "issues" + "total"; GetIssue
+	// would have returned a single issue object with "id" at the top
+	// level. The shape disambiguates which handler ran.
+	var searchResp map[string]any
+	readJSON(t, resp, &searchResp)
+	if _, ok := searchResp["issues"]; !ok {
+		t.Fatalf("SearchIssues: response missing 'issues' field — looks like GetIssue handled the request: %v", searchResp)
+	}
+	if _, ok := searchResp["total"]; !ok {
+		t.Fatalf("SearchIssues: response missing 'total' field — looks like GetIssue handled the request: %v", searchResp)
+	}
+}
+
+// TestChildIssueProgressNotShadowedByIDRoute mirrors the search
+// regression for the second static GET sibling.
+func TestChildIssueProgressNotShadowedByIDRoute(t *testing.T) {
+	resp := authRequest(t, "GET", "/api/issues/child-progress", nil)
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ChildIssueProgress: got 404 %q — /api/issues/child-progress is being shadowed by GET /api/issues/{id}", body)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("ChildIssueProgress: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+}
+
 // ---- Comments through full router ----
 
 func TestCommentsThroughRouter(t *testing.T) {
@@ -814,5 +884,92 @@ func TestWebSocketIntegration(t *testing.T) {
 	json.Unmarshal(msg, &deleteMsg)
 	if deleteMsg["type"] != "issue:deleted" {
 		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
+	}
+}
+
+// TestRouterBlastRadius_NoStaticShadowedByParam locks down the full
+// blast radius of the JEH-324 chi-router regression. JEH-378 fixed the
+// two known shadowing victims (/api/issues/search and
+// /api/issues/child-progress); this test exercises every other static
+// GET that lives next to a sibling {param} route in the same chi
+// subtree, asserting the request reaches a real handler rather than
+// being greedily captured by the {param} sibling.
+//
+// The contract is intentionally loose: any non-404 response means chi
+// dispatched to the static handler (the handler may then 200, 400, or
+// 403 depending on validation). A 404 means chi sent the request to a
+// {param} handler that responded "not found" instead — that's the
+// regression we're guarding against.
+func TestRouterBlastRadius_NoStaticShadowedByParam(t *testing.T) {
+	// Create one issue used by every /api/issues/{id}/<sub> case so the
+	// {id} segment is a real UUID (eliminates "handler returned 404
+	// because issue doesn't exist" as a confounding signal).
+	createResp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "blast radius",
+		"status": "todo",
+	})
+	if createResp.StatusCode != 201 {
+		body, _ := io.ReadAll(createResp.Body)
+		createResp.Body.Close()
+		t.Fatalf("setup CreateIssue: expected 201, got %d: %s", createResp.StatusCode, body)
+	}
+	var created map[string]any
+	readJSON(t, createResp, &created)
+	issueID := created["id"].(string)
+	t.Cleanup(func() {
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		// --- Top-level static GETs sharing /api/<resource> with a {id} sibling ---
+		{"issues list", "/api/issues?workspace_id=" + testWorkspaceID},
+		{"agents list", "/api/agents?workspace_id=" + testWorkspaceID},
+		{"projects list", "/api/projects"},
+		{"projects search", "/api/projects/search?q=foo"},
+		{"projects by-repo", "/api/projects/by-repo?repo_url=https://example.com/foo"},
+		{"work-sessions active", "/api/work-sessions/active"},
+		{"usage daily", "/api/usage/daily"},
+		{"usage summary", "/api/usage/summary"},
+		{"runtimes list", "/api/runtimes"},
+		{"skills list", "/api/skills"},
+		{"autopilots list", "/api/autopilots"},
+		{"pins list", "/api/pins"},
+		{"artifacts list", "/api/artifacts"},
+		{"artifact-folders list", "/api/artifact-folders"},
+		{"inbox unread-count", "/api/inbox/unread-count"},
+		{"inbox active-issue-tasks", "/api/inbox/active-issue-tasks"},
+		{"inbox notifications", "/api/inbox/notifications"},
+		{"inbox notifications unread-count", "/api/inbox/notifications/unread-count"},
+		{"inbox folders", "/api/inbox/folders"},
+		{"inbox folder-memberships", "/api/inbox/folder-memberships"},
+		{"chat pending-tasks", "/api/chat/pending-tasks"},
+		{"assignee-frequency", "/api/assignee-frequency"},
+		{"invitations list", "/api/invitations"},
+
+		// --- /api/issues/{id}/<sub> static siblings of GET /api/issues/{id} ---
+		{"issue timeline", "/api/issues/" + issueID + "/timeline"},
+		{"issue subscribers", "/api/issues/" + issueID + "/subscribers"},
+		{"issue active-task", "/api/issues/" + issueID + "/active-task"},
+		{"issue task-runs", "/api/issues/" + issueID + "/task-runs"},
+		{"issue usage", "/api/issues/" + issueID + "/usage"},
+		{"issue attachments", "/api/issues/" + issueID + "/attachments"},
+		{"issue artifacts", "/api/issues/" + issueID + "/artifacts"},
+		{"issue children", "/api/issues/" + issueID + "/children"},
+		{"issue work-sessions", "/api/issues/" + issueID + "/work-sessions"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := authRequest(t, "GET", tc.path, nil)
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("GET %s: got 404 %q — route is being shadowed by a {param} sibling", tc.path, body)
+			}
+		})
 	}
 }
