@@ -30,11 +30,16 @@ function AppContent() {
   // first render.
   const [bootstrapping, setBootstrapping] = useState(false);
 
+  const runtimeConfig = window.desktopAPI.runtimeConfig.ok
+    ? window.desktopAPI.runtimeConfig.config
+    : null;
+
   // Tell the main process which backend URL we talk to, so daemon-manager
   // can pick the matching CLI profile (server_url from ~/.multica config).
   useEffect(() => {
-    window.daemonAPI.setTargetApiUrl(DAEMON_TARGET_API_URL);
-  }, []);
+    if (!runtimeConfig) return;
+    window.daemonAPI.setTargetApiUrl(runtimeConfig.apiUrl);
+  }, [runtimeConfig]);
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged
@@ -226,9 +231,21 @@ function AppContent() {
   );
 }
 
-// Backend the daemon should connect to — same URL the renderer talks to.
-const DAEMON_TARGET_API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8080";
+function BlockingRuntimeConfigError({ message }: { message: string }) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
+      <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
+        <h1 className="text-lg font-semibold">Desktop configuration error</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+        </p>
+        <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
+          {message}
+        </pre>
+      </div>
+    </div>
+  );
+}
 
 // On logout, wipe desktop-only in-memory state and stop the daemon so that
 // a subsequent login as a different user never inherits the previous user's
@@ -252,6 +269,7 @@ async function handleDaemonLogout() {
 
 export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
+  const runtimeConfigResult = window.desktopAPI.runtimeConfig;
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.
   const identity = useMemo(
@@ -260,14 +278,18 @@ export default function App() {
   );
   return (
     <ThemeProvider>
-      <CoreProvider
-        apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
-        wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
-        onLogout={handleDaemonLogout}
-        identity={identity}
-      >
-        <AppContent />
-      </CoreProvider>
+      {runtimeConfigResult.ok ? (
+        <CoreProvider
+          apiBaseUrl={runtimeConfigResult.config.apiUrl}
+          wsUrl={runtimeConfigResult.config.wsUrl}
+          onLogout={handleDaemonLogout}
+          identity={identity}
+        >
+          <AppContent />
+        </CoreProvider>
+      ) : (
+        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+      )}
       <Toaster />
       <UpdateNotification />
     </ThemeProvider>

@@ -2,7 +2,9 @@ import { LoginPage } from "@multica/views/auth";
 import { DragStrip } from "@multica/views/platform";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 
-const WEB_URL = import.meta.env.VITE_APP_URL || "http://localhost:3000";
+const WEB_URL = window.desktopAPI.runtimeConfig.ok
+  ? window.desktopAPI.runtimeConfig.config.appUrl
+  : "";
 
 export function DesktopLoginPage() {
   const handleGoogleLogin = () => {

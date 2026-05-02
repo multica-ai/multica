@@ -8,6 +8,8 @@ import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
+import { loadRuntimeConfig } from "./runtime-config-loader";
+import type { RuntimeConfigResult } from "../shared/runtime-config";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -37,6 +39,10 @@ if (process.platform !== "win32") {
 const PROTOCOL = "multica";
 
 let mainWindow: BrowserWindow | null = null;
+let runtimeConfigResult: RuntimeConfigResult = {
+  ok: false,
+  error: { message: "Runtime config has not loaded yet" },
+};
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -187,7 +193,16 @@ if (!gotTheLock) {
     if (deepLinkUrl) handleDeepLink(deepLinkUrl);
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    runtimeConfigResult = await loadRuntimeConfig({
+      isDev: is.dev,
+      env: {
+        apiUrl: process.env.VITE_API_URL,
+        wsUrl: process.env.VITE_WS_URL,
+        appUrl: process.env.VITE_APP_URL,
+      },
+    });
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -221,6 +236,13 @@ if (!gotTheLock) {
       const p = process.platform;
       const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
       event.returnValue = { version: getAppVersion(), os };
+    });
+
+    // Sync IPC: preload exposes the validated runtime config before renderer
+    // boot. If desktop.json exists but is invalid, renderer receives the
+    // blocking error and must not silently fall back to the cloud defaults.
+    ipcMain.on("runtime-config:get", (event) => {
+      event.returnValue = runtimeConfigResult;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
