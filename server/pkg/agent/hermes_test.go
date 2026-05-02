@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsHermesBackend(t *testing.T) {
@@ -69,6 +73,123 @@ func TestBuildHermesSessionParamsOmitsEmptyModel(t *testing.T) {
 	params := buildHermesSessionParams("/tmp/work", "")
 	if _, present := params["model"]; present {
 		t.Error("expected model key to be omitted when model is empty")
+	}
+}
+
+func fakeHermesResumeReplacementACPScript() string {
+	return `#!/bin/sh
+if [ -n "$HERMES_REQUESTS_FILE" ]; then
+  : > "$HERMES_REQUESTS_FILE"
+fi
+while IFS= read -r line; do
+  if [ -n "$HERMES_REQUESTS_FILE" ]; then
+    printf '%s\n' "$line" >> "$HERMES_REQUESTS_FILE"
+  fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_replacement"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      case "$line" in
+        *'"sessionId":"ses_replacement"'*)
+          printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"model switch requested for missing session"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *'"sessionId":"ses_replacement"'*)
+          printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_replacement","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"resumed ok"}}}}\n'
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+          exit 0
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"prompt: session not found"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      ;;
+  esac
+done
+`
+}
+
+func TestHermesBackendUsesReplacementSessionIDFromResume(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	requestsFile := filepath.Join(tempDir, "requests.jsonl")
+	fakePath := filepath.Join(tempDir, "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesResumeReplacementACPScript()))
+
+	backend, err := New("hermes", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"HERMES_REQUESTS_FILE": requestsFile},
+	})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "continue", ExecOptions{
+		ResumeSessionID: "ses_missing",
+		Model:           "provider:model",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.Output != "resumed ok" {
+			t.Fatalf("output = %q, want resumed ok", result.Output)
+		}
+		if result.SessionID != "ses_replacement" {
+			t.Fatalf("session id = %q, want replacement session", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	raw, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	requests := string(raw)
+	if !strings.Contains(requests, `"method":"session/resume"`) {
+		t.Fatalf("expected session/resume request, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"method":"session/set_model"`) {
+		t.Fatalf("expected session/set_model request, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"method":"session/prompt"`) {
+		t.Fatalf("expected session/prompt request, got:\n%s", requests)
+	}
+	if strings.Contains(requests, `"method":"session/set_model","params":{"modelId":"provider:model","sessionId":"ses_missing"}`) ||
+		strings.Contains(requests, `"method":"session/prompt","params":{"prompt":[{"text":"continue","type":"text"}],"sessionId":"ses_missing"}`) {
+		t.Fatalf("set_model/prompt used stale requested resume session id, got:\n%s", requests)
 	}
 }
 
