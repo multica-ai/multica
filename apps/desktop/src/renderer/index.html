@@ -1,9 +1,40 @@
 <!doctype html>
-<html lang="ar" dir="rtl" class="h-full">
+<html lang="ar" class="h-full">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multica</title>
+    <script>
+      // Text direction toggle: Left Ctrl+Left Shift = LTR, Right Ctrl+Right Shift = RTL
+      (function() {
+        var leftCtrl = false, rightCtrl = false;
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Control') {
+            if (e.location === 1) leftCtrl = true;
+            if (e.location === 2) rightCtrl = true;
+            return;
+          }
+          if (e.key !== 'Shift' || !e.ctrlKey) return;
+          var el = document.activeElement;
+          if (!el || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) return;
+          if (e.location === 2 && rightCtrl) {
+            el.style.direction = 'rtl';
+            el.style.textAlign = 'right';
+            e.preventDefault();
+          } else if (e.location === 1 && leftCtrl) {
+            el.style.direction = 'ltr';
+            el.style.textAlign = 'left';
+            e.preventDefault();
+          }
+        }, true);
+        document.addEventListener('keyup', function(e) {
+          if (e.key === 'Control') {
+            if (e.location === 1) leftCtrl = false;
+            if (e.location === 2) rightCtrl = false;
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body class="h-full overflow-hidden antialiased font-sans">
     <div id="root" class="h-full"></div>
