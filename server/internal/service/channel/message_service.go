@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -206,9 +207,13 @@ type MentionTriggerCandidate struct {
 
 // SelectAgentsForMentionParams is the input shape for the selector.
 type SelectAgentsForMentionParams struct {
-	ChannelID    pgtype.UUID
-	Content      string
-	Author       Actor
+	ChannelID pgtype.UUID
+	// ChannelKind is "channel" | "dm". DMs trigger every agent member
+	// implicitly even without an @mention — the whole conversation is
+	// addressed at the agent participant(s).
+	ChannelKind string
+	Content     string
+	Author      Actor
 	// DedupWindowSeconds is how recent a pending task counts as a
 	// "duplicate"; passed through to the SQL query. The handler reads
 	// this from CHANNEL_AGENT_DEDUP_WINDOW_SECONDS env (default 30).
@@ -255,13 +260,22 @@ func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAge
 		return nil, fmt.Errorf("%w: MentionParser required", ErrInvalid)
 	}
 	mentions := p.MentionParser(p.Content)
-	if len(mentions) == 0 {
+	// In a DM, every member message addresses every agent member of the
+	// DM implicitly — explicit @mention is redundant. We only fan out for
+	// member-authored messages: agent-authored messages auto-triggering
+	// other agents in a DM would create endless ping-pong loops.
+	autoTriggerDM := p.ChannelKind == KindDM && p.Author.Type == ActorMember
+	if len(mentions) == 0 && !autoTriggerDM {
 		return nil, nil
 	}
 
 	// Dedup mention list at the (type, id) tuple level so a message that
 	// @-mentions the same agent twice produces one trigger.
 	seen := make(map[string]struct{}, len(mentions))
+	// Tracks agents already added (mention or DM-auto) so the DM-auto
+	// fanout doesn't duplicate an agent that was just selected by an
+	// explicit @mention in the same message.
+	added := make(map[string]struct{}, len(mentions))
 	candidates := make([]MentionTriggerCandidate, 0)
 	for _, m := range mentions {
 		if m.Type != ActorAgent {
@@ -315,11 +329,73 @@ func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAge
 			continue
 		}
 
+		added[m.ID] = struct{}{}
 		candidates = append(candidates, MentionTriggerCandidate{
 			AgentID: agentUUID,
 			Agent:   agent,
 		})
 	}
+
+	// DM auto-trigger fanout. In a DM with one or more agents, every
+	// member-authored message implicitly addresses every agent member
+	// — the user shouldn't have to @-mention an agent in a 1:1 DM with
+	// it. Skipped when the author is itself an agent (avoids loops) or
+	// when the channel is a regular shared channel (existing @mention
+	// gating is the right behavior there).
+	if autoTriggerDM {
+		members, err := s.Queries.ListChannelMembers(ctx, p.ChannelID)
+		if err != nil {
+			return nil, fmt.Errorf("list channel members for DM auto-trigger: %w", err)
+		}
+		for _, m := range members {
+			if m.MemberType != ActorAgent {
+				continue
+			}
+			agentIDStr := uuidString(m.MemberID)
+			if _, dup := added[agentIDStr]; dup {
+				continue
+			}
+			// Author guard: an agent's own DM message shouldn't
+			// re-trigger itself (and the autoTriggerDM gate already
+			// excludes agent-authored messages, but defensive double-
+			// check survives future refactors).
+			if p.Author.Type == ActorAgent && agentIDStr == uuidString(p.Author.ID) {
+				continue
+			}
+
+			agent, err := s.Queries.GetAgent(ctx, m.MemberID)
+			if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+				slog.Info("SelectAgentsForMention: dm-auto skip unreachable agent",
+					"agent_id", agentIDStr,
+					"err", err,
+					"archived", agent.ArchivedAt.Valid,
+					"has_runtime", agent.RuntimeID.Valid,
+				)
+				continue
+			}
+
+			hasPending, err := s.Queries.HasPendingChannelMentionForAgent(ctx, db.HasPendingChannelMentionForAgentParams{
+				AgentID:       m.MemberID,
+				ChannelID:     uuidString(p.ChannelID),
+				WindowSeconds: p.DedupWindowSeconds,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("check dedup (dm-auto): %w", err)
+			}
+			if hasPending {
+				slog.Info("SelectAgentsForMention: dm-auto skip dedup-window pending", "agent_id", agentIDStr)
+				continue
+			}
+
+			slog.Info("SelectAgentsForMention: dm-auto candidate selected", "agent_id", agentIDStr)
+			added[agentIDStr] = struct{}{}
+			candidates = append(candidates, MentionTriggerCandidate{
+				AgentID: m.MemberID,
+				Agent:   agent,
+			})
+		}
+	}
+
 	return candidates, nil
 }
 

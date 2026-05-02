@@ -613,6 +613,7 @@ func channelAgentDedupWindow() float64 {
 func (h *Handler) triggerMentionedAgentTasks(ctx context.Context, workspaceID pgtype.UUID, ch db.Channel, msg db.ChannelMessage, author channel.Actor) {
 	candidates, err := h.ChannelMessageService.SelectAgentsForMention(ctx, channel.SelectAgentsForMentionParams{
 		ChannelID:          ch.ID,
+		ChannelKind:        ch.Kind,
 		Content:            msg.Content,
 		Author:             author,
 		DedupWindowSeconds: channelAgentDedupWindow(),
