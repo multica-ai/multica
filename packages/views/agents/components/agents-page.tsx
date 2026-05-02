@@ -83,9 +83,10 @@ export function AgentsPage() {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
-    runtimeListOptions(wsId),
-  );
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
+    ...runtimeListOptions(wsId),
+    retry: false,
+  });
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
 
