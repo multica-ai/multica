@@ -9,52 +9,24 @@ import { useEffect, useRef } from "react";
  * Works on any focused editable element (input, textarea, contenteditable).
  *
  * Strategy:
- * - Track which Shift key is currently held (left vs right).
- * - Fire on ANY keydown when both Ctrl+Shift are active (order-independent).
- * - Use CSS class injection with !important to survive React re-renders.
+ * - Fire ONLY on Shift keydown when Ctrl is already held (not on every
+ *   Ctrl+Shift+X combination). This avoids breaking command palettes
+ *   (Ctrl+Shift+K, Ctrl+Shift+P, etc.).
+ * - Use HTML-native `dir` attribute (no injected CSS or !important needed).
  */
 export function DirectionScript() {
   const shiftSideRef = useRef<"left" | "right" | null>(null);
 
   useEffect(() => {
-    // Inject a <style> tag with direction classes that use !important.
-    // This ensures our direction overrides survive React re-renders and
-    // beat the global CSS rules that also use !important.
-    const styleId = "__multica-direction-styles";
-    if (!document.getElementById(styleId)) {
-      const styleEl = document.createElement("style");
-      styleEl.id = styleId;
-      styleEl.textContent = `
-        [data-multica-dir="ltr"], [data-multica-dir="ltr"] * {
-          direction: ltr !important;
-          text-align: left !important;
-        }
-        [data-multica-dir="rtl"], [data-multica-dir="rtl"] * {
-          direction: rtl !important;
-          text-align: right !important;
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
-
     function onKeyDown(e: KeyboardEvent) {
-      // Track which shift key was pressed
-      if (e.code === "ShiftLeft") {
-        shiftSideRef.current = "left";
-      } else if (e.code === "ShiftRight") {
-        shiftSideRef.current = "right";
-      }
+      // Only react to the Shift key itself when Ctrl is held.
+      // This avoids triggering on Ctrl+Shift+A, Ctrl+Shift+K, etc.
+      if (e.key !== "Shift") return;
+      if (!e.ctrlKey) return;
 
-      // We need BOTH Ctrl and Shift to be held.
-      // But we only act on the event that COMPLETES the combo:
-      // - If Shift was pressed first, then Ctrl → act on Ctrl keydown
-      // - If Ctrl was pressed first, then Shift → act on Shift keydown
-      // - If both already held and another key pressed → also act
-      if (!e.ctrlKey || !e.shiftKey) return;
-
-      // Determine direction from the tracked shift side
-      const side = shiftSideRef.current;
-      if (!side) return;
+      // Track which shift was pressed (for LTR vs RTL)
+      const side = e.code === "ShiftLeft" ? "left" : "right";
+      shiftSideRef.current = side;
 
       const el = document.activeElement as HTMLElement | null;
       if (!el) return;
@@ -68,15 +40,8 @@ export function DirectionScript() {
 
       const dir = side === "right" ? "rtl" : "ltr";
 
-      // Use data attribute — the injected CSS handles the !important styling.
-      el.setAttribute("data-multica-dir", dir);
-
-      // Also set inline style as backup (survives even if CSS is blocked)
-      el.style.setProperty("direction", dir, "important");
-      el.style.setProperty("text-align", dir === "rtl" ? "right" : "left", "important");
-
-      e.preventDefault();
-      e.stopImmediatePropagation();
+      // Use HTML-native dir attribute — browser handles styling without !important
+      el.setAttribute("dir", dir);
     }
 
     function onKeyUp(e: KeyboardEvent) {

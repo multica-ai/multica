@@ -24,19 +24,9 @@ html, body {
 }
 
 /* Navigation & sidebars: LTR */
-nav, aside, [role="navigation"], [role="menubar"], [data-sidebar] {
+nav, aside, [role="navigation"], [role="menubar"], [data-sidebar],
+[data-slot="sidebar"], [data-slot="sidebar-wrapper"], [data-slot="sidebar-inner"] {
   direction: ltr !important;
-  text-align: left !important;
-}
-
-/* Settings page & form elements: always LTR */
-form, [role="form"], [role="dialog"], [role="alertdialog"],
-button, input, select, textarea,
-[role="switch"], [role="slider"], [role="checkbox"],
-[role="menuitem"], [role="button"], [role="listbox"],
-[role="option"], [role="combobox"] {
-  direction: ltr !important;
-  text-align: left !important;
 }
 
 /* Panel group layout: must stay LTR for react-resizable-panels */
@@ -49,11 +39,6 @@ button, input, select, textarea,
   direction: ltr !important;
 }
 
-/* Settings sub-menu sidebar: LTR */
-[role="tree"], [role="listbox"] {
-  direction: ltr !important;
-}
-
 /* Content area: Contextual RTL via dir="auto" + unicode-bidi */
 main, [role="main"], article,
 .prose, [class*="markdown"], [class*="description"] {
@@ -61,8 +46,8 @@ main, [role="main"], article,
 }
 
 /* Paragraphs and headings: auto-detect direction */
-main p, main h1, main h2, main h3, main h4, main h5, main h6, main span, main li,
-article p, article h1, article h2, article h3, article span, article li {
+main p, main h1, main h2, main h3, main h4, main h5, main h6,
+article p, article h1, article h2, article h3 {
   unicode-bidi: isolate;
 }
 
