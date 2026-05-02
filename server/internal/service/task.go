@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"strconv"
 
@@ -19,6 +20,12 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
+
+// cancelledByUserMarker is appended to the assistant chat_message body that
+// records a chat turn cut short by the user clicking Stop. The live timeline
+// (text + tool_use + tool_result) is reconstructed from task_messages by the
+// frontend; the marker is the visible "why does this reply end here" cue.
+const cancelledByUserMarker = "_(stoppet af bruger)_"
 
 type TaskService struct {
 	Queries   *db.Queries
@@ -164,21 +171,59 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
+//
+// For chat tasks, the cancel and the assistant chat_message insert run in a
+// single transaction. task_messages already holds every streamed text and
+// tool event, but without a chat_message row pointing at the task the
+// frontend's AssistantMessage component has nothing to render against, so
+// the entire mid-turn timeline disappears from the chat history on cancel.
+// Persisting the assistant chat_message inside the cancel tx closes the gap
+// before the cancel response returns and the frontend refetches messages.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.CancelAgentTask(ctx, taskID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		existing, err := s.Queries.GetAgentTask(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("cancel task: %w", err)
+	var task db.AgentTaskQueue
+	var alreadyTerminal bool
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		t, cancelErr := qtx.CancelAgentTask(ctx, taskID)
+		if errors.Is(cancelErr, pgx.ErrNoRows) {
+			existing, lookupErr := qtx.GetAgentTask(ctx, taskID)
+			if lookupErr != nil {
+				return fmt.Errorf("cancel task: %w", lookupErr)
+			}
+			task = existing
+			alreadyTerminal = true
+			return nil
 		}
-		return &existing, nil
+		if cancelErr != nil {
+			return fmt.Errorf("cancel task: %w", cancelErr)
+		}
+		task = t
+
+		if t.ChatSessionID.Valid {
+			content, err := buildCancelledChatContent(ctx, qtx, taskID)
+			if err != nil {
+				return fmt.Errorf("build cancelled chat content: %w", err)
+			}
+			if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+				ChatSessionID: t.ChatSessionID,
+				Role:          "assistant",
+				Content:       content,
+				TaskID:        taskID,
+			}); err != nil {
+				return fmt.Errorf("create cancelled chat message: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	if err != nil {
-		return nil, fmt.Errorf("cancel task: %w", err)
+	if alreadyTerminal {
+		return &task, nil
 	}
 
 	// Best-effort: cancellation should also drop the task token so a
-	// running agent can't keep posting comments after we say stop.
+	// running agent can't keep posting comments after we say stop. Outside
+	// the cancel tx so a token-revoke failure can't roll back the cancel
+	// (and the persisted chat_message that goes with it).
 	if err := s.Queries.RevokeTaskTokensForTask(ctx, taskID); err != nil {
 		slog.Warn("revoke task tokens on cancel failed (non-fatal)", "task_id", util.UUIDToString(taskID), "error", err)
 	}
@@ -192,6 +237,33 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 
 	return &task, nil
+}
+
+// buildCancelledChatContent assembles the chat_message body for an assistant
+// reply that was cut short by user-initiated cancel. It concatenates every
+// persisted text event for the task (already redacted at write-time in the
+// daemon handler) and appends the cancelled-by-user marker. Tool events are
+// rendered separately by the frontend timeline using the chat_message's
+// task_id, so they don't need to land in the body.
+func buildCancelledChatContent(ctx context.Context, q *db.Queries, taskID pgtype.UUID) (string, error) {
+	msgs, err := q.ListTaskMessages(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for _, m := range msgs {
+		if m.Type == "text" && m.Content.Valid && m.Content.String != "" {
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(m.Content.String)
+		}
+	}
+	if sb.Len() > 0 {
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(cancelledByUserMarker)
+	return sb.String(), nil
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
