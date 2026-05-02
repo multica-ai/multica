@@ -78,6 +78,13 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	// Apply configured API timeout if non-zero (default 30s in NewClient is preserved for external callers)
+	if cfg.APITimeout > 0 {
+		client.SetTimeout(cfg.APITimeout)
+		logger.Info("API timeout configured", "timeout_seconds", cfg.APITimeout.Seconds())
+	} else {
+		logger.Info("API timeout using default", "timeout_seconds", 30)
+	}
 	return &Daemon{
 		cfg:           cfg,
 		client:        client,
@@ -732,6 +739,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
+	d.logger.Info("model discovery completed", "provider", rt.Provider, "count", len(models), "supported", agent.ModelSelectionSupported(rt.Provider))
 	// map[string]string) so the Default bool round-trips — without
 	// it the UI loses its "default" badge on the advertised pick.
 	type modelWire struct {
@@ -749,11 +757,17 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			Default:  m.Default,
 		})
 	}
-	d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
+	// Debug: log the actual wire payload so we can see what the UI receives.
+	d.logger.Info("model wire payload", "provider", rt.Provider, "count", len(wire))
+	if err := d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
-	})
+	}); err != nil {
+		d.logger.Error("model list report failed", "provider", rt.Provider, "error", err)
+	} else {
+		d.logger.Info("model list report sent successfully", "provider", rt.Provider)
+	}
 }
 
 func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {

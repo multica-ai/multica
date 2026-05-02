@@ -5,6 +5,7 @@ import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { LocaleSync } from "@/components/locale-sync";
+import { DirectionScript } from "@/components/direction-script";
 import "./globals.css";
 
 // Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
@@ -104,11 +105,12 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="en"
+      lang="ar"
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
+        <DirectionScript />
         <LocaleSync />
         <ThemeProvider>
           <WebProviders>

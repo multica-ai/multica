@@ -37,7 +37,7 @@ export function ModelDropdown({
   const [search, setSearch] = useState("");
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(runtimeId ?? null),
   );
 
   const supported = modelsQuery.data?.supported ?? true;

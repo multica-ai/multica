@@ -10,3 +10,56 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
+
+/* ============================================
+   RTL Support for Arabic Content — Contextual
+   Strategy: Global LTR, Arabic text auto-detects
+   via unicode-bidi:isolate and dir="auto"
+   ============================================ */
+
+/* Global: LTR layout (flexbox, panels, nav work correctly) */
+html, body {
+  direction: ltr;
+  width: 100%;
+}
+
+/* Navigation & sidebars: LTR */
+nav, aside, [role="navigation"], [role="menubar"], [data-sidebar],
+[data-slot="sidebar"], [data-slot="sidebar-wrapper"], [data-slot="sidebar-inner"] {
+  direction: ltr !important;
+}
+
+/* Panel group layout: must stay LTR for react-resizable-panels */
+[data-panel-group], .panel-group, [data-slot="resizable-panel-group"] {
+  direction: ltr !important;
+}
+
+/* Individual panels: LTR to prevent overlap */
+[data-slot="resizable-panel"], [data-panel] {
+  direction: ltr !important;
+}
+
+/* Content area: Contextual RTL via dir="auto" + unicode-bidi */
+main, [role="main"], article,
+.prose, [class*="markdown"], [class*="description"] {
+  unicode-bidi: isolate;
+}
+
+/* Paragraphs and headings: auto-detect direction */
+main p, main h1, main h2, main h3, main h4, main h5, main h6,
+article p, article h1, article h2, article h3 {
+  unicode-bidi: isolate;
+}
+
+/* Explicit RTL override when needed (e.g., Arabic-only sections) */
+[dir="rtl"] {
+  direction: rtl !important;
+  text-align: right !important;
+}
+
+/* Code blocks: always LTR */
+code, pre, [class*="code"], [class*="highlight"] {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate;
+}

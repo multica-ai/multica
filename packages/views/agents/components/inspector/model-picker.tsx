@@ -39,8 +39,11 @@ export function ModelPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Allow model discovery even when runtime appears offline — the daemon
+  // may still be running and reachable via heartbeat. A failed discovery
+  // will surface as an error instead of silently hiding the picker.
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(runtimeId ?? null),
   );
   const supported = modelsQuery.data?.supported ?? true;
   // Memoise the model list so every downstream useMemo gets a stable

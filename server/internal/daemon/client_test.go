@@ -95,3 +95,23 @@ func TestNormalizeGOOS(t *testing.T) {
 		}
 	}
 }
+
+func TestClient_SetTimeout(t *testing.T) {
+	// Test default timeout (30s from NewClient)
+	c := NewClient("http://localhost")
+	if c.client.Timeout != 30*time.Second {
+		t.Errorf("expected default timeout 30s, got %v", c.client.Timeout)
+	}
+
+	// Test override via SetTimeout
+	c.SetTimeout(60 * time.Second)
+	if c.client.Timeout != 60*time.Second {
+		t.Errorf("expected timeout 60s after SetTimeout, got %v", c.client.Timeout)
+	}
+
+	// Test custom timeout
+	c.SetTimeout(120 * time.Second)
+	if c.client.Timeout != 120*time.Second {
+		t.Errorf("expected timeout 120s after SetTimeout, got %v", c.client.Timeout)
+	}
+}

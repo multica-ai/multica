@@ -579,7 +579,7 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
   const hover = useLinkHover(wrapperRef);
 
   return (
-    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
+    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)} dir="auto">
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}

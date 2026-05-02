@@ -18,6 +18,7 @@ const (
 	DefaultHeartbeatInterval              = 15 * time.Second
 	DefaultAgentTimeout                   = 2 * time.Hour
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	DefaultAPITimeout                     = 120 * time.Second // HTTP client timeout for daemon API calls (heartbeat, register, etc.)
 	DefaultRuntimeName                    = "Local Agent"
 	DefaultWorkspaceSyncInterval          = 30 * time.Second
 	DefaultHealthPort                     = 19514
@@ -63,6 +64,7 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	APITimeout                     time.Duration // HTTP client timeout for daemon API calls
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -80,6 +82,7 @@ type Overrides struct {
 	RuntimeName                    string
 	Profile                        string // profile name (empty = default)
 	HealthPort                     int    // health check port (0 = use default)
+	APITimeout                     time.Duration // HTTP client timeout (0 = use env/default)
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -126,6 +129,21 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
+	if hermesPath == "hermes" {
+		// Try fallback locations before giving up. The daemon may be
+		// started with a minimal PATH that doesn't include ~/.local/bin
+		// or a venv path, so we probe common hermes install locations.
+		home, _ := os.UserHomeDir()
+		for _, candidate := range []string{
+			filepath.Join(home, ".local", "bin", "hermes"),
+			filepath.Join(home, "hermes-agent", ".venv", "bin", "hermes"),
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				hermesPath = candidate
+				break
+			}
+		}
+	}
 	if _, err := exec.LookPath(hermesPath); err == nil {
 		agents["hermes"] = AgentEntry{
 			Path:  hermesPath,
@@ -309,6 +327,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		healthPort = overrides.HealthPort
 	}
 
+	// API timeout: override > env > default
+	apiTimeout, err := durationFromEnv("MULTICA_DAEMON_API_TIMEOUT", DefaultAPITimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if overrides.APITimeout > 0 {
+		apiTimeout = overrides.APITimeout
+	}
+
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
@@ -359,6 +386,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		APITimeout:                     apiTimeout,
 	}, nil
 }
 
