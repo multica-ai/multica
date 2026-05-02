@@ -149,4 +149,14 @@
      * Progressive enhancement: browsers that don't support it simply ignore the rule. */
     text-autospace: ideograph-alpha ideograph-numeric;
   }
+
+  @media (max-width: 767px), (pointer: coarse) {
+    input:not([type="button"]):not([type="checkbox"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="image"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]),
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"]) {
+      /* iOS Safari zooms the page when focused editable text is below 16px. */
+      font-size: 16px !important;
+    }
+  }
 }

@@ -14,13 +14,19 @@ import (
 )
 
 // gcLoop periodically scans local workspace directories and removes those
-// whose issue is done/canceled and hasn't been updated within the configured TTL.
+// whose issue is done/cancelled and hasn't been updated within the configured TTL.
 func (d *Daemon) gcLoop(ctx context.Context) {
 	if !d.cfg.GCEnabled {
 		d.logger.Info("gc: disabled")
 		return
 	}
-	d.logger.Info("gc: started", "interval", d.cfg.GCInterval, "ttl", d.cfg.GCTTL, "orphan_ttl", d.cfg.GCOrphanTTL)
+	d.logger.Info("gc: started",
+		"interval", d.cfg.GCInterval,
+		"ttl", d.cfg.GCTTL,
+		"orphan_ttl", d.cfg.GCOrphanTTL,
+		"artifact_ttl", d.cfg.GCArtifactTTL,
+		"artifact_patterns", d.cfg.GCArtifactPatterns,
+	)
 
 	// Run once at startup after a short delay (let the daemon finish initializing).
 	if err := sleepWithContext(ctx, 30*time.Second); err != nil {
@@ -41,6 +47,17 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 	}
 }
 
+// gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
+type gcStats struct {
+	cleaned         int            // whole task dirs removed (issue done/cancelled)
+	orphaned        int            // whole task dirs removed (no meta / unreachable issue)
+	skipped         int            // task dirs left untouched
+	artifactDirs    int            // task dirs that had at least one artifact reclaimed
+	artifactRemoved int            // count of removed artifact subdirs
+	bytesReclaimed  int64          // total bytes freed in this cycle
+	byPattern       map[string]int // basename -> reclaim count, for visibility
+}
+
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
 	root := d.cfg.WorkspacesRoot
@@ -53,34 +70,40 @@ func (d *Daemon) runGC(ctx context.Context) {
 		return
 	}
 
-	var cleaned, skipped, orphaned int
+	stats := &gcStats{byPattern: map[string]int{}}
 	for _, wsEntry := range entries {
 		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
 			continue
 		}
 		wsDir := filepath.Join(root, wsEntry.Name())
-		c, s, o := d.gcWorkspace(ctx, wsDir)
-		cleaned += c
-		skipped += s
-		orphaned += o
+		d.gcWorkspace(ctx, wsDir, stats)
 	}
 
 	// Prune stale worktree references from all bare repo caches.
 	d.pruneRepoWorktrees(root)
 
-	if cleaned > 0 || orphaned > 0 {
-		d.logger.Info("gc: cycle complete", "cleaned", cleaned, "orphaned", orphaned, "skipped", skipped)
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 {
+		d.logger.Info("gc: cycle complete",
+			"cleaned", stats.cleaned,
+			"orphaned", stats.orphaned,
+			"skipped", stats.skipped,
+			"artifact_dirs", stats.artifactDirs,
+			"artifact_removed", stats.artifactRemoved,
+			"bytes_reclaimed", stats.bytesReclaimed,
+			"by_pattern", stats.byPattern,
+		)
 	}
 }
 
 // gcWorkspace scans task directories inside a single workspace directory.
-func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string) (cleaned, skipped, orphaned int) {
+func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) {
 	taskEntries, err := os.ReadDir(wsDir)
 	if err != nil {
 		d.logger.Warn("gc: read workspace dir failed", "dir", wsDir, "error", err)
 		return
 	}
 
+	cleanedHere := 0
 	for _, entry := range taskEntries {
 		if ctx.Err() != nil {
 			return
@@ -92,36 +115,62 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string) (cleaned, skippe
 		action := d.shouldCleanTaskDir(ctx, taskDir)
 		switch action {
 		case gcActionClean:
+			bytes := dirSize(taskDir)
 			d.cleanTaskDir(taskDir)
-			cleaned++
+			stats.cleaned++
+			stats.bytesReclaimed += bytes
+			cleanedHere++
 		case gcActionOrphan:
+			bytes := dirSize(taskDir)
 			d.cleanTaskDir(taskDir)
-			orphaned++
+			stats.orphaned++
+			stats.bytesReclaimed += bytes
+			cleanedHere++
+		case gcActionCleanArtifacts:
+			removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, d.cfg.GCArtifactPatterns)
+			if removed > 0 {
+				stats.artifactDirs++
+				stats.artifactRemoved += removed
+				stats.bytesReclaimed += bytes
+				for k, v := range perPattern {
+					stats.byPattern[k] += v
+				}
+			}
+			stats.skipped++ // task dir itself preserved
 		default:
-			skipped++
+			stats.skipped++
 		}
 	}
 
 	// Remove the workspace directory itself if it's now empty.
-	if cleaned+orphaned > 0 {
+	if cleanedHere > 0 {
 		remaining, _ := os.ReadDir(wsDir)
 		if len(remaining) == 0 {
 			os.Remove(wsDir)
 		}
 	}
-	return
 }
 
 type gcAction int
 
 const (
-	gcActionSkip   gcAction = iota
-	gcActionClean           // issue is done/canceled and stale
-	gcActionOrphan          // no meta or unknown issue and dir is old
+	gcActionSkip           gcAction = iota
+	gcActionClean                   // issue is done/cancelled and stale
+	gcActionOrphan                  // no meta or unknown issue and dir is old
+	gcActionCleanArtifacts          // task completed long enough ago; drop regenerable artifacts only
 )
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
+	// A task currently running on this env root must never be reclaimed —
+	// not even on the done/cancelled or orphan-404 paths. A new comment on
+	// an already-done issue can dispatch a follow-up task that reuses the
+	// prior workdir without bumping the issue's updated_at, so the regular
+	// TTL check alone wouldn't notice the resumed activity.
+	if d.isActiveEnvRoot(taskDir) {
+		return gcActionSkip
+	}
+
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
 		// No .gc_meta.json — check mtime for orphan cleanup.
@@ -158,7 +207,7 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		return gcActionSkip
 	}
 
-	if (status.Status == "done" || status.Status == "canceled") &&
+	if (status.Status == "done" || status.Status == "cancelled") &&
 		time.Since(status.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
@@ -167,6 +216,22 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 			"updated_at", status.UpdatedAt.Format(time.RFC3339),
 		)
 		return gcActionClean
+	}
+
+	// Artifact-only cleanup: issue is still open but the task itself completed
+	// long enough ago that its build artifacts are unlikely to be reused.
+	// Active-root protection is handled by the early return above; skip here
+	// only when artifact GC is disabled or the meta has no completed_at
+	// (defensive — that means the task crashed before WriteGCMeta).
+	if d.cfg.GCArtifactTTL > 0 && len(d.cfg.GCArtifactPatterns) > 0 &&
+		!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
+		d.logger.Info("gc: eligible for artifact cleanup",
+			"dir", filepath.Base(taskDir),
+			"issue", meta.IssueID,
+			"status", status.Status,
+			"completed_at", meta.CompletedAt.Format(time.RFC3339),
+		)
+		return gcActionCleanArtifacts
 	}
 
 	return gcActionSkip
@@ -179,6 +244,114 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 	} else {
 		d.logger.Info("gc: removed", "dir", taskDir)
 	}
+}
+
+// cleanTaskArtifacts walks taskDir and deletes every directory whose basename
+// matches one of patterns. Returns (removedCount, bytesReclaimed, perPattern).
+//
+// Safety contract:
+//   - patterns are basename-only; entries with a path separator are dropped.
+//   - .git subtrees are never descended into, so the agent's git history stays
+//     intact even if a pattern would otherwise match.
+//   - symlinks are skipped entirely — neither the link nor its target is
+//     touched, so a malicious or stale link can't redirect the GC outside the
+//     workdir.
+//   - every removal target is verified to live inside taskDir, so a tampered
+//     .gc_meta.json can't trick the daemon into deleting outside its sandbox.
+func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed int, bytes int64, perPattern map[string]int) {
+	perPattern = map[string]int{}
+	if taskDir == "" || len(patterns) == 0 {
+		return
+	}
+	patternSet := make(map[string]struct{}, len(patterns))
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.ContainsAny(p, "/\\") {
+			continue
+		}
+		patternSet[p] = struct{}{}
+	}
+	if len(patternSet) == 0 {
+		return
+	}
+
+	absRoot, err := filepath.Abs(taskDir)
+	if err != nil {
+		return
+	}
+
+	walkErr := filepath.WalkDir(absRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil // best-effort — keep walking
+		}
+		if path == absRoot {
+			return nil
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		// Never descend into .git — preserves agent commits even if a pattern
+		// like "objects" would otherwise match.
+		if entry.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		// Refuse to follow symlinked directories. WalkDir reports them as type
+		// Dir on some platforms; lstat to be sure.
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return filepath.SkipDir
+		}
+		if _, ok := patternSet[entry.Name()]; !ok {
+			return nil
+		}
+		// Containment check: target must remain inside taskDir.
+		rel, relErr := filepath.Rel(absRoot, path)
+		if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+			return filepath.SkipDir
+		}
+		size := dirSize(path)
+		if rmErr := os.RemoveAll(path); rmErr != nil {
+			d.logger.Warn("gc: artifact remove failed", "path", path, "error", rmErr)
+			return filepath.SkipDir
+		}
+		removed++
+		bytes += size
+		perPattern[entry.Name()]++
+		d.logger.Info("gc: artifact removed", "path", path, "bytes", size)
+		// Don't descend into the now-deleted subtree.
+		return filepath.SkipDir
+	})
+	if walkErr != nil {
+		d.logger.Warn("gc: artifact walk failed", "dir", taskDir, "error", walkErr)
+	}
+	return
+}
+
+// dirSize returns the total size of all regular files under root, in bytes.
+// Non-fatal: errors during the walk are ignored so callers can report a
+// best-effort byte count without aborting the whole GC cycle.
+func dirSize(root string) int64 {
+	var total int64
+	_ = filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 const gitCmdTimeout = 30 * time.Second

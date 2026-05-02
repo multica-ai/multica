@@ -32,15 +32,12 @@ interface ChatMessageListProps {
   pendingTask: ChatPendingTask | null | undefined;
   /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
   availability: AgentAvailability | undefined;
-  /** Cancel handler exposed by the StatusPill once the task crosses the long-run threshold. */
-  onCancel?: () => void;
 }
 
 export function ChatMessageList({
   messages,
   pendingTask,
   availability,
-  onCancel,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
@@ -87,7 +84,6 @@ export function ChatMessageList({
             pendingTask={pendingTask}
             taskMessages={liveTaskMessages ?? []}
             availability={availability}
-            onCancel={onCancel}
           />
         )}
       </div>

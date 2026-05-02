@@ -28,6 +28,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
+import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -133,11 +134,6 @@ function ProjectIssuesContent({
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const viewState = projectViewStore.getState();
-      if (viewState.sortBy !== "position") {
-        viewState.setSortBy("position");
-        viewState.setSortDirection("asc");
-      }
       const updates: Partial<{ status: IssueStatus; position: number }> = { status: newStatus };
       if (newPosition !== undefined) updates.position = newPosition;
       updateIssueMutation.mutate(
@@ -494,6 +490,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           />
         </div>}
       </div>
+
+      {/* Resources */}
+      <ProjectResourcesSection projectId={projectId} />
     </div>
   );
 

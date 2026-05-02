@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -27,6 +28,24 @@ func TestShortID(t *testing.T) {
 		if got := shortID(tt.input); got != tt.want {
 			t.Errorf("shortID(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestPredictRootDir(t *testing.T) {
+	t.Parallel()
+	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	if got != want {
+		t.Errorf("PredictRootDir = %q, want %q", got, want)
+	}
+	if got := PredictRootDir("", "ws", "task"); got != "" {
+		t.Errorf("expected empty when workspaces root missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "", "task"); got != "" {
+		t.Errorf("expected empty when workspace ID missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "ws", ""); got != "" {
+		t.Errorf("expected empty when task ID missing, got %q", got)
 	}
 }
 
@@ -120,6 +139,139 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	}
 }
 
+func TestPrepareWithProjectResources(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Agent UX 2026",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-pr",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	// resources.json should exist and decode back to what we wrote.
+	resourcesPath := filepath.Join(env.WorkDir, ".multica", "project", "resources.json")
+	raw, err := os.ReadFile(resourcesPath)
+	if err != nil {
+		t.Fatalf("failed to read resources.json: %v", err)
+	}
+	var got struct {
+		ProjectID    string `json:"project_id"`
+		ProjectTitle string `json:"project_title"`
+		Resources    []struct {
+			ID           string          `json:"id"`
+			ResourceType string          `json:"resource_type"`
+			ResourceRef  json.RawMessage `json:"resource_ref"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
+	}
+	if got.ProjectID != taskCtx.ProjectID {
+		t.Errorf("resources.json project_id = %q, want %q", got.ProjectID, taskCtx.ProjectID)
+	}
+	if got.ProjectTitle != taskCtx.ProjectTitle {
+		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	}
+	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
+		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
+	}
+
+	// CLAUDE.md should mention the project context block.
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Project Context",
+		"Agent UX 2026",
+		"GitHub repo",
+		"https://github.com/multica-ai/multica",
+		"default branch: `main`",
+		".multica/project/resources.json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
+// When the issue's project has its own github_repo resources, those should be
+// the only repos rendered in the meta-skill — workspace-level repos must not
+// leak into the agent prompt to avoid confusing it about which repo to use.
+//
+// The handler-side override is exercised in handler tests; this test confirms
+// the rendering side: given a TaskContextForEnv where Repos was already
+// narrowed by the server to project repos only, the meta skill renders just
+// those.
+func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Project A",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/project-repo"},
+		},
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  []byte(`{"url":"https://github.com/org/project-repo"}`),
+			},
+		},
+	}
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	if !strings.Contains(s, "https://github.com/org/project-repo") {
+		t.Errorf("CLAUDE.md missing project repo URL")
+	}
+	if strings.Contains(s, "https://github.com/org/workspace-repo") {
+		t.Errorf("CLAUDE.md should not contain workspace repo when project has its own")
+	}
+}
+
+func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+		t.Fatalf("writeProjectResources: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no resources.json to be written when project context is empty")
+	}
+}
+
 func TestPrepareWithRepoContext(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -127,8 +279,8 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend", Description: "Go backend"},
-			{URL: "https://github.com/org/frontend", Description: "React frontend"},
+			{URL: "https://github.com/org/backend"},
+			{URL: "https://github.com/org/frontend"},
 		},
 	}
 	env, err := Prepare(PrepareParams{
@@ -170,9 +322,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
-		"Go backend",
 		"https://github.com/org/frontend",
-		"React frontend",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
@@ -719,7 +869,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "c3d4e5f6-a7b8-9012-cdef-123456789012",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend", Description: "Go backend"},
+			{URL: "https://github.com/org/backend"},
 		},
 	}
 	env, err := Prepare(PrepareParams{
@@ -760,7 +910,6 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
-		"Go backend",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing %q", want)

@@ -19,9 +19,10 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
-import { useAgentPresenceDetail } from "@multica/core/agents";
+import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
+import { NoAgentBanner } from "./no-agent-banner";
 import {
   chatSessionsOptions,
   allChatSessionsOptions,
@@ -102,6 +103,13 @@ export function ChatWindow() {
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
+
+  // Three-state availability — "loading" stays neutral (no banner, no
+  // disable) so the input doesn't flash a fake "no agent" state in the
+  // few hundred ms before the agent list query resolves. Only `"none"`
+  // (server confirmed: zero usable agents) drives the disabled UI.
+  const agentAvailability = useWorkspaceAgentAvailability();
+  const noAgent = agentAvailability === "none";
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -422,27 +430,38 @@ export function ChatWindow() {
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
-          onCancel={handleStop}
         />
       ) : (
         <EmptyState
+          hasSessions={sessions.length > 0}
           agentName={activeAgent?.name}
           onPickPrompt={(text) => handleSend(text)}
         />
       )}
 
-      {/* Presence banner sits above the input card (not inside topSlot) so
-       *  the "offline / unstable" hint reads as a global session signal,
-       *  not an attachment to the message being composed. ContextAnchorCard
-       *  stays in topSlot because that's per-message context. */}
-      <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+      {/* Status banner above the input — single mutually-exclusive slot.
+       *  Priority: no-agent > offline / unstable. Agent presence is the
+       *  hard prerequisite (you can't send anything without one), so it
+       *  always wins over a presence hint. ContextAnchorCard stays in
+       *  topSlot because that's per-message context, not session state.
+       *
+       *  We key off `noAgent` (the resolved-empty state) rather than
+       *  `!activeAgent`, so the loading window between mount and the
+       *  first agent-list response stays banner-free. */}
+      {noAgent ? (
+        <NoAgentBanner />
+      ) : (
+        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+      )}
 
-      {/* Input — disabled for archived sessions */}
+      {/* Input — disabled for archived sessions; locked out entirely
+       *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
+        noAgent={noAgent}
         agentName={activeAgent?.name}
         topSlot={<ContextAnchorCard />}
         leftAdornment={
@@ -709,12 +728,42 @@ const STARTER_PROMPTS: { icon: string; text: string }[] = [
 ];
 
 function EmptyState({
+  hasSessions,
   agentName,
   onPickPrompt,
 }: {
+  hasSessions: boolean;
   agentName?: string;
   onPickPrompt: (text: string) => void;
 }) {
+  // First-time experience: the user has never started a chat in this
+  // workspace. Educate before suggesting actions — starter prompts
+  // presume the user already knows what chat is for.
+  //
+  // Independent of agent state: missing-agent feedback lives in the
+  // banner above the input, not here. That keeps this surface focused
+  // on "what is chat" rather than "what's broken right now".
+  if (!hasSessions) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8">
+        <div className="text-center space-y-3">
+          <h3 className="text-base font-semibold">Chat with your agents</h3>
+          <p className="text-sm text-muted-foreground">
+            ✨ They know your workspace —{" "}
+            <span className="font-medium text-foreground">
+              issues, projects, skills
+            </span>
+            .
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Ask for a summary, plan your day, or hand off a quick task.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Returning user: starter prompts are the fastest path back to action.
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
       <div className="text-center space-y-1">

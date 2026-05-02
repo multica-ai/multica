@@ -11,13 +11,24 @@ const MAX = 50;
 
 export function ConcurrencyPicker({
   value,
+  canEdit = true,
   onChange,
 }: {
   value: number;
+  /** When false, render a static read-only display and skip the popover. */
+  canEdit?: boolean;
   onChange: (next: number) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(String(value));
+
+  if (!canEdit) {
+    return (
+      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        {value}
+      </span>
+    );
+  }
 
   // Reset draft from authoritative value whenever the popover (re-)opens or
   // the prop changes from elsewhere — protects against stale draft state if

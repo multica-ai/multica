@@ -26,11 +26,14 @@ export function ModelPicker({
   runtimeId,
   runtimeOnline,
   value,
+  canEdit = true,
   onChange,
 }: {
   runtimeId: string | null;
   runtimeOnline: boolean;
   value: string;
+  /** When false, render a static read-only display and skip the popover. */
+  canEdit?: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
@@ -79,6 +82,17 @@ export function ModelPicker({
 
   const triggerLabel = value || "Default";
   const triggerTitle = `Model · ${triggerLabel}`;
+
+  if (!canEdit) {
+    return (
+      <span
+        className="min-w-0 truncate px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+        title={triggerTitle}
+      >
+        {triggerLabel}
+      </span>
+    );
+  }
 
   return (
     <PropertyPicker

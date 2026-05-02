@@ -55,6 +55,15 @@ interface InspectorProps {
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
+  /**
+   * Computed by the parent via `useAgentPermissions(agent).canEdit.allowed`.
+   * When false the inspector renders all editable surfaces as static
+   * read-only displays — pickers become text/badges, name/description lose
+   * their pencil affordance, the avatar is no longer clickable, and the
+   * "Attach skill" trigger is hidden. Mirrors the backend gate at
+   * `server/internal/handler/agent.go:519-535`.
+   */
+  canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -77,6 +86,7 @@ export function AgentDetailInspector({
   runtimes,
   members,
   currentUserId,
+  canEdit,
   onUpdate,
 }: InspectorProps) {
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
@@ -86,16 +96,18 @@ export function AgentDetailInspector({
     <aside className="flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-lg border bg-background">
       {/* Identity */}
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
-        <AvatarEditor agent={agent} onUpdate={update} />
-        <NameAndDescription agent={agent} onUpdate={update} />
+        <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
+        <NameAndDescription
+          agent={agent}
+          canEdit={canEdit}
+          onUpdate={update}
+        />
         <PresenceBadge presence={presence} />
       </div>
 
-      {/* Properties — editable. Row hover is OFF here on purpose: each chip
-          (RuntimePicker, ModelPicker, …) carries its own border + hover-bg
-          treatment that already telegraphs "this is a button". A second
-          row-wide hover layer on top would just smudge the chip boundary
-          and make it harder, not easier, to see what's clickable. */}
+      {/* Properties — editable when canEdit. When the current user lacks
+          permission, each picker self-renders a static read-only display so
+          the value is visible but not interactive. */}
       <Section label="Properties">
         <PropRow label="Runtime" interactive={false}>
           <RuntimePicker
@@ -103,6 +115,7 @@ export function AgentDetailInspector({
             runtimes={runtimes}
             members={members}
             currentUserId={currentUserId}
+            canEdit={canEdit}
             onChange={(id) => update({ runtime_id: id })}
           />
         </PropRow>
@@ -111,18 +124,21 @@ export function AgentDetailInspector({
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
             value={agent.model ?? ""}
+            canEdit={canEdit}
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
         <PropRow label="Visibility" interactive={false}>
           <VisibilityPicker
             value={agent.visibility}
+            canEdit={canEdit}
             onChange={(v) => update({ visibility: v })}
           />
         </PropRow>
         <PropRow label="Concurrency" interactive={false}>
           <ConcurrencyPicker
             value={agent.max_concurrent_tasks}
+            canEdit={canEdit}
             onChange={(n) => update({ max_concurrent_tasks: n })}
           />
         </PropRow>
@@ -173,7 +189,7 @@ export function AgentDetailInspector({
               {s.name}
             </span>
           ))}
-          <SkillAttach agent={agent} />
+          <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
       </div>
     </aside>
@@ -192,11 +208,13 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 border-b px-5 py-4">
-      <div className="mb-1 px-2 -mx-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="border-b px-5 py-4">
+      <div className="mb-1 -mx-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      {children}
+      <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+        {children}
+      </div>
     </div>
   );
 }
@@ -207,13 +225,28 @@ function Section({
 
 function AvatarEditor({
   agent,
+  canEdit,
   onUpdate,
 }: {
   agent: Agent;
+  canEdit: boolean;
   onUpdate: (data: Record<string, unknown>) => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading } = useFileUpload(api);
+
+  if (!canEdit) {
+    return (
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+        <ActorAvatar
+          actorType="agent"
+          actorId={agent.id}
+          size={56}
+          className="rounded-none"
+        />
+      </div>
+    );
+  }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -267,11 +300,32 @@ function AvatarEditor({
 
 function NameAndDescription({
   agent,
+  canEdit,
   onUpdate,
 }: {
   agent: Agent;
+  canEdit: boolean;
   onUpdate: (data: Record<string, unknown>) => Promise<void>;
 }) {
+  if (!canEdit) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-base font-semibold leading-tight">
+          {agent.name}
+        </span>
+        {agent.description ? (
+          <span className="text-xs leading-relaxed text-muted-foreground">
+            {agent.description}
+          </span>
+        ) : (
+          <span className="text-xs italic leading-relaxed text-muted-foreground/50">
+            No description
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <InlineEditPopover

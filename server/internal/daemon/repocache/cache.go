@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,21 +20,45 @@ import (
 // It passes the full daemon environment so credential helpers (e.g. gh) can
 // locate their config, and disables TTY prompting so auth failures produce
 // clear errors instead of blocking on a non-existent terminal.
+//
+// safe.directory=* is set via GIT_CONFIG_* env vars so git trusts all
+// directories regardless of ownership. The daemon manages its own bare
+// caches and worktrees, so the ownership check adds no security value
+// and breaks CI environments where the runner UID differs from the
+// directory owner.
 func gitEnv() []string {
-	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	base := os.Environ()
+
+	// Find the existing GIT_CONFIG_COUNT so we append at the next index
+	// rather than overwriting any env-scoped git config (auth, URL
+	// rewrites, extra headers, etc.).
+	existing := 0
+	for _, e := range base {
+		if strings.HasPrefix(e, "GIT_CONFIG_COUNT=") {
+			if n, err := strconv.Atoi(strings.TrimPrefix(e, "GIT_CONFIG_COUNT=")); err == nil {
+				existing = n
+			}
+		}
+	}
+
+	idx := strconv.Itoa(existing)
+	return append(base,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
+		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
+		"GIT_CONFIG_VALUE_"+idx+"=*",
+	)
 }
 
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
-	URL         string
-	Description string
+	URL string
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
 type CachedRepo struct {
-	URL         string // remote URL
-	Description string // human-readable description
-	LocalPath   string // absolute path to the bare clone
+	URL       string // remote URL
+	LocalPath string // absolute path to the bare clone
 }
 
 // Cache manages bare git clones for workspace repositories.

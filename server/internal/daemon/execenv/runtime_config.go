@@ -1,11 +1,46 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// formatProjectResource renders a single resource as a human-readable bullet.
+// Unknown resource types fall back to a JSON-encoded ref so the agent can
+// still read what the user attached. New resource types should add a case
+// here AND in the API validator (handler/project_resource.go).
+func formatProjectResource(r ProjectResourceForEnv) string {
+	label := r.Label
+	switch r.ResourceType {
+	case "github_repo":
+		var payload struct {
+			URL               string `json:"url"`
+			DefaultBranchHint string `json:"default_branch_hint,omitempty"`
+		}
+		_ = json.Unmarshal(r.ResourceRef, &payload)
+		out := fmt.Sprintf("**GitHub repo**: %s", payload.URL)
+		if payload.DefaultBranchHint != "" {
+			out += fmt.Sprintf(" (default branch: `%s`)", payload.DefaultBranchHint)
+		}
+		if label != "" {
+			out += " — " + label
+		}
+		return out
+	default:
+		ref := string(r.ResourceRef)
+		if ref == "" {
+			ref = "{}"
+		}
+		out := fmt.Sprintf("**%s**: `%s`", r.ResourceType, ref)
+		if label != "" {
+			out += " — " + label
+		}
+		return out
+	}
+}
 
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
@@ -126,16 +161,30 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory.\n\n")
-		b.WriteString("| URL | Description |\n")
-		b.WriteString("|-----|-------------|\n")
 		for _, repo := range ctx.Repos {
-			desc := repo.Description
-			if desc == "" {
-				desc = "—"
-			}
-			fmt.Fprintf(&b, "| %s | %s |\n", repo.URL, desc)
+			fmt.Fprintf(&b, "- %s\n", repo.URL)
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed.\n\n")
+	}
+
+	// Inject project-scoped context (resources attached to the issue's project).
+	// The full structured payload is also available at .multica/project/resources.json
+	// so skills can consume it programmatically.
+	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+		b.WriteString("## Project Context\n\n")
+		if ctx.ProjectTitle != "" {
+			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if len(ctx.ProjectResources) > 0 {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			for _, r := range ctx.ProjectResources {
+				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
+			}
+			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code.\n\n")
+		} else {
+			b.WriteString("This project has no resources attached yet.\n\n")
+		}
 	}
 
 	b.WriteString("### Workflow\n\n")

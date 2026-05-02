@@ -28,6 +28,7 @@ catalog:
   katex: "^0.16.45"
   rehype-katex: "^7.0.1"
   remark-math: "^6.0.0"
+  mermaid: "^11.14.0"
 
   # Icons
   lucide-react: "^1.0.1"
