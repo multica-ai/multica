@@ -369,6 +369,65 @@ describe("LoginPage", () => {
   });
 
   // -------------------------------------------------------------------------
+  // OIDC SSO
+  // -------------------------------------------------------------------------
+
+  it("renders OIDC SSO button when oidc prop provided", () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        oidc={{
+          authorizationEndpoint: "https://idp.example.com/authorize",
+          clientID: "oidc-client-1",
+          redirectUri: "http://localhost:3000/auth/oidc/callback",
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /continue with single sign-on/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides OIDC SSO button when oidc prop omitted", () => {
+    render(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.queryByRole("button", { name: /continue with single sign-on/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("OIDC button click builds the correct authorize URL with state passthrough", async () => {
+    render(
+      <LoginPage
+        onSuccess={onSuccess}
+        oidc={{
+          authorizationEndpoint: "https://idp.example.com/authorize",
+          clientID: "oidc-client-1",
+          redirectUri: "http://localhost:3000/auth/oidc/callback",
+          state: "platform:desktop",
+        }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: /continue with single sign-on/i }),
+    );
+
+    expect(window.location.href).toContain(
+      "https://idp.example.com/authorize?",
+    );
+    expect(window.location.href).toContain("client_id=oidc-client-1");
+    expect(window.location.href).toContain(
+      "redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Foidc%2Fcallback",
+    );
+    expect(window.location.href).toContain("response_type=code");
+    expect(window.location.href).toContain(
+      "scope=openid+email+profile",
+    );
+    expect(window.location.href).toContain("state=platform%3Adesktop");
+  });
+
+  // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------
 

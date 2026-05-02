@@ -196,6 +196,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/oidc", h.OIDCLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API

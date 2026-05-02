@@ -6,6 +6,27 @@ WHERE id = $1;
 SELECT * FROM "user"
 WHERE email = $1;
 
+-- name: GetUserByExternalIdentity :one
+-- Look up user by OIDC / external IDP identity. Used as the primary
+-- lookup path for OIDC logins; the partial unique index on
+-- (external_provider, external_user_id) WHERE external_user_id IS NOT NULL
+-- enforces uniqueness and makes this an index-only fetch.
+SELECT * FROM "user"
+WHERE external_provider = $1 AND external_user_id = $2
+LIMIT 1;
+
+-- name: SetUserExternalIdentity :one
+-- Bind a multica user to an external OIDC identity. Called on first
+-- OIDC login (either by user creation or by email-link fallback) to
+-- record the (provider, sub) pair so subsequent logins can find the
+-- user by external_id directly.
+UPDATE "user" SET
+    external_provider = $2,
+    external_user_id  = $3,
+    updated_at        = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)

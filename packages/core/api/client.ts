@@ -308,6 +308,13 @@ export class ApiClient {
     });
   }
 
+  async oidcLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/oidc", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }
@@ -805,6 +812,9 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    oidc_issuer_url?: string;
+    oidc_client_id?: string;
+    oidc_authorization_endpoint?: string;
     posthog_key?: string;
     posthog_host?: string;
   }> {
