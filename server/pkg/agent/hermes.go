@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -90,6 +91,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	var outputMu sync.Mutex
 	var output strings.Builder
+	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -98,7 +100,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
 				output.WriteString(msg.Content)
@@ -107,6 +115,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -233,8 +244,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 5. Send the prompt and wait for PromptResponse.
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+	// 5. Send the prompt and wait for PromptResponse.
+	// Set streamingCurrentTurn before sending prompt so we start accepting
+	// notifications only for the current turn's output, not any history
+	// replay that Hermes might send.
+	streamingCurrentTurn.Store(true)
+	_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": userText},
