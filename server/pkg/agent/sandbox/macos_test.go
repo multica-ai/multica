@@ -98,17 +98,61 @@ func TestGenerate_AllowsWorkdirReadWrite(t *testing.T) {
 }
 
 func TestGenerate_AllowedHostsBecomeNetworkRules(t *testing.T) {
+	// Public hostnames collapse to a port-only rule (Seatbelt cannot match
+	// arbitrary hostnames at the kernel layer); loopback IPs map to
+	// "localhost:<port>" so the daemon health port stays loopback-scoped.
 	out, err := Generate(Profile{
-		Workdir:      "/tmp/work",
-		Home:         "/Users/sandbox",
-		AllowedHosts: []string{"api.anthropic.com:443"},
+		Workdir: "/tmp/work",
+		Home:    "/Users/sandbox",
+		AllowedHosts: []string{
+			"api.anthropic.com:443",
+			"127.0.0.1:19514",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	want := `(allow network-outbound (remote tcp "api.anthropic.com:443"))`
-	if !strings.Contains(out, want) {
-		t.Errorf("profile missing allowed host rule\nprofile:\n%s", out)
+	wants := []string{
+		`(allow network-outbound (remote tcp "localhost:19514"))`,
+		`(allow network-outbound (remote tcp "*:443"))`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Errorf("profile missing rule %q\nprofile:\n%s", w, out)
+		}
+	}
+}
+
+// TestGenerate_NoLiteralHostsInRemoteTCP guards against the regression that
+// motivated this translation: any (remote tcp ...) rule with a host other
+// than "*" or "localhost" causes sandbox-exec to reject the profile and
+// exit 65 before the wrapped process runs (JEH-354). Hostname/IP literals
+// must never appear in the generated profile.
+func TestGenerate_NoLiteralHostsInRemoteTCP(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/tmp/work",
+		Home:    "/Users/sandbox",
+		AllowedHosts: []string{
+			"api.anthropic.com:443",
+			"statsig.anthropic.com:443",
+			"multica.example.com:443",
+			"127.0.0.1:19514",
+			"localhost:19514",
+			"[::1]:8080",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "(remote tcp ") {
+			continue
+		}
+		// Acceptable: "*:<port>" or "localhost:<port>".
+		if strings.Contains(line, `"*:`) || strings.Contains(line, `"localhost:`) {
+			continue
+		}
+		t.Errorf("disallowed remote tcp host literal in rule: %s", line)
 	}
 }
 
@@ -126,6 +170,72 @@ func TestGenerate_EmptyAllowlistDeniesAllOutbound(t *testing.T) {
 	// DNS is still allowed so allowlisted hostnames could resolve once added.
 	if !strings.Contains(out, "(allow network-outbound (remote udp \"*:53\"))") {
 		t.Error("expected DNS allow rule")
+	}
+}
+
+func TestTranslateAllowlistToTCPRules(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "empty input returns nil",
+			in:   nil,
+			want: nil,
+		},
+		{
+			name: "loopback variants collapse to one localhost rule",
+			in:   []string{"127.0.0.1:19514", "localhost:19514", "[::1]:19514"},
+			want: []string{
+				`(allow network-outbound (remote tcp "localhost:19514"))`,
+			},
+		},
+		{
+			name: "different public hosts on same port collapse to one wildcard rule",
+			in:   []string{"api.anthropic.com:443", "statsig.anthropic.com:443"},
+			want: []string{
+				`(allow network-outbound (remote tcp "*:443"))`,
+			},
+		},
+		{
+			name: "loopback and public on same port produce two distinct rules",
+			in:   []string{"127.0.0.1:443", "api.anthropic.com:443"},
+			want: []string{
+				`(allow network-outbound (remote tcp "localhost:443"))`,
+				`(allow network-outbound (remote tcp "*:443"))`,
+			},
+		},
+		{
+			name: "loopback rules sort before public; ports sort lexicographically within group",
+			in:   []string{"api.example.com:80", "api.example.com:443", "localhost:9000", "localhost:80"},
+			want: []string{
+				`(allow network-outbound (remote tcp "localhost:80"))`,
+				`(allow network-outbound (remote tcp "localhost:9000"))`,
+				`(allow network-outbound (remote tcp "*:443"))`,
+				`(allow network-outbound (remote tcp "*:80"))`,
+			},
+		},
+		{
+			name: "garbage entries are dropped",
+			in:   []string{"", "  ", "not-a-host-port", ":443", "host:", "api.anthropic.com:443"},
+			want: []string{
+				`(allow network-outbound (remote tcp "*:443"))`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := translateAllowlistToTCPRules(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("translateAllowlistToTCPRules(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("rule[%d] = %q, want %q (full: %v)", i, got[i], tc.want[i], got)
+				}
+			}
+		})
 	}
 }
 
@@ -179,12 +289,12 @@ func TestNormalizeHosts(t *testing.T) {
 
 func TestSchemeString(t *testing.T) {
 	cases := map[string]string{
-		"":            `""`,
-		"foo":         `"foo"`,
-		`with"quote`:  `"with\"quote"`,
-		`with\back`:   `"with\\back"`,
-		"/Users/foo":  `"/Users/foo"`,
-		"æøå":         `"æøå"`,
+		"":           `""`,
+		"foo":        `"foo"`,
+		`with"quote`: `"with\"quote"`,
+		`with\back`:  `"with\\back"`,
+		"/Users/foo": `"/Users/foo"`,
+		"æøå":        `"æøå"`,
 	}
 	for in, want := range cases {
 		if got := schemeString(in); got != want {

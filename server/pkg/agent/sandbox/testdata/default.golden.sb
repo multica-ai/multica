@@ -79,10 +79,11 @@
 (deny file-read* file-write* (subpath "/Users/sandbox/Library/Mail"))
 (deny file-read* file-write* (subpath "/Users/sandbox/Library/Messages"))
 
-;; Network (deny by default; allow specific hosts)
-(allow network-outbound (remote tcp "127.0.0.1:19514"))
-(allow network-outbound (remote tcp "api.anthropic.com:443"))
-(allow network-outbound (remote tcp "multica.example.com:443"))
+;; Network (deny by default; allow specific ports)
+;; Seatbelt cannot match hostnames; rules are port-scoped.
+(allow network-outbound (remote tcp "localhost:19514"))
+(allow network-outbound (remote tcp "*:443"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))
 (allow network-outbound (remote udp "*:53"))
 (allow network-bind (local ip "localhost:*"))
 

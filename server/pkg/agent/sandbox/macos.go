@@ -3,9 +3,17 @@
 //
 // The profile is deny-by-default: only explicit allow rules expose system
 // directories, and writes are limited to the task work directory plus a
-// per-task temp directory. Outbound network access is restricted to an
-// allowlist supplied by the daemon (Multica server, agent provider API,
-// loopback for the daemon health port, plus user-configured extras).
+// per-task temp directory. Outbound network access is restricted to a
+// port-level allowlist derived from host:port pairs supplied by the daemon
+// (Multica server, agent provider API, loopback for the daemon health port,
+// plus user-configured extras).
+//
+// Seatbelt limitation: the (remote tcp ...) primitive only accepts "*" or
+// "localhost" as the host token. Per-hostname filtering at the kernel layer
+// is therefore not possible — we degrade to per-port filtering, with
+// loopback specially scoped so the daemon health port is reachable only on
+// localhost. Hostname-level enforcement is an application-level concern
+// (Claude Code hooks, outbound proxy) and is intentionally out of scope here.
 //
 // The profile shape was chosen so that the kernel-level rules survive even
 // if Multica's application-level permission policy (Claude Code hooks) has
@@ -37,6 +45,13 @@ type Profile struct {
 	// AllowedHosts is the outbound network allowlist as host:port pairs,
 	// e.g. "api.anthropic.com:443" or "127.0.0.1:19514". Empty list means
 	// outbound network access is fully denied.
+	//
+	// Seatbelt cannot match arbitrary hostnames or IP literals at the
+	// kernel layer (only "*" and "localhost"), so the generator translates
+	// this list into port-level rules: loopback hosts produce a
+	// "localhost:<port>" rule; all other hosts collapse to a "*:<port>"
+	// rule. Application-level hostname filtering (e.g. Claude Code hooks,
+	// outbound proxy) is required if hostname-level enforcement is needed.
 	AllowedHosts []string
 }
 
@@ -146,20 +161,34 @@ func Generate(p Profile) (string, error) {
 	}
 	b.WriteString("\n")
 
-	// Outbound network. Loopback is implicitly part of the allowlist
-	// (the daemon adds 127.0.0.1:<healthport>) — without explicit allows,
-	// every outbound connection is denied by `(deny default)`.
-	b.WriteString(";; Network (deny by default; allow specific hosts)\n")
-	hosts := normalizeHosts(p.AllowedHosts)
-	if len(hosts) == 0 {
-		b.WriteString(";; (allowlist is empty — all outbound network is denied)\n")
+	// Outbound network. Seatbelt's (remote tcp ...) only accepts "*" or
+	// "localhost" as the host token, so we translate the host:port
+	// allowlist into kernel-valid rules: loopback hosts become
+	// "localhost:<port>", all other hosts collapse to "*:<port>". This
+	// loses hostname-level filtering at the kernel layer (a Seatbelt
+	// limitation, not a design choice) but keeps the loopback scope
+	// distinct so non-loopback callers cannot reach the daemon health
+	// port.
+	b.WriteString(";; Network (deny by default; allow specific ports)\n")
+	b.WriteString(";; Seatbelt cannot match hostnames; rules are port-scoped.\n")
+	rules := translateAllowlistToTCPRules(p.AllowedHosts)
+	if len(rules) == 0 {
+		b.WriteString(";; (allowlist is empty — all outbound TCP is denied)\n")
 	} else {
-		for _, h := range hosts {
-			fmt.Fprintf(&b, "(allow network-outbound (remote tcp %s))\n", schemeString(h))
+		for _, r := range rules {
+			b.WriteString(r)
+			b.WriteByte('\n')
 		}
 	}
 	// DNS is needed to resolve allowlisted hostnames. Without this, even
 	// allowed hosts cannot be reached.
+	//
+	// On macOS, getaddrinfo does NOT send raw UDP/53 packets — it talks to
+	// mDNSResponder over a unix-domain socket at /private/var/run/mDNSResponder.
+	// Missing this rule causes "Could not resolve host" inside the sandbox
+	// even with the UDP/53 allow in place; the *:53 rule remains for the
+	// rare static-config path that does issue UDP queries directly.
+	b.WriteString("(allow network-outbound (literal \"/private/var/run/mDNSResponder\"))\n")
 	b.WriteString("(allow network-outbound (remote udp \"*:53\"))\n")
 	b.WriteString("(allow network-bind (local ip \"localhost:*\"))\n")
 	b.WriteString("\n")
@@ -249,6 +278,80 @@ var sensitiveHomeSubpaths = []string{
 	"Library/Keychains",
 	"Library/Mail",
 	"Library/Messages",
+}
+
+// translateAllowlistToTCPRules converts host:port pairs into the
+// (allow network-outbound ...) rules that macOS Seatbelt actually accepts.
+//
+// Why a translation step exists: sandbox-exec parses the .sb profile up
+// front and refuses to launch the wrapped process if any rule is invalid —
+// it exits 65 before the agent ever runs. The (remote tcp ...) primitive
+// only accepts "*" or "localhost" as the host token; an IP literal or FQDN
+// produces "host must be * or localhost in network address" and aborts.
+// Per-host filtering at the kernel layer is therefore impossible on macOS,
+// regardless of how the allowlist is configured.
+//
+// Translation rules:
+//   - Loopback hosts (localhost, 127.0.0.1, ::1, anything else
+//     net.IP.IsLoopback) → "localhost:<port>".
+//   - All other hosts (FQDNs, public IPs) → "*:<port>" (port-only filter).
+//
+// Returns deduplicated, deterministically-ordered (allow ...) lines. An
+// empty input slice returns nil so callers can emit a clear "denied"
+// comment instead.
+func translateAllowlistToTCPRules(in []string) []string {
+	loopbackPorts := map[string]struct{}{}
+	publicPorts := map[string]struct{}{}
+	for _, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(raw)
+		if err != nil || host == "" || port == "" {
+			continue
+		}
+		if isLoopbackHost(host) {
+			loopbackPorts[port] = struct{}{}
+		} else {
+			publicPorts[port] = struct{}{}
+		}
+	}
+	if len(loopbackPorts)+len(publicPorts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(loopbackPorts)+len(publicPorts))
+	for _, p := range sortedKeys(loopbackPorts) {
+		out = append(out, fmt.Sprintf("(allow network-outbound (remote tcp %s))", schemeString("localhost:"+p)))
+	}
+	for _, p := range sortedKeys(publicPorts) {
+		out = append(out, fmt.Sprintf("(allow network-outbound (remote tcp %s))", schemeString("*:"+p)))
+	}
+	return out
+}
+
+// isLoopbackHost reports whether a host token from a host:port pair refers
+// to the loopback interface. We accept the literal "localhost", IPv4/IPv6
+// loopback literals, and anything else net.IP.IsLoopback recognises.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// sortedKeys returns the keys of a string-keyed set in lexicographic order,
+// so generated profiles are deterministic regardless of map iteration.
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // normalizeHosts returns a deduplicated, sorted list of host:port entries.
