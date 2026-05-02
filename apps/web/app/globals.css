@@ -10,3 +10,19 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
+
+/* RTL fixes for resizable panels */
+[dir="rtl"] [data-slot="resizable-panel-group"] {
+  flex-direction: row-reverse !important;
+}
+
+[dir="rtl"] [data-slot="resizable-handle"] {
+  transform: rotate(180deg) !important;
+}
+
+/* Force sidebar panel to be visible in RTL */
+[dir="rtl"] [data-slot="resizable-panel"]:has(#sidebar) {
+  min-width: 260px !important;
+  width: 320px !important;
+  flex: 0 0 320px !important;
+}

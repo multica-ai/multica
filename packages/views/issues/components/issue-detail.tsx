@@ -173,9 +173,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+  const { defaultLayout: storedLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
+  // In RTL mode, ensure sidebar is never collapsed
+  let defaultLayout = storedLayout;
+  if (storedLayout && typeof storedLayout === "object") {
+    const sidebarSize = (storedLayout as Record<string, number>)["sidebar"] ?? 0;
+    if (sidebarSize < 20) {
+      defaultLayout = { ...storedLayout, sidebar: 25, content: 75 } as typeof storedLayout;
+    }
+  }
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(defaultSidebarOpen);
@@ -1051,7 +1059,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         panelRef={sidebarRef}
         onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
       >
-      <div className="overflow-y-auto border-l h-full">
+      <div className="overflow-y-auto border-s h-full">
         <div className="p-4">
           {sidebarContent}
         </div>

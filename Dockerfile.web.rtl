@@ -1,0 +1,11 @@
+FROM ghcr.io/multica-ai/multica-web:latest
+
+# Override the HTML template to add dir="rtl" lang="ar"
+USER root
+RUN find /app -name "*.html" -exec sed -i 's/<html/<html dir="rtl" lang="ar" /g' {} \; && \
+    find /app -name "*.html" -exec sed -i 's/<html  dir="rtl" lang="ar" /<html dir="rtl" lang="ar" /g' {} \;
+
+# Add RTL-specific CSS override
+RUN echo 'html, body { direction: rtl; } [dir="ltr"] { direction: rtl !important; }' > /app/public/rtl-override.css
+
+USER nextjs
