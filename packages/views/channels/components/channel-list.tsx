@@ -151,18 +151,21 @@ export function ChannelList({
                   const mems = memQuery?.data ?? [];
                   const info = dmDisplayName(selfUserId, mems, memberById, agentById);
                   const isActive = c.id === activeChannelId;
+                  const unread = c.unread_count > 0 && !isActive;
                   return (
                     <li key={c.id}>
                       <AppLink
                         href={paths.workspace(slug).channelDetail(c.id)}
                         className={[
                           "flex items-center gap-2 px-3 py-1.5 text-sm",
-                          "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
+                          "hover:bg-sidebar-accent/70 hover:text-foreground",
                           isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "",
+                          unread ? "font-semibold text-foreground" : "text-muted-foreground",
                         ].join(" ")}
                       >
                         <DMAvatar info={info} />
-                        <span className="truncate">{info.label}</span>
+                        <span className="flex-1 truncate">{info.label}</span>
+                        {unread ? <UnreadBadge count={c.unread_count} /> : null}
                       </AppLink>
                     </li>
                   );
@@ -222,23 +225,39 @@ function ChannelRows({ channels, activeId, slug }: ChannelRowsProps) {
         const Icon = rowIcon(c);
         const isActive = c.id === activeId;
         const label = c.display_name || c.name;
+        const unread = c.unread_count > 0 && !isActive;
         return (
           <li key={c.id}>
             <AppLink
               href={paths.workspace(slug).channelDetail(c.id)}
               className={[
                 "flex items-center gap-2 px-3 py-1.5 text-sm",
-                "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
+                "hover:bg-sidebar-accent/70 hover:text-foreground",
                 isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "",
+                unread ? "font-semibold text-foreground" : "text-muted-foreground",
               ].join(" ")}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span className="truncate">{label}</span>
+              <span className="flex-1 truncate">{label}</span>
+              {unread ? <UnreadBadge count={c.unread_count} /> : null}
             </AppLink>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+function UnreadBadge({ count }: { count: number }) {
+  // Cap visible count at 99+ so wide channel names don't get squeezed.
+  const text = count > 99 ? "99+" : String(count);
+  return (
+    <span
+      aria-label={`${count} unread`}
+      className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-none text-primary-foreground"
+    >
+      {text}
+    </span>
   );
 }
 

@@ -41,6 +41,11 @@ interface MessageRowProps {
   /** Inside a thread panel, "reply in thread" is meaningless on the
    * replies themselves — pass true to suppress the action. */
   disableReplyAction?: boolean;
+  /** True when this message is the second-or-later in a same-author
+   * burst within the group window. The list computes this; we use it to
+   * suppress the avatar + author header so consecutive messages read as
+   * a single block (Slack/Discord-style density). */
+  isGroupContinuation?: boolean;
 }
 
 function authorName(props: MessageRowProps): string {
@@ -88,7 +93,7 @@ export function MessageRow(props: MessageRowProps) {
   // thread continuity isn't broken (replies under it still render).
   if (message.deleted_at) {
     return (
-      <div className="px-4 py-2 text-sm italic text-muted-foreground">
+      <div className="px-4 py-0.5 text-sm italic text-muted-foreground">
         [message deleted]
       </div>
     );
@@ -122,6 +127,7 @@ function MessageRowBody({
   isOwnMessage,
   onOpenThread,
   disableReplyAction,
+  isGroupContinuation,
 }: MessageRowBodyProps) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -171,73 +177,101 @@ function MessageRowBody({
     });
   };
 
+  // Slack-style density. First-in-group ("standalone") gets the full
+  // avatar + name + time header and a small top gap. Continuations hide
+  // the avatar (replaced by a hover-revealed timestamp in the same
+  // gutter) and the name header — the body alone, indented to align
+  // under the first message's body. The hover action toolbar sits in
+  // the top-right corner regardless, so reply / edit / delete are
+  // reachable on every row.
+  const rowPadding = isGroupContinuation ? "py-0.5" : "pt-2 pb-0.5";
+
+  const hoverActions = (
+    <div className="absolute right-2 -top-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-background px-0.5 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+      {!disableReplyAction && onOpenThread ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs text-muted-foreground"
+          onClick={() => onOpenThread(message.id)}
+          aria-label="Reply in thread"
+        >
+          <MessageSquareReply className="mr-1 h-3 w-3" />
+          Reply
+        </Button>
+      ) : null}
+      {isOwnMessage ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                aria-label="Message actions"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setEditing(true)}>
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setConfirmDelete(true)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
+  );
+
   return (
     <>
-      <div className="group flex gap-3 px-4 py-2 hover:bg-muted/40 transition-colors">
-        <Avatar className="h-8 w-8 shrink-0">
-          {!isAgent && member?.avatar_url ? (
-            <AvatarImage src={member.avatar_url} alt={name} />
-          ) : null}
-          <AvatarFallback className={isAgent ? "bg-purple-100 text-purple-900" : ""}>
-            {isAgent ? <Bot className="h-4 w-4" /> : authorInitial(name)}
-          </AvatarFallback>
-        </Avatar>
+      <div className={`group relative flex gap-3 px-4 ${rowPadding} hover:bg-muted/40 transition-colors`}>
+        {isGroupContinuation ? (
+          // Reserved gutter that mirrors the avatar's width so body text
+          // aligns vertically with the first-in-group's body. The
+          // timestamp fades in on hover so the row stays clean at rest.
+          <span className="flex h-5 w-8 shrink-0 items-center justify-end pr-1 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+            {formatTime(message.created_at)}
+          </span>
+        ) : (
+          <Avatar className="h-8 w-8 shrink-0">
+            {!isAgent && member?.avatar_url ? (
+              <AvatarImage src={member.avatar_url} alt={name} />
+            ) : null}
+            <AvatarFallback className={isAgent ? "bg-purple-100 text-purple-900" : ""}>
+              {isAgent ? <Bot className="h-4 w-4" /> : authorInitial(name)}
+            </AvatarFallback>
+          </Avatar>
+        )}
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm font-medium text-foreground">{name}</span>
-            {isAgent ? (
-              <span className="text-xs text-muted-foreground">agent</span>
-            ) : null}
-            <span className="text-xs text-muted-foreground">
-              {formatTime(message.created_at)}
-            </span>
-            {message.edited_at ? (
-              <span className="text-xs text-muted-foreground">(edited)</span>
-            ) : null}
-            <span className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-              {!disableReplyAction && onOpenThread ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs text-muted-foreground"
-                  onClick={() => onOpenThread(message.id)}
-                  aria-label="Reply in thread"
-                >
-                  <MessageSquareReply className="mr-1 h-3 w-3" />
-                  Reply
-                </Button>
+          {!isGroupContinuation ? (
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-medium text-foreground">{name}</span>
+              {isAgent ? (
+                <span className="text-xs text-muted-foreground">agent</span>
               ) : null}
-              {isOwnMessage ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-6 p-0 text-muted-foreground"
-                        aria-label="Message actions"
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setEditing(true)}>
-                      <Pencil className="mr-2 h-3.5 w-3.5" />
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setConfirmDelete(true)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 className="mr-2 h-3.5 w-3.5" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              <span className="text-xs text-muted-foreground">
+                {formatTime(message.created_at)}
+              </span>
+              {message.edited_at ? (
+                <span className="text-xs text-muted-foreground">(edited)</span>
               ) : null}
-            </span>
-          </div>
+            </div>
+          ) : message.edited_at ? (
+            // No header on continuations, but still surface "(edited)"
+            // somewhere — small inline marker after the body keeps it
+            // discoverable without cluttering the row.
+            <span className="ml-1 align-middle text-[10px] text-muted-foreground">(edited)</span>
+          ) : null}
           {editing ? (
             <div className="mt-1 space-y-2">
               <div className="rounded-md border border-input bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring">
@@ -265,7 +299,12 @@ function MessageRowBody({
           ) : (
             <>
               {message.content ? (
-                <div className="prose prose-sm max-w-none text-foreground">
+                // Tailwind Typography's defaults add ~1em above and
+                // below every paragraph; for a chat surface that's far
+                // too generous and produces obvious "gappy" multi-line
+                // messages. The `prose-p:my-0` etc. overrides collapse
+                // those defaults to chat-appropriate spacing.
+                <div className="prose prose-sm max-w-none leading-snug text-foreground prose-p:my-0 prose-headings:my-1 prose-pre:my-1 prose-ul:my-1 prose-ol:my-1 prose-blockquote:my-1">
                   <ReadonlyContent content={message.content} />
                 </div>
               ) : null}
@@ -289,6 +328,7 @@ function MessageRowBody({
             </button>
           ) : null}
         </div>
+        {hoverActions}
       </div>
 
       <AlertDialog

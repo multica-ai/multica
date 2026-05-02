@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
@@ -13,6 +13,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   channelDetailOptions,
   channelMessagesOptions,
+  channelsListOptions,
   useMarkChannelRead,
 } from "@multica/core/channels";
 import { ChannelList } from "./channel-list";
@@ -77,6 +78,28 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   const { data: messages = [] } = useQuery(
     channelMessagesOptions(activeChannelId ?? "", enabled && !!activeChannelId),
   );
+  // The list response carries per-channel unread state. We freeze the
+  // last_read_message_id captured at the moment the user opened this
+  // channel so the unread divider doesn't jump as we mark-read.
+  const { data: channelList = [] } = useQuery(channelsListOptions(wsId, enabled));
+  const initialUnreadCursorRef = useRef<{ channelId: string | null; cursor: string | null }>({
+    channelId: null,
+    cursor: null,
+  });
+  const initialUnreadCursor = useMemo(() => {
+    if (!activeChannelId) return null;
+    if (initialUnreadCursorRef.current.channelId === activeChannelId) {
+      return initialUnreadCursorRef.current.cursor;
+    }
+    const fromList = channelList.find((c) => c.id === activeChannelId);
+    if (!fromList) return initialUnreadCursorRef.current.cursor;
+    initialUnreadCursorRef.current = {
+      channelId: activeChannelId,
+      cursor: fromList.last_read_message_id,
+    };
+    return fromList.last_read_message_id;
+  }, [activeChannelId, channelList]);
+
   const markRead = useMarkChannelRead(activeChannelId ?? "");
 
   // Mark-read on view: whenever the newest message id changes (mount, new
@@ -150,6 +173,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
                       channelId={channel.id}
                       enabled={enabled}
                       onOpenThread={setThreadParentId}
+                      initialUnreadCursor={initialUnreadCursor}
                     />
                     <ChannelComposer channel={channel} />
                   </div>
@@ -170,6 +194,7 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
                   channelId={channel.id}
                   enabled={enabled}
                   onOpenThread={setThreadParentId}
+                  initialUnreadCursor={initialUnreadCursor}
                 />
                 <ChannelComposer channel={channel} />
               </div>
