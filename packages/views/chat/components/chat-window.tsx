@@ -30,6 +30,7 @@ import {
 import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
+import { ChatStatusLine } from "./chat-status-line";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
@@ -394,6 +395,9 @@ export function ChatWindow() {
           onPickPrompt={(text) => handleSend(text)}
         />
       )}
+
+      {/* Live "doing X now" line — only renders while a task is streaming. */}
+      <ChatStatusLine pendingTaskId={pendingTaskId} />
 
       {/* Input — disabled for archived sessions */}
       <ChatInput

@@ -17,6 +17,7 @@ import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { getToolSummary } from "./tool-summary";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ export function ChatMessageList({
           ))}
           {hasLive && (
             <div className="w-full space-y-1.5">
-              <TimelineView items={liveTimeline} />
+              <TimelineView items={liveTimeline} live />
             </div>
           )}
           {isWaiting && !hasLive && !pendingAlreadyPersisted && (
@@ -215,7 +216,18 @@ function segmentTimeline(items: ChatTimelineItem[]): TimelineSegment[] {
   return segments;
 }
 
-function TimelineView({ items }: { items: ChatTimelineItem[] }) {
+function TimelineView({
+  items,
+  live,
+}: {
+  items: ChatTimelineItem[];
+  /**
+   * When true, every tool group renders open by default so the user can
+   * see what the agent is doing without clicking. Completed assistant
+   * messages keep the compact behaviour: only the last group is open.
+   */
+  live?: boolean;
+}) {
   const segments = segmentTimeline(items);
 
   return (
@@ -229,7 +241,7 @@ function TimelineView({ items }: { items: ChatTimelineItem[] }) {
           <ToolGroupCollapsible
             key={seg.items[0]!.seq}
             items={seg.items}
-            defaultOpen={i === segments.length - 1}
+            defaultOpen={live || i === segments.length - 1}
           />
         ),
       )}
@@ -280,35 +292,6 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
     default:
       return null;
   }
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
-}
-
-function getToolSummary(item: ChatTimelineItem): string {
-  if (!item.input) return "";
-  const inp = item.input as Record<string, string>;
-  if (inp.query) return inp.query;
-  if (inp.file_path) return shortenPath(inp.file_path);
-  if (inp.path) return shortenPath(inp.path);
-  if (inp.pattern) return inp.pattern;
-  if (inp.description) return String(inp.description);
-  if (inp.command) {
-    const cmd = String(inp.command);
-    return cmd.length > 100 ? cmd.slice(0, 100) + "..." : cmd;
-  }
-  if (inp.prompt) {
-    const p = String(inp.prompt);
-    return p.length > 100 ? p.slice(0, 100) + "..." : p;
-  }
-  if (inp.skill) return String(inp.skill);
-  for (const v of Object.values(inp)) {
-    if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-  }
-  return "";
 }
 
 function ToolCallRow({ item }: { item: ChatTimelineItem }) {

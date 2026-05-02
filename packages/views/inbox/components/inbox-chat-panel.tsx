@@ -16,6 +16,7 @@ import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { canAssignAgent } from "../../issues/components";
 import { ChatMessageList, ChatMessageSkeleton } from "../../chat/components/chat-message-list";
+import { ChatStatusLine } from "../../chat/components/chat-status-line";
 import { ChatInput } from "../../chat/components/chat-input";
 import type { Agent, ChatMessage } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
@@ -190,6 +191,7 @@ export function InboxChatPanel({
 
       {/* Input — fixed at bottom */}
       <div className="shrink-0 border-t pt-2">
+      <ChatStatusLine pendingTaskId={pendingTaskId} />
       <ChatInput
         onSend={handleSend}
         onStop={handleStop}
