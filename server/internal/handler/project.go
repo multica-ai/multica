@@ -436,11 +436,35 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Queries.DeleteProject(r.Context(), project.ID); err != nil {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeleteProject(r.Context(), project.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+	if err := qtx.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
+		ItemType: "project",
+		ItemID:   project.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project pins")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+
 	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
+	h.publish(protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
+		"item_type": "project",
+		"item_id":   uuidToString(project.ID),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -12,6 +12,10 @@ RETURNING *;
 DELETE FROM pinned_item
 WHERE workspace_id = $1 AND user_id = $2 AND item_type = $3 AND item_id = $4;
 
+-- name: DeletePinnedItemByID :exec
+DELETE FROM pinned_item
+WHERE workspace_id = $1 AND user_id = $2 AND id = $3;
+
 -- name: UpdatePinnedItemPosition :exec
 UPDATE pinned_item SET position = $1
 WHERE id = $2 AND workspace_id = $3 AND user_id = $4;

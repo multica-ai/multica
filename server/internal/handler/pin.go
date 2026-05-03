@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -67,9 +69,58 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]PinnedItemResponse, 0, len(pins))
 	for _, p := range pins {
+		exists, err := h.pinnedItemExists(r, p)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list pins")
+			return
+		}
+		if !exists {
+			if err := h.Queries.DeletePinnedItemByID(r.Context(), db.DeletePinnedItemByIDParams{
+				WorkspaceID: p.WorkspaceID,
+				UserID:      p.UserID,
+				ID:          p.ID,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list pins")
+				return
+			}
+			h.publish(protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
+				"item_type": p.ItemType,
+				"item_id":   uuidToString(p.ItemID),
+			})
+			continue
+		}
 		resp = append(resp, pinnedItemToResponse(p))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) pinnedItemExists(r *http.Request, p db.PinnedItem) (bool, error) {
+	switch p.ItemType {
+	case "issue":
+		_, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID: p.ItemID, WorkspaceID: p.WorkspaceID,
+		})
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	case "project":
+		_, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID: p.ItemID, WorkspaceID: p.WorkspaceID,
+		})
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	default:
+		return false, nil
+	}
 }
 
 func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {

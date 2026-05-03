@@ -1016,6 +1016,100 @@ func TestCreatePinRejectsMalformedItemID(t *testing.T) {
 	}
 }
 
+func TestDeleteProjectRemovesPins(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Pinned project to delete",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/pins", map[string]any{
+		"item_type": "project",
+		"item_id":   project.ID,
+	})
+	testHandler.CreatePin(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreatePin: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/projects/"+project.ID, nil)
+	req = withURLParam(req, "id", project.ID)
+	testHandler.DeleteProject(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProject: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM pinned_item WHERE item_type = 'project' AND item_id = $1`,
+		project.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count pinned project items: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected project pins to be removed after delete, got %d", count)
+	}
+}
+
+func TestListPinsOmitsMissingProjectPins(t *testing.T) {
+	missingProjectID := "00000000-0000-0000-0000-00000000abcd"
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO pinned_item (workspace_id, user_id, item_type, item_id, position)
+		 VALUES ($1, $2, 'project', $3, 999)`,
+		testWorkspaceID,
+		testUserID,
+		missingProjectID,
+	); err != nil {
+		t.Fatalf("insert orphan project pin: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM pinned_item WHERE workspace_id = $1 AND user_id = $2 AND item_type = 'project' AND item_id = $3`,
+			testWorkspaceID,
+			testUserID,
+			missingProjectID,
+		)
+	})
+	var insertedCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM pinned_item WHERE workspace_id = $1 AND user_id = $2 AND item_type = 'project' AND item_id = $3`,
+		testWorkspaceID,
+		testUserID,
+		missingProjectID,
+	).Scan(&insertedCount); err != nil {
+		t.Fatalf("count inserted orphan project pin: %v", err)
+	}
+	if insertedCount != 1 {
+		t.Fatalf("expected inserted orphan project pin count 1, got %d", insertedCount)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/pins", nil)
+	testHandler.ListPins(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListPins: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var pins []PinnedItemResponse
+	if err := json.NewDecoder(w.Body).Decode(&pins); err != nil {
+		t.Fatalf("decode pins: %v", err)
+	}
+	for _, pin := range pins {
+		if pin.ItemType == "project" && pin.ItemID == missingProjectID {
+			t.Fatalf("expected missing project pin to be omitted, got %+v", pin)
+		}
+	}
+}
+
 func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/workspaces/not-a-uuid", map[string]any{

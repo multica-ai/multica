@@ -68,6 +68,22 @@ func (q *Queries) DeletePinnedItem(ctx context.Context, arg DeletePinnedItemPara
 	return err
 }
 
+const deletePinnedItemByID = `-- name: DeletePinnedItemByID :exec
+DELETE FROM pinned_item
+WHERE workspace_id = $1 AND user_id = $2 AND id = $3
+`
+
+type DeletePinnedItemByIDParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) DeletePinnedItemByID(ctx context.Context, arg DeletePinnedItemByIDParams) error {
+	_, err := q.db.Exec(ctx, deletePinnedItemByID, arg.WorkspaceID, arg.UserID, arg.ID)
+	return err
+}
+
 const deletePinnedItemsByItem = `-- name: DeletePinnedItemsByItem :exec
 DELETE FROM pinned_item
 WHERE item_type = $1 AND item_id = $2
