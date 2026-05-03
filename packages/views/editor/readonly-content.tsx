@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, useEffect, useId, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -573,7 +573,14 @@ interface ReadonlyContentProps {
   className?: string;
 }
 
-export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
+// Memoized so a long timeline of comments (Inbox + IssueDetail) does not
+// re-run the full react-markdown + rehype-* + lowlight pipeline on every
+// parent re-render. Props are `content` and `className` (both strings), so
+// React.memo's default shallow comparison is value-equality here.
+export const ReadonlyContent = memo(function ReadonlyContent({
+  content,
+  className,
+}: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
@@ -591,4 +598,4 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
       <LinkHoverCard {...hover} />
     </div>
   );
-}
+});
