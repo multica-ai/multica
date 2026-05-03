@@ -649,7 +649,7 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
-		slog.Warn("codex: unhandled server request", "method", method, "id", id)
+		c.cfg.Logger.Warn("codex: unhandled server request", "method", method, "id", id)
 		c.respondError(id, -32601, fmt.Sprintf("unhandled server request: %s", method))
 	}
 }
