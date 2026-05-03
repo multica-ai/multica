@@ -38,6 +38,12 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# The Friday release workflow creates the GitHub release with rich,
+# Multica-aware notes before this tag-triggered run starts. `mode: append`
+# keeps that body intact and just adds the build artifacts.
+release:
+  mode: append
+
 changelog:
   sort: asc
   filters:

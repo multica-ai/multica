@@ -1,0 +1,100 @@
+name: Friday release
+
+on:
+  schedule:
+    # Friday 14:00 UTC = 16:00 Copenhagen during CEST (Mar–Oct).
+    # During CET (Nov–Feb) this fires at 15:00 Copenhagen — accepted trade-off
+    # to keep the cron simple. Re-trigger manually via workflow_dispatch if needed.
+    - cron: "0 14 * * 5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute notes & version but do NOT push tag"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      bump_override:
+        description: "Force bump level"
+        required: false
+        default: "auto"
+        type: choice
+        options: ["auto", "patch", "minor", "major"]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: friday-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure git
+        run: |
+          git config user.name "multica-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+
+      - name: Compute next tag and release notes
+        id: bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MULTICA_BASE_URL: ${{ vars.MULTICA_BASE_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          BUMP_OVERRIDE: ${{ github.event.inputs.bump_override || 'auto' }}
+          RELEASE_NOTES_FILE: ${{ github.workspace }}/release-notes.md
+        run: python3 scripts/release/compute_friday_release.py
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Friday release"
+            echo ""
+            echo "- Previous tag: \`${{ steps.bump.outputs.prev_tag }}\`"
+            echo "- Next tag: \`${{ steps.bump.outputs.tag }}\`"
+            echo "- Bump: \`${{ steps.bump.outputs.bump }}\`"
+            echo "- Included commits: ${{ steps.bump.outputs.included_count }}"
+            echo "- Skipped (do-not-release): ${{ steps.bump.outputs.skipped_count }}"
+            echo ""
+            if [ -f release-notes.md ]; then
+              echo "<details><summary>Release notes</summary>"
+              echo ""
+              cat release-notes.md
+              echo ""
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push tag
+        if: steps.bump.outputs.tag != '' && (github.event.inputs.dry_run || 'false') != 'true'
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git tag -a "$TAG" -F release-notes.md
+          git push origin "$TAG"
+
+      - name: Create GitHub release
+        if: steps.bump.outputs.tag != '' && (github.event.inputs.dry_run || 'false') != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --verify-tag
