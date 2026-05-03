@@ -369,9 +369,9 @@ export function ChatWindow() {
       transition={{
         layout: isDragging
           ? { duration: 0 }
-          : { type: "spring", stiffness: 400, damping: 30 },
+          : { type: "spring", duration: 0.3, bounce: 0 },
         opacity: { duration: 0.15 },
-        scale: { type: "spring", stiffness: 500, damping: 35 },
+        scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
       {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
