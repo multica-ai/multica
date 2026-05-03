@@ -69,6 +69,13 @@ type Daemon struct {
 
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
+
+	// bgSyncs tracks background goroutines started by registerTaskRepos so
+	// callers (notably tests using t.TempDir-backed cache roots) can wait for
+	// them to drain before tearing the daemon down. Without this the bg
+	// goroutine can race against t.TempDir cleanup, leaving a partially
+	// deleted bare clone and an unrelated `not empty` cleanup failure.
+	bgSyncs sync.WaitGroup
 }
 
 // New creates a new Daemon instance.
@@ -454,8 +461,21 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		// `ensureRepoReady` reports a meaningful error if the cache isn't ready
 		// yet, so the agent's first checkout will surface a sync failure
 		// without silently treating it as a config bug.
-		go d.syncWorkspaceRepos(workspaceID, toSync)
+		d.bgSyncs.Add(1)
+		go func() {
+			defer d.bgSyncs.Done()
+			d.syncWorkspaceRepos(workspaceID, toSync)
+		}()
 	}
+}
+
+// waitBackgroundSyncs blocks until every background sync started by
+// registerTaskRepos has finished. Intended for test teardown: tests that
+// hand the daemon a t.TempDir-backed repo cache must call this before
+// returning, otherwise an in-flight clone/fetch can race against TempDir
+// cleanup and surface as an unrelated "directory not empty" failure.
+func (d *Daemon) waitBackgroundSyncs() {
+	d.bgSyncs.Wait()
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
