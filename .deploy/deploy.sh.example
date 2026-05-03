@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Canonical operator deploy script for self-hosted Mac runners.
+#
+# This is the example committed to the repo so the deploy procedure is
+# reviewable alongside other code. The actual `.deploy/deploy.sh` lives
+# only on the runner machine (it embeds local paths and is not in the
+# repo). Whenever this example changes, copy the new content to the
+# runner's deploy.sh.
+#
+# Usage on the runner:
+#   - Triggered by the webhook tool when GitHub posts a push event for main.
+#   - Or run manually:  bash ~/code/firtal-cerebro/.deploy/deploy.sh
+#
+# Behaviour:
+#   1. git fetch origin/main, exit 0 if no new commits.
+#   2. git reset --hard origin/main (no local commits expected).
+#   3. pnpm install + Go build + migrate + Next build.
+#   4. Restart all three long-running services (JEH-438): backend, frontend,
+#      AND daemon. Forgetting daemon leaves it on the previous binary —
+#      same class of bug as JEH-379 (backend stale env after deploy).
+
+set -euo pipefail
+
+# Repo path — adjust on each runner if not the canonical location.
+REPO=/Users/sara/code/firtal-cerebro
+LOG_DIR="$REPO/.deploy/logs"
+mkdir -p "$LOG_DIR"
+
+LOG="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+LATEST="$LOG_DIR/deploy-latest.log"
+
+exec > >(tee -a "$LOG") 2>&1
+ln -sf "$LOG" "$LATEST"
+
+echo "=== deploy started: $(date -Iseconds) ==="
+
+cd "$REPO"
+
+# Make sure node + tooling are on PATH regardless of how we were invoked.
+export PATH="/Users/sara/.nvm/versions/node/v24.13.1/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+OLD_SHA=$(git rev-parse HEAD)
+echo "Current SHA: $OLD_SHA"
+
+git fetch origin main
+NEW_SHA=$(git rev-parse origin/main)
+echo "Remote SHA:  $NEW_SHA"
+
+if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+  echo "No changes — nothing to deploy."
+  exit 0
+fi
+
+echo "Resetting to origin/main…"
+git reset --hard origin/main
+
+echo "Installing deps (pnpm)…"
+pnpm install --frozen-lockfile
+
+echo "Building Go backend…"
+make build
+
+echo "Running migrations…"
+make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
+
+echo "Building Next.js frontend…"
+pnpm --filter @multica/web build
+
+# Restart all three services. The daemon is easy to forget — `make build`
+# rewrites the binary but the running launchd job continues to execute the
+# old one until kickstart. JEH-438 was filed when this caused JEH-418 to
+# look broken in prod until someone manually restarted the daemon.
+echo "Restarting launchd jobs…"
+launchctl kickstart -k gui/$(id -u)/com.multica.backend
+launchctl kickstart -k gui/$(id -u)/com.multica.frontend
+launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+
+echo "=== deploy finished: $(date -Iseconds) ==="
+echo "Deployed: $OLD_SHA -> $NEW_SHA"
