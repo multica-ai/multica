@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -90,6 +91,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	var outputMu sync.Mutex
 	var output strings.Builder
+	// streamingCurrentTurn gates all session updates so that history
+	// replay (Hermes sends full prior-turn transcripts on session/resume,
+	// and may flush queued chunks before our session/prompt response
+	// streams) is dropped instead of duplicating the previous answer
+	// into output. We flip it to true only after session/prompt is sent.
+	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -98,7 +105,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
 				output.WriteString(msg.Content)
@@ -107,6 +120,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -233,7 +249,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 5. Send the prompt and wait for PromptResponse.
+		// 5. Send the prompt and wait for PromptResponse. Flip the gate
+		// just before the request so any history replay flushed during
+		// initialize / session setup stays dropped, but every notification
+		// belonging to this turn is processed.
+		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{

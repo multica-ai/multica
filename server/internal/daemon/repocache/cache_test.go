@@ -522,6 +522,131 @@ func TestCreateWorktreeNotCached(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeWithRequestedBranchRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	defaultHead := gitHead(t, sourceRepo)
+
+	runGitAuthored(t, sourceRepo, "checkout", "-b", "review-branch")
+	if err := os.WriteFile(filepath.Join(sourceRepo, "review.txt"), []byte("review\n"), 0o644); err != nil {
+		t.Fatalf("write review file: %v", err)
+	}
+	runGitAuthored(t, sourceRepo, "add", ".")
+	runGitAuthored(t, sourceRepo, "commit", "-m", "review branch commit")
+	reviewHead := gitHead(t, sourceRepo)
+	if reviewHead == defaultHead {
+		t.Fatal("test setup failed: review branch did not advance")
+	}
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "review-branch",
+		AgentName:   "Reviewer",
+		TaskID:      "review-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != reviewHead {
+		t.Fatalf("worktree HEAD = %s, want requested branch head %s", got, reviewHead)
+	}
+	if _, err := os.Stat(filepath.Join(result.Path, "review.txt")); err != nil {
+		t.Fatalf("requested branch file missing: %v", err)
+	}
+}
+
+func TestCreateWorktreeWithRequestedCommitRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	firstCommit := gitHead(t, sourceRepo)
+	addEmptyCommit(t, sourceRepo, "second commit")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         firstCommit,
+		AgentName:   "Reviewer",
+		TaskID:      "commit-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != firstCommit {
+		t.Fatalf("worktree HEAD = %s, want requested commit %s", got, firstCommit)
+	}
+}
+
+func TestCreateWorktreeWithRequestedTagRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	taggedCommit := gitHead(t, sourceRepo)
+	runGitAuthored(t, sourceRepo, "tag", "v1")
+	// Advance the default branch past the tag so worktree HEAD == taggedCommit
+	// can only be true if the tag was actually resolved (vs falling back to
+	// the default branch tip).
+	addEmptyCommit(t, sourceRepo, "post-tag commit")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "v1",
+		AgentName:   "Reviewer",
+		TaskID:      "tag-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != taggedCommit {
+		t.Fatalf("worktree HEAD = %s, want tagged commit %s", got, taggedCommit)
+	}
+}
+
+func TestCreateWorktreeWithUnknownRequestedRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "missing-ref",
+		AgentName:   "Reviewer",
+		TaskID:      "missing-ref-task-id",
+	})
+	if err == nil {
+		t.Fatal("expected unknown ref error")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve requested ref") {
+		t.Fatalf("expected requested ref error, got: %v", err)
+	}
+}
+
 func trimLine(s string) string {
 	return strings.TrimSpace(s)
 }
@@ -957,11 +1082,11 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:        "ws-1",
-		RepoURL:            sourceRepo,
-		WorkDir:            workDir,
-		AgentName:          "Test Agent",
-		TaskID:             "a1b2c3d4-0000-0000-0000-000000000000",
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "a1b2c3d4-0000-0000-0000-000000000000",
 		CoAuthoredByEnabled: true,
 	})
 	if err != nil {
@@ -1001,11 +1126,11 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:        "ws-1",
-		RepoURL:            sourceRepo,
-		WorkDir:            workDir,
-		AgentName:          "Test Agent",
-		TaskID:             "b2c3d4e5-0000-0000-0000-000000000000",
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "b2c3d4e5-0000-0000-0000-000000000000",
 		CoAuthoredByEnabled: true,
 	})
 	if err != nil {

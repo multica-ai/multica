@@ -314,6 +314,48 @@ func TestHermesClientHandleSessionNotificationAgentMessage(t *testing.T) {
 	}
 }
 
+// Regression for #1997: Hermes ACP can flush queued session updates from
+// the previous turn (history replay on session/resume, or chunks queued
+// before our session/prompt response is sent) before the current turn
+// actually starts. Until acceptNotification gates them out, those updates
+// were appended to output and re-sent to the UI, making the previous
+// answer appear duplicated alongside the new one. The Backend wires the
+// gate to a streamingCurrentTurn flag set just before session/prompt; here
+// we exercise the gate directly on hermesClient.
+func TestHermesClientAcceptNotificationGate(t *testing.T) {
+	t.Parallel()
+
+	var (
+		got    []Message
+		accept bool
+	)
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		acceptNotification: func(string) bool {
+			return accept
+		},
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	replay := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"history should be ignored"}}}}`
+	c.handleLine(replay)
+	if len(got) != 0 {
+		t.Fatalf("expected gate to drop replay before turn starts, got %+v", got)
+	}
+
+	accept = true
+	live := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"current"}}}}`
+	c.handleLine(live)
+	if len(got) != 1 {
+		t.Fatalf("expected current-turn update to pass the gate, got %+v", got)
+	}
+	if got[0].Content != "current" {
+		t.Fatalf("got content %q, want \"current\"", got[0].Content)
+	}
+}
+
 func TestHermesClientHandleAgentThought(t *testing.T) {
 	t.Parallel()
 

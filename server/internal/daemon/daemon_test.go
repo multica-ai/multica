@@ -368,13 +368,19 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return &Daemon{
+	d := &Daemon{
 		client:       NewClient(srv.URL),
 		repoCache:    repocache.New(t.TempDir(), slog.Default()),
 		logger:       slog.Default(),
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
 	}
+	// Drain background syncs (started by registerTaskRepos) before the
+	// t.TempDir cache root is cleaned up, otherwise an in-flight clone/fetch
+	// races against the deletion and the test fails with a misleading
+	// "directory not empty" cleanup error.
+	t.Cleanup(d.waitBackgroundSyncs)
+	return d
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
