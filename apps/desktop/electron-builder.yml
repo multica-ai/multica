@@ -1,4 +1,4 @@
-appId: ai.multica.desktop
+appId: com.furtherref.multica
 productName: Multica
 directories:
   buildResources: build
