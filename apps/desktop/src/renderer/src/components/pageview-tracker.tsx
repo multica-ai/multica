@@ -1,11 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { capturePageview } from "@multica/core/analytics";
 import { useAuthStore } from "@multica/core/auth";
 import { useTabStore } from "@/stores/tab-store";
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
 
 /**
- * Fires a PostHog $pageview whenever the user's visible surface changes.
+ * Fires a PostHog $pageview whenever the user's visible surface changes,
+ * EXCEPT for pure tab / workspace switches.
  *
  * Desktop has three layers that can own the visible page:
  *
@@ -17,10 +18,18 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  *   3. Otherwise → the active tab's path (workspace-scoped, e.g.
  *      `/acme/issues/123`). Kept in sync by `useTabRouterSync`.
  *
- * The overlay takes precedence over the tab path because it is visually in
- * front of the tab system; the logged-out state shadows both because the
- * shell doesn't render at all yet. This keeps the `$pageview` stream aligned
- * with what the user actually sees.
+ * Tab-switch suppression: switching between already-open tabs (or
+ * workspaces) surfaces a previously-visited path under a new `tabId`. The
+ * pageview for that path was already emitted when the user originally
+ * navigated there — re-emitting on every tab switch was the single largest
+ * source of PostHog quota burn (~50% of all `$pageview` events) and added
+ * no new signal. We detect a tab switch as "the active surface stayed
+ * `tab` but the `(workspace, tabId)` identity changed" and skip the
+ * capture, while still updating the ref so the next in-tab navigation
+ * compares against the right baseline.
+ *
+ * Login transitions, overlay open/close, and intra-tab navigation still
+ * fire — those are real surface changes the funnel cares about.
  *
  * PostHog's `capture_pageview: true` auto-capture is intentionally off (see
  * `initAnalytics`) so this component owns the event shape, matching the web
@@ -29,6 +38,12 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
 export function PageviewTracker() {
   const user = useAuthStore((s) => s.user);
   const overlay = useWindowOverlayStore((s) => s.overlay);
+  const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
+  const activeTabId = useTabStore((s) => {
+    const slug = s.activeWorkspaceSlug;
+    if (!slug) return null;
+    return s.byWorkspace[slug]?.activeTabId ?? null;
+  });
   const activeTabPath = useTabStore((s) => {
     const slug = s.activeWorkspaceSlug;
     if (!slug) return null;
@@ -37,24 +52,58 @@ export function PageviewTracker() {
     return group.tabs.find((t) => t.id === group.activeTabId)?.path ?? null;
   });
 
-  const path = resolvePath(user, overlay, activeTabPath);
+  const lastRef = useRef<{
+    kind: "login" | "overlay" | "tab" | null;
+    slug: string | null;
+    tabId: string | null;
+    path: string | null;
+  }>({ kind: null, slug: null, tabId: null, path: null });
 
   useEffect(() => {
-    if (!path) return;
+    let kind: "login" | "overlay" | "tab";
+    let slug: string | null = null;
+    let tabId: string | null = null;
+    let path: string;
+
+    if (!user) {
+      kind = "login";
+      path = "/login";
+    } else if (overlay) {
+      kind = "overlay";
+      path = overlayPath(overlay);
+    } else if (activeTabPath && activeTabId && activeWorkspaceSlug) {
+      kind = "tab";
+      slug = activeWorkspaceSlug;
+      tabId = activeTabId;
+      path = activeTabPath;
+    } else {
+      return;
+    }
+
+    const last = lastRef.current;
+    const next = { kind, slug, tabId, path };
+
+    const isTabSwitch =
+      last.kind === "tab" &&
+      kind === "tab" &&
+      (last.slug !== slug || last.tabId !== tabId);
+    if (isTabSwitch) {
+      lastRef.current = next;
+      return;
+    }
+
+    const unchanged =
+      last.kind === kind &&
+      last.slug === slug &&
+      last.tabId === tabId &&
+      last.path === path;
+    if (unchanged) return;
+
     capturePageview(path);
-  }, [path]);
+    lastRef.current = next;
+  }, [user, overlay, activeWorkspaceSlug, activeTabId, activeTabPath]);
 
   return null;
-}
-
-function resolvePath(
-  user: unknown,
-  overlay: WindowOverlay | null,
-  activeTabPath: string | null,
-): string | null {
-  if (!user) return "/login";
-  if (overlay) return overlayPath(overlay);
-  return activeTabPath;
 }
 
 function overlayPath(overlay: WindowOverlay): string {
