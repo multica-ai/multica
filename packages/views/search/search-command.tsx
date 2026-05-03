@@ -95,6 +95,7 @@ type NavKey =
   | "issues"
   | "projects"
   | "agents"
+  | "wiki"
   | "runtimes"
   | "skills"
   | "settings";
@@ -112,6 +113,7 @@ const navPages: NavPage[] = [
   { key: "issues", label: "Issues", icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
   { key: "projects", label: "Projects", icon: FolderKanban, keywords: ["projects", "kanban"] },
   { key: "agents", label: "Agents", icon: Bot, keywords: ["agents", "bots", "ai"] },
+  { key: "wiki", label: "Wiki", icon: BookOpenText, keywords: ["wiki", "docs", "knowledge"] },
   { key: "runtimes", label: "Runtimes", icon: Monitor, keywords: ["runtimes", "environments"] },
   { key: "skills", label: "Skills", icon: BookOpenText, keywords: ["skills", "library"] },
   { key: "settings", label: "Settings", icon: Settings, keywords: ["settings", "config", "preferences"] },
