@@ -91,9 +91,16 @@ func openBrowser(url string) error {
 	return exec.Command(cmd, args...).Start()
 }
 
-func runAuthLogin(cmd *cobra.Command, _ []string) error {
+func runAuthLogin(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("token") {
 		tokenFlag, _ := cmd.Flags().GetString("token")
+		// `--token mul_xxx` (space form) is what users actually type — that's
+		// the form from the docs and from #1994. NoOptDefVal prevents pflag
+		// from consuming the next arg as the flag value, so it lands here as
+		// a positional. Promote it to the token value.
+		if tokenFlag == tokenPromptSentinel && len(args) == 1 {
+			tokenFlag = args[0]
+		}
 		return runAuthLoginToken(cmd, tokenFlag)
 	}
 	return runAuthLoginBrowser(cmd)
@@ -321,6 +328,12 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 }
 
 func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
+	// The prompt sentinel is what pflag substitutes for `--token` with no
+	// value (see loginCmd init); treat it the same as an empty string so we
+	// fall through to the interactive prompt.
+	if providedToken == tokenPromptSentinel {
+		providedToken = ""
+	}
 	token := strings.TrimSpace(providedToken)
 	if token == "" {
 		fmt.Print("Enter your personal access token: ")

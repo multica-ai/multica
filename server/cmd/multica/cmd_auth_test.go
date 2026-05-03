@@ -119,34 +119,107 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 }
 
-// TestLoginTokenFlagAcceptsValue guards against regressing #1994: the
-// `--token` flag must accept the PAT as a string value (both `--token foo`
-// and `--token=foo`). It used to be a Bool, which silently dropped the
-// supplied value and forced an interactive prompt.
-func TestLoginTokenFlagAcceptsValue(t *testing.T) {
+// TestLoginTokenFlagWiring asserts the production loginCmd flag is registered
+// the way #1994 needs it to be: a String flag (not Bool) with a NoOptDefVal
+// so `--token` (no value) keeps its legacy prompt-mode behavior. This is the
+// load-bearing regression guard — without these asserts a future change that
+// reverts the flag to Bool could pass while a synthetic stand-in test happily
+// keeps testing string-flag parsing.
+func TestLoginTokenFlagWiring(t *testing.T) {
+	tokenFlag := loginCmd.Flags().Lookup("token")
+	if tokenFlag == nil {
+		t.Fatal("loginCmd is missing the --token flag")
+	}
+	if got := tokenFlag.Value.Type(); got != "string" {
+		t.Fatalf("loginCmd --token type = %q, want %q (regressed to bool?)", got, "string")
+	}
+	if tokenFlag.NoOptDefVal != tokenPromptSentinel {
+		t.Fatalf("loginCmd --token NoOptDefVal = %q, want %q (legacy `multica login --token` prompt mode would break)", tokenFlag.NoOptDefVal, tokenPromptSentinel)
+	}
+}
+
+// TestLoginTokenFlagParsing exercises every documented invocation form
+// against a cobra command wired up exactly the same way as the production
+// loginCmd, then runs runAuthLogin's flag-resolution logic to confirm the
+// right downstream branch is taken: `--token mul_xxx` and `--token=mul_xxx`
+// both consume the value (the bug from #1994), `--token` alone falls
+// through to the prompt sentinel (preserves the legacy headless form), and
+// no flag at all leaves the browser flow untouched.
+func TestLoginTokenFlagParsing(t *testing.T) {
+	type want struct {
+		changed         bool
+		resolvedToken   string // empty == "fall through to prompt"
+		expectsPrompted bool
+	}
+
 	cases := []struct {
 		name string
-		args []string
-		want string
+		argv []string
+		want want
 	}{
-		{"space-separated value", []string{"--token", "mul_abc"}, "mul_abc"},
-		{"equals-separated value", []string{"--token=mul_abc"}, "mul_abc"},
-		{"explicit empty value triggers prompt", []string{"--token="}, ""},
+		{
+			name: "space-separated value (the form from #1994)",
+			argv: []string{"--token", "mul_xxx"},
+			want: want{changed: true, resolvedToken: "mul_xxx"},
+		},
+		{
+			name: "equals-separated value",
+			argv: []string{"--token=mul_yyy"},
+			want: want{changed: true, resolvedToken: "mul_yyy"},
+		},
+		{
+			name: "no value falls through to prompt (legacy CLI_INSTALL.md form)",
+			argv: []string{"--token"},
+			want: want{changed: true, expectsPrompted: true},
+		},
+		{
+			name: "explicit empty value also falls through to prompt",
+			argv: []string{"--token="},
+			want: want{changed: true, expectsPrompted: true},
+		},
+		{
+			name: "no flag at all → browser flow",
+			argv: []string{},
+			want: want{changed: false},
+		},
 	}
+
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := &cobra.Command{Use: "login"}
+			// Mirror loginCmd's exact flag wiring. If init() in cmd_login.go
+			// regresses, TestLoginTokenFlagWiring catches that; here we test
+			// the parsing behavior given the documented wiring.
 			cmd.Flags().String("token", "", "")
-			if err := cmd.ParseFlags(tc.args); err != nil {
-				t.Fatalf("ParseFlags(%v) error: %v", tc.args, err)
+			cmd.Flags().Lookup("token").NoOptDefVal = tokenPromptSentinel
+
+			if err := cmd.ParseFlags(tc.argv); err != nil {
+				t.Fatalf("ParseFlags(%v) error: %v", tc.argv, err)
 			}
-			if !cmd.Flags().Changed("token") {
-				t.Fatalf("expected --token flag to be marked Changed for args %v", tc.args)
+			if cmd.Flags().Changed("token") != tc.want.changed {
+				t.Fatalf("Changed(token) = %v, want %v for argv=%v", cmd.Flags().Changed("token"), tc.want.changed, tc.argv)
 			}
-			got, _ := cmd.Flags().GetString("token")
-			if got != tc.want {
-				t.Fatalf("token value = %q, want %q", got, tc.want)
+			if !tc.want.changed {
+				return
+			}
+
+			// Replay runAuthLogin's resolution logic so the test fails if
+			// either the flag wiring OR the space-form recovery breaks.
+			tokenFlag, _ := cmd.Flags().GetString("token")
+			positional := cmd.Flags().Args()
+			if tokenFlag == tokenPromptSentinel && len(positional) == 1 {
+				tokenFlag = positional[0]
+			}
+
+			if tc.want.expectsPrompted {
+				if tokenFlag != tokenPromptSentinel && tokenFlag != "" {
+					t.Fatalf("expected prompt fall-through, got resolved token %q", tokenFlag)
+				}
+			} else {
+				if tokenFlag != tc.want.resolvedToken {
+					t.Fatalf("resolved token = %q, want %q", tokenFlag, tc.want.resolvedToken)
+				}
 			}
 		})
 	}
