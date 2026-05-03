@@ -372,7 +372,7 @@ skill
 3. **注入**：当 agent 认领任务时，daemon 把挂载的 skill 内容写到任务工作目录的 **provider 原生位置**：
    - Claude Code → `.claude/skills/{name}/SKILL.md`
    - Codex → `CODEX_HOME/skills/{name}/`
-   - OpenCode → `.config/opencode/skills/{name}/SKILL.md`
+   - OpenCode → `.opencode/skills/{name}/SKILL.md`
    - Pi → `.pi/skills/{name}/SKILL.md`
    - Cursor → `.cursor/skills/{name}/SKILL.md`
    - GitHub Copilot → `.github/skills/{name}/SKILL.md`
