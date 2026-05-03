@@ -493,6 +493,7 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	WikiContent  pgtype.Text        `json:"wiki_content"`
 }
 
 type WorkspaceInvitation struct {

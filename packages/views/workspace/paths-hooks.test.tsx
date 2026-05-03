@@ -21,6 +21,7 @@ function makeWorkspace(over: Partial<Workspace>): Workspace {
     slug: "default",
     description: null,
     context: null,
+    wiki_content: null,
     settings: {},
     repos: [],
     issue_prefix: "DEF",
