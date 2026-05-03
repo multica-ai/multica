@@ -1158,6 +1158,124 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled verifies the toggle-off
+// path: a bare cache that already carries the Multica prepare-commit-msg hook
+// (e.g. from a prior worktree created with the setting on) must drop the hook
+// when the next CreateWorktree call passes CoAuthoredByEnabled=false.
+// Otherwise commits keep getting the trailer even after the user disables the
+// workspace setting.
+func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// First worktree: setting enabled → hook installed in the bare cache's
+	// shared hooks dir.
+	workDir1 := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir1,
+		AgentName:           "Test Agent",
+		TaskID:              "11111111-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (enabled) failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hookPath := filepath.Join(barePath, "hooks", "prepare-commit-msg")
+	if _, err := os.Stat(hookPath); err != nil {
+		t.Fatalf("precondition: expected hook to be installed at %s: %v", hookPath, err)
+	}
+
+	// Second worktree on the same bare cache: setting disabled → hook must
+	// be removed and a commit in the new worktree must NOT carry the
+	// trailer.
+	workDir2 := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir2,
+		AgentName:           "Test Agent",
+		TaskID:              "22222222-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	if strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer with setting disabled.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestRemoveCoAuthoredByHookPreservesUserHook verifies that the disable path
+// only deletes hooks installed by the daemon. A prepare-commit-msg hook
+// without the Multica marker (e.g. one a user added manually) must be left
+// untouched even when CoAuthoredByEnabled=false.
+func TestRemoveCoAuthoredByHookPreservesUserHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	userHook := "#!/bin/sh\n# user hook, not Multica\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(userHook), 0o755); err != nil {
+		t.Fatalf("seed user hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "33333333-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("user hook unexpectedly removed: %v", err)
+	}
+	if string(got) != userHook {
+		t.Errorf("user hook contents changed.\nwant:\n%s\ngot:\n%s", userHook, string(got))
+	}
+}
+
 // TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty verifies step 4's
 // safe-scan gating: when the cache has multiple refs/remotes/origin/*
 // entries, none match the common defaults, and none match the bare HEAD
