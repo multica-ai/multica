@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitCommitHorizontal } from "lucide-react";
+import { GitCommitHorizontal, Database, Cloud } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Label } from "@multica/ui/components/ui/label";
@@ -20,14 +20,17 @@ export function LabsTab() {
   const coAuthoredByEnabled =
     (workspace?.settings as Record<string, unknown>)?.co_authored_by_enabled !== false;
 
-  const handleToggle = async (checked: boolean) => {
+  const diffSnapshotMode =
+    ((workspace?.settings as Record<string, unknown>)?.diff_snapshot_mode as string) !== "dynamic";
+
+  const handleToggle = async (setting: string, checked: boolean) => {
     if (!workspace || saving) return;
     setSaving(true);
     try {
       const updated = await api.updateWorkspace(workspace.id, {
         settings: {
           ...((workspace.settings as Record<string, unknown>) ?? {}),
-          co_authored_by_enabled: checked,
+          [setting]: checked,
         },
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
@@ -75,7 +78,42 @@ export function LabsTab() {
               <Switch
                 id="co-authored-by"
                 checked={coAuthoredByEnabled}
-                onCheckedChange={handleToggle}
+                onCheckedChange={(checked) => handleToggle("co_authored_by_enabled", checked)}
+                disabled={saving}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">
+                  {diffSnapshotMode ? (
+                    <Database className="h-4 w-4" />
+                  ) : (
+                    <Cloud className="h-4 w-4" />
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="diff-snapshot"
+                    className="text-sm font-medium"
+                  >
+                    Snapshot diffs at commit time
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {diffSnapshotMode
+                      ? "Store full diffs in the database. Diffs remain viewable even if the branch is deleted."
+                      : "Fetch diffs on-demand from the repository. Saves database storage but diffs are lost if the branch is removed."}
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="diff-snapshot"
+                checked={diffSnapshotMode}
+                onCheckedChange={(checked) => handleToggle("diff_snapshot_mode", checked)}
                 disabled={saving}
               />
             </div>

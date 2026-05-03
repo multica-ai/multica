@@ -211,9 +211,11 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 	})
 
-	// task:completed — record "task_completed" activity
+	// task:completed — record "task_completed" activity and, if commit info
+	// is present, also record a "git_commit" activity.
 	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
 		handleTaskActivity(ctx, bus, queries, e, "task_completed")
+		handleTaskCommitActivity(ctx, bus, queries, e)
 	})
 
 	// task:failed — record "task_failed" activity
@@ -285,4 +287,89 @@ func publishActivityEvent(bus *events.Bus, original events.Event, activity db.Ac
 			},
 		},
 	})
+}
+
+// handleTaskCommitActivity records a "git_commit" activity when a task
+// completes with commit information in its result payload.
+func handleTaskCommitActivity(ctx context.Context, bus *events.Bus, queries *db.Queries, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	agentID, _ := payload["agent_id"].(string)
+	issueID, _ := payload["issue_id"].(string)
+	if issueID == "" {
+		return
+	}
+
+	// Extract commit info from the result field (daemon sends it as JSON).
+	resultRaw, _ := payload["result"]
+	if resultRaw == nil {
+		return
+	}
+	resultStr, _ := resultRaw.(string)
+	if resultStr == "" {
+		return
+	}
+
+	// Parse the result JSON looking for commit info.
+	var resultObj map[string]any
+	if err := json.Unmarshal([]byte(resultStr), &resultObj); err != nil {
+		return
+	}
+	commitRaw, ok := resultObj["commit"]
+	if !ok {
+		return
+	}
+	commitMap, ok := commitRaw.(map[string]any)
+	if !ok {
+		return
+	}
+
+	// Look up issue to get workspace_id and workspace settings.
+	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		slog.Error("activity: failed to get issue for commit event",
+			"issue_id", issueID, "error", err)
+		return
+	}
+
+	// Check workspace diff_snapshot_mode setting.
+	// "dynamic" = don't store the diff in DB, just SHA/URL for on-demand fetch.
+	// anything else (default) = snapshot the full diff.
+	ws, err := queries.GetWorkspace(ctx, issue.WorkspaceID)
+	diffSnapshot := true
+	if err == nil {
+		var wsSettings map[string]any
+		if len(ws.Settings) > 0 {
+			_ = json.Unmarshal(ws.Settings, &wsSettings)
+		}
+		if mode, ok := wsSettings["diff_snapshot_mode"].(string); ok && mode == "dynamic" {
+			diffSnapshot = false
+		}
+	}
+
+	// Strip the diff field if in dynamic mode to save DB storage.
+	if !diffSnapshot {
+		delete(commitMap, "diff")
+	}
+
+	// Build details JSON for the commit activity.
+	details, _ := json.Marshal(commitMap)
+
+	activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     parseUUID(issueID),
+		ActorType:   util.StrToText("agent"),
+		ActorID:     parseUUID(agentID),
+		Action:      "git_commit",
+		Details:     details,
+	})
+	if err != nil {
+		slog.Error("activity: failed to record git_commit activity",
+			"issue_id", issueID, "error", err)
+		return
+	}
+
+	publishActivityEvent(bus, e, activity)
 }

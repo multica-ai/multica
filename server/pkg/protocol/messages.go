@@ -38,6 +38,31 @@ type TaskCompletedPayload struct {
 	Output string `json:"output,omitempty"`
 }
 
+// CommitInfo is embedded in TaskCompletedPayload when an agent pushes commits.
+type CommitInfo struct {
+	SHA           string `json:"sha"`
+	ShortSHA      string `json:"short_sha"`
+	Message       string `json:"message"`
+	URL           string `json:"url,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	Repo          string `json:"repo,omitempty"`
+	AuthorName    string `json:"author_name,omitempty"`
+	AuthorEmail   string `json:"author_email,omitempty"`
+	CommittedAt   string `json:"committed_at,omitempty"`
+	TotalFiles    int    `json:"total_files,omitempty"`
+	TotalAdditions int   `json:"total_additions,omitempty"`
+	TotalDeletions int   `json:"total_deletions,omitempty"`
+	Diff          string `json:"diff,omitempty"`
+}
+
+// CommitFileChange describes a single file's changes in a commit.
+type CommitFileChange struct {
+	Path       string `json:"path"`
+	Additions  int    `json:"additions"`
+	Deletions  int    `json:"deletions"`
+	Status     string `json:"status"`
+}
+
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
 	TaskID  string         `json:"task_id"`

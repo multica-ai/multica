@@ -46,6 +46,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { CommitCard, parseCommitDetails } from "./commit-card";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -117,6 +118,11 @@ function formatActivity(
       return "completed the task";
     case "task_failed":
       return "task failed";
+    case "git_commit": {
+      const msg = details.message as string | undefined;
+      if (msg) return `committed: ${msg}`;
+      return `pushed a commit`;
+    }
     default:
       return entry.action ?? "";
   }
@@ -970,6 +976,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         const isStatusChange = entry.action === "status_changed";
                         const isPriorityChange = entry.action === "priority_changed";
                         const isDueDateChange = entry.action === "due_date_changed";
+                        const isGitCommit = entry.action === "git_commit";
+
+                        if (isGitCommit) {
+                          const commitDetails = parseCommitDetails(entry.details);
+                          if (commitDetails) {
+                            const diffSnapshotMode =
+                              ((workspace?.settings as Record<string, unknown>)?.diff_snapshot_mode as string) !== "dynamic";
+                            return (
+                              <CommitCard
+                                key={entry.id}
+                                commit={commitDetails}
+                                actorName={getActorName(entry.actor_type, entry.actor_id)}
+                                createdAt={entry.created_at}
+                                diffSnapshotMode={diffSnapshotMode}
+                              />
+                            );
+                          }
+                        }
 
                         let leadIcon: React.ReactNode;
                         if (isStatusChange && details.to) {
