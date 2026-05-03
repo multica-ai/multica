@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -348,26 +349,31 @@ export function ChatWindow() {
   const containerClass = isExpanded
     ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
     : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
-  const containerStyle: React.CSSProperties = isExpanded
-    ? {
-        opacity: isVisible ? 1 : 0,
-        pointerEvents: isOpen ? "auto" : "none",
-        transition: "opacity 150ms ease-out",
-      }
-    : {
-        width: `${renderWidth}px`,
-        height: `${renderHeight}px`,
-        opacity: isVisible ? 1 : 0,
-        transform: isVisible ? "scale(1)" : "scale(0.95)",
-        transformOrigin: "bottom right",
-        pointerEvents: isOpen ? "auto" : "none",
-        transition: isDragging
-          ? "none"
-          : "width 200ms ease-out, height 200ms ease-out, opacity 150ms ease-out, transform 150ms ease-out",
-      };
+  const containerStyle: React.CSSProperties = {
+    ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
+    transformOrigin: "bottom right",
+    pointerEvents: isOpen ? "auto" : "none",
+  };
 
   return (
-    <div ref={windowRef} className={containerClass} style={containerStyle}>
+    <motion.div
+      ref={windowRef}
+      className={containerClass}
+      style={containerStyle}
+      layout
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{
+        opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : 0.95,
+      }}
+      transition={{
+        layout: isDragging
+          ? { duration: 0 }
+          : { type: "spring", stiffness: 400, damping: 30 },
+        opacity: { duration: 0.15 },
+        scale: { type: "spring", stiffness: 500, damping: 35 },
+      }}
+    >
       {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
@@ -484,7 +490,7 @@ export function ChatWindow() {
         }
         rightAdornment={<ContextAnchorButton />}
       />
-    </div>
+    </motion.div>
   );
 }
 
