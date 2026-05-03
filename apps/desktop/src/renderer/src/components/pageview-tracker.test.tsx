@@ -33,13 +33,28 @@ vi.mock("@/stores/window-overlay-store", () => {
 });
 
 // Tab store — selectors read activeWorkspaceSlug + byWorkspace. Also expose
-// getState() for the seed pass.
+// getState() for the seed pass and the helpers the tracker imports
+// (useActiveTabIdentity, getActiveTab) so we don't have to re-import them
+// from the real store inside a mocked module.
 vi.mock("@/stores/tab-store", () => {
   const useTabStore = Object.assign(
     (selector: (s: typeof state) => unknown) => selector(state),
     { getState: () => state },
   );
-  return { useTabStore };
+  const getActiveTab = (s: typeof state) => {
+    const slug = s.activeWorkspaceSlug;
+    if (!slug) return null;
+    const group = s.byWorkspace[slug];
+    if (!group) return null;
+    return group.tabs.find((t) => t.id === group.activeTabId) ?? null;
+  };
+  const useActiveTabIdentity = () => ({
+    slug: state.activeWorkspaceSlug,
+    tabId: state.activeWorkspaceSlug
+      ? (state.byWorkspace[state.activeWorkspaceSlug]?.activeTabId ?? null)
+      : null,
+  });
+  return { useTabStore, getActiveTab, useActiveTabIdentity };
 });
 
 import { PageviewTracker } from "./pageview-tracker";

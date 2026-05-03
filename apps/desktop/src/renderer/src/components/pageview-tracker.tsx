@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import { capturePageview } from "@multica/core/analytics";
 import { useAuthStore } from "@multica/core/auth";
-import { useTabStore } from "@/stores/tab-store";
+import {
+  getActiveTab,
+  useActiveTabIdentity,
+  useTabStore,
+} from "@/stores/tab-store";
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
 
 /**
@@ -20,19 +24,17 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  *      `/acme/issues/123`). Kept in sync by `useTabRouterSync`.
  *
  * Tab-switch suppression: re-activating an already-open tab surfaces a
- * previously-visited path under a `(workspace, tabId)` we've already seen
- * — the pageview was emitted when the user originally navigated there, so
- * re-emitting on every switch just inflates PostHog billing without
- * adding signal (real-data audit: desktop tab switches were ~50% of all
- * `$pageview` events).
+ * previously-visited path under a `(workspace, tabId)` we have already
+ * seen — the pageview was emitted when the user originally navigated
+ * there, so re-emitting on every switch just inflates PostHog billing
+ * without adding signal (real-data audit: desktop tab switches were
+ * ~50% of all `$pageview` events).
  *
- * Distinguishing "switch" from real navigation requires remembering which
- * `(workspace, tabId)` we have already observed — and at which path.
  * Newly opened tabs (`openInNewTab`, `addTab`) and cross-workspace
  * `switchWorkspace(slug, path)` to a previously-unseen tab still fire,
- * because their key is not in the observed set yet. We seed the set from
- * the persisted tab store on mount so tabs restored from a previous
- * session don't all re-emit on first activation in the new session.
+ * because their key is not in the observed map yet. The map is seeded
+ * from the persisted tab store on first render so tabs restored from a
+ * previous session don't all re-emit on first activation.
  *
  * PostHog's `capture_pageview: true` auto-capture is intentionally off (see
  * `initAnalytics`) so this component owns the event shape, matching the web
@@ -41,46 +43,29 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
 export function PageviewTracker() {
   const user = useAuthStore((s) => s.user);
   const overlay = useWindowOverlayStore((s) => s.overlay);
-  const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
-  const activeTabId = useTabStore((s) => {
-    const slug = s.activeWorkspaceSlug;
-    if (!slug) return null;
-    return s.byWorkspace[slug]?.activeTabId ?? null;
-  });
-  const activeTabPath = useTabStore((s) => {
-    const slug = s.activeWorkspaceSlug;
-    if (!slug) return null;
-    const group = s.byWorkspace[slug];
-    if (!group) return null;
-    return group.tabs.find((t) => t.id === group.activeTabId)?.path ?? null;
-  });
+  const { slug: activeWorkspaceSlug, tabId: activeTabId } = useActiveTabIdentity();
+  const activeTabPath = useTabStore((s) => getActiveTab(s)?.path ?? null);
 
-  // (slug:tabId) → last path observed while that tab was visible. Used to
-  // tell "user is reactivating a tab they already saw on this path"
-  // (suppress) apart from "user opened a brand-new tab" or "user navigated
-  // to a new path inside the tab" (fire).
+  // (slug:tabId) → last path observed while that tab was visible. Lets us
+  // tell "re-activating a tab on a path we already saw" (suppress) apart
+  // from "newly opened tab" or "intra-tab navigation" (fire). Seeded
+  // synchronously on first render from the persisted tab store so
+  // session-restored tabs don't re-emit on first click.
   const observedTabsRef = useRef<Map<string, string> | null>(null);
-  const lastSurfaceRef = useRef<{
-    kind: "login" | "overlay" | "tab" | null;
-    key: string | null;
-    path: string | null;
-  }>({ kind: null, key: null, path: null });
-
-  // Seed the observed-tabs map once from the persisted tab store so tabs
-  // restored from the previous session don't fire a pageview the first
-  // time the user clicks into them. Lazy-initialized inside the effect so
-  // the store has had a chance to hydrate.
-  useEffect(() => {
-    if (observedTabsRef.current !== null) return;
+  if (observedTabsRef.current === null) {
     const seed = new Map<string, string>();
-    const groups = useTabStore.getState().byWorkspace;
-    for (const [slug, group] of Object.entries(groups)) {
+    for (const [slug, group] of Object.entries(useTabStore.getState().byWorkspace)) {
       for (const tab of group.tabs) {
         seed.set(`${slug}:${tab.id}`, tab.path);
       }
     }
     observedTabsRef.current = seed;
-  }, []);
+  }
+  const lastSurfaceRef = useRef<{
+    kind: "login" | "overlay" | "tab" | null;
+    key: string | null;
+    path: string | null;
+  }>({ kind: null, key: null, path: null });
 
   useEffect(() => {
     let kind: "login" | "overlay" | "tab";
@@ -101,9 +86,7 @@ export function PageviewTracker() {
       return;
     }
 
-    const observed = observedTabsRef.current ?? new Map<string, string>();
-    if (observedTabsRef.current === null) observedTabsRef.current = observed;
-
+    const observed = observedTabsRef.current!;
     const last = lastSurfaceRef.current;
     const next = { kind, key, path };
 
