@@ -180,7 +180,7 @@ export function CommitDiffDialog({ open, onOpenChange, commit, diffSnapshotMode 
                     -{commit.total_deletions}
                   </span>
                 )}
-                {commit.url && (
+                {commit.url && commit.url.includes("github.com") && (
                   <a
                     href={commit.url}
                     target="_blank"
