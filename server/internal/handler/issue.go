@@ -18,7 +18,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -27,33 +26,33 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
-	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
+	ID                 string                  `json:"id"`
+	WorkspaceID        string                  `json:"workspace_id"`
+	Number             int32                   `json:"number"`
+	Identifier         string                  `json:"identifier"`
+	Title              string                  `json:"title"`
+	Description        *string                 `json:"description"`
+	Status             string                  `json:"status"`
+	Priority           string                  `json:"priority"`
+	AssigneeType       *string                 `json:"assignee_type"`
+	AssigneeID         *string                 `json:"assignee_id"`
+	CreatorType        string                  `json:"creator_type"`
+	CreatorID          string                  `json:"creator_id"`
+	ParentIssueID      *string                 `json:"parent_issue_id"`
+	ProjectID          *string                 `json:"project_id"`
+	Position           float64                 `json:"position"`
+	DueDate            *string                 `json:"due_date"`
+	CreatedAt          string                  `json:"created_at"`
+	UpdatedAt          string                  `json:"updated_at"`
+	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels *[]LabelResponse `json:"labels,omitempty"`
+	Labels             *[]LabelResponse        `json:"labels,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -287,7 +286,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase) // $1
+	phraseParam := nextArg(escapedPhrase)               // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -859,11 +858,8 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // into a `multica issue create` invocation in the background; success and
 // failure both surface as inbox notifications to the requester.
 type QuickCreateIssueRequest struct {
-	AgentID   string  `json:"agent_id"`
-	Prompt    string  `json:"prompt"`
-	Priority  *string `json:"priority,omitempty"`
-	DueDate   *string `json:"due_date,omitempty"`
-	ProjectID *string `json:"project_id,omitempty"`
+	AgentID string `json:"agent_id"`
+	Prompt  string `json:"prompt"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -886,43 +882,6 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	agentUUID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
 	if !ok {
 		return
-	}
-	if req.Priority != nil {
-		priority := strings.ToLower(strings.TrimSpace(*req.Priority))
-		if priority == "" {
-			req.Priority = nil
-		} else {
-			switch priority {
-			case "urgent", "high", "medium", "low":
-				req.Priority = &priority
-			default:
-				writeError(w, http.StatusBadRequest, "priority must be one of: urgent, high, medium, low")
-				return
-			}
-		}
-	}
-	if req.DueDate != nil {
-		dueDate := strings.TrimSpace(*req.DueDate)
-		if dueDate == "" {
-			req.DueDate = nil
-		} else {
-			if _, err := time.Parse(time.RFC3339, dueDate); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
-				return
-			}
-			req.DueDate = &dueDate
-		}
-	}
-	if req.ProjectID != nil {
-		projectID := strings.TrimSpace(*req.ProjectID)
-		if projectID == "" {
-			req.ProjectID = nil
-		} else {
-			if _, ok := parseUUIDOrBadRequest(w, projectID, "project_id"); !ok {
-				return
-			}
-			req.ProjectID = &projectID
-		}
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
@@ -984,11 +943,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt, func(qc *service.QuickCreateContext) {
-		qc.Priority = req.Priority
-		qc.DueDate = req.DueDate
-		qc.ProjectID = req.ProjectID
-	})
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1087,16 +1042,16 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	Title              string   `json:"title"`
+	Description        *string  `json:"description"`
+	Status             string   `json:"status"`
+	Priority           string   `json:"priority"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
+	DueDate            *string  `json:"due_date"`
+	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1332,16 +1287,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
-	Priority      *string  `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	Position      *float64 `json:"position"`
-	DueDate       *string  `json:"due_date"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
+	Title              *string  `json:"title"`
+	Description        *string  `json:"description"`
+	Status             *string  `json:"status"`
+	Priority           *string  `json:"priority"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	Position           *float64 `json:"position"`
+	DueDate            *string  `json:"due_date"`
+	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {

@@ -61,11 +61,7 @@ func buildQuickCreatePrompt(task Task) string {
 	b.WriteString("  - Never echo the title in the description.\n\n")
 
 	// priority
-	if task.QuickCreatePriority != "" {
-		fmt.Fprintf(&b, "- **priority**: pass `--priority %s`.\n\n", task.QuickCreatePriority)
-	} else {
-		b.WriteString("- **priority**: one of `urgent`, `high`, `medium`, `low`, or omit. Map P0/P1 → urgent/high; \"asap\" → urgent. If unspecified, omit.\n\n")
-	}
+	b.WriteString("- **priority**: one of `urgent`, `high`, `medium`, `low`, or omit. Map P0/P1 → urgent/high; \"asap\" → urgent. If unspecified, omit.\n\n")
 
 	// assignee
 	b.WriteString("- **assignee**:\n")
@@ -80,17 +76,8 @@ func buildQuickCreatePrompt(task Task) string {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
 	}
 
-	// due date
-	if task.QuickCreateDueDate != "" {
-		fmt.Fprintf(&b, "- **due-date**: pass `--due-date %s`.\n\n", task.QuickCreateDueDate)
-	}
-
 	// fields to omit
-	if task.QuickCreateProjectID != "" {
-		fmt.Fprintf(&b, "- **project**: pass `--project %s`.\n\n", task.QuickCreateProjectID)
-	} else {
-		b.WriteString("- **project**: omit unless the platform UI shows a specific project context. The platform will route the issue to the workspace default.\n")
-	}
+	b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 

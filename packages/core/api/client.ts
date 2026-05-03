@@ -426,7 +426,7 @@ export class ApiClient {
     });
   }
 
-  async quickCreateIssue(data: { agent_id: string; prompt: string; priority?: string; due_date?: string; project_id?: string }): Promise<{ task_id: string }> {
+  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
