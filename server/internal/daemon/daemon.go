@@ -79,11 +79,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
-		cfg:           cfg,
-		client:        client,
-		repoCache:     repocache.New(cacheRoot, logger),
-		logger:        logger,
-		workspaces:    make(map[string]*workspaceState),
+		cfg:            cfg,
+		client:         client,
+		repoCache:      repocache.New(cacheRoot, logger),
+		logger:         logger,
+		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   make(map[string]Runtime),
 		runtimeSetCh:   make(chan struct{}, 1),
 		agentVersions:  make(map[string]string),
@@ -886,7 +886,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	// could brick the embedded binary mid-update. Refuse cleanly.
 	if d.cfg.LaunchedBy == "desktop" {
 		d.logger.Info("refusing CLI self-update: daemon is managed by Desktop", "runtime_id", runtimeID, "update_id", update.ID)
-		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 			"status": "failed",
 			"error":  "CLI is managed by Multica Desktop — update the Desktop app to upgrade the CLI",
 		})
@@ -903,7 +903,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
 	// Report running status.
-	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 		"status": "running",
 	})
 
@@ -915,7 +915,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		output, err = cli.UpdateViaBrew()
 		if err != nil {
 			d.logger.Error("CLI update failed", "error", err, "output", output)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 				"status": "failed",
 				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
 			})
@@ -927,7 +927,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		output, err = cli.UpdateViaDownload(update.TargetVersion)
 		if err != nil {
 			d.logger.Error("CLI update failed", "error", err)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 				"status": "failed",
 				"error":  fmt.Sprintf("download update failed: %v", err),
 			})
@@ -936,13 +936,69 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
-	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 		"status": "completed",
 		"output": fmt.Sprintf("Updated to %s", update.TargetVersion),
 	})
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+}
+
+// updateReportBackoffs defines the retry schedule for delivering CLI update
+// status back to the server. This mirrors localSkillReportBackoffs because
+// both features have the same user-visible failure mode: the daemon completed
+// work locally, but a transient report failure leaves the UI waiting until the
+// server-side request times out.
+//
+// Overridable for tests to avoid real sleeps.
+var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+
+func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
+	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
+	})
+}
+
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+	var lastErr error
+	for attempt, wait := range updateReportBackoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				d.logger.Error("CLI update report cancelled",
+					"runtime_id", runtimeID, "update_id", updateID,
+					"attempt", attempt, "error", ctx.Err())
+				return
+			case <-time.After(wait):
+			}
+		}
+
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				d.logger.Info("CLI update report succeeded after retry",
+					"runtime_id", runtimeID, "update_id", updateID,
+					"attempt", attempt+1)
+			}
+			return
+		}
+		lastErr = err
+
+		var reqErr *requestError
+		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
+			d.logger.Error("CLI update report rejected — not retrying",
+				"runtime_id", runtimeID, "update_id", updateID,
+				"status", reqErr.StatusCode, "error", err)
+			return
+		}
+
+		d.logger.Warn("CLI update report failed — will retry",
+			"runtime_id", runtimeID, "update_id", updateID,
+			"attempt", attempt+1, "error", err)
+	}
+	d.logger.Error("CLI update report exhausted retries",
+		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
