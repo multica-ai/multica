@@ -53,6 +53,14 @@ export function createMarkdownPasteExtension() {
               // clipboard path to preserve exact node structure.
               if (html && html.includes("data-pm-slice")) return false;
 
+              // Inside code blocks, pasted text must stay literal. Parsing as
+              // Markdown would split blank lines into paragraphs and break the
+              // surrounding code block structure.
+              if (editor.isActive("codeBlock")) {
+                editor.commands.insertContent(text);
+                return true;
+              }
+
               // Everything else (VS Code, text editors, .md files, terminals,
               // web pages): parse text/plain as Markdown.
               const json = editor.markdown.parse(text);
