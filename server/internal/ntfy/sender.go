@@ -3,7 +3,6 @@ package ntfy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -40,27 +39,33 @@ func New() *Sender {
 // Send posts a notification to topicURL. When token is non-empty it is sent
 // as a Bearer auth header. Returns an error only for transport or HTTP-level
 // failures; callers typically fire-and-forget via a goroutine.
+//
+// ntfy supports two publishing modes:
+//  1. POST to topic URL (e.g. https://ntfy.sh/mytopic) with plain-text body
+//     and metadata in headers (X-Title, X-Priority, X-Click, etc.)
+//  2. POST to base URL with a JSON body containing a "topic" field.
+//
+// We use mode 1 because users configure a full topic URL. Using JSON mode
+// with an empty "topic" field causes ntfy to send the raw JSON as the message
+// body rather than parsing it.
 func (s *Sender) Send(ctx context.Context, topicURL, token string, msg Message) error {
 	priority, ok := priorityFromSeverity[msg.Severity]
 	if !ok {
 		priority = 3
 	}
 
-	body, err := json.Marshal(map[string]any{
-		"topic":    "", // unused when posting directly to a topic URL
-		"title":    msg.Title,
-		"message":  msg.Body,
-		"priority": priority,
-	})
-	if err != nil {
-		return fmt.Errorf("ntfy: marshal: %w", err)
+	body := msg.Body
+	if body == "" {
+		body = msg.Title
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, topicURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, topicURL, bytes.NewReader([]byte(body)))
 	if err != nil {
 		return fmt.Errorf("ntfy: build request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	req.Header.Set("X-Title", msg.Title)
+	req.Header.Set("X-Priority", fmt.Sprintf("%d", priority))
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
