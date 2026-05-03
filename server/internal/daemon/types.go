@@ -50,6 +50,12 @@ type Task struct {
 	// Falling back to the daemon's own PAT would defeat the security
 	// model — agents must NEVER see the daemon's full token. JEH-324.
 	TaskToken string `json:"task_token,omitempty"`
+	// SandboxEnabled is the per-runtime sandbox override (JEH-418). nil
+	// means "no override, fall back to the daemon's MULTICA_ENABLE_SANDBOX
+	// default"; true/false force sandbox on/off for this task regardless
+	// of the env var. Carried on every claim so an admin's UI toggle takes
+	// effect at the next claim — no daemon restart needed.
+	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

@@ -8,8 +8,12 @@ import type { AgentRuntime } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import {
+  useDeleteRuntime,
+  useUpdateRuntimeSandbox,
+} from "@multica/core/runtimes/mutations";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,6 +64,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const deleteMutation = useDeleteRuntime(wsId);
+  const sandboxMutation = useUpdateRuntimeSandbox(wsId);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -77,6 +82,38 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canDelete = isAdmin || isRuntimeOwner;
+
+  // Sandbox toggle is admin-only on the server. We render the section to all
+  // members for transparency (so a member knows their runtime IS or ISN'T
+  // sandboxed) but disable the controls and surface why — silent absence
+  // looked like a missing feature, and the previous toast-on-403 was easy to
+  // miss on a slow network.
+  const canEditSandbox = isAdmin;
+  const sandboxOverride = runtime.sandbox_enabled;
+  // For the binary Switch we treat null (no override) as "on" — that matches
+  // the daemon-wide darwin default and keeps the control truthful for the
+  // overwhelmingly common case. The "Reset to default" link below shows up
+  // whenever an explicit override is in place, so the inherit state is
+  // recoverable without a tri-state control.
+  const sandboxChecked = sandboxOverride === null ? true : sandboxOverride;
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
+  const handleSandboxMutate = (next: boolean | null) => {
+    setSandboxError(null);
+    sandboxMutation.mutate(
+      { runtimeId: runtime.id, sandboxEnabled: next },
+      {
+        onError: (e) => {
+          // Server returns a JSON {error: "..."} body. The api client surfaces
+          // it as Error.message — show it verbatim so the user sees the actual
+          // reason (permission, validation, server-side state) instead of a
+          // generic "Failed".
+          const msg = e instanceof Error ? e.message : "Unknown error";
+          setSandboxError(msg);
+        },
+      },
+    );
+  };
 
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
@@ -171,6 +208,77 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           </h3>
           <PingSection runtimeId={runtime.id} />
         </div>
+
+        {/* Sandbox toggle — local runtimes only. The macOS seatbelt sandbox
+            is a no-op elsewhere, so showing the control on a Linux cloud
+            runtime would just confuse operators. The control is rendered to
+            every member for transparency about the current state, but the
+            toggle is interactive only for owner/admin (matches the server
+            permission gate). */}
+        {runtime.runtime_mode === "local" && (
+          <div>
+            <h3 className="text-xs font-medium text-muted-foreground mb-3">
+              Sandbox
+            </h3>
+            <div className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">
+                    Run agent CLIs in macOS sandbox
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {sandboxOverride === null
+                      ? "Inheriting the daemon's MULTICA_ENABLE_SANDBOX setting (default on macOS)."
+                      : sandboxOverride
+                        ? "Sandbox is forced on for this runtime."
+                        : "Sandbox is disabled for this runtime — agents run with full host access."}
+                  </p>
+                </div>
+                <Switch
+                  checked={sandboxChecked}
+                  onCheckedChange={(next) => handleSandboxMutate(next)}
+                  disabled={!canEditSandbox || sandboxMutation.isPending}
+                  aria-label="Sandbox enabled"
+                />
+              </div>
+              {!canEditSandbox && (
+                <p className="mt-3 text-xs text-muted-foreground italic">
+                  Only workspace owners and admins can change this setting.
+                </p>
+              )}
+              {canEditSandbox && sandboxOverride !== null && (
+                <button
+                  type="button"
+                  className="mt-3 text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                  onClick={() => handleSandboxMutate(null)}
+                  disabled={sandboxMutation.isPending}
+                >
+                  Reset to default
+                </button>
+              )}
+              {sandboxError && (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs"
+                >
+                  <div className="font-medium text-destructive">
+                    Couldn&apos;t update sandbox setting
+                  </div>
+                  <p className="mt-1 text-destructive/90 break-words">
+                    {sandboxError}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-destructive/80 underline-offset-2 hover:underline"
+                    onClick={() => setSandboxError(null)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Usage */}
         <div>

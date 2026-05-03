@@ -16,6 +16,9 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  // Per-runtime sandbox override (JEH-418). null = inherit the daemon's
+  // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
+  sandbox_enabled: boolean | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

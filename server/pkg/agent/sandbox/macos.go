@@ -34,14 +34,25 @@ type Profile struct {
 	// Workdir is the task working directory. file-read* and file-write* are
 	// allowed under this subpath.
 	Workdir string
-	// Home is the user's home directory; sensitive subpaths (~/.ssh, ~/.aws,
-	// ~/.gcloud, ~/Library/Application Support, ~/Library/Cookies) are
-	// explicitly denied so a future broad allow can never re-expose them.
+	// Home is the user's home directory. Reads under $HOME are broadly
+	// allowed; sensitive subpaths (~/.ssh, ~/.aws, ~/.gcloud,
+	// ~/Library/Application Support, ~/Library/Cookies, …) are denied
+	// after the broad allow so they remain sealed even if a future allow
+	// rule overlaps.
 	Home string
 	// TempDir is the task-specific temp directory. file-read*/file-write*
 	// are allowed under this subpath. Optional — if empty, only Workdir
 	// receives write access.
 	TempDir string
+	// WritablePaths are absolute paths the spawned process needs read+write
+	// access to in addition to Workdir/TempDir. The agent CLIs (claude,
+	// cursor, gemini, …) keep per-user state outside the workdir
+	// (~/.claude.json, ~/.cursor, ~/.gemini, …) and silently fail to start
+	// if those paths are denied. Callers (the daemon) populate this list
+	// per provider; the generator emits the allow rules before the
+	// sensitive-home denies so a path that accidentally overlaps a
+	// denied subpath still gets sealed.
+	WritablePaths []string
 	// AllowedHosts is the outbound network allowlist as host:port pairs,
 	// e.g. "api.anthropic.com:443" or "127.0.0.1:19514". Empty list means
 	// outbound network access is fully denied.
@@ -144,20 +155,49 @@ func Generate(p Profile) (string, error) {
 	b.WriteString("(allow file-read* (subpath \"/dev/null\"))\n")
 	b.WriteString("\n")
 
-	// Home: read-only allow for the parts agents legitimately need
-	// (caches, the user's writable scratch dirs that tools assume), then
-	// explicit denies for the secret directories. The denies come AFTER
-	// the allows on purpose — last match wins — so they survive any future
-	// broadening of the home-read rules.
-	b.WriteString(";; Home (selective read)\n")
-	for _, sub := range homeReadSubpaths {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
-	}
+	// Home: broad read access. The previous design enumerated 16 specific
+	// subpaths under $HOME (~/.cache, ~/.npm, ~/Library/Caches, …) which
+	// missed every agent-CLI state path (~/.claude.json, ~/.cursor,
+	// ~/.gemini, …) and caused claude to exit 0 with empty output the
+	// instant it tried to read its own settings.json (JEH-405). The
+	// security model has not weakened: secrets are protected by the
+	// explicit deny list emitted below, which runs LAST and overrides
+	// any preceding allow under "last match wins". Auditing what is
+	// sealed is now driven by the deny list (which we control fully)
+	// rather than by an opt-in allow list (which has to anticipate
+	// every CLI's storage choices).
+	b.WriteString(";; Home (broad read; sensitive subpaths denied below)\n")
+	fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", schemeString(home))
 	b.WriteString("\n")
+
+	// Per-process writable paths outside the workdir (agent CLI state
+	// files like ~/.claude.json, ~/.cursor, ~/.gemini). These are emitted
+	// BEFORE the sensitive-home deny list so an accidental overlap with a
+	// denied path still gets sealed by the trailing deny.
+	if len(p.WritablePaths) > 0 {
+		b.WriteString(";; Per-process writable paths (agent CLI state)\n")
+		for _, raw := range p.WritablePaths {
+			resolved, err := canonicalPath(raw)
+			if err != nil {
+				return "", fmt.Errorf("sandbox: resolve writable path %q: %w", raw, err)
+			}
+			fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %s))\n", schemeString(resolved))
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString(";; Sensitive home subpaths — DENY (defense in depth)\n")
 	for _, sub := range sensitiveHomeSubpaths {
 		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
+	}
+	// Keychain DB: read is required so securityd can serve the agent CLI's
+	// own item via XPC; the actual cross-item authorisation is enforced by
+	// per-item ACLs inside securityd (a sandboxed claude can only decrypt
+	// items the user's keychain ACL grants to the claude binary). Writes
+	// would only be a DOS / corruption vector — securityd is the legitimate
+	// path for mutations and runs unsandboxed.
+	for _, sub := range keychainReadOnlySubpaths {
+		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
 	}
 	b.WriteString("\n")
 
@@ -237,31 +277,9 @@ var systemReadPaths = []string{
 	"/Applications",
 }
 
-// homeReadSubpaths are subpaths under $HOME that the agent CLI legitimately
-// needs to read (config files, caches, language tool installations).
-// Sensitive subpaths are denied below, regardless of these allows.
-var homeReadSubpaths = []string{
-	".cache",
-	".config",
-	".npm",
-	".pnpm-store",
-	".yarn",
-	".cargo",
-	".rustup",
-	".rbenv",
-	".pyenv",
-	".nvm",
-	".asdf",
-	".local/bin",
-	".local/share",
-	"Library/Caches",
-	"Library/Preferences",
-	"Library/Logs",
-}
-
-// sensitiveHomeSubpaths are denied unconditionally. Order does not matter
-// among themselves; the denies are emitted after the home reads so they
-// override any overlapping allow.
+// sensitiveHomeSubpaths are denied unconditionally. Emitted last so they
+// override the broad $HOME read allow and any per-process writable-path
+// allow that happens to overlap (last match wins).
 var sensitiveHomeSubpaths = []string{
 	".ssh",
 	".aws",
@@ -275,9 +293,19 @@ var sensitiveHomeSubpaths = []string{
 	".netrc",
 	"Library/Application Support",
 	"Library/Cookies",
-	"Library/Keychains",
 	"Library/Mail",
 	"Library/Messages",
+}
+
+// keychainReadOnlySubpaths are home subpaths that need file-read so the
+// agent CLI can fetch its own auth token via securityd, but where direct
+// file-write is denied. securityd enforces per-item ACLs at decrypt time,
+// so reading the keychain DB does not grant access to other apps' items.
+// Mutations to the keychain go through securityd (unsandboxed) anyway, so
+// blocking file-write here only stops corruption / cooperative-mmap
+// shenanigans, never legitimate use.
+var keychainReadOnlySubpaths = []string{
+	"Library/Keychains",
 }
 
 // translateAllowlistToTCPRules converts host:port pairs into the

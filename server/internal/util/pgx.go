@@ -74,3 +74,17 @@ func UUIDToPtr(u pgtype.UUID) *string {
 	s := UUIDToString(u)
 	return &s
 }
+
+func BoolToPtr(b pgtype.Bool) *bool {
+	if !b.Valid {
+		return nil
+	}
+	return &b.Bool
+}
+
+func PtrToBool(p *bool) pgtype.Bool {
+	if p == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *p, Valid: true}
+}

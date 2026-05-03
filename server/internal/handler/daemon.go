@@ -535,7 +535,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify the caller owns this runtime's workspace.
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID)
+	if !ok {
 		return
 	}
 
@@ -549,9 +550,17 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{"status": "ok"}
 
-	// Check for pending ping requests for this runtime.
+	// Check for pending ping requests for this runtime. Include the runtime's
+	// per-runtime sandbox override (JEH-418) so the daemon's ping-side
+	// buildSandboxConfig honours the same setting as the task-side path —
+	// otherwise an admin who disabled the sandbox via the UI would still see
+	// pings fail because they ran sandboxed.
 	if pending := h.PingStore.PopPending(req.RuntimeID); pending != nil {
-		resp["pending_ping"] = map[string]string{"id": pending.ID}
+		pingPayload := map[string]any{"id": pending.ID}
+		if override := boolToPtr(rt.SandboxEnabled); override != nil {
+			pingPayload["sandbox_enabled"] = *override
+		}
+		resp["pending_ping"] = pingPayload
 	}
 
 	// Check for pending update requests for this runtime.
@@ -648,6 +657,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
+
+	// Surface the runtime's per-runtime sandbox override (JEH-418) so the
+	// daemon can honour it on the next buildSandboxConfig without needing a
+	// restart. nil here is meaningful: it tells the daemon to fall back to
+	// its env-var default. We keep going even if the lookup fails — losing
+	// the override defaults to safe-by-default sandboxing.
+	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
+	} else {
+		slog.Warn("failed to load runtime for sandbox override", "runtime_id", uuidToString(task.RuntimeID), "error", err)
+	}
+
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		var customEnv map[string]string

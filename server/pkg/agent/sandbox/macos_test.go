@@ -83,6 +83,119 @@ func TestGenerate_DeniesSensitivePaths(t *testing.T) {
 	}
 }
 
+func TestGenerate_AllowsBroadHomeRead(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	want := `(allow file-read* (subpath "/Users/sandbox"))`
+	if !strings.Contains(out, want) {
+		t.Errorf("profile missing broad home read rule\nprofile:\n%s", out)
+	}
+}
+
+// TestGenerate_WritablePathsEmittedBeforeDenies guards JEH-405: agent CLIs
+// (claude, cursor, gemini, …) read+write per-user state files outside the
+// workdir (~/.claude.json, ~/.cursor, …). Without those allows the CLI
+// silently exits with empty output the moment it tries to persist its
+// session. The allows MUST sit before the sensitive-home denies so an
+// accidentally overlapping path still gets sealed by "last match wins".
+func TestGenerate_WritablePathsEmittedBeforeDenies(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+		WritablePaths: []string{
+			"/Users/sandbox/.claude",
+			"/Users/sandbox/.claude.json",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	allow := `(allow file-read* file-write* (subpath "/Users/sandbox/.claude"))`
+	if !strings.Contains(out, allow) {
+		t.Errorf("profile missing writable-path allow %q\nprofile:\n%s", allow, out)
+	}
+	idxAllow := strings.Index(out, allow)
+	idxDeny := strings.Index(out, "Sensitive home subpaths")
+	if idxAllow < 0 || idxDeny < 0 {
+		t.Fatalf("expected both writable allow and sensitive deny block; allow@%d deny@%d", idxAllow, idxDeny)
+	}
+	if idxAllow > idxDeny {
+		t.Errorf("writable-path allow must come before sensitive denies (allow@%d deny@%d)", idxAllow, idxDeny)
+	}
+}
+
+// TestGenerate_KeychainReadAllowedWriteDenied guards JEH-405's second
+// blocker: claude (and the other agent CLIs) authenticate via the
+// macOS Keychain. securityd serves keychain items over XPC but
+// requires the calling process to have file-read access on the
+// keychain DB. The previous full-deny on Library/Keychains broke
+// auth — claude exited with "Not logged in · Please run /login".
+//
+// Reads must be allowed (covered by the broad $HOME read); writes
+// must still be denied so a sandboxed agent cannot corrupt the DB
+// or smuggle items in (legitimate mutations go through securityd
+// which runs unsandboxed).
+func TestGenerate_KeychainReadAllowedWriteDenied(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	// Must not appear in the read+write deny block.
+	bothDenied := `(deny file-read* file-write* (subpath "/Users/sandbox/Library/Keychains"))`
+	if strings.Contains(out, bothDenied) {
+		t.Errorf("keychain DB must not be in the read+write deny block:\n%s", out)
+	}
+	// Must appear in the write-only deny block.
+	writeDenied := `(deny file-write* (subpath "/Users/sandbox/Library/Keychains"))`
+	if !strings.Contains(out, writeDenied) {
+		t.Errorf("expected write-only deny on keychain DB, profile:\n%s", out)
+	}
+	// Read is granted via the broad $HOME read; the write-only deny
+	// must be emitted AFTER that broad allow so "last match wins"
+	// gives us read but not write.
+	idxBroadHome := strings.Index(out, `(allow file-read* (subpath "/Users/sandbox"))`)
+	idxWriteDeny := strings.Index(out, writeDenied)
+	if idxBroadHome < 0 || idxWriteDeny < 0 {
+		t.Fatalf("missing required rules; broadHome@%d writeDeny@%d", idxBroadHome, idxWriteDeny)
+	}
+	if idxWriteDeny < idxBroadHome {
+		t.Errorf("write-deny on keychain must come after broad $HOME read (deny@%d allow@%d)", idxWriteDeny, idxBroadHome)
+	}
+}
+
+// TestGenerate_WritablePathOverlappingSensitiveStillDenied verifies the
+// "last match wins" guarantee: even if a caller passes a writable path
+// that overlaps a sensitive subpath (a misconfiguration we do not want
+// to silently honour), the trailing deny rule still seals it.
+func TestGenerate_WritablePathOverlappingSensitiveStillDenied(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+		// Pretend a misconfiguration tries to make ~/.ssh writable.
+		WritablePaths: []string{"/Users/sandbox/.ssh"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	deny := `(deny file-read* file-write* (subpath "/Users/sandbox/.ssh"))`
+	if !strings.Contains(out, deny) {
+		t.Fatalf("profile missing sensitive deny rule\nprofile:\n%s", out)
+	}
+	idxAllow := strings.Index(out, `(allow file-read* file-write* (subpath "/Users/sandbox/.ssh"))`)
+	idxDeny := strings.Index(out, deny)
+	if idxAllow >= 0 && idxAllow > idxDeny {
+		t.Errorf("an overlapping writable allow must NOT come after the sensitive deny (allow@%d deny@%d)", idxAllow, idxDeny)
+	}
+}
+
 func TestGenerate_AllowsWorkdirReadWrite(t *testing.T) {
 	out, err := Generate(Profile{
 		Workdir: "/Users/sandbox/work",

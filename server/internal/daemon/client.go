@@ -155,6 +155,12 @@ type HeartbeatResponse struct {
 // PendingPing represents a ping test request from the server.
 type PendingPing struct {
 	ID string `json:"id"`
+	// SandboxEnabled mirrors the runtime's per-runtime sandbox override
+	// (JEH-418) at the moment the server issued this ping request.
+	// nil = inherit the daemon's env-var default. Without this field, an
+	// admin who disabled sandbox via the UI would still see pings fail
+	// because the ping path ran sandboxed against env-var-default=true.
+	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
 }
 
 // PendingUpdate represents a CLI update request from the server.

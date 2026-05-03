@@ -16,20 +16,24 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	DaemonID     *string `json:"daemon_id"`
-	Name         string  `json:"name"`
-	RuntimeMode  string  `json:"runtime_mode"`
-	Provider     string  `json:"provider"`
-	LaunchHeader string  `json:"launch_header"`
-	Status       string  `json:"status"`
-	DeviceInfo   string  `json:"device_info"`
-	Metadata     any     `json:"metadata"`
-	OwnerID      *string `json:"owner_id"`
-	LastSeenAt   *string `json:"last_seen_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID             string  `json:"id"`
+	WorkspaceID    string  `json:"workspace_id"`
+	DaemonID       *string `json:"daemon_id"`
+	Name           string  `json:"name"`
+	RuntimeMode    string  `json:"runtime_mode"`
+	Provider       string  `json:"provider"`
+	LaunchHeader   string  `json:"launch_header"`
+	Status         string  `json:"status"`
+	DeviceInfo     string  `json:"device_info"`
+	Metadata       any     `json:"metadata"`
+	OwnerID        *string `json:"owner_id"`
+	// SandboxEnabled is the per-runtime override for the macOS sandbox
+	// (JEH-418). nil = inherit the daemon's MULTICA_ENABLE_SANDBOX value;
+	// true/false = force on/off for this runtime regardless of env.
+	SandboxEnabled *bool   `json:"sandbox_enabled"`
+	LastSeenAt     *string `json:"last_seen_at"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -42,20 +46,21 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 
 	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+		ID:             uuidToString(rt.ID),
+		WorkspaceID:    uuidToString(rt.WorkspaceID),
+		DaemonID:       textToPtr(rt.DaemonID),
+		Name:           rt.Name,
+		RuntimeMode:    rt.RuntimeMode,
+		Provider:       rt.Provider,
+		LaunchHeader:   agent.LaunchHeader(rt.Provider),
+		Status:         rt.Status,
+		DeviceInfo:     rt.DeviceInfo,
+		Metadata:       metadata,
+		OwnerID:        uuidToPtr(rt.OwnerID),
+		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
+		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
+		CreatedAt:      timestampToString(rt.CreatedAt),
+		UpdatedAt:      timestampToString(rt.UpdatedAt),
 	}
 }
 
@@ -340,4 +345,73 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// UpdateRuntimeSandboxRequest carries the per-runtime sandbox override
+// (JEH-418). A null value clears the override and falls back to the daemon's
+// MULTICA_ENABLE_SANDBOX env var.
+type UpdateRuntimeSandboxRequest struct {
+	SandboxEnabled *bool `json:"sandbox_enabled"`
+}
+
+// UpdateAgentRuntimeSandbox sets or clears the per-runtime sandbox override.
+// Restricted to workspace owner/admin: this is a security-posture toggle and
+// runtime owners shouldn't be able to silently disable sandboxing on a runtime
+// they registered. The daemon picks up the new value at the next claim or
+// pending-ping; no daemon restart needed.
+func (h *Handler) UpdateAgentRuntimeSandbox(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can change sandbox settings")
+		return
+	}
+
+	var req UpdateRuntimeSandboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated, err := h.Queries.UpdateAgentRuntimeSandbox(r.Context(), db.UpdateAgentRuntimeSandboxParams{
+		ID:             rt.ID,
+		SandboxEnabled: ptrToBool(req.SandboxEnabled),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update sandbox setting")
+		return
+	}
+
+	logVal := "null"
+	if req.SandboxEnabled != nil {
+		if *req.SandboxEnabled {
+			logVal = "true"
+		} else {
+			logVal = "false"
+		}
+	}
+	slog.Info("runtime sandbox setting updated",
+		"runtime_id", runtimeID,
+		"updated_by", uuidToString(member.UserID),
+		"sandbox_enabled", logVal,
+	)
+
+	// Notify the frontend to refresh runtime list/details.
+	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+		"action":     "update",
+		"runtime_id": runtimeID,
+	})
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
 }

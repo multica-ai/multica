@@ -488,7 +488,7 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 				if resp.PendingPing != nil {
 					rt := d.findRuntime(rid)
 					if rt != nil {
-						go d.handlePing(ctx, *rt, resp.PendingPing.ID)
+						go d.handlePing(ctx, *rt, resp.PendingPing.ID, resp.PendingPing.SandboxEnabled)
 					}
 				}
 
@@ -501,7 +501,12 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
+// handlePing executes a ping request from the server. sandboxOverride is the
+// per-runtime sandbox setting (JEH-418) carried in the heartbeat's pending
+// ping payload — it lets an admin's UI toggle take effect for pings as well
+// as task execution, so an unsandboxed runtime doesn't suddenly fail health
+// checks because the ping path ran sandboxed against the env-var default.
+func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sandboxOverride *bool) {
 	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
 
 	start := time.Now()
@@ -519,7 +524,7 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string) {
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Logger:         d.logger,
-		Sandbox:        d.buildSandboxConfig(rt.Provider, nil),
+		Sandbox:        d.buildSandboxConfig(rt.Provider, sandboxOverride, nil),
 	})
 	if err != nil {
 		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
@@ -1003,7 +1008,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
-		Sandbox:        d.buildSandboxConfig(provider, task.Agent),
+		Sandbox:        d.buildSandboxConfig(provider, task.SandboxEnabled, task.Agent),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

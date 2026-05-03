@@ -440,6 +440,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/ping/{pingId}", h.GetPing)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
+					r.Patch("/sandbox", h.UpdateAgentRuntimeSandbox)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})

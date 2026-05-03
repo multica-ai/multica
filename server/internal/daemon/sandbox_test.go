@@ -3,6 +3,7 @@ package daemon
 import (
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -12,14 +13,14 @@ func sandboxTestDaemon(cfg Config) *Daemon {
 
 func TestBuildSandboxConfig_DisabledReturnsNil(t *testing.T) {
 	d := sandboxTestDaemon(Config{EnableSandbox: false})
-	if got := d.buildSandboxConfig("claude", nil); got != nil {
+	if got := d.buildSandboxConfig("claude", nil, nil); got != nil {
 		t.Errorf("expected nil when sandbox disabled, got %+v", got)
 	}
 }
 
 func TestBuildSandboxConfig_SkipsCodex(t *testing.T) {
 	d := sandboxTestDaemon(Config{EnableSandbox: true, HealthPort: 19514})
-	if got := d.buildSandboxConfig("codex", nil); got != nil {
+	if got := d.buildSandboxConfig("codex", nil, nil); got != nil {
 		t.Errorf("expected nil for codex (own sandbox), got %+v", got)
 	}
 }
@@ -30,7 +31,7 @@ func TestBuildSandboxConfig_IncludesLoopbackAndProvider(t *testing.T) {
 		HealthPort:    19514,
 		ServerBaseURL: "https://multica.example.com",
 	})
-	got := d.buildSandboxConfig("claude", nil)
+	got := d.buildSandboxConfig("claude", nil, nil)
 	if got == nil || !got.Enabled {
 		t.Fatal("expected enabled sandbox config")
 	}
@@ -51,7 +52,7 @@ func TestBuildSandboxConfig_MergesPerAgentOverride(t *testing.T) {
 		EnableSandbox: true,
 		HealthPort:    19514,
 	})
-	got := d.buildSandboxConfig("claude", &AgentData{
+	got := d.buildSandboxConfig("claude", nil, &AgentData{
 		SandboxAllowlist: []string{"api.openai.com:443"},
 	})
 	if got == nil {
@@ -68,12 +69,95 @@ func TestBuildSandboxConfig_MergesDaemonAllowlist(t *testing.T) {
 		HealthPort:       19514,
 		SandboxAllowlist: []string{"proxy.internal:8080"},
 	})
-	got := d.buildSandboxConfig("claude", nil)
+	got := d.buildSandboxConfig("claude", nil, nil)
 	if got == nil {
 		t.Fatal("expected sandbox config")
 	}
 	if !slices.Contains(got.NetworkAllowlist, "proxy.internal:8080") {
 		t.Errorf("daemon allowlist not merged: %v", got.NetworkAllowlist)
+	}
+}
+
+// boolPtr is a tiny helper for the per-runtime override tests below.
+func boolPtr(b bool) *bool { return &b }
+
+// TestBuildSandboxConfig_RuntimeOverrideEnables drives the JEH-418 acceptance
+// criterion from the "force on" direction: env says off, runtime says on, the
+// runtime wins and the daemon hands a sandbox config to the backend.
+func TestBuildSandboxConfig_RuntimeOverrideEnables(t *testing.T) {
+	d := sandboxTestDaemon(Config{EnableSandbox: false, HealthPort: 19514})
+	got := d.buildSandboxConfig("claude", boolPtr(true), nil)
+	if got == nil || !got.Enabled {
+		t.Fatalf("expected sandbox enabled by per-runtime override, got %+v", got)
+	}
+}
+
+// TestBuildSandboxConfig_RuntimeOverrideDisables drives the JEH-418 reverse
+// case: env says sandbox on, but the runtime is explicitly opted out (e.g.
+// Sara's Mac mini where claude OAuth lives in macOS Keychain unreachable from
+// the sandbox). The override must beat the env-var default.
+func TestBuildSandboxConfig_RuntimeOverrideDisables(t *testing.T) {
+	d := sandboxTestDaemon(Config{EnableSandbox: true, HealthPort: 19514})
+	if got := d.buildSandboxConfig("claude", boolPtr(false), nil); got != nil {
+		t.Errorf("expected nil when per-runtime override disables sandbox, got %+v", got)
+	}
+}
+
+// TestBuildSandboxConfig_NilOverrideUsesEnvDefault confirms the no-override
+// path still falls through to cfg.EnableSandbox in both directions, so
+// existing runtimes (sandbox_enabled IS NULL) keep their previous behaviour.
+func TestBuildSandboxConfig_NilOverrideUsesEnvDefault(t *testing.T) {
+	dOn := sandboxTestDaemon(Config{EnableSandbox: true, HealthPort: 19514})
+	if got := dOn.buildSandboxConfig("claude", nil, nil); got == nil {
+		t.Errorf("EnableSandbox=true + nil override: expected sandbox config, got nil")
+	}
+	dOff := sandboxTestDaemon(Config{EnableSandbox: false, HealthPort: 19514})
+	if got := dOff.buildSandboxConfig("claude", nil, nil); got != nil {
+		t.Errorf("EnableSandbox=false + nil override: expected nil, got %+v", got)
+	}
+}
+
+// TestBuildSandboxConfig_PopulatesProviderWritePaths guards JEH-405:
+// claude (and the other agent CLIs) keep state outside the workdir
+// (~/.claude.json, ~/.cursor, …). Without those paths in
+// SandboxConfig.WritablePaths the seatbelt profile denies the writes
+// and claude exits 0 with empty output. The daemon must populate the
+// list per provider.
+func TestBuildSandboxConfig_PopulatesProviderWritePaths(t *testing.T) {
+	d := sandboxTestDaemon(Config{EnableSandbox: true, HealthPort: 19514})
+	got := d.buildSandboxConfig("claude", nil, nil)
+	if got == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if len(got.WritablePaths) == 0 {
+		t.Fatal("expected non-empty writable paths for claude")
+	}
+	hasClaudeJSON := false
+	hasClaudeDir := false
+	for _, p := range got.WritablePaths {
+		if strings.HasSuffix(p, "/.claude.json") {
+			hasClaudeJSON = true
+		}
+		if strings.HasSuffix(p, "/.claude") {
+			hasClaudeDir = true
+		}
+	}
+	if !hasClaudeJSON {
+		t.Errorf("expected ~/.claude.json in writable paths: %v", got.WritablePaths)
+	}
+	if !hasClaudeDir {
+		t.Errorf("expected ~/.claude in writable paths: %v", got.WritablePaths)
+	}
+}
+
+func TestBuildSandboxConfig_NoWritePathsForUnknownProvider(t *testing.T) {
+	d := sandboxTestDaemon(Config{EnableSandbox: true, HealthPort: 19514})
+	got := d.buildSandboxConfig("unknown-cli", nil, nil)
+	if got == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if len(got.WritablePaths) != 0 {
+		t.Errorf("expected empty writable paths for unknown provider, got %v", got.WritablePaths)
 	}
 }
 

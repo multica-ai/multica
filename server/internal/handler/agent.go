@@ -143,6 +143,10 @@ type AgentTaskResponse struct {
 	// the task's issue/agent/workspace so an exfiltrated token cannot be
 	// used for general API access.
 	TaskToken string `json:"task_token,omitempty"`
+	// SandboxEnabled is the per-runtime sandbox override (JEH-418), copied
+	// from agent_runtime.sandbox_enabled at claim time so the daemon picks
+	// up changes without restarting. nil = inherit daemon's env-var default.
+	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

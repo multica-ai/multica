@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -19,16 +21,35 @@ var providerSandboxAllowlist = map[string][]string{
 	"copilot": {"api.githubcopilot.com:443", "api.github.com:443", "copilot-proxy.githubusercontent.com:443"},
 }
 
+// providerSandboxWritePaths is the per-provider list of $HOME-relative paths
+// that the agent CLI itself reads and writes (session state, config, history,
+// telemetry). Each launch updates these files, so without write access the
+// CLI exits 0 with empty output the moment it tries to persist its state —
+// the JEH-405 silent-fail symptom. Paths are joined to the user's home dir
+// at sandbox-config build time.
+var providerSandboxWritePaths = map[string][]string{
+	"claude":  {".claude", ".claude.json"},
+	"cursor":  {".cursor"},
+	"gemini":  {".gemini"},
+	"copilot": {".config/github-copilot"},
+}
+
 // codex has its own internal sandbox; the daemon does not wrap it.
 var providersWithOwnSandbox = map[string]bool{
 	"codex": true,
 }
 
 // buildSandboxConfig assembles the sandbox configuration to pass to a backend
-// for a given provider. It returns nil when the daemon-level sandbox is
-// disabled, when the provider runs its own sandbox (e.g. codex), or when the
-// platform is non-darwin (the agent package short-circuits to a regular
-// exec, but skipping the work in the daemon avoids spurious log noise).
+// for a given provider. It returns nil when sandboxing is disabled (per the
+// per-runtime override or, when that's nil, the daemon-wide cfg.EnableSandbox
+// default), when the provider runs its own sandbox (e.g. codex), or when the
+// platform is non-darwin (the agent package short-circuits to a regular exec,
+// but skipping the work in the daemon avoids spurious log noise).
+//
+// runtimeOverride carries the per-runtime sandbox setting from the server
+// (JEH-418): non-nil wins over the env-var default so an admin can flip a
+// single runtime without restarting the daemon. nil means "no per-runtime
+// override, use the daemon-wide default".
 //
 // The returned allowlist is the union of:
 //   - daemon-wide hosts (cfg.SandboxAllowlist),
@@ -36,8 +57,12 @@ var providersWithOwnSandbox = map[string]bool{
 //   - the Multica server host derived from cfg.ServerBaseURL,
 //   - loopback to the daemon health port,
 //   - a per-agent override when AgentData.SandboxAllowlist is non-empty.
-func (d *Daemon) buildSandboxConfig(provider string, agentData *AgentData) *agent.SandboxConfig {
-	if !d.cfg.EnableSandbox {
+func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, agentData *AgentData) *agent.SandboxConfig {
+	enabled := d.cfg.EnableSandbox
+	if runtimeOverride != nil {
+		enabled = *runtimeOverride
+	}
+	if !enabled {
 		return nil
 	}
 	if providersWithOwnSandbox[provider] {
@@ -72,7 +97,28 @@ func (d *Daemon) buildSandboxConfig(provider string, agentData *AgentData) *agen
 	return &agent.SandboxConfig{
 		Enabled:          true,
 		NetworkAllowlist: hosts,
+		WritablePaths:    providerWritablePaths(provider),
 	}
+}
+
+// providerWritablePaths resolves the provider's $HOME-relative state paths
+// to absolute filesystem paths. Returns nil when the user's home dir is
+// unresolvable (the sandbox profile generator only emits write rules for
+// non-empty paths, so callers don't need to special-case the empty slice).
+func providerWritablePaths(provider string) []string {
+	subs := providerSandboxWritePaths[provider]
+	if len(subs) == 0 {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	out := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		out = append(out, filepath.Join(home, sub))
+	}
+	return out
 }
 
 // serverHostPort extracts host:port from cfg.ServerBaseURL. A missing port

@@ -73,6 +73,14 @@ ORDER BY created_at ASC;
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
 
+-- name: UpdateAgentRuntimeSandbox :one
+-- Sets the per-runtime sandbox override (JEH-418). NULL clears the override
+-- and falls back to the daemon-wide MULTICA_ENABLE_SANDBOX default.
+UPDATE agent_runtime
+SET sandbox_enabled = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 

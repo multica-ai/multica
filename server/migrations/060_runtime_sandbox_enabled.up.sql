@@ -1,0 +1,6 @@
+-- Per-runtime sandbox override (JEH-418). NULL means "inherit the daemon's
+-- MULTICA_ENABLE_SANDBOX value" so existing rows keep current behaviour;
+-- TRUE/FALSE forces sandbox on/off for tasks claimed by this runtime,
+-- regardless of what the daemon's env var says.
+ALTER TABLE agent_runtime
+    ADD COLUMN sandbox_enabled BOOLEAN;

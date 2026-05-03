@@ -67,6 +67,7 @@ type AgentRuntime struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
+	SandboxEnabled pgtype.Bool        `json:"sandbox_enabled"`
 }
 
 type AgentSkill struct {

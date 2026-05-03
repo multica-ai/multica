@@ -27,6 +27,12 @@ type SandboxConfig struct {
 	// included by the caller. An empty list means all outbound network is
 	// denied.
 	NetworkAllowlist []string
+	// WritablePaths are absolute filesystem paths the sandboxed process
+	// needs read+write access to outside the workdir — typically the
+	// agent CLI's per-user state files (~/.claude.json, ~/.cursor, …).
+	// Caller is responsible for joining $HOME-relative subpaths to the
+	// real home directory before passing them in.
+	WritablePaths []string
 }
 
 // errSandboxRequiredButUnavailable is returned when SandboxConfig.Enabled is
@@ -78,9 +84,10 @@ func prepareCommand(
 	}
 
 	profilePath, err := sandbox.WriteToTemp(sandbox.Profile{
-		Workdir:      wd,
-		Home:         home,
-		AllowedHosts: sb.NetworkAllowlist,
+		Workdir:       wd,
+		Home:          home,
+		AllowedHosts:  sb.NetworkAllowlist,
+		WritablePaths: sb.WritablePaths,
 	})
 	if err != nil {
 		return nil, noopCleanup, fmt.Errorf("agent: write sandbox profile: %w", err)
@@ -100,6 +107,7 @@ func prepareCommand(
 		"exec", execPath,
 		"workdir", wd,
 		"allowlist_size", len(sb.NetworkAllowlist),
+		"writable_paths", len(sb.WritablePaths),
 	)
 	return exec.CommandContext(ctx, sandboxExec, wrappedArgs...), cleanup, nil
 }
