@@ -14,7 +14,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
       "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 Agent \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + Agent \u56e2\u961f\u3002",
-    cta: "免费开始",
+    cta: "登录",
     downloadDesktop: "下载桌面端",
     worksWith: "支持",
     imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c Agent \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
@@ -116,15 +116,14 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   },
 
   howItWorks: {
-    label: "\u5f00\u59cb\u4f7f\u7528",
+    label: "接入流程",
     headlineMain: "\u62db\u52df\u4f60\u7684\u7b2c\u4e00\u4e2a AI \u5458\u5de5",
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: allowSignup ? "注册并创建您的工作空间" : "登录到您的工作空间",
-        description: allowSignup
-          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
-          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
+        title: "登录到您的工作空间",
+        description:
+          "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
@@ -142,7 +141,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "\u4ece\u6307\u6d3e\u4eba\u4e0b\u62c9\u83dc\u5355\u4e2d\u9009\u62e9\u4f60\u7684 Agent\u2014\u2014\u5c31\u50cf\u6307\u6d3e\u7ed9\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u81ea\u52a8\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3002\u5b9e\u65f6\u89c2\u770b\u8fdb\u5ea6\u3002",
       },
     ],
-    cta: "\u5f00\u59cb\u4f7f\u7528",
+    cta: "登录",
     ctaGithub: "\u5728 GitHub \u4e0a\u67e5\u770b",
     ctaDocs: "\u9605\u8bfb\u6587\u6863",
   },
@@ -219,7 +218,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   footer: {
     tagline:
       "\u4eba\u7c7b + Agent \u56e2\u961f\u7684\u9879\u76ee\u7ba1\u7406\u3002\u5f00\u6e90\u3001\u53ef\u81ea\u6258\u7ba1\u3001\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
-    cta: "\u5f00\u59cb\u4f7f\u7528",
+    cta: "登录",
     groups: {
       product: {
         label: "\u4ea7\u54c1",
@@ -235,7 +234,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u6587\u6863", href: "/docs/zh" },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
       },
       company: {

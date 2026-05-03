@@ -14,7 +14,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine2: "won\u2019t be human.",
     subheading:
       "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
-    cta: "Start free trial",
+    cta: "Log in",
     downloadDesktop: "Download Desktop",
     worksWith: "Works with",
     imageAlt: "Multica board view \u2014 issues managed by humans and agents",
@@ -116,15 +116,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   },
 
   howItWorks: {
-    label: "Get started",
+    label: "Access",
     headlineMain: "Hire your first AI employee",
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: allowSignup ? "Sign up & create your workspace" : "Login to your workspace",
-        description: allowSignup
-          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
-          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
+        title: "Log in to your workspace",
+        description:
+          "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
       {
         title: "Install the CLI & connect your machine",
@@ -142,7 +141,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Pick your agent from the assignee dropdown \u2014 just like assigning to a teammate. The task is queued, claimed, and executed automatically. Watch progress in real time.",
       },
     ],
-    cta: "Get started",
+    cta: "Log in",
     ctaGithub: "View on GitHub",
     ctaDocs: "Read the docs",
   },
@@ -219,7 +218,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   footer: {
     tagline:
       "Project management for human + agent teams. Open source, self-hostable, built for the future of work.",
-    cta: "Get started",
+    cta: "Log in",
     groups: {
       product: {
         label: "Product",
@@ -235,7 +234,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
       },
       company: {
