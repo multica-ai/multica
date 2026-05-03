@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowDownToLine, RefreshCw, X } from "lucide-react";
+import { ArrowDownToLine, Loader2, RefreshCw, X } from "lucide-react";
 
 type UpdateState =
   | { status: "idle" }
@@ -10,6 +10,7 @@ type UpdateState =
 export function UpdateNotification() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [dismissed, setDismissed] = useState(false);
+  const [installing, setInstalling] = useState(false);
 
   useEffect(() => {
     const cleanups: (() => void)[] = [];
@@ -18,6 +19,7 @@ export function UpdateNotification() {
       window.updater.onUpdateAvailable((info) => {
         setState({ status: "available", version: info.version });
         setDismissed(false);
+        setInstalling(false);
       }),
     );
 
@@ -30,6 +32,7 @@ export function UpdateNotification() {
     cleanups.push(
       window.updater.onUpdateDownloaded(() => {
         setState({ status: "ready" });
+        setInstalling(false);
       }),
     );
 
@@ -44,8 +47,12 @@ export function UpdateNotification() {
   }, [state.status]);
 
   const handleInstall = useCallback(() => {
-    window.updater.installUpdate();
-  }, []);
+    if (installing) return;
+    setInstalling(true);
+    void window.updater.installUpdate().catch(() => {
+      setInstalling(false);
+    });
+  }, [installing]);
 
   // Only allow dismiss when update is available (not during download or ready)
   if (state.status === "idle") return null;
@@ -120,15 +127,19 @@ export function UpdateNotification() {
                 onClick={() =>
                   window.desktopAPI.openExternal("https://multica.furtherref.com/changelog")
                 }
+                disabled={installing}
                 className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
               >
                 See changes
               </button>
               <button
                 onClick={handleInstall}
-                className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                disabled={installing}
+                aria-busy={installing}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
-                Restart now
+                {installing && <Loader2 className="size-3 animate-spin" />}
+                {installing ? "Restarting..." : "Restart now"}
               </button>
             </div>
           </div>
