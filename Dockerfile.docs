@@ -12,7 +12,7 @@ COPY packages/ui/package.json packages/ui/
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/eslint-config/package.json packages/eslint-config/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # --- Build ---
 FROM node:22-alpine AS builder
