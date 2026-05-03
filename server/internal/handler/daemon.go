@@ -1095,6 +1095,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			if qc.Priority != nil {
+				resp.QuickCreatePriority = *qc.Priority
+			}
+			if qc.DueDate != nil {
+				resp.QuickCreateDueDate = *qc.DueDate
+			}
+			if qc.ProjectID != nil {
+				resp.QuickCreateProjectID = *qc.ProjectID
+			}
 			resp.WorkspaceID = qc.WorkspaceID
 			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
 				var repos []RepoData
