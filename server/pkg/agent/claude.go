@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -92,7 +93,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			stdin = nil
 		}
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[claude:stderr] ")
+	// Tee stderr to a ring buffer so we can quote the tail when claude exits
+	// 0 with empty stdout (sandbox denial, missing auth, model reject, …).
+	// Without this, the only diagnostic was "claude returned empty output"
+	// in the daemon comment and a Debug-level kernel message in the daemon
+	// log nobody reads. See JEH-405.
+	stderrTail := newRingBuffer(stderrTailBytes)
+	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[claude:stderr] "), stderrTail)
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -131,6 +138,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		// Diagnostics for the empty-output fail mode (JEH-405): count how
+		// many lines we couldn't parse and remember the first one. A surge
+		// of unparseable lines almost always means the claude stream-json
+		// schema drifted or sandbox-exec wrote a banner over stdout.
+		var unparseableCount int
+		var firstUnparseable string
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -149,6 +162,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			var msg claudeSDKMessage
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				unparseableCount++
+				if firstUnparseable == "" {
+					firstUnparseable = truncate(line, 200)
+					b.cfg.Logger.Warn("claude: unparseable stdout line",
+						"error", err,
+						"line", firstUnparseable,
+					)
+				}
 				continue
 			}
 
@@ -187,6 +208,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for process exit
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
+		exitCode := -1
+		if exitErr == nil {
+			exitCode = 0
+		} else if ee, ok := exitErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
@@ -199,7 +226,23 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
 		}
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		// Empty-output diagnostic (JEH-405): a clean exit with no stdout
+		// is otherwise reported as "claude returned empty output" with no
+		// reason. Surface the actual signals (exit code, stderr tail,
+		// unparseable line count) so the daemon can forward them in the
+		// task comment instead of the operator having to ssh into the
+		// host and grep daemon.err.log.
+		if finalStatus == "completed" && output.Len() == 0 {
+			finalError = formatEmptyOutputReason(exitCode, unparseableCount, firstUnparseable, stderrTail.Snapshot())
+		}
+
+		b.cfg.Logger.Info("claude finished",
+			"pid", cmd.Process.Pid,
+			"status", finalStatus,
+			"duration", duration.Round(time.Millisecond).String(),
+			"exit_code", exitCode,
+			"unparseable_lines", unparseableCount,
+		)
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {
@@ -587,4 +630,69 @@ func (w *logWriter) Write(p []byte) (int, error) {
 		w.logger.Debug(w.prefix + text)
 	}
 	return len(p), nil
+}
+
+// stderrTailBytes is the cap on the ring buffer that captures claude's
+// stderr. 64 KiB comfortably holds the last screen-or-two of output —
+// enough to quote the actual error message without ballooning task
+// comments stored on the server.
+const stderrTailBytes = 64 * 1024
+
+// ringBuffer is a goroutine-safe writer that retains only the last
+// `cap` bytes written to it. Used to keep the tail of a long-running
+// process's stderr around for diagnostic quoting.
+type ringBuffer struct {
+	mu  sync.Mutex
+	cap int
+	buf []byte
+}
+
+func newRingBuffer(cap int) *ringBuffer {
+	return &ringBuffer{cap: cap, buf: make([]byte, 0, cap)}
+}
+
+func (r *ringBuffer) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(p) >= r.cap {
+		r.buf = append(r.buf[:0], p[len(p)-r.cap:]...)
+		return len(p), nil
+	}
+	if len(r.buf)+len(p) > r.cap {
+		drop := len(r.buf) + len(p) - r.cap
+		r.buf = append(r.buf[:0], r.buf[drop:]...)
+	}
+	r.buf = append(r.buf, p...)
+	return len(p), nil
+}
+
+func (r *ringBuffer) Snapshot() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.TrimSpace(string(r.buf))
+}
+
+// formatEmptyOutputReason composes the diagnostic string surfaced when
+// claude exits with no stdout. Returns an empty string only if every
+// signal is also empty (impossible in practice — the exit code is
+// always knowable) so callers can rely on the result being usable.
+func formatEmptyOutputReason(exitCode, unparseableCount int, firstUnparseable, stderrTail string) string {
+	parts := []string{fmt.Sprintf("exit=%d", exitCode)}
+	if unparseableCount > 0 {
+		parts = append(parts, fmt.Sprintf("unparsed_stdout_lines=%d (first: %q)", unparseableCount, firstUnparseable))
+	}
+	if stderrTail != "" {
+		parts = append(parts, "stderr: "+truncate(stderrTail, 4096))
+	}
+	return strings.Join(parts, " | ")
+}
+
+// truncate returns s clipped to at most n runes, with a trailing
+// ellipsis when truncation actually happened. Used to keep diagnostic
+// strings bounded so a runaway stderr dump can't bloat task comments.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

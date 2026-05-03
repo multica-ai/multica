@@ -1102,9 +1102,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			// Even an empty-output completion may have established a real
 			// session — surface it through the blocked path so the next chat
 			// turn can still resume from where this one left off.
+			//
+			// Backends populate Result.Error with a diagnostic string in
+			// this branch (exit code, stderr tail, unparseable line count)
+			// so the operator sees the actual reason the agent died
+			// silently, not just "<provider> returned empty output". See
+			// JEH-405 for the silent-fail incident this surfaces.
+			comment := fmt.Sprintf("%s returned empty output", provider)
+			if result.Error != "" {
+				comment = fmt.Sprintf("%s returned empty output (%s)", provider, result.Error)
+			}
 			return TaskResult{
 				Status:    "blocked",
-				Comment:   fmt.Sprintf("%s returned empty output", provider),
+				Comment:   comment,
 				SessionID: result.SessionID,
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,

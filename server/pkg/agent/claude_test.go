@@ -541,3 +541,89 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	}
 	return data
 }
+
+func TestRingBufferRetainsTail(t *testing.T) {
+	t.Parallel()
+
+	r := newRingBuffer(8)
+	if _, err := r.Write([]byte("abc")); err != nil {
+		t.Fatalf("write 1: %v", err)
+	}
+	if got := r.Snapshot(); got != "abc" {
+		t.Errorf("after small write: got %q, want %q", got, "abc")
+	}
+	// Crossing the cap drops from the head, not the tail.
+	if _, err := r.Write([]byte("defghij")); err != nil {
+		t.Fatalf("write 2: %v", err)
+	}
+	if got := r.Snapshot(); got != "cdefghij" {
+		t.Errorf("after wrap: got %q, want %q", got, "cdefghij")
+	}
+	// A single write larger than cap keeps only the trailing cap bytes.
+	if _, err := r.Write([]byte("0123456789ABCDEF")); err != nil {
+		t.Fatalf("write 3: %v", err)
+	}
+	if got := r.Snapshot(); got != "89ABCDEF" {
+		t.Errorf("after oversized write: got %q, want %q", got, "89ABCDEF")
+	}
+}
+
+func TestFormatEmptyOutputReasonIncludesAvailableSignals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name             string
+		exitCode         int
+		unparseableCount int
+		firstUnparseable string
+		stderrTail       string
+		wantSubs         []string
+		wantNotSubs      []string
+	}{
+		{
+			name:        "exit code only",
+			exitCode:    0,
+			wantSubs:    []string{"exit=0"},
+			wantNotSubs: []string{"unparsed_stdout_lines", "stderr"},
+		},
+		{
+			name:             "with stderr tail",
+			exitCode:         1,
+			stderrTail:       "Error: invalid API key",
+			wantSubs:         []string{"exit=1", "stderr: Error: invalid API key"},
+			wantNotSubs:      []string{"unparsed_stdout_lines"},
+		},
+		{
+			name:             "with unparseable lines",
+			exitCode:         0,
+			unparseableCount: 3,
+			firstUnparseable: "{not json",
+			wantSubs:         []string{"exit=0", "unparsed_stdout_lines=3", `first: "{not json"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatEmptyOutputReason(tc.exitCode, tc.unparseableCount, tc.firstUnparseable, tc.stderrTail)
+			for _, sub := range tc.wantSubs {
+				if !strings.Contains(got, sub) {
+					t.Errorf("missing %q in: %q", sub, got)
+				}
+			}
+			for _, sub := range tc.wantNotSubs {
+				if strings.Contains(got, sub) {
+					t.Errorf("unexpected %q in: %q", sub, got)
+				}
+			}
+		})
+	}
+}
+
+func TestTruncateAddsEllipsis(t *testing.T) {
+	t.Parallel()
+	if got := truncate("short", 10); got != "short" {
+		t.Errorf("no truncation expected: %q", got)
+	}
+	if got := truncate("0123456789ABCDEF", 8); got != "01234567…" {
+		t.Errorf("truncate: %q", got)
+	}
+}
