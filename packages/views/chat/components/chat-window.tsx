@@ -346,7 +346,7 @@ export function ChatWindow() {
   const isVisible = isOpen && (isExpanded || boundsReady);
 
   const containerClass = isExpanded
-    ? "absolute inset-0 z-50 flex flex-col bg-sidebar overflow-hidden"
+    ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
     : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = isExpanded
     ? {
