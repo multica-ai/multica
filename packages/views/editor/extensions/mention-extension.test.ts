@@ -4,10 +4,18 @@ import { BaseMentionExtension } from "./mention-extension";
 const tokenizer = BaseMentionExtension.config.markdownTokenizer!;
 const renderMarkdown = BaseMentionExtension.config.renderMarkdown!;
 
+// The tiptap MarkdownTokenizer type allows `start` to be a string or function
+// and `tokenize` to accept 3 args (src, tokens, lexer). Our extension always
+// provides functions with the signatures below, so cast for test convenience.
+const startFn = tokenizer.start as (src: string) => number;
+const tokenizeFn = tokenizer.tokenize as (
+  src: string,
+) => { type: string; raw: string; attributes: Record<string, string> } | undefined;
+
 function tokenize(src: string) {
-  const start = tokenizer.start(src);
+  const start = startFn(src);
   if (start === -1) return undefined;
-  return tokenizer.tokenize(src.slice(start));
+  return tokenizeFn(src.slice(start));
 }
 
 describe("mention tokenizer", () => {
@@ -37,11 +45,11 @@ describe("mention tokenizer", () => {
       "Check [docs](https://example.com) - [@User](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)";
 
     // start() must NOT land on the [docs] link at index 6
-    const start = tokenizer.start(src);
+    const start = startFn(src);
     expect(start).toBeGreaterThan(6);
 
     // tokenize from the correct start position
-    const token = tokenizer.tokenize(src.slice(start));
+    const token = tokenizeFn(src.slice(start));
     expect(token).toBeDefined();
     expect(token!.attributes.label).toBe("User");
     expect(token!.attributes.id).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -50,8 +58,8 @@ describe("mention tokenizer", () => {
   it("handles multiple ordinary links before a mention", () => {
     const src =
       "See [a](https://a.com) and [b](https://b.com) - [@Bot](mention://agent/abc-123)";
-    const start = tokenizer.start(src);
-    const token = tokenizer.tokenize(src.slice(start));
+    const start = startFn(src);
+    const token = tokenizeFn(src.slice(start));
     expect(token).toBeDefined();
     expect(token!.attributes.label).toBe("Bot");
   });
