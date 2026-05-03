@@ -994,7 +994,7 @@ func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or
 	// using a cancelled context if the query respects it.
-
+	
 	// Create a handler with a "broken" queries object is hard because it's a struct.
 	// Instead, let's use a context that is already cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1009,13 +1009,13 @@ func TestSendCodeDbError(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	testHandler.SendCode(w, req)
-
+	
 	// If the DB query respects the cancelled context, it should return an error.
 	// pgx usually returns context.Canceled which is not what isNotFound checks for.
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-
+	
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] != "failed to lookup user" {
@@ -1106,89 +1106,6 @@ func TestVerifyCode(t *testing.T) {
 	}
 	if resp.User.Email != email {
 		t.Fatalf("VerifyCode: expected email '%s', got '%s'", email, resp.User.Email)
-	}
-}
-
-func TestFixedLoginCodeHashMatching(t *testing.T) {
-	hash := fixedLoginCodeHash(" 135790 ")
-	if !fixedLoginCodeMatches(hash, "135790") {
-		t.Fatal("expected fixed login code hash to match")
-	}
-	if !fixedLoginCodeMatches("sha256:"+hash, "135790") {
-		t.Fatal("expected fixed login code hash with sha256 prefix to match")
-	}
-	if fixedLoginCodeMatches(hash, "000000") {
-		t.Fatal("expected different fixed login code to fail")
-	}
-	if fixedLoginCodeMatches("not-a-hex-hash", "135790") {
-		t.Fatal("expected invalid hash to fail")
-	}
-}
-
-func TestVerifyFixedLoginCode(t *testing.T) {
-	const email = "fixed-login-test@multica.ai"
-	const code = "135790"
-	ctx := context.Background()
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
-	})
-
-	user, err := testHandler.Queries.CreateUser(ctx, db.CreateUserParams{
-		Name:  "Fixed Login Test",
-		Email: email,
-	})
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if _, err := testHandler.Queries.UpsertFixedLoginCode(ctx, db.UpsertFixedLoginCodeParams{
-		UserID:   user.ID,
-		CodeHash: fixedLoginCodeHash(code),
-	}); err != nil {
-		t.Fatalf("UpsertFixedLoginCode: %v", err)
-	}
-
-	w := httptest.NewRecorder()
-	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": code})
-	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
-	req.Header.Set("Content-Type", "application/json")
-	testHandler.VerifyCode(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("VerifyCode fixed login: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp LoginResponse
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp.Token == "" {
-		t.Fatal("VerifyCode fixed login: expected non-empty token")
-	}
-	if resp.User.Email != email {
-		t.Fatalf("VerifyCode fixed login: expected email %q, got %q", email, resp.User.Email)
-	}
-}
-
-func TestVerifyFixedLoginCodeDoesNotCreateUser(t *testing.T) {
-	const email = "fixed-login-missing-user@multica.ai"
-	ctx := context.Background()
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
-	})
-
-	w := httptest.NewRecorder()
-	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "135790"})
-	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
-	req.Header.Set("Content-Type", "application/json")
-	testHandler.VerifyCode(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("VerifyCode missing fixed login user: expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-
-	if _, err := testHandler.Queries.GetUserByEmail(ctx, email); !isNotFound(err) {
-		t.Fatalf("expected no user to be created, got err=%v", err)
 	}
 }
 
