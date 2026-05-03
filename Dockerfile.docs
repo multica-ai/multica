@@ -1,0 +1,59 @@
+# --- Dependencies ---
+FROM node:22-alpine AS deps
+
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+
+WORKDIR /app
+
+# Copy workspace config and all package.json files for dependency resolution.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
+COPY apps/docs/package.json apps/docs/
+COPY packages/ui/package.json packages/ui/
+COPY packages/tsconfig/package.json packages/tsconfig/
+COPY packages/eslint-config/package.json packages/eslint-config/
+
+RUN pnpm install --frozen-lockfile
+
+# --- Build ---
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+
+WORKDIR /app
+
+COPY --from=deps /app ./
+
+# Copy source needed by the docs app and its workspace dependencies.
+COPY package.json turbo.json pnpm-workspace.yaml ./
+COPY apps/docs/ apps/docs/
+COPY packages/ui/ packages/ui/
+COPY packages/tsconfig/ packages/tsconfig/
+COPY packages/eslint-config/ packages/eslint-config/
+
+# Re-link after source overlay (fixes any symlinks overwritten by COPY).
+RUN pnpm install --frozen-lockfile --offline
+
+ENV STANDALONE=true
+
+RUN pnpm --filter @multica/docs build
+
+# --- Runtime ---
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/apps/docs/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/docs/.next/static ./apps/docs/.next/static
+
+USER nextjs
+
+EXPOSE 4000
+ENV PORT=4000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "apps/docs/server.js"]

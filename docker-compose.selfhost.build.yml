@@ -1,4 +1,4 @@
-# Development override: build the backend/web images from the current checkout
+# Development override: build the backend/web/docs images from the current checkout
 # instead of pulling the official GHCR images.
 
 services:
@@ -15,5 +15,12 @@ services:
       dockerfile: Dockerfile.web
       args:
         REMOTE_API_URL: http://backend:8080
+        DOCS_URL: http://docs:4000
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
         NEXT_PUBLIC_APP_VERSION: dev
+
+  docs:
+    image: multica-docs:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.docs

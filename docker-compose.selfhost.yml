@@ -7,6 +7,7 @@
 #
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8080 (also used by CLI/daemon)
+# Docs:     proxied by the frontend at /docs
 
 name: multica
 
@@ -29,7 +30,7 @@ services:
       retries: 5
 
   backend:
-    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/furtherref/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,11 +65,20 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_WEB_IMAGE:-ghcr.io/furtherref/multica-web}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       - backend
+      - docs
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: "0.0.0.0"
+    restart: unless-stopped
+
+  docs:
+    image: ${MULTICA_DOCS_IMAGE:-ghcr.io/furtherref/multica-docs}:${MULTICA_IMAGE_TAG:-latest}
+    expose:
+      - "4000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
