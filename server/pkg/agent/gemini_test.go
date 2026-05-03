@@ -12,6 +12,7 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	expected := []string{
 		"-p", "write a haiku",
 		"--yolo",
+		"--skip-trust",
 		"-o", "stream-json",
 	}
 
@@ -106,5 +107,39 @@ func TestBuildGeminiArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if args[len(args)-1] != "--sandbox" {
 		t.Fatalf("expected --sandbox to pass through, got %v", args)
+	}
+}
+
+func TestBuildGeminiArgsAlwaysSkipsTrust(t *testing.T) {
+	t.Parallel()
+
+	args := buildGeminiArgs("hi", ExecOptions{}, slog.Default())
+	var found bool
+	for _, a := range args {
+		if a == "--skip-trust" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --skip-trust in baseline args (workspace trust gate must be bypassed in headless mode), got %v", args)
+	}
+}
+
+func TestBuildGeminiArgsFiltersDuplicateSkipTrust(t *testing.T) {
+	t.Parallel()
+
+	args := buildGeminiArgs("hi", ExecOptions{
+		CustomArgs: []string{"--skip-trust"},
+	}, slog.Default())
+
+	var count int
+	for _, a := range args {
+		if a == "--skip-trust" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --skip-trust (custom-args duplicate must be filtered), got %d in %v", count, args)
 	}
 }

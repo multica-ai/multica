@@ -244,15 +244,21 @@ type geminiModelStats struct {
 // geminiBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var geminiBlockedArgs = map[string]blockedArgMode{
-	"-p":     blockedWithValue,  // non-interactive prompt
-	"--yolo": blockedStandalone, // auto-approve tool use
-	"-o":     blockedWithValue,  // stream-json output format
+	"-p":           blockedWithValue,  // non-interactive prompt
+	"--yolo":       blockedStandalone, // auto-approve tool use
+	"--skip-trust": blockedStandalone, // bypass workspace trust prompt (headless)
+	"-o":           blockedWithValue,  // stream-json output format
 }
 
 func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+	// --skip-trust bypasses Gemini CLI's workspace-trust gate. Without it,
+	// gemini exits before running any tool because the daemon-managed workdir
+	// is not in the user's trusted-folders list (--yolo is ignored in that
+	// state). See gemini docs: trusted-folders / headless environments.
 	args := []string{
 		"-p", prompt,
 		"--yolo",
+		"--skip-trust",
 		"-o", "stream-json",
 	}
 	if opts.Model != "" {
