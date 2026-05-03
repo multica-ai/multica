@@ -1230,6 +1230,92 @@ func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeRemovesLegacyCoAuthoredByHook verifies the migration
+// path: bare clones already on disk from previous daemon versions carry a
+// prepare-commit-msg hook that does NOT include the multicaHookMarker
+// sentinel — only the older `# Installed by the Multica daemon.` comment.
+// Toggling the workspace setting off must still remove those legacy hooks,
+// otherwise users who flip the toggle in production keep seeing the trailer
+// indefinitely (the exact bug reported in MUL-1704).
+func TestCreateWorktreeRemovesLegacyCoAuthoredByHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Seed the bare cache with the exact hook content shipped by the
+	// previous daemon release (no multicaHookMarker line). Keeping a
+	// verbatim copy here means the test fails if recognition logic ever
+	// drifts away from what production hosts actually have on disk.
+	const legacyHook = `#!/bin/sh
+# Multica: add Co-authored-by trailer for the Multica Agent.
+# Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Skip merge and squash commits.
+case "$COMMIT_SOURCE" in
+  merge|squash) exit 0 ;;
+esac
+
+TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+
+# Don't add if already present.
+if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+# Use git interpret-trailers for proper formatting.
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
+`
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(hookPath, []byte(legacyHook), 0o755); err != nil {
+		t.Fatalf("seed legacy hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "44444444-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected legacy hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if commitMsg := string(out); strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer after legacy hook removal.\ngot:\n%s", commitMsg)
+	}
+}
+
 // TestRemoveCoAuthoredByHookPreservesUserHook verifies that the disable path
 // only deletes hooks installed by the daemon. A prepare-commit-msg hook
 // without the Multica marker (e.g. one a user added manually) must be left

@@ -748,6 +748,19 @@ func bareHeadBranch(barePath string) string {
 // tool. Do not change without bumping the recognition logic.
 const multicaHookMarker = "# multica:prepare-commit-msg:co-authored-by"
 
+// daemonInstalledHookSignatures lists substrings that identify a
+// prepare-commit-msg hook as one the daemon installed. removeCoAuthoredByHook
+// treats a hook as Multica-owned if its content contains ANY of these
+// substrings. The list deliberately includes the legacy comment that the
+// daemon used before multicaHookMarker existed, so disabling the toggle on
+// existing installations still cleans up old hooks seeded by previous daemon
+// versions. Add to this list — never remove from it — so future tweaks to
+// prepareCommitMsgHook keep recognizing every previously-shipped variant.
+var daemonInstalledHookSignatures = []string{
+	multicaHookMarker,
+	"# Installed by the Multica daemon.",
+}
+
 // prepareCommitMsgHook is the prepare-commit-msg hook script that appends a
 // Co-authored-by trailer for the Multica Agent to every commit message.
 const prepareCommitMsgHook = `#!/bin/sh
@@ -801,11 +814,26 @@ func installCoAuthoredByHook(worktreePath string) error {
 	return nil
 }
 
+// isDaemonInstalledHook reports whether a prepare-commit-msg hook on disk was
+// installed by the Multica daemon (current or any previously released
+// version). It returns false for hooks that don't carry any known daemon
+// signature, so a user-installed hook at the same path is left alone.
+func isDaemonInstalledHook(contents []byte) bool {
+	body := string(contents)
+	for _, sig := range daemonInstalledHookSignatures {
+		if strings.Contains(body, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // removeCoAuthoredByHook removes the prepare-commit-msg hook installed by
-// installCoAuthoredByHook. It only deletes the file when the content carries
-// the Multica marker, so a user-installed prepare-commit-msg hook is never
-// touched. Returns nil when no hook is present or when an unrelated hook
-// occupies the path.
+// installCoAuthoredByHook. It only deletes the file when the content matches
+// a known daemon signature (current marker or any previously released hook
+// content), so a user-installed prepare-commit-msg hook is never touched.
+// Returns nil when no hook is present or when an unrelated hook occupies
+// the path.
 func removeCoAuthoredByHook(worktreePath string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
 	out, err := cmd.Output()
@@ -825,7 +853,7 @@ func removeCoAuthoredByHook(worktreePath string) error {
 		}
 		return fmt.Errorf("read prepare-commit-msg hook: %w", err)
 	}
-	if !strings.Contains(string(contents), multicaHookMarker) {
+	if !isDaemonInstalledHook(contents) {
 		// Unrelated hook (user or third-party): leave it alone.
 		return nil
 	}
