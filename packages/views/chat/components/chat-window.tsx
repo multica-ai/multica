@@ -360,7 +360,7 @@ export function ChatWindow() {
       ref={windowRef}
       className={containerClass}
       style={containerStyle}
-      layout
+      layout="position"
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{
         opacity: isVisible ? 1 : 0,
