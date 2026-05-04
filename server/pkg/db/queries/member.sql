@@ -26,8 +26,19 @@ DELETE FROM member WHERE id = $1;
 
 -- name: ListMembersWithUser :many
 SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
+       m.scope_enforcement_enabled, m.budget_enforcement_enabled,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: UpdateMemberScopeEnforcement :one
+UPDATE member SET scope_enforcement_enabled = $2
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateMemberBudgetEnforcement :one
+UPDATE member SET budget_enforcement_enabled = $2
+WHERE id = $1
+RETURNING *;

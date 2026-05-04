@@ -40,3 +40,8 @@ WHERE workspace_id = $1
   AND window_type = $3
   AND window_start = $4
 ORDER BY cents_spent DESC;
+
+-- name: InsertBudgetChangeLog :exec
+INSERT INTO budget_change_log
+    (workspace_id, changed_by, scope_type, scope_id, field, old_value_cents, new_value_cents, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
