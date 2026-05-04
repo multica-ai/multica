@@ -77,7 +77,24 @@ func buildQuickCreatePrompt(task Task) string {
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
-	if agentName != "" {
+	// Two regimes for the "user didn't name an assignee" default:
+	//
+	//  - Single-agent workspace (no peers): the picker is the only agent
+	//    available; self-assign is the only sensible default and matches
+	//    today's behavior.
+	//
+	//  - Workspace has peer agents: orchestrator-style pickers (Hermes,
+	//    routing patterns, etc.) need to be allowed to delegate by name
+	//    instead of forced to self-assign. The Agent Identity / Peer
+	//    Agents sections in CLAUDE.md already tell the agent who exists
+	//    and what their role is; we just stop the prompt from overriding
+	//    the persona's routing logic. Coding-agent personas will still
+	//    self-assign (their instructions tell them so); orchestrator
+	//    personas will route. The decision lives in the persona.
+	hasPeers := len(task.PeerAgents) > 0
+	if agentName != "" && hasPeers {
+		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, decide based on the work AND your role described in the Agent Identity section. If your persona delegates this kind of task to a peer (peers are listed in the \"Peer Agents in this Workspace\" section above, with each peer's role one-liner), pass `--assignee \"<peer name>\"`. Otherwise keep it yourself: pass `--assignee %q`. Never leave the issue unassigned. Pick exactly one assignee.\n\n", agentName)
+	} else if agentName != "" {
 		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned.\n\n", agentName)
 	} else {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
