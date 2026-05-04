@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
+import { Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
@@ -141,29 +141,43 @@ function ProjectRow({ project }: { project: Project }) {
           />
         </div>
       ) : (
-        <AppLink
-          href={wsPaths.projectDetail(project.id)}
-          className="flex min-w-0 flex-1 items-center gap-2"
-        >
-          <ProjectIcon project={project} size="md" />
-          <span
-            className="min-w-0 flex-1 truncate font-medium"
-            // Double-click flips into edit mode without navigating. The
-            // browser fires `dblclick` AFTER two `click` events, so we
-            // can't fully suppress the first navigation that fires on
-            // single-click — but a real double-click intent is preserved
-            // by the AppLink remaining the click target for normal
-            // navigation, while dblclick is a separate user action.
-            onDoubleClick={(e) => {
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <AppLink
+            href={wsPaths.projectDetail(project.id)}
+            className="flex min-w-0 flex-1 items-center gap-2"
+          >
+            <ProjectIcon project={project} size="md" />
+            <span
+              className="min-w-0 flex-1 truncate font-medium"
+              // Double-click also flips into edit mode for power users —
+              // the visible pencil button is the discoverable affordance,
+              // but dblclick is the muscle-memory shortcut.
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsEditingTitle(true);
+              }}
+            >
+              {project.title}
+            </span>
+          </AppLink>
+          {/* Hover-revealed rename button. Sibling of AppLink so a click
+              doesn't trigger navigation. Visible on row hover (and always
+              visible to keyboard focus). */}
+          <button
+            type="button"
+            onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               setIsEditingTitle(true);
             }}
-            title="Double-click to rename"
+            className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-60 hover:opacity-100"
+            aria-label={`Rename ${project.title}`}
+            title="Rename project"
           >
-            {project.title}
-          </span>
-        </AppLink>
+            <Pencil className="size-3" />
+          </button>
+        </div>
       )}
 
       {/* Priority — dropdown */}
