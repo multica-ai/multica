@@ -18,6 +18,9 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     metadata: {},
     owner_id: null,
     last_seen_at: new Date(FIXED_NOW - 10_000).toISOString(),
+    paused_at: null,
+    unpause_at: null,
+    pause_reason: null,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
     ...overrides,
@@ -87,6 +90,31 @@ describe("deriveRuntimeHealth", () => {
         FIXED_NOW,
       ),
     ).toBe("recently_lost");
+  });
+
+  it("returns paused when paused_at is set, regardless of online status", () => {
+    expect(
+      deriveRuntimeHealth(
+        makeRuntime({
+          status: "online",
+          paused_at: new Date(FIXED_NOW - 60_000).toISOString(),
+        }),
+        FIXED_NOW,
+      ),
+    ).toBe("paused");
+  });
+
+  it("returns paused even when the runtime would otherwise be offline", () => {
+    expect(
+      deriveRuntimeHealth(
+        makeRuntime({
+          status: "offline",
+          last_seen_at: new Date(FIXED_NOW - 60 * 60_000).toISOString(),
+          paused_at: new Date(FIXED_NOW - 30_000).toISOString(),
+        }),
+        FIXED_NOW,
+      ),
+    ).toBe("paused");
   });
 
   it("respects the 5-minute boundary (just outside → offline)", () => {

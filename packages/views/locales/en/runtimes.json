@@ -32,6 +32,10 @@
       "label": "Online",
       "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
     },
+    "paused": {
+      "label": "Paused",
+      "description": "Manually paused or auto-paused by a provider rate limit. Tasks resume on unpause."
+    },
     "recently_lost": {
       "label": "Recently lost",
       "description": "Lost contact under 5 minutes ago — often a brief network blip."

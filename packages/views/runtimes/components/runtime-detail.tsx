@@ -7,6 +7,9 @@ import {
   ChevronRight,
   Cpu,
   Lock,
+  Pause,
+  Play,
+  Moon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -14,7 +17,11 @@ import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import {
+  useDeleteRuntime,
+  usePauseRuntime,
+  useUnpauseRuntime,
+} from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -103,11 +110,14 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const deleteMutation = useDeleteRuntime(wsId);
+  const pauseMutation = usePauseRuntime(wsId);
+  const unpauseMutation = useUnpauseRuntime(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const health = deriveRuntimeHealth(runtime, now);
+  const isPaused = !!runtime.paused_at;
   const ownerMember = runtime.owner_id
     ? members.find((m) => m.user_id === runtime.owner_id) ?? null
     : null;
@@ -137,6 +147,38 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     });
   };
 
+  const handlePause = () => {
+    pauseMutation.mutate(
+      { runtimeId: runtime.id, reason: "manual" },
+      {
+        onSuccess: () => toast.success("Runtime paused"),
+        onError: (e) =>
+          toast.error(
+            e instanceof Error ? e.message : "Failed to pause runtime",
+          ),
+      },
+    );
+  };
+
+  const handleUnpause = () => {
+    unpauseMutation.mutate(runtime.id, {
+      onSuccess: (rt) => {
+        toast.success(
+          rt.paused_at ? "Unpause queued" : "Runtime resumed",
+        );
+      },
+      onError: (e) =>
+        toast.error(
+          e instanceof Error ? e.message : "Failed to resume runtime",
+        ),
+    });
+  };
+
+  // Permission for pause/unpause matches delete (admin or runtime owner).
+  // Only enforces UI affordance — the backend re-checks on every call.
+  const canPause = canDelete;
+  const pauseBusy = pauseMutation.isPending || unpauseMutation.isPending;
+
   const daemonShort = shortDaemonId(runtime.daemon_id);
   const lastSeen = formatLastSeen(runtime.last_seen_at);
 
@@ -164,6 +206,35 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
+          )}
+          {canPause && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={isPaused ? handleUnpause : handlePause}
+                    disabled={pauseBusy}
+                    className={
+                      isPaused
+                        ? "text-brand hover:text-brand"
+                        : "text-muted-foreground hover:text-foreground"
+                    }
+                    aria-label={isPaused ? "Resume runtime" : "Pause runtime"}
+                  >
+                    {isPaused ? (
+                      <Play className="h-3.5 w-3.5" />
+                    ) : (
+                      <Pause className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                {isPaused ? "Resume runtime" : "Pause runtime"}
+              </TooltipContent>
+            </Tooltip>
           )}
           {canDelete && (
             <Tooltip>
@@ -201,6 +272,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               ownerMember={ownerMember}
               cliVersion={cliVersion}
               daemonShort={daemonShort}
+              now={now}
             />
             <UsageSection runtimeId={runtime.id} />
           </div>
@@ -211,6 +283,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
+              runtimePaused={isPaused}
             />
             <DiagnosticsCard
               runtime={runtime}
@@ -269,6 +342,7 @@ function HeroCard({
   ownerMember,
   cliVersion,
   daemonShort,
+  now,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -276,6 +350,7 @@ function HeroCard({
   ownerMember: MemberWithUser | null;
   cliVersion: string | null;
   daemonShort: string | null;
+  now: number;
 }) {
   const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
@@ -301,6 +376,14 @@ function HeroCard({
           </div>
         </div>
       </div>
+
+      {runtime.paused_at && (
+        <PauseBanner
+          unpauseAt={runtime.unpause_at}
+          reason={runtime.pause_reason}
+          now={now}
+        />
+      )}
 
       {/* User-visible facts — Owner / Device / Runtime, each labelled.
           Replaces the older dense `·`-separated meta strip that mixed
@@ -383,6 +466,52 @@ function HeroCard({
   );
 }
 
+// Renders a thin brand-toned strip under the identity row when the runtime
+// is paused. Displays the configured reason (manual / rate_limit / …) and a
+// live countdown to the scheduled auto-unpause when one is set.
+function PauseBanner({
+  unpauseAt,
+  reason,
+  now,
+}: {
+  unpauseAt: string | null;
+  reason: string | null;
+  now: number;
+}) {
+  const countdown = unpauseAt ? formatUntil(unpauseAt, now) : null;
+  return (
+    <div className="flex items-center gap-2 border-b bg-brand/5 px-4 py-2 text-xs text-brand">
+      <Pause className="h-3.5 w-3.5" />
+      <span className="font-medium">Paused</span>
+      {reason && reason !== "manual" && (
+        <>
+          <span className="text-muted-foreground">·</span>
+          <span className="capitalize">{reason.replace(/_/g, " ")}</span>
+        </>
+      )}
+      <span className="ml-auto text-muted-foreground">
+        {countdown ? `Auto-resume ${countdown}` : "No scheduled resume"}
+      </span>
+    </div>
+  );
+}
+
+// Returns "in 5m", "in 2h 14m", or "any moment now" for a future timestamp.
+// For a past timestamp we say "any moment now" because the sweeper runs on
+// a 30s tick — once unpause_at has passed, the unpause is imminent.
+function formatUntil(iso: string, now: number): string {
+  const then = new Date(iso).getTime();
+  const diff = then - now;
+  if (diff <= 0) return "any moment now";
+  const totalSec = Math.round(diff / 1000);
+  if (totalSec < 60) return `in ${totalSec}s`;
+  const totalMin = Math.round(totalSec / 60);
+  if (totalMin < 60) return `in ${totalMin}m`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins === 0 ? `in ${hours}h` : `in ${hours}h ${mins}m`;
+}
+
 function Fact({
   label,
   children,
@@ -408,10 +537,12 @@ function ServingAgentsCard({
   agents,
   presenceMap,
   agentHref,
+  runtimePaused,
 }: {
   agents: Agent[];
   presenceMap: Map<string, AgentPresenceDetail>;
   agentHref: (agentId: string) => string;
+  runtimePaused: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
@@ -420,7 +551,20 @@ function ServingAgentsCard({
       <div className="flex items-center justify-between border-b px-4 py-2.5">
         <span className="text-xs font-semibold">{t(($) => $.detail.serving_title)}</span>
         <span className="text-xs text-muted-foreground">
+<<<<<<< HEAD
           {t(($) => $.detail.serving_count, { count: agents.length })}
+=======
+          {runtimePaused && agents.length > 0 ? (
+            <span className="inline-flex items-center gap-1 text-brand">
+              <Moon className="h-3 w-3" />
+              All {agents.length} sleeping
+            </span>
+          ) : (
+            <>
+              {agents.length} agent{agents.length === 1 ? "" : "s"}
+            </>
+          )}
+>>>>>>> ccc7b5e1 (feat(views): surface runtime pause state and pause/resume controls)
         </span>
       </div>
       {agents.length === 0 ? (

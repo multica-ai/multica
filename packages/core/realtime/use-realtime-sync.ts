@@ -153,6 +153,14 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
       },
+      // runtime:paused / runtime:unpaused — same shape as daemon:register,
+      // just specifically for the pause-orchestration columns. Cheap
+      // re-fetch of the runtime list keeps the badge / countdown in sync
+      // across every connected client without bespoke patch logic.
+      runtime: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      },
       autopilot: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });

@@ -40,6 +40,8 @@ export type WSEventType =
   | "member:removed"
   | "daemon:heartbeat"
   | "daemon:register"
+  | "runtime:paused"
+  | "runtime:unpaused"
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"
@@ -325,4 +327,16 @@ export interface InvitationDeclinedPayload {
 export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
+}
+
+export interface RuntimePausedPayload {
+  runtime_id: string;
+  paused_at: string;
+  unpause_at: string;
+  pause_reason: string;
+}
+
+export interface RuntimeUnpausedPayload {
+  runtime_id: string;
+  resumed_tasks: number;
 }

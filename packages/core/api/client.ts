@@ -657,6 +657,22 @@ export class ApiClient {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
+  // Pause a runtime. unpause_at is optional; when omitted the runtime stays
+  // paused until manually unpaused. reason defaults to 'manual' server-side.
+  async pauseRuntime(
+    runtimeId: string,
+    body?: { unpause_at?: string; reason?: string },
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/pause`, {
+      method: "POST",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async unpauseRuntime(runtimeId: string): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/unpause`, { method: "POST" });
+  }
+
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));

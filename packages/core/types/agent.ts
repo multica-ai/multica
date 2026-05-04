@@ -17,6 +17,16 @@ export interface RuntimeDevice {
   metadata: Record<string, unknown>;
   owner_id: string | null;
   last_seen_at: string | null;
+  /**
+   * Pause state — orthogonal to status (which tracks heartbeat). When
+   * paused_at is non-null the runtime is paused: its daemon may still be
+   * online, but the backend won't dispatch claimed tasks until unpaused.
+   * unpause_at is the scheduled auto-unpause (null = manual only).
+   * pause_reason is a short slug ('rate_limit' | 'manual' | …) for UI hints.
+   */
+  paused_at: string | null;
+  unpause_at: string | null;
+  pause_reason: string | null;
   created_at: string;
   updated_at: string;
 }

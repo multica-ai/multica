@@ -23,22 +23,67 @@ import { RuntimeList } from "./runtime-list";
 import { useT } from "../../i18n";
 
 type RuntimeFilter = "mine" | "all";
-type HealthFilter = "all" | "online" | "recently_lost" | "offline" | "about_to_gc";
+type HealthFilter =
+  | "all"
+  | "online"
+  | "paused"
+  | "recently_lost"
+  | "offline"
+  | "about_to_gc";
 
 const HEALTH_ORDER: HealthFilter[] = [
   "all",
   "online",
+  "paused",
   "recently_lost",
   "offline",
   "about_to_gc",
 ];
 
+<<<<<<< HEAD
 // Dot tokens stay in code — labels/descriptions flow through useT.
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
   online: "bg-success",
   recently_lost: "bg-warning",
   offline: "bg-muted-foreground/40",
   about_to_gc: "bg-destructive",
+=======
+// Single source of truth for the 4-state chip visuals + tooltip copy.
+// Thresholds come from `deriveRuntimeHealth`: 45s heartbeat window (server
+// sweeper), 5 min "recently lost" cutoff, 6 day "about_to_gc" trigger,
+// 7 day hard GC. Wording leans on what the user should *do*, not the
+// internals of the sweeper — those live in the redesign doc.
+const HEALTH_CHIP: Record<
+  Exclude<HealthFilter, "all">,
+  { label: string; dot: string; description: string }
+> = {
+  online: {
+    label: "Online",
+    dot: "bg-success",
+    description: "Heartbeat received in the last 45s. Ready to dispatch tasks.",
+  },
+  paused: {
+    label: "Paused",
+    dot: "bg-brand",
+    description:
+      "Orchestrationally paused — no tasks are dispatched until the runtime is resumed (manual or scheduled).",
+  },
+  recently_lost: {
+    label: "Recently lost",
+    dot: "bg-warning",
+    description: "Lost contact under 5 minutes ago — often a brief network blip.",
+  },
+  offline: {
+    label: "Offline",
+    dot: "bg-muted-foreground/40",
+    description: "No heartbeat for 5+ minutes. Restart the daemon or investigate the host.",
+  },
+  about_to_gc: {
+    label: "About to GC",
+    dot: "bg-destructive",
+    description: "Offline 6+ days. Auto-deleted at 7 days unless it reconnects.",
+  },
+>>>>>>> ccc7b5e1 (feat(views): surface runtime pause state and pause/resume controls)
 };
 
 interface RuntimesPageProps {
@@ -102,6 +147,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const healthCounts = useMemo(() => {
     const counts: Record<Exclude<HealthFilter, "all">, number> = {
       online: 0,
+      paused: 0,
       recently_lost: 0,
       offline: 0,
       about_to_gc: 0,

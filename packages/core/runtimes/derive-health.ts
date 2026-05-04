@@ -13,6 +13,11 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ABOUT_TO_GC_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
 
 export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): RuntimeHealth {
+  // Pause takes precedence over heartbeat-derived state. A paused runtime
+  // is typically still online (its daemon keeps heartbeating); the user-
+  // visible truth is "pause is the gating signal", so we surface it first.
+  if (runtime.paused_at) return "paused";
+
   if (runtime.status === "online") return "online";
 
   // No last_seen timestamp ever recorded — treat as long-offline. This is

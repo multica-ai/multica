@@ -5,6 +5,7 @@
 
 export type RuntimeHealth =
   | "online" // green — within heartbeat threshold
+  | "paused" // muted blue — orchestrationally paused; daemon may still be online
   | "recently_lost" // amber — offline < 5 minutes (likely transient)
   | "offline" // grey — offline 5 minutes ~ 7 days
   | "about_to_gc"; // dim — within 1 day of the 7-day GC threshold

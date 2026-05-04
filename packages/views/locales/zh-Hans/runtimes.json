@@ -32,6 +32,10 @@
       "label": "在线",
       "description": "最近 45 秒内收到心跳。可以派发 task。"
     },
+    "paused": {
+      "label": "已暂停",
+      "description": "已手动暂停或因 provider 限流自动暂停。取消暂停后任务将恢复。"
+    },
     "recently_lost": {
       "label": "最近失联",
       "description": "失联不到 5 分钟——通常是短暂的网络抖动。"

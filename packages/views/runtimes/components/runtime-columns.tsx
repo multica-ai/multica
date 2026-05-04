@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
   MoreHorizontal,
+  Pause,
+  Play,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,7 +17,11 @@ import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import {
+  useDeleteRuntime,
+  usePauseRuntime,
+  useUnpauseRuntime,
+} from "@multica/core/runtimes/mutations";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -487,11 +493,17 @@ function RowMenu({
 }) {
   const { t } = useT("runtimes");
   const deleteMutation = useDeleteRuntime(wsId);
+  const pauseMutation = usePauseRuntime(wsId);
+  const unpauseMutation = useUnpauseRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
+  // Permission for pause/unpause matches delete (admin or runtime owner) —
+  // the backend re-checks regardless, this just gates the affordance.
   if (!canDelete) {
     return <span aria-hidden />;
   }
+
+  const isPaused = !!runtime.paused_at;
 
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
@@ -504,6 +516,29 @@ function RowMenu({
           e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed),
         );
       },
+    });
+  };
+
+  const handlePause = () => {
+    pauseMutation.mutate(
+      { runtimeId: runtime.id, reason: "manual" },
+      {
+        onSuccess: () => toast.success("Runtime paused"),
+        onError: (e) =>
+          toast.error(
+            e instanceof Error ? e.message : "Failed to pause runtime",
+          ),
+      },
+    );
+  };
+
+  const handleUnpause = () => {
+    unpauseMutation.mutate(runtime.id, {
+      onSuccess: () => toast.success("Runtime resumed"),
+      onError: (e) =>
+        toast.error(
+          e instanceof Error ? e.message : "Failed to resume runtime",
+        ),
     });
   };
 
@@ -528,6 +563,23 @@ function RowMenu({
           className="w-40"
           onClick={(e) => e.stopPropagation()}
         >
+          {isPaused ? (
+            <DropdownMenuItem
+              onClick={handleUnpause}
+              disabled={unpauseMutation.isPending}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Resume
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={handlePause}
+              disabled={pauseMutation.isPending}
+            >
+              <Pause className="h-3.5 w-3.5" />
+              Pause
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setDeleteOpen(true)}
