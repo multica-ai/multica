@@ -203,6 +203,47 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return task, nil
 }
 
+// EnqueueOrchestratorTask wakes a workspace's configured orchestrator agent
+// in response to an agent-authored comment. Mechanically identical to
+// EnqueueTaskForMention — same DB row shape, same broadcast — but kept as
+// a separate entry point so logs and metrics can distinguish orchestrator
+// wakes from explicit @mentions, and so future divergence (e.g. a separate
+// dedup window or a different trigger summary template) is a localized
+// change.
+func (s *TaskService) EnqueueOrchestratorTask(ctx context.Context, issue db.Issue, orchestratorAgentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, orchestratorAgentID)
+	if err != nil {
+		slog.Error("orchestrator task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load orchestrator agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		slog.Debug("orchestrator task enqueue skipped: agent archived", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("orchestrator agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Error("orchestrator task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("orchestrator agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:          orchestratorAgentID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: triggerCommentID,
+		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+	})
+	if err != nil {
+		slog.Error("orchestrator task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create orchestrator task: %w", err)
+	}
+
+	slog.Info("orchestrator task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
+
 // QuickCreateContext is the JSON payload stored on a quick-create task's
 // context column. The daemon detects this variant via Type == "quick_create"
 // and switches to the quick-create prompt template; the completion path

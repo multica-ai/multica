@@ -18,6 +18,10 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
+-- orchestrator_agent_id uses a paired (orchestrator_agent_id, orchestrator_agent_id_set)
+-- pattern so callers can distinguish "don't change" from "explicitly clear to NULL".
+-- The narg-and-bool pattern is the same one used for project lead_type/lead_id
+-- and for workspace.repos before it.
 UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -25,6 +29,11 @@ UPDATE workspace SET
     settings = COALESCE(sqlc.narg('settings'), settings),
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
+    orchestrator_agent_id = CASE
+        WHEN sqlc.arg('orchestrator_agent_id_set')::boolean
+        THEN sqlc.narg('orchestrator_agent_id')::uuid
+        ELSE orchestrator_agent_id
+    END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

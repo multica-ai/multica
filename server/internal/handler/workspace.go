@@ -33,16 +33,17 @@ func generateIssuePrefix(name string) string {
 }
 
 type WorkspaceResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID                  string  `json:"id"`
+	Name                string  `json:"name"`
+	Slug                string  `json:"slug"`
+	Description         *string `json:"description"`
+	Context             *string `json:"context"`
+	Settings            any     `json:"settings"`
+	Repos               any     `json:"repos"`
+	IssuePrefix         string  `json:"issue_prefix"`
+	OrchestratorAgentID *string `json:"orchestrator_agent_id"` // optional pointer to the workspace's orchestrator agent — woken up on agent-authored issue comments to drive cross-agent workflows
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -61,16 +62,17 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:                  uuidToString(w.ID),
+		Name:                w.Name,
+		Slug:                w.Slug,
+		Description:         textToPtr(w.Description),
+		Context:             textToPtr(w.Context),
+		Settings:            settings,
+		Repos:               repos,
+		IssuePrefix:         w.IssuePrefix,
+		OrchestratorAgentID: uuidToPtr(w.OrchestratorAgentID),
+		CreatedAt:           timestampToString(w.CreatedAt),
+		UpdatedAt:           timestampToString(w.UpdatedAt),
 	}
 }
 
@@ -231,6 +233,11 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	// OrchestratorAgentID + OrchestratorAgentIDSet use the paired-bool pattern
+	// so a PATCH can distinguish "don't touch" from "explicitly clear to NULL".
+	// Set the bool true to apply; pass null in OrchestratorAgentID to clear.
+	OrchestratorAgentID    *string `json:"orchestrator_agent_id,omitempty"`
+	OrchestratorAgentIDSet bool    `json:"orchestrator_agent_id_set,omitempty"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +283,30 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	if req.OrchestratorAgentIDSet {
+		params.OrchestratorAgentIDSet = true
+		if req.OrchestratorAgentID != nil && *req.OrchestratorAgentID != "" {
+			agentUUID, ok := parseUUIDOrBadRequest(w, *req.OrchestratorAgentID, "orchestrator_agent_id")
+			if !ok {
+				return
+			}
+			// Verify the orchestrator agent belongs to this workspace —
+			// otherwise a malicious or misconfigured client could point at
+			// an agent in a different workspace and trigger cross-workspace
+			// dispatch.
+			agent, err := h.Queries.GetAgent(r.Context(), agentUUID)
+			if err != nil || agent.WorkspaceID != idUUID {
+				writeError(w, http.StatusBadRequest, "orchestrator_agent_id must reference an agent in this workspace")
+				return
+			}
+			if agent.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "orchestrator_agent_id must reference a non-archived agent")
+				return
+			}
+			params.OrchestratorAgentID = agentUUID
+		}
+		// nil OrchestratorAgentID with set=true clears the pointer.
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
