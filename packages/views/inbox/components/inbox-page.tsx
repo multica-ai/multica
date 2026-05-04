@@ -66,6 +66,7 @@ import {
   chatSessionsOptions,
   chatSessionsInFolderOptions,
   archivedChatSessionsOptions,
+  allChatSessionsOptions,
   pendingChatTasksOptions,
 } from "@multica/core/chat/queries";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -114,15 +115,21 @@ function isGroupByMode(s: string | null): s is GroupByMode {
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
+  // ?chat=<id> selects a chat session (preferred). ?issue=<id> selects a
+  // notification or issue. Both are also accepted as legacy aliases for
+  // each other so old bookmarks of `?issue=<chat-id>` keep landing on the
+  // chat — the lookup further down decides which one matches.
+  const urlChat = searchParams.get("chat") ?? "";
   const urlIssue = searchParams.get("issue") ?? "";
+  const urlSelected = urlChat || urlIssue;
   const wsPaths = useWorkspacePaths();
 
-  const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
+  const [selectedKey, setSelectedKeyState] = useState(() => urlSelected);
   const [viewMode, setViewMode] = useState<ViewMode>({ kind: "inbox" });
 
   useEffect(() => {
-    setSelectedKeyState(urlIssue);
-  }, [urlIssue]);
+    setSelectedKeyState(urlSelected);
+  }, [urlSelected]);
 
   const wsId = useWorkspaceId();
   const isFolderView = viewMode.kind === "folder";
@@ -225,13 +232,21 @@ export function InboxPage() {
   const { data: folders = [] } = useQuery(inboxFolderListOptions(wsId));
   useQuery(inboxFolderMembershipsOptions(wsId)); // primed for cache; not read here
 
+  // All sessions (active + archived). Used purely for URL-driven lookup so a
+  // pasted/bookmarked chat URL still resolves when the active list doesn't
+  // contain that session — e.g. an archived chat opened via deep link.
+  const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
+
   const createFolder = useCreateInboxFolder();
   const renameFolder = useRenameInboxFolder();
   const deleteFolder = useDeleteInboxFolder();
   const addItemToFolder = useAddInboxFolderItem();
   const setFolderParent = useSetInboxFolderParent();
 
-  const selectedChatSession = chatSessions.find((s) => s.id === selectedKey) ?? null;
+  const selectedChatSession =
+    chatSessions.find((s) => s.id === selectedKey) ??
+    allSessions.find((s) => s.id === selectedKey) ??
+    null;
   const selected = selectedChatSession
     ? null
     : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
@@ -245,8 +260,12 @@ export function InboxPage() {
     if (selected) return;
     if (selectedChatSession || selectedKey === "new-chat") return;
     if (pendingChatIdRef.current === selectedKey) return;
+    // Don't redirect a `?chat=<id>` URL to the issue page — if the chat
+    // genuinely doesn't exist, leave the panel empty rather than sending
+    // the user to a "this issue does not exist" screen.
+    if (urlChat && !urlIssue) return;
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths]);
+  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths, urlChat, urlIssue]);
 
   useEffect(() => {
     if (pendingChatIdRef.current && chatSessions.some((s) => s.id === pendingChatIdRef.current)) {
@@ -254,15 +273,23 @@ export function InboxPage() {
     }
   }, [chatSessions]);
 
-  const setSelectedKey = useCallback((key: string) => {
+  // `kind` decides which query param the URL uses: `?chat=` for chat
+  // sessions (incl. the new-chat sentinel), `?issue=` for inbox items.
+  // Picking the right one is what makes shared URLs land on the right
+  // panel without the inbox redirecting chats into "issue does not exist".
+  const setSelectedKey = useCallback((kind: "chat" | "issue" | null, key: string) => {
     setSelectedKeyState(key);
     const inboxPath = wsPaths.inbox();
-    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
+    const url = !key
+      ? inboxPath
+      : kind === "chat"
+        ? `${inboxPath}?chat=${key}`
+        : `${inboxPath}?issue=${key}`;
     replace(url);
   }, [replace, wsPaths]);
 
   const handleArchiveChat = useCallback(async (sessionId: string) => {
-    if (sessionId === selectedKey) setSelectedKey("");
+    if (sessionId === selectedKey) setSelectedKey(null, "");
     await api.archiveChatSession(sessionId);
     qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
@@ -283,7 +310,7 @@ export function InboxPage() {
   const archiveCompletedMutation = useArchiveCompletedInbox();
 
   const handleSelect = (item: InboxItem) => {
-    setSelectedKey(item.issue_id ?? item.id);
+    setSelectedKey("issue", item.issue_id ?? item.id);
     if (!item.read) {
       markReadMutation.mutate(item.id, {
         onError: () => toast.error("Failed to mark as read"),
@@ -293,7 +320,7 @@ export function InboxPage() {
 
   const handleArchive = (id: string) => {
     const archived = items.find((i) => i.id === id);
-    if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
+    if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey(null, "");
     archiveMutation.mutate(id, {
       onError: () => toast.error("Failed to archive"),
     });
@@ -306,7 +333,7 @@ export function InboxPage() {
   };
 
   const handleArchiveAll = () => {
-    setSelectedKey("");
+    setSelectedKey(null, "");
     archiveAllMutation.mutate(undefined, {
       onError: () => toast.error("Failed to archive all"),
     });
@@ -314,21 +341,21 @@ export function InboxPage() {
 
   const handleArchiveAllRead = () => {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
-    if (readKeys.includes(selectedKey)) setSelectedKey("");
+    if (readKeys.includes(selectedKey)) setSelectedKey(null, "");
     archiveAllReadMutation.mutate(undefined, {
       onError: () => toast.error("Failed to archive read items"),
     });
   };
 
   const handleArchiveCompleted = () => {
-    setSelectedKey("");
+    setSelectedKey(null, "");
     archiveCompletedMutation.mutate(undefined, {
       onError: () => toast.error("Failed to archive completed"),
     });
   };
 
   const handleNewChat = () => {
-    setSelectedKey("new-chat");
+    setSelectedKey("chat", "new-chat");
   };
 
   // -- Drag and drop ---------------------------------------------------------
@@ -444,7 +471,7 @@ export function InboxPage() {
         { onError: () => toast.error("Failed to move item") },
       );
       if (selectedKey === itemId) {
-        setSelectedKey("");
+        setSelectedKey(null, "");
       }
     },
     [addItemToFolder, setFolderParent, folders, folderDescendants, selectedKey, setSelectedKey],
@@ -541,7 +568,7 @@ export function InboxPage() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
-                setSelectedKey("");
+                setSelectedKey(null, "");
                 setViewMode(isArchivedView ? { kind: "inbox" } : { kind: "archived" });
               }}
             >
@@ -616,7 +643,7 @@ export function InboxPage() {
             className={`group/chat flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
               session.id === selectedKey ? "bg-accent" : ""
             }`}
-            onClick={() => setSelectedKey(session.id)}
+            onClick={() => setSelectedKey("chat", session.id)}
           >
             <Avatar className="size-7 shrink-0">
               {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
@@ -830,7 +857,7 @@ export function InboxPage() {
       folders={folders}
       selectedFolderId={isFolderView ? folderId : null}
       onSelect={(id) => {
-        setSelectedKey("");
+        setSelectedKey(null, "");
         setViewMode(id ? { kind: "folder", id } : { kind: "inbox" });
       }}
       onCreate={(name, parentId) =>
@@ -860,7 +887,7 @@ export function InboxPage() {
       sessionId={selectedChatSession?.id ?? null}
       onSessionCreated={(id) => {
         pendingChatIdRef.current = id;
-        setSelectedKey(id);
+        setSelectedKey("chat", id);
       }}
     />
   ) : selected?.issue_id ? (
@@ -928,7 +955,7 @@ export function InboxPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSelectedKey("")}
+              onClick={() => setSelectedKey(null, "")}
               className="gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
