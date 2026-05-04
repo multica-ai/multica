@@ -2,12 +2,12 @@
 # Multica MCP installer — installs the CLI (if missing), authenticates,
 # and registers the MCP server with Claude Code.
 #
-# One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main/scripts/install-mcp.sh | bash
+# One-line install (requires gh CLI with access to firtal-group):
+#   gh repo view firtal-group/firtal-cerebro --raw --ref main scripts/install-mcp.sh | bash
 #
 set -euo pipefail
 
-REPO_RAW="https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main"
+REPO="firtal-group/firtal-cerebro"
 
 if [ -t 1 ] || [ -t 2 ]; then
   BOLD='\033[1m'
@@ -26,6 +26,36 @@ warn()  { printf "${BOLD}${YELLOW}⚠ %s${RESET}\n" "$*" >&2; }
 fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# Fetch a file from the private repo using gh CLI (handles auth automatically)
+fetch_repo_file() {
+  local path="$1"
+  gh api "repos/${REPO}/contents/${path}?ref=main" --jq '.content' | base64 -d
+}
+
+ensure_gh_cli() {
+  if command_exists gh; then
+    return 0
+  fi
+  fail "'gh' CLI not found on PATH.
+
+The installer uses the GitHub CLI to fetch files from the private firtal-group repo.
+Install GitHub CLI first: https://cli.github.com/
+
+Then authenticate with: gh auth login
+And re-run this installer."
+}
+
+ensure_gh_auth() {
+  if gh auth status >/dev/null 2>&1; then
+    return 0
+  fi
+  fail "GitHub CLI is not authenticated.
+
+Run: gh auth login
+
+Then re-run this installer."
+}
 
 ensure_claude_cli() {
   if command_exists claude; then
@@ -46,8 +76,8 @@ ensure_multica_cli() {
   fi
 
   info "Installing Multica CLI..."
-  # Delegate to the canonical CLI installer so we don't duplicate logic.
-  curl -fsSL "$REPO_RAW/scripts/install.sh" | bash
+  # Fetch and run the canonical CLI installer from the private repo
+  fetch_repo_file "scripts/install.sh" | bash
 
   if ! command_exists multica; then
     fail "Multica CLI installed but 'multica' not found on PATH. Restart your shell and re-run this installer."
@@ -79,6 +109,8 @@ main() {
   printf "${BOLD}  Multica MCP — Installer${RESET}\n"
   printf "\n"
 
+  ensure_gh_cli
+  ensure_gh_auth
   ensure_claude_cli
   ensure_multica_cli
   ensure_logged_in
