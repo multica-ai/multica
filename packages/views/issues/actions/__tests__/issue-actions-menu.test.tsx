@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue, Project } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 
 // ---------------------------------------------------------------------------
 // Mocks — same pattern as the issue-detail test suite.
@@ -42,31 +42,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
     queryFn: () => Promise.resolve([]),
-  }),
-}));
-
-vi.mock("@multica/core/projects/queries", () => ({
-  projectListOptions: () => ({
-    queryKey: ["projects", "ws-1", "list"],
-    queryFn: () =>
-      Promise.resolve([
-        {
-          id: "project-1",
-          workspace_id: "ws-1",
-          title: "Launch work",
-          description: null,
-          icon: "🚀",
-          status: "in_progress",
-          priority: "medium",
-          settings: {},
-          lead_type: null,
-          lead_id: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-          issue_count: 1,
-          done_count: 0,
-        },
-      ]),
   }),
 }));
 
@@ -115,10 +90,6 @@ vi.mock("../../../common/actor-avatar", () => ({
 // Import after mocks.
 import { IssueActionsDropdown } from "../issue-actions-dropdown";
 import { IssueActionsContextMenu } from "../issue-actions-context-menu";
-import {
-  IssueActionsMenuItems,
-  type MenuPrimitives,
-} from "../issue-actions-menu-items";
 
 const mockIssue: Issue = {
   id: "issue-1",
@@ -168,7 +139,6 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
-    expect(screen.getByText("Project")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
     expect(screen.getByText("More")).toBeInTheDocument();
@@ -215,66 +185,6 @@ describe("IssueActionsContextMenu", () => {
     fireEvent.contextMenu(screen.getByTestId("row"));
 
     expect(await screen.findByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Project")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-  });
-});
-
-const testPrimitives = {
-  Item: ({ children, onClick, disabled }: any) => (
-    <button disabled={disabled} onClick={onClick} type="button">
-      {children}
-    </button>
-  ),
-  Sub: ({ children }: any) => <div>{children}</div>,
-  SubTrigger: ({ children }: any) => <div>{children}</div>,
-  SubContent: ({ children }: any) => <div>{children}</div>,
-  Separator: () => <hr />,
-} as unknown as MenuPrimitives;
-
-const project: Project = {
-  id: "project-1",
-  workspace_id: "ws-1",
-  title: "Launch work",
-  description: null,
-  icon: "🚀",
-  status: "in_progress",
-  priority: "medium",
-  settings: {},
-  lead_type: null,
-  lead_id: null,
-  created_at: "2026-01-01T00:00:00Z",
-  updated_at: "2026-01-01T00:00:00Z",
-  issue_count: 1,
-  done_count: 0,
-};
-
-describe("IssueActionsMenuItems", () => {
-  it("updates the issue project from the shared action menu", () => {
-    const updateField = vi.fn();
-
-    render(
-      <IssueActionsMenuItems
-        issue={mockIssue}
-        primitives={testPrimitives}
-        actions={{
-          members: [],
-          agents: [],
-          projects: [project],
-          isPinned: false,
-          updateField,
-          togglePin: vi.fn(),
-          copyLink: vi.fn(),
-          openCreateSubIssue: vi.fn(),
-          openSetParent: vi.fn(),
-          openAddChild: vi.fn(),
-          openDeleteConfirm: vi.fn(),
-        }}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /launch work/i }));
-
-    expect(updateField).toHaveBeenCalledWith({ project_id: "project-1" });
   });
 });

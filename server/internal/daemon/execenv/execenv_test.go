@@ -303,6 +303,37 @@ func TestPrepareAfterCreateHookFailureReturnsLogContext(t *testing.T) {
 	}
 }
 
+func TestCappedWriterLimitsOutput(t *testing.T) {
+	var b strings.Builder
+	w := &cappedWriter{w: &b, max: 5}
+
+	n, err := w.Write([]byte("123456789"))
+	if err != nil {
+		t.Fatalf("first write failed: %v", err)
+	}
+	if n != 9 {
+		t.Fatalf("first write n = %d, want 9", n)
+	}
+	n, err = w.Write([]byte("abcdef"))
+	if err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+	if n != 6 {
+		t.Fatalf("second write n = %d, want 6", n)
+	}
+
+	got := b.String()
+	if !strings.HasPrefix(got, "12345") {
+		t.Fatalf("output prefix = %q, want capped payload", got)
+	}
+	if strings.Count(got, "after_create log truncated") != 1 {
+		t.Fatalf("expected one truncation marker, got %q", got)
+	}
+	if strings.Contains(got, "6789") || strings.Contains(got, "abcdef") {
+		t.Fatalf("output included bytes past cap: %q", got)
+	}
+}
+
 func TestPrepareAfterCreateHookTimeoutUsesEnvOverride(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell hook fixture is POSIX-only")

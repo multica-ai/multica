@@ -20,6 +20,7 @@ const (
 	AfterCreateHookTimeoutEnv     = "MULTICA_PROJECT_AFTER_CREATE_TIMEOUT"
 	afterCreateLogName            = "after_create.log"
 	afterCreateOutputTailBytes    = 8 * 1024
+	afterCreateLogOutputMaxBytes  = 1024 * 1024
 )
 
 // AfterCreateHook describes a project-scoped setup script to run in a fresh
@@ -123,7 +124,8 @@ func runAfterCreateHook(ctx context.Context, envRoot, workDir string, hook After
 	cmd.Env = hookEnv(hook.Env, workDir, envRoot)
 
 	tail := &tailWriter{max: afterCreateOutputTailBytes}
-	writer := io.MultiWriter(logFile, tail)
+	logOutput := &cappedWriter{w: logFile, max: afterCreateLogOutputMaxBytes}
+	writer := io.MultiWriter(logOutput, tail)
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 
@@ -184,4 +186,36 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 
 func (w *tailWriter) String() string {
 	return string(w.buf)
+}
+
+type cappedWriter struct {
+	w         io.Writer
+	max       int
+	written   int
+	truncated bool
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if w.max <= 0 || w.w == nil {
+		return len(p), nil
+	}
+	remaining := w.max - w.written
+	if remaining > 0 {
+		chunk := p
+		if len(chunk) > remaining {
+			chunk = chunk[:remaining]
+		}
+		n, err := w.w.Write(chunk)
+		w.written += n
+		if err != nil {
+			return n, err
+		}
+	}
+	if len(p) > remaining && !w.truncated {
+		w.truncated = true
+		if _, err := io.WriteString(w.w, "\n\n[after_create log truncated]\n"); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
 }

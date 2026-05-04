@@ -162,6 +162,71 @@ func TestProjectSettingsRejectMalformedHooks(t *testing.T) {
 	}
 }
 
+func TestProjectSettingsHooksRequireAdminRole(t *testing.T) {
+	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+
+	w := httptest.NewRecorder()
+	req := newRequestAsUser(memberUserID, http.MethodPost, "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Member hook project",
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo no",
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateProject with hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Owner-created hook target",
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo yes",
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	}()
+
+	w = httptest.NewRecorder()
+	req = newRequestAsUser(memberUserID, http.MethodPut, "/api/projects/"+project.ID, map[string]any{
+		"settings": map[string]any{},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateProject clearing hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequestAsUser(memberUserID, http.MethodPut, "/api/projects/"+project.ID, map[string]any{
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo no",
+			},
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateProject with hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestProjectResourceLifecycle(t *testing.T) {
 	// Create a project to attach resources to.
 	w := httptest.NewRecorder()

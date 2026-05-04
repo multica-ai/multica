@@ -1343,6 +1343,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	agentEnv := d.taskAgentEnv(task, agentName, agentID, slot)
+	// Ensure the multica CLI is on PATH for both project setup hooks and the
+	// provider process. Some runtimes (e.g. Codex) run in an isolated sandbox
+	// that may not inherit the daemon's PATH. Prepend the directory of the
+	// running multica binary so `multica` commands resolve consistently.
+	if selfBin, err := os.Executable(); err == nil {
+		binDir := filepath.Dir(selfBin)
+		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
@@ -1409,14 +1417,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task)
 
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := os.Executable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
-	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {

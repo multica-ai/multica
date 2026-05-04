@@ -103,6 +103,35 @@ type projectHooksWire struct {
 	AfterCreate string `json:"after_create,omitempty"`
 }
 
+func projectSettingsMentionsAfterCreateHook(settings any) bool {
+	obj, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	hooksRaw, ok := obj["hooks"]
+	if !ok {
+		return false
+	}
+	hooks, ok := hooksRaw.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, exists := hooks["after_create"]
+	return exists
+}
+
+func (h *Handler) requireProjectHookManager(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can configure project setup hooks")
+		return false
+	}
+	return true
+}
+
 func marshalProjectSettingsForWrite(settings any) ([]byte, error) {
 	if settings == nil {
 		return []byte("{}"), nil
@@ -251,6 +280,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	settingsJSON, err := marshalProjectSettingsForWrite(req.Settings)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if projectSettingsMentionsAfterCreateHook(req.Settings) && !h.requireProjectHookManager(w, r, workspaceID) {
 		return
 	}
 	var leadType pgtype.Text
@@ -452,6 +484,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		settingsJSON, err := marshalProjectSettingsForWrite(req.Settings)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if (projectSettingsMentionsAfterCreateHook(req.Settings) ||
+			projectHooksFromSettings(prevProject.Settings) != nil) &&
+			!h.requireProjectHookManager(w, r, workspaceID) {
 			return
 		}
 		params.Settings = settingsJSON

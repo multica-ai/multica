@@ -279,7 +279,7 @@ function BashScriptEditor({
   return (
     <div className="h-64 overflow-hidden rounded-lg border border-input bg-muted/50 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
       <div className="flex h-8 items-center justify-between border-b border-border/60 px-2.5">
-        <span className="font-mono text-xs text-muted-foreground">bash</span>
+        <span className="font-mono text-xs text-muted-foreground">sh</span>
         <Button
           type="button"
           variant="ghost"
@@ -309,7 +309,7 @@ function BashScriptEditor({
           disabled={disabled}
           spellCheck={false}
           wrap="off"
-          aria-label="Project setup bash script"
+          aria-label="Project setup shell script"
           placeholder="git clone https://github.com/org/repo.git ."
           className="absolute inset-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-[13px] leading-5 text-transparent caret-foreground outline-none placeholder:text-muted-foreground selection:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
         />
