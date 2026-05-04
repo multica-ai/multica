@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -10,16 +11,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// BudgetService enforces JEH-327 cost caps at task claim time. The
-// foundational schema (workspace_budget_config, agent_budget_override,
-// budget_state) was landed in PR #18; this service adds the live
-// pre-claim check on top.
-//
-// Per-user enforcement requires `triggered_by_user_id` on
-// agent_task_queue, which is plumbed in a follow-up sub-issue. Until
-// then this service enforces only the workspace daily hard kill and
-// per-agent daily caps. User overrides set today are stored but not
-// consulted.
+// BudgetService enforces JEH-327 cost caps at task claim time across
+// three axes: workspace daily hard kill, per-agent daily cap, and
+// per-user daily cap. Each axis can be configured independently;
+// per-user enforcement also consults the member's
+// budget_enforcement_enabled toggle (migration 9008) so an admin can
+// exempt a single user without touching the workspace default.
 type BudgetService struct {
 	Queries *db.Queries
 }
@@ -37,7 +34,10 @@ type PreClaimDecision struct {
 }
 
 // CheckPreClaim returns whether a task may be claimed for a given
-// (workspace, agent) pair given today's spend.
+// (workspace, agent, triggering user) tuple given today's spend.
+// triggeredByUserID may be invalid (zero pgtype.UUID) for
+// system-triggered tasks (autopilots, schedulers); per-user enforcement
+// is then skipped while the workspace and agent axes still apply.
 //
 // Decision tree:
 //   - workspace has no config row OR configured_at IS NULL
@@ -47,8 +47,11 @@ type PreClaimDecision struct {
 //     >= cap → deny "workspace daily hard kill exceeded"
 //   - agent has effective daily cap (override OR workspace default)
 //     AND today's agent spend >= cap → deny "agent daily cap exceeded"
+//   - triggering member exists, has budget_enforcement_enabled, and
+//     has effective user daily cap with spend >= cap
+//     → deny "user daily cap exceeded"
 //   - otherwise → allow
-func (s *BudgetService) CheckPreClaim(ctx context.Context, workspaceID, agentID pgtype.UUID) PreClaimDecision {
+func (s *BudgetService) CheckPreClaim(ctx context.Context, workspaceID, agentID, triggeredByUserID pgtype.UUID) PreClaimDecision {
 	if !workspaceID.Valid {
 		return PreClaimDecision{Allowed: true}
 	}
@@ -82,6 +85,15 @@ func (s *BudgetService) CheckPreClaim(ctx context.Context, workspaceID, agentID 
 		}
 	}
 
+	if triggeredByUserID.Valid && s.userBudgetEnforced(ctx, workspaceID, triggeredByUserID) {
+		if userCap := s.effectiveUserDailyCap(ctx, workspaceID, triggeredByUserID, cfg); userCap.Valid {
+			spent := s.spentInWindow(ctx, workspaceID, "user", triggeredByUserID, "day", dayStart)
+			if spent >= userCap.Int64 {
+				return PreClaimDecision{Allowed: false, Reason: "user daily cap exceeded"}
+			}
+		}
+	}
+
 	return PreClaimDecision{Allowed: true}
 }
 
@@ -100,6 +112,40 @@ func (s *BudgetService) effectiveAgentDailyCap(ctx context.Context, workspaceID,
 		return override.DailyCapCents
 	}
 	return cfg.DefaultAgentDailyCapCents
+}
+
+// effectiveUserDailyCap returns the user override if present and set,
+// otherwise the workspace default. Both can be NULL (Int8.Valid =
+// false) which the caller treats as "no cap".
+func (s *BudgetService) effectiveUserDailyCap(ctx context.Context, workspaceID, userID pgtype.UUID, cfg db.WorkspaceBudgetConfig) pgtype.Int8 {
+	override, err := s.Queries.GetUserBudgetOverride(ctx, db.GetUserBudgetOverrideParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	})
+	if err == nil && override.DailyCapCents.Valid {
+		return override.DailyCapCents
+	}
+	return cfg.DefaultUserDailyCapCents
+}
+
+// userBudgetEnforced returns true unless the member row says otherwise.
+// Missing member (deleted or cross-workspace) → enforce by default; a
+// stale task tied to a removed member shouldn't bypass caps.
+func (s *BudgetService) userBudgetEnforced(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return true
+	}
+	if !member.BudgetEnforcementEnabled {
+		slog.Debug("user budget enforcement disabled by member toggle",
+			"member_id", uuidToString(member.ID),
+			"user_id", uuidToString(userID),
+		)
+	}
+	return member.BudgetEnforcementEnabled
 }
 
 // spentInWindow returns 0 when no row exists or on lookup error —
@@ -122,4 +168,19 @@ func (s *BudgetService) spentInWindow(ctx context.Context, workspaceID pgtype.UU
 func todayUTCStart() pgtype.Date {
 	t := time.Now().UTC()
 	return pgtype.Date{Time: time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), Valid: true}
+}
+
+func uuidToString(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	v, err := u.Value()
+	if err != nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }

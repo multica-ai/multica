@@ -50,7 +50,7 @@ func TestBudgetService_HardKillBlocksClaim(t *testing.T) {
 	`, testWorkspaceID, dayStart); err != nil {
 		t.Fatalf("setup: seed budget state: %v", err)
 	}
-	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID); !d.Allowed {
+	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID, pgtype.UUID{}); !d.Allowed {
 		t.Fatalf("expected allowed at 500/1000, got denied: %s", d.Reason)
 	}
 
@@ -61,7 +61,7 @@ func TestBudgetService_HardKillBlocksClaim(t *testing.T) {
 	`, testWorkspaceID, dayStart); err != nil {
 		t.Fatalf("update budget state: %v", err)
 	}
-	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID)
+	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID, pgtype.UUID{})
 	if d.Allowed {
 		t.Fatalf("expected denied at hard kill, got allowed")
 	}
@@ -118,7 +118,7 @@ func TestBudgetService_AgentDailyCapBlocksClaim(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
-	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID)
+	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID, pgtype.UUID{})
 	if d.Allowed {
 		t.Fatalf("expected denied at agent cap, got allowed")
 	}
@@ -132,7 +132,7 @@ func TestBudgetService_AgentDailyCapBlocksClaim(t *testing.T) {
 	`, testWorkspaceID, agentID); err != nil {
 		t.Fatalf("bump cap: %v", err)
 	}
-	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID); !d.Allowed {
+	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, agentUUID, pgtype.UUID{}); !d.Allowed {
 		t.Fatalf("expected allowed at 500/1000, got denied: %s", d.Reason)
 	}
 }
@@ -152,8 +152,96 @@ func TestBudgetService_NoConfigAllows(t *testing.T) {
 	// Ensure no config row.
 	testPool.Exec(ctx, `DELETE FROM workspace_budget_config WHERE workspace_id = $1`, testWorkspaceID)
 
-	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, pgtype.UUID{}); !d.Allowed {
+	if d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, pgtype.UUID{}, pgtype.UUID{}); !d.Allowed {
 		t.Fatalf("expected allowed without config, got denied: %s", d.Reason)
+	}
+}
+
+// TestBudgetService_UserDailyCapBlocksClaim covers the per-user
+// enforcement axis added in 9008. Member toggle stays ON; default
+// cap is 500c; user has 500c spent → claim denied.
+func TestBudgetService_UserDailyCapBlocksClaim(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	wsID := pgtype.UUID{}
+	_ = wsID.Scan(testWorkspaceID)
+	userUUID := pgtype.UUID{}
+	_ = userUUID.Scan(testUserID)
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_budget_config (workspace_id, default_user_daily_cap_cents, configured_at, configured_by)
+		VALUES ($1, 500, now(), $2)
+	`, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("setup: insert config: %v", err)
+	}
+	now := time.Now().UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO budget_state (workspace_id, scope_type, scope_id, window_type, window_start, cents_spent)
+		VALUES ($1, 'user', $2, 'day', $3, 500)
+	`, testWorkspaceID, testUserID, dayStart); err != nil {
+		t.Fatalf("setup: seed user spend: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace_budget_config WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, pgtype.UUID{}, userUUID)
+	if d.Allowed {
+		t.Fatalf("expected denied at user cap, got allowed")
+	}
+	if d.Reason != "user daily cap exceeded" {
+		t.Fatalf("expected user cap reason, got %q", d.Reason)
+	}
+}
+
+// TestBudgetService_UserToggleOffBypassesCap covers JEH-327 admin
+// opt-out: even with cap hit, member.budget_enforcement_enabled=false
+// allows the claim through.
+func TestBudgetService_UserToggleOffBypassesCap(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	wsID := pgtype.UUID{}
+	_ = wsID.Scan(testWorkspaceID)
+	userUUID := pgtype.UUID{}
+	_ = userUUID.Scan(testUserID)
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_budget_config (workspace_id, default_user_daily_cap_cents, configured_at, configured_by)
+		VALUES ($1, 500, now(), $2)
+	`, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("setup: insert config: %v", err)
+	}
+	now := time.Now().UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO budget_state (workspace_id, scope_type, scope_id, window_type, window_start, cents_spent)
+		VALUES ($1, 'user', $2, 'day', $3, 500)
+	`, testWorkspaceID, testUserID, dayStart); err != nil {
+		t.Fatalf("setup: seed user spend: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE member SET budget_enforcement_enabled = false
+		WHERE workspace_id = $1 AND user_id = $2
+	`, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("setup: flip toggle: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace_budget_config WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `UPDATE member SET budget_enforcement_enabled = true WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, testUserID)
+	})
+
+	d := testHandler.BudgetService.CheckPreClaim(ctx, wsID, pgtype.UUID{}, userUUID)
+	if !d.Allowed {
+		t.Fatalf("expected allowed when toggle off, got denied: %s", d.Reason)
 	}
 }
 
