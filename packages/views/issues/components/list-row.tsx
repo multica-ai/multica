@@ -2,7 +2,9 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, GripVertical } from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -38,6 +40,8 @@ export const ListRow = memo(function ListRow({
   collapsed = false,
   onToggleCollapsed,
   isOrphan = false,
+  isSortable = false,
+  isDragOverlay = false,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -56,6 +60,18 @@ export const ListRow = memo(function ListRow({
    * without having to open the issue.
    */
   isOrphan?: boolean;
+  /**
+   * True when this row participates in the parent SortableContext
+   * (top-level rows in the list view when drag-to-move is enabled).
+   * Sub-issues + orphans are not draggable in v1.
+   */
+  isSortable?: boolean;
+  /**
+   * True when this row is rendered inside a DragOverlay. Skips
+   * useSortable wiring and renders a pointer-events-none clone so it
+   * doesn't intercept drag events while it follows the cursor.
+   */
+  isDragOverlay?: boolean;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -90,14 +106,58 @@ export const ListRow = memo(function ListRow({
   // sub-issues section on the issue detail page.
   const indentPx = indentLevel * 24;
 
+  // ----- sortable wiring -----
+  // Hooks must be unconditional, but useSortable is fine to call with
+  // disabled=true; it short-circuits inside dnd-kit. The DragOverlay clone
+  // doesn't participate (rendered via `isDragOverlay`).
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: issue.id, disabled: !isSortable || isDragOverlay });
+
+  const style = isSortable
+    ? {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        paddingLeft: indentPx ? `${16 + indentPx}px` : undefined,
+      }
+    : indentPx
+      ? { paddingLeft: `${16 + indentPx}px` }
+      : undefined;
+
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        ref={isSortable && !isDragOverlay ? setNodeRef : undefined}
+        style={style}
         className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
-        }`}
-        style={indentPx ? { paddingLeft: `${16 + indentPx}px` } : undefined}
+        } ${isDragging ? "opacity-40" : ""}`}
       >
+        {/*
+         * Drag handle column. Reserves the same 16px slot whether the row
+         * is draggable or not, so titles align across leaf / parent /
+         * draggable / non-draggable rows.
+         */}
+        {isSortable && !isDragOverlay ? (
+          <span
+            {...attributes}
+            {...listeners}
+            className="flex shrink-0 items-center justify-center w-4 h-4 cursor-grab opacity-0 group-hover/row:opacity-60 hover:opacity-100 active:cursor-grabbing text-muted-foreground"
+            aria-label={`Drag ${issue.identifier}`}
+            // Stop the AppLink's navigation from firing when the user
+            // grabs the handle to start a drag.
+            onClick={(e) => e.preventDefault()}
+          >
+            <GripVertical className="size-3.5" />
+          </span>
+        ) : (
+          <span aria-hidden className="shrink-0 w-4 h-4" />
+        )}
         {/*
          * Chevron column.
          * - Parent with children: visible toggle.
