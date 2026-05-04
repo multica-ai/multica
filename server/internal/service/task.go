@@ -211,6 +211,17 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 			}); err != nil {
 				return fmt.Errorf("create cancelled chat message: %w", err)
 			}
+			// Treat the cancel as the response to every user message the
+			// task had already bundled (i.e. created before the task
+			// started). Messages that arrived AFTER started_at belong to
+			// the queued successor task — leave them unresponded so the
+			// successor's claim picks them up.
+			if err := qtx.MarkUserMessagesRespondedBefore(ctx, db.MarkUserMessagesRespondedBeforeParams{
+				ChatSessionID: t.ChatSessionID,
+				CreatedAt:     t.StartedAt,
+			}); err != nil {
+				return fmt.Errorf("mark user messages responded: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -360,6 +371,19 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 // flipping to 'completed' and chat_session.session_id being refreshed,
 // causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
+	// Decode the daemon's payload up-front. Chat tasks need the assistant
+	// reply text inside the tx so the chat_message insert + mark-responded
+	// pair commits atomically with the task transition — otherwise a crash
+	// in between would let the next claim re-bundle messages we already
+	// answered.
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		// Tolerate malformed payloads — the issue/comment paths below
+		// already do, and we shouldn't block task completion on a
+		// daemon serialization bug.
+		payload = protocol.TaskCompletedPayload{}
+	}
+
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
@@ -390,6 +414,36 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
+
+			// Persist the assistant reply and mark this task's bundle
+			// of user messages as answered, both in the same tx as the
+			// task transition. Cutoff = started_at: messages older than
+			// that are what this task saw; newer messages belong to the
+			// queued successor task and stay unresponded so its claim
+			// picks them up.
+			if payload.Output != "" {
+				if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+					ChatSessionID: t.ChatSessionID,
+					Role:          "assistant",
+					Content:       redact.Text(payload.Output),
+					TaskID:        t.ID,
+				}); err != nil {
+					return fmt.Errorf("create assistant chat message: %w", err)
+				}
+				if err := qtx.MarkUserMessagesRespondedBefore(ctx, db.MarkUserMessagesRespondedBeforeParams{
+					ChatSessionID: t.ChatSessionID,
+					CreatedAt:     t.StartedAt,
+				}); err != nil {
+					return fmt.Errorf("mark user messages responded: %w", err)
+				}
+				// Stamp unread_since on the first unread reply. No-op
+				// if the session already has unread; if the user is
+				// actively viewing, the frontend's auto-mark-read
+				// effect will clear it within a tick.
+				if err := qtx.SetUnreadSinceIfNull(ctx, t.ChatSessionID); err != nil {
+					return fmt.Errorf("set unread_since: %w", err)
+				}
+			}
 		}
 		return nil
 	}); err != nil {
@@ -418,45 +472,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// where the agent did NOT already post a comment during execution.
 	// Comment-triggered tasks: the agent replies via CLI with --parent, so
 	// posting here would create a duplicate.
-	// Chat tasks: no comment posting needed.
-	if task.IssueID.Valid && !task.TriggerCommentID.Valid {
+	// Chat tasks: assistant chat_message was inserted inside the tx above.
+	if task.IssueID.Valid && !task.TriggerCommentID.Valid && payload.Output != "" {
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,
 			Since:    task.StartedAt,
 		})
 		if !agentCommented {
-			var payload protocol.TaskCompletedPayload
-			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
-				}
-			}
+			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(payload.Output), "comment", task.TriggerCommentID)
 		}
 	}
 
-	// For chat tasks, save assistant reply and broadcast chat:done. The
-	// resume pointer was already persisted inside the transaction above.
 	if task.ChatSessionID.Valid {
-		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
-			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-				ChatSessionID: task.ChatSessionID,
-				Role:          "assistant",
-				Content:       redact.Text(payload.Output),
-				TaskID:        task.ID,
-			}); err != nil {
-				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
-			} else {
-				// Event-driven unread: stamp unread_since on the first unread
-				// assistant message. No-op if the session already has unread.
-				// If the user is actively viewing the session, the frontend's
-				// auto-mark-read effect will clear this within a tick.
-				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
-				}
-			}
-		}
 		s.broadcastChatDone(ctx, task)
 	}
 

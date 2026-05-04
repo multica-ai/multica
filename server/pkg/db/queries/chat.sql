@@ -63,23 +63,37 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
 
--- name: ListUserMessagesSinceLastAssistant :many
--- Returns user messages newer than the most recent assistant message in the
--- session, in chronological order. Falls back to ALL user messages when no
--- assistant message exists yet (first turn of the conversation).
--- Used by the daemon claim path to bundle every user message that arrived
--- during the prior agent turn into a single follow-up prompt — without this,
--- the agent would only ever see the latest user message and earlier ones
--- sent mid-stream would be silently dropped.
+-- name: ListUnrespondedUserMessages :many
+-- Returns every user message in the session that has not yet been answered
+-- by an assistant turn, in chronological order. The daemon claim path
+-- bundles all of them into the next prompt so messages sent mid-stream
+-- aren't dropped. Replaces the old time-based filter which lost messages
+-- whose created_at was older than the prior turn's assistant reply (the
+-- very window mid-stream sends land in).
 SELECT cm.* FROM chat_message cm
 WHERE cm.chat_session_id = $1
   AND cm.role = 'user'
-  AND cm.created_at > COALESCE(
-      (SELECT MAX(prev.created_at) FROM chat_message prev
-       WHERE prev.chat_session_id = $1 AND prev.role = 'assistant'),
-      '-infinity'::timestamptz
-  )
+  AND cm.responded_at IS NULL
 ORDER BY cm.created_at ASC;
+
+-- name: MarkUserMessagesRespondedBefore :exec
+-- Marks every un-answered user message older than $cutoff as answered.
+-- The cutoff is the claiming task's started_at: messages created before
+-- the task started were the ones the daemon bundled into this task's
+-- prompt. Messages created AFTER started_at were sent mid-stream and
+-- are the responsibility of the next (queued) successor task — they
+-- must NOT be marked here, otherwise the successor claims an empty
+-- bundle and the agent answers "Tom besked".
+--
+-- Called inside the same transaction that inserts the assistant reply
+-- (see CompleteTask + CancelTask in server/internal/service/task.go) so
+-- the pair is atomic.
+UPDATE chat_message
+SET responded_at = now()
+WHERE chat_session_id = $1
+  AND role = 'user'
+  AND responded_at IS NULL
+  AND created_at < $2;
 
 -- name: GetChatMessage :one
 SELECT * FROM chat_message

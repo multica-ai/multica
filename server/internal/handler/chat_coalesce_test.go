@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -138,43 +139,49 @@ func TestSendChatMessage_CoalesceIsRaceSafe(t *testing.T) {
 	}
 }
 
-// TestListUserMessagesSinceLastAssistant_BoundedByAssistant verifies that the
-// daemon-claim query returns only user messages newer than the most recent
-// assistant reply. This is what lets a queued successor task pull every
-// unanswered user message into a single follow-up prompt without re-sending
-// messages from earlier turns.
-func TestListUserMessagesSinceLastAssistant_BoundedByAssistant(t *testing.T) {
+// TestListUnrespondedUserMessages_OnlyUnanswered verifies that the daemon
+// claim query returns user messages whose responded_at is NULL — the ones
+// no prior task has marked as answered. Replaces the older time-based
+// "since last assistant" filter, which silently dropped follow-up messages
+// sent mid-stream (their created_at landed older than the prior turn's
+// assistant reply, so they were excluded even though they had never been
+// addressed).
+func TestListUnrespondedUserMessages_OnlyUnanswered(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	sessionID := createChatSessionForCoalesceTest(t)
 	ctx := context.Background()
 
-	// Seed: user → assistant → user → user.
-	// Only the last two should be returned (newer than the assistant reply).
-	insertChatMessage(t, sessionID, "user", "old user 1")
-	insertChatMessage(t, sessionID, "assistant", "old assistant reply")
-	insertChatMessage(t, sessionID, "user", "new user 1")
-	insertChatMessage(t, sessionID, "user", "new user 2")
+	insertChatMessage(t, sessionID, "user", "answered earlier")
+	insertChatMessage(t, sessionID, "assistant", "old reply")
+	insertChatMessage(t, sessionID, "user", "still pending 1")
+	insertChatMessage(t, sessionID, "user", "still pending 2")
 
-	msgs, err := testHandler.Queries.ListUserMessagesSinceLastAssistant(ctx, parseUUID(sessionID))
+	// Mark the first user message as already answered. The remaining two
+	// must still be returned regardless of created_at vs. assistant.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE chat_message SET responded_at = now() WHERE chat_session_id = $1 AND content = $2`,
+		sessionID, "answered earlier"); err != nil {
+		t.Fatalf("seed responded_at: %v", err)
+	}
+
+	msgs, err := testHandler.Queries.ListUnrespondedUserMessages(ctx, parseUUID(sessionID))
 	if err != nil {
-		t.Fatalf("list user messages: %v", err)
+		t.Fatalf("list unresponded: %v", err)
 	}
 	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages newer than last assistant, got %d", len(msgs))
+		t.Fatalf("expected 2 unresponded user messages, got %d", len(msgs))
 	}
-	if msgs[0].Content != "new user 1" || msgs[1].Content != "new user 2" {
-		t.Fatalf("unexpected message contents: %q, %q", msgs[0].Content, msgs[1].Content)
+	if msgs[0].Content != "still pending 1" || msgs[1].Content != "still pending 2" {
+		t.Fatalf("unexpected contents/order: %q, %q", msgs[0].Content, msgs[1].Content)
 	}
 }
 
-// TestListUserMessagesSinceLastAssistant_NoAssistantYet verifies the
-// first-turn edge case Sara flagged: when no assistant message exists in the
-// session, the query falls back to returning ALL user messages instead of
-// silently producing zero rows (which would leave the daemon with an empty
-// prompt).
-func TestListUserMessagesSinceLastAssistant_NoAssistantYet(t *testing.T) {
+// TestListUnrespondedUserMessages_NoAssistantYet verifies the first-turn
+// edge case: when no assistant message exists yet, every user message is
+// still considered un-answered and must be returned.
+func TestListUnrespondedUserMessages_NoAssistantYet(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -184,15 +191,67 @@ func TestListUserMessagesSinceLastAssistant_NoAssistantYet(t *testing.T) {
 	insertChatMessage(t, sessionID, "user", "first")
 	insertChatMessage(t, sessionID, "user", "second")
 
-	msgs, err := testHandler.Queries.ListUserMessagesSinceLastAssistant(ctx, parseUUID(sessionID))
+	msgs, err := testHandler.Queries.ListUnrespondedUserMessages(ctx, parseUUID(sessionID))
 	if err != nil {
-		t.Fatalf("list user messages: %v", err)
+		t.Fatalf("list unresponded: %v", err)
 	}
 	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages on first turn (no assistant yet), got %d", len(msgs))
+		t.Fatalf("expected 2 messages on first turn, got %d", len(msgs))
 	}
 	if msgs[0].Content != "first" || msgs[1].Content != "second" {
 		t.Fatalf("unexpected order: %q, %q", msgs[0].Content, msgs[1].Content)
+	}
+}
+
+// TestMarkUserMessagesRespondedBefore_PreservesMidStream is the regression
+// guard for the "Tom besked" bug. Reproduces the actual sequence captured
+// in chat session 04094fc1: a user follow-up arrives while the prior task
+// is running, and the prior task's completion uses a cutoff (started_at)
+// that excludes it. The follow-up must remain unresponded so the queued
+// successor task picks it up — instead of being silently marked answered
+// by the prior reply and producing an empty prompt.
+func TestMarkUserMessagesRespondedBefore_PreservesMidStream(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+	ctx := context.Background()
+
+	// Replay timeline:
+	//   T0:  user "first"      (claimed by task A)
+	//   T1:  task A starts     (started_at = T1)
+	//   T2:  user "midstream"  (sent while task A is running)
+	//   T3:  task A completes, inserts assistant + marks responded
+	//        with cutoff = T1. "midstream" was created at T2 > T1 →
+	//        must stay unresponded.
+	insertChatMessage(t, sessionID, "user", "first")
+
+	// Capture the cutoff. now() runs in the same wall-clock as the inserts;
+	// we want a cutoff strictly between "first" and "midstream".
+	var cutoff pgtype.Timestamptz
+	if err := testPool.QueryRow(ctx, `SELECT now()`).Scan(&cutoff); err != nil {
+		t.Fatalf("read cutoff: %v", err)
+	}
+
+	insertChatMessage(t, sessionID, "user", "midstream")
+	insertChatMessage(t, sessionID, "assistant", "reply to first")
+
+	if err := testHandler.Queries.MarkUserMessagesRespondedBefore(ctx, db.MarkUserMessagesRespondedBeforeParams{
+		ChatSessionID: parseUUID(sessionID),
+		CreatedAt:     cutoff,
+	}); err != nil {
+		t.Fatalf("mark responded: %v", err)
+	}
+
+	msgs, err := testHandler.Queries.ListUnrespondedUserMessages(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list unresponded: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly 1 unresponded message (the mid-stream one), got %d", len(msgs))
+	}
+	if msgs[0].Content != "midstream" {
+		t.Fatalf("expected mid-stream message preserved, got %q", msgs[0].Content)
 	}
 }
 

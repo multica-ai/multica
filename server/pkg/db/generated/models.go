@@ -221,6 +221,7 @@ type ChatMessage struct {
 	Content       string             `json:"content"`
 	TaskID        pgtype.UUID        `json:"task_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	RespondedAt   pgtype.Timestamptz `json:"responded_at"`
 }
 
 type ChatSession struct {
