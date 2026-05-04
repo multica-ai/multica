@@ -4,7 +4,6 @@ import React from "react";
 import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles, Bell, BookText } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { AppLink } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -42,9 +41,15 @@ interface SettingsPageProps {
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
+  const [tab, setTab] = React.useState("profile");
 
   return (
-    <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
+    <Tabs
+      value={tab}
+      onValueChange={setTab}
+      orientation="vertical"
+      className="flex-1 min-h-0 gap-0"
+    >
       {/* Left nav */}
       <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
         <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
@@ -77,35 +82,43 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
             </TabsTrigger>
           ))}
 
-          {/* Resources group — links out of the settings page */}
+          {/* Resources group */}
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
             Resources
           </span>
-          <AppLink
-            href="/docs"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
+          <TabsTrigger value="documentation">
             <BookText className="h-4 w-4" />
             Documentation
-          </AppLink>
+          </TabsTrigger>
         </TabsList>
       </div>
 
-      {/* Right content */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
-        <div className="w-full max-w-3xl mx-auto p-6">
-          <TabsContent value="profile"><AccountTab /></TabsContent>
-          <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
-          <TabsContent value="appearance"><AppearanceTab /></TabsContent>
-          <TabsContent value="notifications"><NotificationsTab /></TabsContent>
-          <TabsContent value="tokens"><TokensTab /></TabsContent>
-          <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
-          <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
-          {extraAccountTabs?.map((tab) => (
-            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
-          ))}
-        </div>
+      {/* Right content. Documentation fills the pane with an iframe; other tabs
+          share a constrained, scrollable container. */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {tab === "documentation" ? (
+          <iframe
+            src="/docs"
+            title="Documentation"
+            className="flex-1 min-h-0 w-full border-0"
+          />
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="w-full max-w-3xl mx-auto p-6">
+              <TabsContent value="profile"><AccountTab /></TabsContent>
+              <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
+              <TabsContent value="appearance"><AppearanceTab /></TabsContent>
+              <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+              <TabsContent value="tokens"><TokensTab /></TabsContent>
+              <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
+              <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+              <TabsContent value="members"><MembersTab /></TabsContent>
+              {extraAccountTabs?.map((extraTab) => (
+                <TabsContent key={extraTab.value} value={extraTab.value}>{extraTab.content}</TabsContent>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Tabs>
   );
