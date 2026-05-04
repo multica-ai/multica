@@ -224,12 +224,17 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     id: "multica_project_detail_layout",
   });
   const sidebarRef = usePanelRef();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Desktop and mobile sidebar state must be separate. A single state defaulting
+  // to `true` made the mobile <Sheet> mount in the open position on first render
+  // (after `useIsMobile()` flipped from false→true), briefly covering the page
+  // with its modal backdrop and locking scroll — leaving the page unresponsive.
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
 
   useEffect(() => {
     if (isMobile) {
-      setSidebarOpen(false);
-      sidebarRef.current?.collapse();
+      setMobileSidebarOpen(false);
     }
   }, [isMobile]);
 
@@ -560,7 +565,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       className={sidebarOpen ? "" : "text-muted-foreground"}
                       onClick={() => {
                         if (isMobile) {
-                          setSidebarOpen(!sidebarOpen);
+                          setMobileSidebarOpen((open) => !open);
                         } else {
                           const panel = sidebarRef.current;
                           if (!panel) return;
@@ -593,13 +598,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         {!isMobile && (
         <ResizablePanel
           id="sidebar"
-          defaultSize={sidebarOpen ? 320 : 0}
+          defaultSize={desktopSidebarOpen ? 320 : 0}
           minSize={260}
           maxSize={420}
           collapsible
           groupResizeBehavior="preserve-pixel-size"
           panelRef={sidebarRef}
-          onResize={(size) => setSidebarOpen(size.inPixels > 0)}
+          onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
         >
           <div className="overflow-y-auto border-l h-full">
             <div className="p-4">
@@ -609,7 +614,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </ResizablePanel>
         )}
         {isMobile && (
-          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
             <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
               {sidebarContent}
             </SheetContent>
