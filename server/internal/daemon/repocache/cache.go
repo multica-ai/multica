@@ -50,6 +50,8 @@ func gitEnv() []string {
 	)
 }
 
+var agentGitExcludePatterns = []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".opencode"}
+
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
 	URL string
@@ -352,12 +354,12 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID        string // workspace that owns the repo
-	RepoURL            string // remote URL to look up in the cache
-	WorkDir            string // parent directory for the worktree (e.g. task workdir)
-	AgentName          string // for branch naming
-	TaskID             string // for branch naming uniqueness
-	CoAuthoredByEnabled bool  // install prepare-commit-msg hook for Co-authored-by trailer
+	WorkspaceID         string // workspace that owns the repo
+	RepoURL             string // remote URL to look up in the cache
+	WorkDir             string // parent directory for the worktree (e.g. task workdir)
+	AgentName           string // for branch naming
+	TaskID              string // for branch naming uniqueness
+	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -423,7 +425,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
 
-		for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".config/opencode"} {
+		for _, pattern := range agentGitExcludePatterns {
 			_ = excludeFromGit(worktreePath, pattern)
 		}
 
@@ -455,7 +457,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	}
 
 	// Exclude agent context files from git tracking.
-	for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".config/opencode"} {
+	for _, pattern := range agentGitExcludePatterns {
 		_ = excludeFromGit(worktreePath, pattern)
 	}
 

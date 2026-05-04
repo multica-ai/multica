@@ -502,6 +502,55 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "OpenCode",
+		TaskID:      "opencode-exclude-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	exclude := gitInfoExclude(t, result.Path)
+	if !strings.Contains(exclude, ".opencode\n") {
+		t.Fatalf("expected .git/info/exclude to contain .opencode, got:\n%s", exclude)
+	}
+	if strings.Contains(exclude, ".config/opencode") {
+		t.Fatalf("expected .git/info/exclude to not contain stale .config/opencode, got:\n%s", exclude)
+	}
+}
+
+func gitInfoExclude(t *testing.T, worktreePath string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --git-dir failed in %s: %v", worktreePath, err)
+	}
+	gitDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(worktreePath, gitDir)
+	}
+	data, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read .git/info/exclude failed: %v", err)
+	}
+	return string(data)
+}
+
 func TestCreateWorktreeNotCached(t *testing.T) {
 	t.Parallel()
 	cacheRoot := t.TempDir()
@@ -957,11 +1006,11 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:        "ws-1",
-		RepoURL:            sourceRepo,
-		WorkDir:            workDir,
-		AgentName:          "Test Agent",
-		TaskID:             "a1b2c3d4-0000-0000-0000-000000000000",
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "a1b2c3d4-0000-0000-0000-000000000000",
 		CoAuthoredByEnabled: true,
 	})
 	if err != nil {
@@ -1001,11 +1050,11 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 
 	workDir := t.TempDir()
 	result, err := cache.CreateWorktree(WorktreeParams{
-		WorkspaceID:        "ws-1",
-		RepoURL:            sourceRepo,
-		WorkDir:            workDir,
-		AgentName:          "Test Agent",
-		TaskID:             "b2c3d4e5-0000-0000-0000-000000000000",
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "b2c3d4e5-0000-0000-0000-000000000000",
 		CoAuthoredByEnabled: true,
 	})
 	if err != nil {
