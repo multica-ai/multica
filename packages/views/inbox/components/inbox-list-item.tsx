@@ -71,9 +71,9 @@ export function InboxListItem({
                   onArchive();
                 }
               }}
-              className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
+              className="inline-flex h-9 w-9 sm:h-7 sm:w-7 sm:hidden items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
             >
-              <Archive className="h-3.5 w-3.5" />
+              <Archive className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
             </span>
             {item.issue_status && (
               <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />

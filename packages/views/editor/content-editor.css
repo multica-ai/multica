@@ -238,11 +238,22 @@
   margin: 1rem 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  /* Anchor scroll-shadow so users see overflow exists on mobile. */
+  background:
+    linear-gradient(to right, var(--background) 30%, color-mix(in srgb, var(--background) 0%, transparent)) 0 0 / 20px 100% no-repeat,
+    linear-gradient(to left, var(--background) 30%, color-mix(in srgb, var(--background) 0%, transparent)) 100% 0 / 20px 100% no-repeat;
 }
 
 .rich-text-editor table {
-  min-width: 100%;
+  /* On wide containers fill 100%, on narrow ones let cells be their natural width and scroll horizontally. */
+  min-width: max-content;
   border-collapse: collapse;
+}
+
+.rich-text-editor th,
+.rich-text-editor td {
+  /* Don't shred sentences across 5 lines on a phone — let the cell take what it needs and scroll horizontally instead. */
+  white-space: nowrap;
 }
 
 .rich-text-editor colgroup {

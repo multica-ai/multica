@@ -42,6 +42,7 @@ import {
 } from "@multica/core/inbox/folders";
 import { IssueDetail } from "../../issues/components";
 import { useNavigation } from "../../navigation";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -669,14 +670,15 @@ export function InboxPage() {
             </div>
             <button
               type="button"
-              className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent group-hover/chat:flex"
+              className="flex h-9 w-9 sm:h-6 sm:w-6 sm:hidden shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent sm:group-hover/chat:flex"
               onClick={(e) => {
                 e.stopPropagation();
                 handleArchiveChat(session.id);
               }}
               title="Archive"
+              aria-label="Archive chat"
             >
-              <Archive className="size-3" />
+              <Archive className="size-4 sm:size-3" />
             </button>
           </div>
         </DraggableRow>
@@ -951,7 +953,8 @@ export function InboxPage() {
     if (selected) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
+          <div className="flex h-12 shrink-0 items-center border-b px-2 gap-1">
+            <SidebarTrigger />
             <Button
               variant="ghost"
               size="sm"

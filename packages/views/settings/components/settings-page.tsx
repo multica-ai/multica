@@ -113,14 +113,14 @@ export function SettingsPage({
       value={tab}
       onValueChange={setTab}
       orientation="vertical"
-      className="flex-1 min-h-0 gap-0"
+      className="flex-1 min-h-0 gap-0 flex-col sm:flex-row"
     >
-      {/* Left nav */}
-      <div className="w-52 shrink-0 border-r overflow-y-auto p-4">
-        <h1 className="text-sm font-semibold mb-4 px-2">Settings</h1>
-        <TabsList variant="line" className="flex-col items-stretch">
+      {/* Nav: horizontal scroll on mobile, vertical sidebar on desktop */}
+      <div className="shrink-0 border-b sm:border-b-0 sm:border-r sm:w-52 sm:overflow-y-auto p-3 sm:p-4">
+        <h1 className="text-sm font-semibold mb-2 sm:mb-4 px-2">Settings</h1>
+        <TabsList variant="line" className="flex-row sm:flex-col overflow-x-auto sm:overflow-x-visible items-center sm:items-stretch whitespace-nowrap">
           {/* My Account group */}
-          <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+          <span className="hidden sm:inline px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
             My Account
           </span>
           {accountTabs.map((tab) => (
@@ -137,7 +137,7 @@ export function SettingsPage({
           ))}
 
           {/* Workspace group */}
-          <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
+          <span className="hidden sm:inline px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? "Workspace"}
           </span>
           {workspaceTabs.map((tab) => (
@@ -150,7 +150,7 @@ export function SettingsPage({
           {documentationContent && (
             <>
               {/* Resources group */}
-              <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
+              <span className="hidden sm:inline px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
                 Resources
               </span>
               <TabsTrigger value="documentation">

@@ -52,6 +52,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -219,6 +220,15 @@ interface AppSidebarProps {
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { pathname, push } = useNavigation();
+  const { isMobile, setOpenMobile } = useSidebar();
+  // Auto-close the mobile sheet whenever the route changes — desktop sidebar is unaffected.
+  const lastPathRef = useRef(pathname);
+  useEffect(() => {
+    if (lastPathRef.current !== pathname) {
+      lastPathRef.current = pathname;
+      if (isMobile) setOpenMobile(false);
+    }
+  }, [pathname, isMobile, setOpenMobile]);
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const logout = useLogout();

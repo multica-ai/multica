@@ -69,7 +69,7 @@ export interface ChatState {
   chatWidth: number;
   chatHeight: number;
   isExpanded: boolean;
-  /** When true, ChatFab and ChatWindow are fully hidden (inbox chat is active). */
+  /** When true, ChatWindow is fully hidden (inbox chat is active). */
   hideFloatingChat: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
