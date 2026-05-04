@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -28,8 +29,14 @@ type AgentRuntimeResponse struct {
 	Metadata     any     `json:"metadata"`
 	OwnerID      *string `json:"owner_id"`
 	LastSeenAt   *string `json:"last_seen_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	// Pause state. PausedAt non-null means the runtime is paused;
+	// UnpauseAt is the scheduled auto-unpause (null = manual only);
+	// PauseReason is a short slug for telemetry / UI badge.
+	PausedAt    *string `json:"paused_at"`
+	UnpauseAt   *string `json:"unpause_at"`
+	PauseReason *string `json:"pause_reason"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -54,6 +61,9 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
+		PausedAt:     timestampToPtr(rt.PausedAt),
+		UnpauseAt:    timestampToPtr(rt.UnpauseAt),
+		PauseReason:  textToPtr(rt.PauseReason),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}
@@ -427,6 +437,125 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// Pause / Unpause
+// ---------------------------------------------------------------------------
+
+// pauseRuntimeRequest is the body of POST /api/runtimes/{id}/pause.
+//
+// UnpauseAt is optional — when omitted (or empty) the runtime stays paused
+// until manually unpaused. When the caller cannot supply an absolute time
+// (e.g. the rate-limit response only had a wall-clock string), the auto-
+// pause path is expected to call ParseRateLimitReset and resolve to RFC3339
+// before calling this endpoint.
+type pauseRuntimeRequest struct {
+	UnpauseAt string `json:"unpause_at"`
+	Reason    string `json:"reason"`
+}
+
+// PauseRuntime puts a runtime to sleep. Owner/admin or runtime owner only.
+// Tasks in flight are interrupted and will be resumed on unpause.
+func (h *Handler) PauseRuntime(w http.ResponseWriter, r *http.Request) {
+	rt, member, ok := h.loadRuntimeForMutation(w, r)
+	if !ok {
+		return
+	}
+
+	var req pauseRuntimeRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	opts := service.PauseOptions{Reason: req.Reason}
+	if req.UnpauseAt != "" {
+		t, err := time.Parse(time.RFC3339, req.UnpauseAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "unpause_at must be RFC3339 (e.g. 2026-05-04T18:50:00Z)")
+			return
+		}
+		if t.Before(time.Now().Add(-1 * time.Minute)) {
+			writeError(w, http.StatusBadRequest, "unpause_at must be in the future")
+			return
+		}
+		opts.UnpauseAt = t
+	}
+	if opts.Reason == "" {
+		opts.Reason = "manual"
+	}
+
+	updated, err := h.TaskService.PauseRuntime(r.Context(), rt.ID, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to pause runtime")
+		return
+	}
+
+	slog.Info("runtime paused",
+		"runtime_id", uuidToString(rt.ID),
+		"reason", opts.Reason,
+		"unpause_at", req.UnpauseAt,
+		"actor", uuidToString(member.UserID),
+	)
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
+}
+
+// UnpauseRuntime wakes a paused runtime back up and resumes any work that
+// was suspended by the pause. Idempotent on already-unpaused runtimes.
+func (h *Handler) UnpauseRuntime(w http.ResponseWriter, r *http.Request) {
+	rt, member, ok := h.loadRuntimeForMutation(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := h.TaskService.UnpauseRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unpause runtime")
+		return
+	}
+
+	slog.Info("runtime unpaused",
+		"runtime_id", uuidToString(rt.ID),
+		"actor", uuidToString(member.UserID),
+	)
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
+}
+
+// loadRuntimeForMutation centralizes the lookup + permission check used by
+// pause / unpause / delete. Returns the runtime, the caller's membership row,
+// and ok=true on success. On failure, writes the response and returns ok=false.
+func (h *Handler) loadRuntimeForMutation(w http.ResponseWriter, r *http.Request) (db.AgentRuntime, db.Member, bool) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	userID := uuidToString(member.UserID)
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isOwner := rt.OwnerID.Valid && uuidToString(rt.OwnerID) == userID
+	if !isAdmin && !isOwner {
+		writeError(w, http.StatusForbidden, "you can only manage your own runtimes")
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+	return rt, member, true
 }
 
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.

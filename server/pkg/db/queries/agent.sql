@@ -114,6 +114,27 @@ FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
 
+-- name: CreateResumeFromPauseTask :one
+-- Like CreateRetryTask but resets the attempt counter to 1. Used when
+-- the unpause sweeper resumes work that died during a rate-limit pause —
+-- the pause was caused by an external blocker, not by the task itself, so
+-- giving it a fresh max_attempts budget is correct. Carries forward the
+-- agent's session context so the conversation continues seamlessly.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    status, priority, trigger_comment_id, trigger_summary, context,
+    session_id, work_dir,
+    attempt, max_attempts, parent_task_id
+)
+SELECT
+    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
+    p.session_id, p.work_dir,
+    1, p.max_attempts, p.id
+FROM agent_task_queue p
+WHERE p.id = $1
+RETURNING *;
+
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
 -- caller can reconcile each agent's status and broadcast task:cancelled events

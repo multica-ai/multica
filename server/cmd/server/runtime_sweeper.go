@@ -80,6 +80,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
+			sweepUnpauseDue(ctx, taskSvc)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
@@ -231,6 +232,18 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 				"action": "runtime_gc",
 			},
 		})
+	}
+}
+
+// sweepUnpauseDue unpauses any runtime whose scheduled unpause_at has
+// passed. Cheap when there's nothing to do — backed by the partial index
+// idx_agent_runtime_unpause_due, so the steady-state SELECT scans zero rows.
+// Each successful unpause re-enqueues suspended work and broadcasts
+// runtime:unpaused via the bus (handled in TaskService.UnpauseRuntime).
+func sweepUnpauseDue(ctx context.Context, taskSvc *service.TaskService) {
+	count := taskSvc.SweepUnpauseDue(ctx)
+	if count > 0 {
+		slog.Info("unpause sweeper: unpaused runtimes", "count", count)
 	}
 }
 

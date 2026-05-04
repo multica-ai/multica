@@ -107,4 +107,10 @@ const (
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
+
+	// Runtime pause/unpause events. Frontend listens to refresh the runtime
+	// row (paused_at, unpause_at, pause_reason) and the derived agent UI
+	// state ("sleeping" while runtime paused). Broadcast workspace-wide.
+	EventRuntimePaused   = "runtime:paused"
+	EventRuntimeUnpaused = "runtime:unpaused"
 )

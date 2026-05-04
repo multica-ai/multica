@@ -983,6 +983,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
 	authMs = time.Since(start).Milliseconds()
 
+	// Paused runtimes return no claimable task without touching Postgres.
+	// Pause is purely an orchestrational concept — the daemon is
+	// unchanged and just sees an empty queue until the auto-unpause
+	// sweeper or a manual unpause clears the flag.
+	if runtime.PausedAt.Valid {
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		outcome = "paused"
+		return
+	}
+
 	claimStart := time.Now()
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
 	claimMs = time.Since(claimStart).Milliseconds()

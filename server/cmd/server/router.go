@@ -469,6 +469,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
+					r.Post("/pause", h.PauseRuntime)
+					r.Post("/unpause", h.UnpauseRuntime)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})

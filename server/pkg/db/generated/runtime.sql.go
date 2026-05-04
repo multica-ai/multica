@@ -135,7 +135,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -186,6 +186,9 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}
@@ -198,7 +201,7 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE id = $1
 `
 
@@ -220,12 +223,15 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -252,12 +258,15 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -286,6 +295,9 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}
@@ -298,7 +310,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -332,6 +344,131 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listResumableTasksForRuntime = `-- name: ListResumableTasksForRuntime :many
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session FROM agent_task_queue t
+WHERE t.runtime_id = $1
+  AND t.status = 'failed'
+  AND t.completed_at >= now() - INTERVAL '24 hours'
+  AND t.failure_reason IN (
+        'runtime_paused',
+        'rate_limit',
+        'runtime_offline',
+        'runtime_recovery',
+        'timeout'
+      )
+  AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue d WHERE d.parent_task_id = t.id
+      )
+ORDER BY t.completed_at ASC
+`
+
+// Called on unpause: returns every leaf task on this runtime that the unpause
+// path should resume — both 'runtime_paused' (interrupted by the pause) and
+// retry-exhausted leaves whose original failure looked like a transient
+// provider error (rate_limit / runtime_offline / runtime_recovery / timeout).
+// "Leaf" means no descendant retry already exists, which prevents resuming a
+// chain that has already been continued via auto-retry while paused.
+//
+// Bounded by the 24h window so an unpause weeks after the failure doesn't
+// silently rerun tasks the user has long since moved past. The window is
+// deliberately generous — a rate-limit pause typically resolves in hours, not
+// days, but a pause that was forgotten and manually unpaused next morning
+// should still pick up yesterday's interrupted work.
+func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listResumableTasksForRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimesDueForUnpause = `-- name: ListRuntimesDueForUnpause :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason FROM agent_runtime
+WHERE paused_at IS NOT NULL
+  AND unpause_at IS NOT NULL
+  AND unpause_at <= now()
+`
+
+// Used by the unpause sweeper to find runtimes whose scheduled unpause_at has
+// passed. Backed by idx_agent_runtime_unpause_due (partial on paused rows).
+func (q *Queries) ListRuntimesDueForUnpause(ctx context.Context) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listRuntimesDueForUnpause)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}
@@ -347,7 +484,7 @@ const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason
 `
 
 // Used on the offline→online transition (and on first heartbeat after
@@ -371,6 +508,9 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -432,6 +572,51 @@ func (q *Queries) MarkRuntimesOfflineByIDs(ctx context.Context, arg MarkRuntimes
 		return nil, err
 	}
 	return items, nil
+}
+
+const pauseAgentRuntime = `-- name: PauseAgentRuntime :one
+UPDATE agent_runtime
+SET paused_at    = COALESCE(paused_at, now()),
+    unpause_at   = $2,
+    pause_reason = $3,
+    updated_at   = now()
+WHERE id = $1
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason
+`
+
+type PauseAgentRuntimeParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	UnpauseAt   pgtype.Timestamptz `json:"unpause_at"`
+	PauseReason pgtype.Text        `json:"pause_reason"`
+}
+
+// Marks a runtime paused. Idempotent: re-pausing an already-paused runtime
+// updates unpause_at / pause_reason but does not reset paused_at (so total
+// pause duration is preserved across re-pauses, e.g. provider returns a new
+// reset time while we're still in the original window).
+func (q *Queries) PauseAgentRuntime(ctx context.Context, arg PauseAgentRuntimeParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, pauseAgentRuntime, arg.ID, arg.UnpauseAt, arg.PauseReason)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+	)
+	return i, err
 }
 
 const reassignAgentsToRuntime = `-- name: ReassignAgentsToRuntime :execrows
@@ -551,6 +736,67 @@ func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
+const suspendActiveTasksForRuntime = `-- name: SuspendActiveTasksForRuntime :many
+UPDATE agent_task_queue
+SET status         = 'failed',
+    completed_at   = now(),
+    error          = 'runtime paused',
+    failure_reason = 'runtime_paused'
+WHERE runtime_id = $1
+  AND status IN ('dispatched', 'running')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+`
+
+// Called when a runtime is paused: marks any in-flight (dispatched/running)
+// task as failed with failure_reason='runtime_paused'. The matching
+// failure_reason is what the unpause path keys on to re-enqueue the work.
+// Returns affected rows so the service can broadcast task:failed events and
+// reconcile agent status.
+func (q *Queries) SuspendActiveTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, suspendActiveTasksForRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
 UPDATE agent_runtime
 SET last_seen_at = now()
@@ -600,6 +846,42 @@ func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgt
 	return result.RowsAffected(), nil
 }
 
+const unpauseAgentRuntime = `-- name: UnpauseAgentRuntime :one
+UPDATE agent_runtime
+SET paused_at    = NULL,
+    unpause_at   = NULL,
+    pause_reason = NULL,
+    updated_at   = now()
+WHERE id = $1
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason
+`
+
+// Clears all pause fields. Idempotent on already-unpaused runtimes.
+func (q *Queries) UnpauseAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, unpauseAgentRuntime, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+	)
+	return i, err
+}
+
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
 INSERT INTO agent_runtime (
     workspace_id,
@@ -623,7 +905,7 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, (xmax = 0) AS inserted
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, paused_at, unpause_at, pause_reason, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
@@ -653,6 +935,9 @@ type UpsertAgentRuntimeRow struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
+	PausedAt       pgtype.Timestamptz `json:"paused_at"`
+	UnpauseAt      pgtype.Timestamptz `json:"unpause_at"`
+	PauseReason    pgtype.Text        `json:"pause_reason"`
 	Inserted       bool               `json:"inserted"`
 }
 
@@ -687,6 +972,9 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
 		&i.Inserted,
 	)
 	return i, err

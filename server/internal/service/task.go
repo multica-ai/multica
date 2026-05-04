@@ -1038,7 +1038,21 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 //
 // failureReason is a coarse classifier consumed by the auto-retry path.
 // Pass "" when unknown (treated as 'agent_error').
+//
+// Auto-pause: when errMsg looks like a provider rate-limit response that
+// includes a parseable reset time, the failureReason is upgraded to
+// 'rate_limit' and the runtime is paused until that reset time. The
+// auto-retry path is skipped — the unpause sweeper owns resumption — so
+// we don't keep slamming a provider that just told us to back off.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+	resetAt, autoPause := ParseRateLimitReset(errMsg, time.Now())
+	if autoPause {
+		// Override caller-supplied failureReason so the unpause path's
+		// resumable-tasks query picks this row up. 'rate_limit' is in the
+		// allow-list explicitly for this reason.
+		failureReason = "rate_limit"
+	}
+
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
@@ -1101,6 +1115,39 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+
+	// Auto-pause runtime when the provider told us to back off until a
+	// specific time. PauseRuntime broadcasts runtime:paused, suspends any
+	// other in-flight work on the runtime, and the sweeper will unpause
+	// at resetAt — at which point this task gets re-enqueued via the
+	// resumable-tasks path. We deliberately do NOT call MaybeRetryFailedTask
+	// here: retrying immediately would just hit the same rate limit.
+	if autoPause {
+		if _, err := s.PauseRuntime(ctx, task.RuntimeID, PauseOptions{
+			UnpauseAt: resetAt,
+			Reason:    "rate_limit",
+		}); err != nil {
+			slog.Warn("auto-pause on rate-limit failed",
+				"runtime_id", util.UUIDToString(task.RuntimeID),
+				"task_id", util.UUIDToString(task.ID),
+				"reset_at", resetAt.Format(time.RFC3339),
+				"error", err,
+			)
+		} else {
+			slog.Info("auto-paused runtime on rate limit",
+				"runtime_id", util.UUIDToString(task.RuntimeID),
+				"task_id", util.UUIDToString(task.ID),
+				"reset_at", resetAt.Format(time.RFC3339),
+			)
+		}
+		// Reconcile agent + broadcast for the failure, then return — we
+		// skip the comment / chat-message side effects below because the
+		// task will be resumed on unpause and we don't want to double-write
+		// "rate limited" UI noise. The runtime:paused broadcast is enough.
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+		return &task, nil
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
