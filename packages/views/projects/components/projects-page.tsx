@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -71,16 +71,100 @@ function ProjectRow({ project }: { project: Project }) {
     [project.id, updateProject],
   );
 
+  // Inline-rename state. Single-click on the title still navigates via the
+  // AppLink (default browser behavior); double-click flips into edit mode.
+  // Enter / blur commits; Escape cancels and reverts.
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(project.title);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep the draft in sync if the project is renamed elsewhere (e.g. detail
+  // page or a real-time event from another client) while we're not actively
+  // editing.
+  useEffect(() => {
+    if (!isEditingTitle) setTitleDraft(project.title);
+  }, [project.title, isEditingTitle]);
+
+  // Auto-focus + select-all when entering edit mode so the user can type
+  // immediately or extend the existing name without an extra click.
+  useEffect(() => {
+    if (isEditingTitle) {
+      const el = titleInputRef.current;
+      el?.focus();
+      el?.select();
+    }
+  }, [isEditingTitle]);
+
+  const commitTitle = useCallback(() => {
+    const trimmed = titleDraft.trim();
+    setIsEditingTitle(false);
+    if (!trimmed) {
+      // Empty input — revert silently rather than wiping the project name.
+      setTitleDraft(project.title);
+      return;
+    }
+    if (trimmed !== project.title) {
+      handleUpdate({ title: trimmed });
+    }
+  }, [titleDraft, project.title, handleUpdate]);
+
+  const cancelTitleEdit = useCallback(() => {
+    setTitleDraft(project.title);
+    setIsEditingTitle(false);
+  }, [project.title]);
+
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
-      {/* Icon + Name (navigates to detail) */}
-      <AppLink
-        href={wsPaths.projectDetail(project.id)}
-        className="flex min-w-0 flex-1 items-center gap-2"
-      >
-        <ProjectIcon project={project} size="md" />
-        <span className="min-w-0 flex-1 truncate font-medium">{project.title}</span>
-      </AppLink>
+      {/* Icon + Name. Single-click navigates (AppLink). Double-click flips
+          into inline rename mode. While editing, the AppLink is replaced
+          with an <input> so clicks don't navigate. */}
+      {isEditingTitle ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <ProjectIcon project={project} size="md" />
+          <input
+            ref={titleInputRef}
+            type="text"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitTitle();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelTitleEdit();
+              }
+            }}
+            aria-label="Project name"
+            className="min-w-0 flex-1 bg-transparent border-b border-primary/40 font-medium outline-none focus:border-primary"
+          />
+        </div>
+      ) : (
+        <AppLink
+          href={wsPaths.projectDetail(project.id)}
+          className="flex min-w-0 flex-1 items-center gap-2"
+        >
+          <ProjectIcon project={project} size="md" />
+          <span
+            className="min-w-0 flex-1 truncate font-medium"
+            // Double-click flips into edit mode without navigating. The
+            // browser fires `dblclick` AFTER two `click` events, so we
+            // can't fully suppress the first navigation that fires on
+            // single-click — but a real double-click intent is preserved
+            // by the AppLink remaining the click target for normal
+            // navigation, while dblclick is a separate user action.
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditingTitle(true);
+            }}
+            title="Double-click to rename"
+          >
+            {project.title}
+          </span>
+        </AppLink>
+      )}
 
       {/* Priority — dropdown */}
       <DropdownMenu>
