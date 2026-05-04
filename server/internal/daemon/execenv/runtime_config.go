@@ -8,6 +8,29 @@ import (
 	"strings"
 )
 
+// primaryProjectRepoURL returns the URL of the first `github_repo` resource
+// in the list — by convention, the project's primary / default repo. The
+// daemon receives resources already ordered by the server's `position ASC,
+// created_at ASC`, so "first" is deterministic. Returns "" when the project
+// has no github_repo resources (e.g. it only attaches docs or notion pages).
+func primaryProjectRepoURL(resources []ProjectResourceForEnv) string {
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(r.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if payload.URL != "" {
+			return payload.URL
+		}
+	}
+	return ""
+}
+
 // formatProjectResource renders a single resource as a human-readable bullet.
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
@@ -201,6 +224,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
 		if len(ctx.ProjectResources) > 0 {
+			// The first `github_repo` resource (lowest position) is the project's
+			// primary / default repo. Surface it explicitly so the agent has a
+			// deterministic answer to "which repo do I work in?" instead of having
+			// to guess from the issue description. Falls back to no callout when
+			// the project has no github_repo resources at all (e.g. only docs or
+			// notion pages attached).
+			if primaryRepo := primaryProjectRepoURL(ctx.ProjectResources); primaryRepo != "" {
+				fmt.Fprintf(&b, "**Primary repo:** %s — when an issue under this project doesn't say otherwise, work in this repo. Use `multica repo checkout %s` to fetch it.\n\n", primaryRepo, primaryRepo)
+			}
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
