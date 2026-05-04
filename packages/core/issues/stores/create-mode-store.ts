@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../../platform/storage";
 
+const CREATE_MODE_STORAGE_KEY = "multica_create_mode";
+
 /**
  * Last create-issue mode the user landed on. Drives the global `c` shortcut
  * and the in-modal mode switch — pressing `c` opens whichever modal the user
@@ -22,6 +24,37 @@ interface CreateModeState {
   setLastMode: (mode: CreateMode) => void;
 }
 
+function isCreateMode(value: unknown): value is CreateMode {
+  return value === "agent" || value === "manual";
+}
+
+function serializeCreateMode(mode: CreateMode) {
+  return JSON.stringify({ state: { lastMode: mode }, version: 0 });
+}
+
+export function getPersistedCreateMode(): CreateMode {
+  const stored = defaultStorage.getItem(CREATE_MODE_STORAGE_KEY);
+  if (!stored) {
+    useCreateModeStore.setState({ lastMode: "manual" });
+    defaultStorage.setItem(CREATE_MODE_STORAGE_KEY, serializeCreateMode("manual"));
+    return "manual";
+  }
+
+  try {
+    const parsed = JSON.parse(stored) as {
+      state?: { lastMode?: unknown };
+    };
+    const lastMode = parsed.state?.lastMode;
+    if (isCreateMode(lastMode)) return lastMode;
+  } catch {
+    // Fall through to the manual default for corrupt persisted state.
+  }
+
+  useCreateModeStore.setState({ lastMode: "manual" });
+  defaultStorage.setItem(CREATE_MODE_STORAGE_KEY, serializeCreateMode("manual"));
+  return "manual";
+}
+
 export const useCreateModeStore = create<CreateModeState>()(
   persist(
     (set) => ({
@@ -29,7 +62,7 @@ export const useCreateModeStore = create<CreateModeState>()(
       setLastMode: (mode) => set({ lastMode: mode }),
     }),
     {
-      name: "multica_create_mode",
+      name: CREATE_MODE_STORAGE_KEY,
       storage: createJSONStorage(() => defaultStorage),
     },
   ),

@@ -24,4 +24,28 @@ describe("useCreateModeStore", () => {
 
     expect(useCreateModeStore.getState().lastMode).toBe("manual");
   });
+
+  it("initializes missing persisted storage when reading the create mode", async () => {
+    const { getPersistedCreateMode } = await import("./create-mode-store");
+
+    expect(localStorage.getItem("multica_create_mode")).toBeNull();
+    expect(getPersistedCreateMode()).toBe("manual");
+    expect(localStorage.getItem("multica_create_mode")).toBe(
+      JSON.stringify({ state: { lastMode: "manual" }, version: 0 }),
+    );
+  });
+
+  it("uses an existing persisted create mode without overwriting it", async () => {
+    localStorage.setItem(
+      "multica_create_mode",
+      JSON.stringify({ state: { lastMode: "agent" }, version: 0 }),
+    );
+
+    const { getPersistedCreateMode } = await import("./create-mode-store");
+
+    expect(getPersistedCreateMode()).toBe("agent");
+    expect(localStorage.getItem("multica_create_mode")).toBe(
+      JSON.stringify({ state: { lastMode: "agent" }, version: 0 }),
+    );
+  });
 });

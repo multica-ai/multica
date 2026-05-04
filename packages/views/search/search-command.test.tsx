@@ -18,6 +18,7 @@ const {
   mockWorkspaces,
   mockCurrentWorkspace,
   mockOpenModal,
+  mockGetPersistedCreateMode,
   mockToastSuccess,
   mockClipboardWrite,
 } = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ const {
     current: null as { id: string; name: string; slug: string } | null,
   },
   mockOpenModal: vi.fn(),
+  mockGetPersistedCreateMode: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
 }));
@@ -49,6 +51,7 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 vi.mock("@multica/core/issues/stores", () => ({
+  getPersistedCreateMode: mockGetPersistedCreateMode,
   useRecentIssuesStore: (selector?: (state: { items: typeof mockRecentItems.current }) => unknown) => {
     const state = { items: mockRecentItems.current };
     return selector ? selector(state) : state;
@@ -146,6 +149,7 @@ describe("SearchCommand", () => {
     mockWorkspaces.current = [];
     mockCurrentWorkspace.current = null;
     mockOpenModal.mockReset();
+    mockGetPersistedCreateMode.mockReset().mockReturnValue("manual");
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
 
@@ -239,8 +243,9 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
   });
 
-  it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
+  it("shows New Issue / New Project under Commands and opens the persisted create mode", async () => {
     const user = userEvent.setup();
+    mockGetPersistedCreateMode.mockReturnValue("agent");
     render(<SearchCommand />);
 
     const input = screen.getByPlaceholderText("Type a command or search...");
@@ -261,6 +266,7 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
+    expect(mockGetPersistedCreateMode).toHaveBeenCalled();
     expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue");
     expect(useSearchStore.getState().open).toBe(false);
   });

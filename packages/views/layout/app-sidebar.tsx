@@ -38,7 +38,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import { getPersistedCreateMode } from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -413,7 +413,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isEditable) return;
       if (useModalStore.getState().modal) return;
       e.preventDefault();
-      const lastMode = useCreateModeStore.getState().lastMode;
+      const lastMode = getPersistedCreateMode();
       if (lastMode === "manual") {
         // Auto-fill project when on a project detail page (manual form only —
         // agent mode lets the agent infer project from the prompt).
@@ -560,7 +560,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("quick-create-issue")}
+                onClick={() => {
+                  const lastMode = getPersistedCreateMode();
+                  useModalStore.getState().open(
+                    lastMode === "manual" ? "create-issue" : "quick-create-issue",
+                  );
+                }}
               >
                 <span className="relative">
                   <SquarePen />
