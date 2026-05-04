@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,9 +15,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
-// persistSessionFromStartup saves session state discovered during startup.
+// persistSessionFromStartup saves the ambient session discovered during startup.
 func persistSessionFromStartup(gitRoot string, session *mcpSessionState) {
-	if gitRoot == "" || session.WorkSessionID == "" {
+	if gitRoot == "" {
+		return
+	}
+	wsID, issueID := session.ambient()
+	if wsID == "" {
 		return
 	}
 	bindings, err := mcp.LoadRepoBindings()
@@ -28,8 +33,8 @@ func persistSessionFromStartup(gitRoot string, session *mcpSessionState) {
 		return
 	}
 	binding.ActiveSession = &mcp.ActiveSession{
-		WorkSessionID: session.WorkSessionID,
-		IssueID:       session.IssueID,
+		WorkSessionID: wsID,
+		IssueID:       issueID,
 		AttachedAt:    time.Now(),
 	}
 	bindings[gitRoot] = binding
@@ -108,12 +113,12 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	if gitRoot != "" {
 		bindings, _ := mcp.LoadRepoBindings()
 		if b, ok := bindings[gitRoot]; ok && b.ActiveSession != nil && !b.ActiveSession.IsStale() {
-			sessionState.WorkSessionID = b.ActiveSession.WorkSessionID
-			sessionState.IssueID = b.ActiveSession.IssueID
+			sessionState.setAmbient(b.ActiveSession.WorkSessionID, b.ActiveSession.IssueID)
+			sessionState.track(b.ActiveSession.WorkSessionID, b.ActiveSession.IssueID, 0)
 		}
 	}
 	// Fallback: check server for active session if none found locally.
-	if sessionState.WorkSessionID == "" {
+	if sessionState.ambientWorkSessionID() == "" {
 		var activeResp struct {
 			Session *struct {
 				ID      string `json:"id"`
@@ -121,8 +126,8 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 			} `json:"session"`
 		}
 		if err := client.GetJSON(context.Background(), "/api/work-sessions/active", &activeResp); err == nil && activeResp.Session != nil {
-			sessionState.WorkSessionID = activeResp.Session.ID
-			sessionState.IssueID = activeResp.Session.IssueID
+			sessionState.setAmbient(activeResp.Session.ID, activeResp.Session.IssueID)
+			sessionState.track(activeResp.Session.ID, activeResp.Session.IssueID, 0)
 			// Persist locally so next restart is instant.
 			persistSessionFromStartup(gitRoot, &sessionState)
 		}
@@ -136,12 +141,116 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	return srv.Run(ctx)
 }
 
-// mcpSessionState tracks the active work session for attach/complete/progress tools.
+// sessionEntry holds per-session counters tracked locally so that parallel
+// agents reporting on different work_session_ids cannot clobber each other's
+// seq counter or auto-naming flag.
+type sessionEntry struct {
+	issueID string
+	seq     int
+	named   bool
+}
+
+// mcpSessionState tracks all known work sessions in this MCP process.
+//
+// The "ambient" session is what get_me reports and what restart-resume
+// restores — it exists for single-agent convenience only. All routing of
+// activity (report_activity, complete_work, ...) MUST be done via an
+// explicit work_session_id parameter, otherwise parallel subagents sharing
+// this MCP process will clobber each other.
 type mcpSessionState struct {
-	WorkSessionID string
-	Named         bool
-	IssueID       string
-	Seq           int
+	mu sync.Mutex
+
+	ambientID    string
+	ambientIssue string
+
+	// sessions is keyed by work_session_id.
+	sessions map[string]*sessionEntry
+}
+
+func (s *mcpSessionState) ambient() (workSessionID, issueID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ambientID, s.ambientIssue
+}
+
+func (s *mcpSessionState) ambientWorkSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ambientID
+}
+
+func (s *mcpSessionState) setAmbient(workSessionID, issueID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ambientID = workSessionID
+	s.ambientIssue = issueID
+}
+
+func (s *mcpSessionState) clearAmbientIfMatches(workSessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ambientID == workSessionID {
+		s.ambientID = ""
+		s.ambientIssue = ""
+		return true
+	}
+	return false
+}
+
+// track records a work session in the per-session map. Existing entries are
+// replaced (e.g. to reset seq on attach).
+func (s *mcpSessionState) track(workSessionID, issueID string, seq int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		s.sessions = make(map[string]*sessionEntry)
+	}
+	s.sessions[workSessionID] = &sessionEntry{issueID: issueID, seq: seq}
+}
+
+// nextSeq returns and increments the seq counter for the given work session.
+// If the session is not yet tracked, it is created with seq starting at 1.
+func (s *mcpSessionState) nextSeq(workSessionID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		s.sessions = make(map[string]*sessionEntry)
+	}
+	e, ok := s.sessions[workSessionID]
+	if !ok {
+		e = &sessionEntry{}
+		s.sessions[workSessionID] = e
+	}
+	e.seq++
+	return e.seq
+}
+
+// markNamed sets the named flag and returns true if the call was the first
+// to set it. Used by report_activity to auto-name the session on first
+// activity.
+func (s *mcpSessionState) markNamed(workSessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		s.sessions = make(map[string]*sessionEntry)
+	}
+	e, ok := s.sessions[workSessionID]
+	if !ok {
+		e = &sessionEntry{}
+		s.sessions[workSessionID] = e
+	}
+	if e.named {
+		return false
+	}
+	e.named = true
+	return true
+}
+
+// forget removes a tracked session. Called by complete_work.
+func (s *mcpSessionState) forget(workSessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, workSessionID)
 }
 
 // jsonText marshals v to JSON and returns a TextResult.

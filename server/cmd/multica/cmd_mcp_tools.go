@@ -51,11 +51,15 @@ func captureGitDiffStat(gitRoot string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// persistSession saves or clears the active session in the repo binding.
-func persistSession(gitRoot string, session *mcpSessionState) {
+// persistAmbient writes (or clears, when ambient is empty) the current
+// ambient session to the repo binding. Only called when ambient state has
+// actually changed — subagent attaches with set_active=false skip this and
+// therefore do not clobber the parent's persisted ambient slot.
+func persistAmbient(gitRoot string, session *mcpSessionState) {
 	if gitRoot == "" {
 		return
 	}
+	wsID, issueID := session.ambient()
 	bindings, err := mcp.LoadRepoBindings()
 	if err != nil {
 		return
@@ -64,10 +68,10 @@ func persistSession(gitRoot string, session *mcpSessionState) {
 	if !ok {
 		return
 	}
-	if session.WorkSessionID != "" {
+	if wsID != "" {
 		binding.ActiveSession = &mcp.ActiveSession{
-			WorkSessionID: session.WorkSessionID,
-			IssueID:       session.IssueID,
+			WorkSessionID: wsID,
+			IssueID:       issueID,
 			AttachedAt:    time.Now(),
 		}
 	} else {
@@ -75,6 +79,19 @@ func persistSession(gitRoot string, session *mcpSessionState) {
 	}
 	bindings[gitRoot] = binding
 	mcp.SaveRepoBindings(bindings)
+}
+
+// optBool extracts an optional bool argument with a default value.
+func optBool(args map[string]any, key string, defaultVal bool) bool {
+	v, ok := args[key]
+	if !ok {
+		return defaultVal
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return defaultVal
+	}
+	return b
 }
 
 func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionState, workspaceID, projectID, gitRoot string) {
@@ -542,10 +559,12 @@ USAGE:
 	// get_me
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "get_me",
-		Description: `Get current user, workspace, bound project, and active work session. Call this at the start of a session to understand your context — which project and issue you are working on.
+		Name: "get_me",
+		Description: `Get current user, workspace, bound project, and (if any) the AMBIENT work session for this MCP process.
 
-HUMAN COMMUNICATION: When referencing the active issue to a human, use both identifier AND title from active_session — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
+HUMAN COMMUNICATION: When referencing the ambient issue to a human, use both identifier AND title from active_session — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.
+
+PARALLEL-SAFETY WARNING: ` + "`active_session`" + ` is the AMBIENT pointer — shared across every Claude session that talks to this MCP process. It is fragile when subagents run in parallel; siblings that call attach_session will overwrite it. Use it only as a hint to resume work after a restart. For routing your own activity (report_activity, complete_work, ...), always use the work_session_id YOU received from attach_session/resume_session/fork_session — never read it from here.`,
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -575,15 +594,18 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 			}
 		}
 
-		// Include active session info.
-		if session.WorkSessionID != "" {
+		// Include ambient session info. NOTE: ambient is shared across this
+		// MCP process — see description warning above.
+		ambientID, ambientIssueID := session.ambient()
+		if ambientID != "" {
 			active := map[string]any{
-				"work_session_id": session.WorkSessionID,
-				"issue_id":        session.IssueID,
+				"work_session_id": ambientID,
+				"issue_id":        ambientIssueID,
+				"note":            "ambient pointer — do NOT use as routing target for report_activity/complete_work; pass the work_session_id you got from attach_session/resume_session/fork_session instead.",
 			}
 			// Resolve issue title.
 			var issue map[string]any
-			if err := client.GetJSON(ctx, "/api/issues/"+session.IssueID, &issue); err == nil {
+			if err := client.GetJSON(ctx, "/api/issues/"+ambientIssueID, &issue); err == nil {
 				active["issue_identifier"] = issue["identifier"]
 				active["issue_title"] = issue["title"]
 			}
@@ -638,13 +660,22 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 	// attach_session
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "attach_session",
-		Description: "Attach this Claude Code session to an issue. Creates a work session that tracks your activity, decisions, and file changes. Auto-captures git context at start. The session persists across restarts.",
+		Name: "attach_session",
+		Description: `Create a work session for an issue and return its ` + "`work_session_id`" + `. Auto-captures git context at start.
+
+YOU MUST CAPTURE THE RETURNED ` + "`work_session_id`" + ` AND PASS IT EXPLICITLY to every subsequent ` + "`report_activity`" + ` / ` + "`complete_work`" + ` call on THIS session. Do NOT read it back from ` + "`get_me.active_session`" + ` — that pointer is shared across the MCP process and gets clobbered by parallel subagents.
+
+PARENT vs SUBAGENT:
+- Main/parent agents: leave ` + "`set_active`" + ` at its default (true) so ` + "`get_me`" + ` and the cross-restart resume slot reflect your work.
+- Subagents and any agent running alongside another active agent: pass ` + "`set_active=false`" + `. You still get a fresh ` + "`work_session_id`" + ` to report against, but the parent's ambient slot stays untouched.
+
+The persisted ambient slot survives MCP restarts so a single-agent flow can resume; it is NOT a routing target.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id"},
 			"properties": map[string]any{
-				"issue_id": map[string]any{"type": "string", "description": "Issue ID to attach to"},
+				"issue_id":   map[string]any{"type": "string", "description": "Issue ID to attach to"},
+				"set_active": map[string]any{"type": "boolean", "description": "Whether to also store this as the ambient session for the MCP process (used by get_me and cross-restart resume). Default true. Pass false from a subagent so the parent's ambient pointer is preserved."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -652,6 +683,7 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
+		setActive := optBool(args, "set_active", true)
 
 		cwd, _ := os.Getwd()
 		branch := ""
@@ -673,47 +705,53 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		}
 
 		id, _ := result["id"].(string)
-		session.WorkSessionID = id
-		session.IssueID = issueID
-		session.Seq = 0
-		session.Named = false
-
-		persistSession(gitRoot, session)
+		session.track(id, issueID, 0)
+		if setActive {
+			session.setAmbient(id, issueID)
+			persistAmbient(gitRoot, session)
+		}
 
 		// Auto-report session start context.
 		startContext := captureGitContext(gitRoot)
 		if startContext != "" {
-			session.Seq++
+			seq := session.nextSeq(id)
 			client.PostJSON(ctx, "/api/work-sessions/"+id+"/messages", map[string]any{
 				"messages": []map[string]any{{
-					"seq":     session.Seq,
+					"seq":     seq,
 					"type":    "note",
 					"content": "[session_start] " + startContext,
 				}},
 			}, nil)
 		}
 
-		return mcp.TextResult(fmt.Sprintf("Attached to issue %s (work session: %s)", issueID, id)), nil
+		ambientNote := ""
+		if !setActive {
+			ambientNote = " (ambient unchanged — parent's get_me slot preserved)"
+		}
+		return mcp.TextResult(fmt.Sprintf("Attached to issue %s (work_session_id: %s)%s. CAPTURE this work_session_id and pass it to every report_activity / complete_work call you make for this issue.", issueID, id, ambientNote)), nil
 	})
 
 	// -----------------------------------------------------------------------
 	// complete_work
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "complete_work",
-		Description: "Mark the attached work session as complete. Auto-captures git diff. Call this when you finish working on an issue — do not leave sessions dangling.",
+		Name: "complete_work",
+		Description: `Mark a work session as complete. Auto-captures git diff. Call this when you finish working on an issue — do not leave sessions dangling.
+
+You MUST pass the ` + "`work_session_id`" + ` you got from ` + "`attach_session`" + ` (or ` + "`resume_session`" + ` / ` + "`fork_session`" + `). The MCP process does not infer it from ambient state, because in parallel-subagent flows the ambient pointer belongs to a different agent.`,
 		InputSchema: map[string]any{
 			"type":     "object",
-			"required": []string{"summary"},
+			"required": []string{"work_session_id", "summary"},
 			"properties": map[string]any{
-				"summary": map[string]any{"type": "string", "description": "Human-readable summary: what was done, what was decided, what remains. A colleague should understand the state of the issue from this summary alone."},
+				"work_session_id": map[string]any{"type": "string", "description": "The work_session_id returned by attach_session/resume_session/fork_session for THIS session."},
+				"summary":         map[string]any{"type": "string", "description": "Human-readable summary: what was done, what was decided, what remains. A colleague should understand the state of the issue from this summary alone."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
-		if session.WorkSessionID == "" {
-			return mcp.ErrorResult("no active work session. Call attach_session first"), nil
+		wsID, err := requireString(args, "work_session_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
 		}
-
 		summary, err := requireString(args, "summary")
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
@@ -722,10 +760,10 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		// Auto-report git diff before completing.
 		diffStat := captureGitDiffStat(gitRoot)
 		if diffStat != "" {
-			session.Seq++
-			client.PostJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/messages", map[string]any{
+			seq := session.nextSeq(wsID)
+			client.PostJSON(ctx, "/api/work-sessions/"+wsID+"/messages", map[string]any{
 				"messages": []map[string]any{{
-					"seq":     session.Seq,
+					"seq":     seq,
 					"type":    "note",
 					"content": "[session_complete] Files changed:\n" + diffStat,
 				}},
@@ -733,16 +771,17 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		}
 
 		body := map[string]any{"summary": summary}
-		if err := client.PutJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/complete", body, nil); err != nil {
+		if err := client.PutJSON(ctx, "/api/work-sessions/"+wsID+"/complete", body, nil); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 
-		wsID := session.WorkSessionID
-		session.WorkSessionID = ""
-		session.IssueID = ""
-		session.Seq = 0
-
-		persistSession(gitRoot, session)
+		session.forget(wsID)
+		// Only clear the ambient slot if THIS session was the ambient one —
+		// otherwise a subagent completing its work would erase the parent's
+		// pointer.
+		if session.clearAmbientIfMatches(wsID) {
+			persistAmbient(gitRoot, session)
+		}
 
 		return mcp.TextResult(fmt.Sprintf("Work session %s completed", wsID)), nil
 	})
@@ -751,12 +790,15 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 	// report_activity
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "report_activity",
-		Description: "Report a meaningful activity on the attached work session. Call at natural milestones only: after design decisions, verification results, or when blocked. Do NOT call for individual file changes (captured at completion).",
+		Name: "report_activity",
+		Description: `Report a meaningful activity on a work session. Call at natural milestones only: after design decisions, verification results, or when blocked. Do NOT call for individual file changes (captured at completion).
+
+You MUST pass the ` + "`work_session_id`" + ` you got from ` + "`attach_session`" + ` (or ` + "`resume_session`" + ` / ` + "`fork_session`" + `). The MCP process does not infer it — in parallel-subagent flows the ambient pointer is shared across siblings and would route activity to the wrong session.`,
 		InputSchema: map[string]any{
 			"type":     "object",
-			"required": []string{"type", "summary"},
+			"required": []string{"work_session_id", "type", "summary"},
 			"properties": map[string]any{
+				"work_session_id": map[string]any{"type": "string", "description": "The work_session_id returned by attach_session/resume_session/fork_session for THIS session."},
 				"type": map[string]any{
 					"type":        "string",
 					"enum":        []string{"decision", "verification", "blocker", "dependency", "error", "note"},
@@ -768,10 +810,10 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
-		if session.WorkSessionID == "" {
-			return mcp.ErrorResult("no active work session. Call attach_session first"), nil
+		wsID, err := requireString(args, "work_session_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
 		}
-
 		actType, err := requireString(args, "type")
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
@@ -793,10 +835,10 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 			input = map[string]any{"files": files}
 		}
 
-		session.Seq++
+		seq := session.nextSeq(wsID)
 
 		msg := map[string]any{
-			"seq":     session.Seq,
+			"seq":     seq,
 			"type":    actType,
 			"content": content,
 		}
@@ -808,14 +850,14 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 			"messages": []map[string]any{msg},
 		}
 
-		if err := client.PostJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/messages", body, nil); err != nil {
+		if err := client.PostJSON(ctx, "/api/work-sessions/"+wsID+"/messages", body, nil); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 
-		// Auto-name session from first activity.
-		if !session.Named {
-			session.Named = true
-			client.PutJSON(ctx, "/api/work-sessions/"+session.WorkSessionID+"/name", map[string]any{"name": summary}, nil)
+		// Auto-name session from first activity (per work_session_id, so
+		// parallel sessions each get their own first-activity name).
+		if session.markNamed(wsID) {
+			client.PutJSON(ctx, "/api/work-sessions/"+wsID+"/name", map[string]any{"name": summary}, nil)
 		}
 
 		return mcp.TextResult("activity reported"), nil
@@ -825,13 +867,16 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 	// resume_session
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "resume_session",
-		Description: "Resume a previously completed work session. Re-opens it, restores the message sequence counter, and continues where you left off. Use this when returning to unfinished work.",
+		Name: "resume_session",
+		Description: `Resume a previously completed work session. Re-opens it, restores the message sequence counter, and continues where you left off. Use this when returning to unfinished work.
+
+The returned ` + "`work_session_id`" + ` is the SAME id you passed in — capture it and pass it to subsequent ` + "`report_activity`" + ` / ` + "`complete_work`" + ` calls. Subagents resuming alongside an active parent should pass ` + "`set_active=false`" + `.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"work_session_id"},
 			"properties": map[string]any{
 				"work_session_id": map[string]any{"type": "string", "description": "Work session ID to resume"},
+				"set_active":      map[string]any{"type": "boolean", "description": "Whether to also store this as the ambient session for the MCP process. Default true. Pass false from a subagent."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -839,6 +884,7 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
+		setActive := optBool(args, "set_active", true)
 
 		var result map[string]any
 		if err := client.PostJSON(ctx, "/api/work-sessions/"+wsID+"/resume", map[string]any{}, &result); err != nil {
@@ -846,32 +892,41 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		}
 
 		issueID, _ := result["issue_id"].(string)
-		session.WorkSessionID = wsID
-		session.IssueID = issueID
-		session.Seq = 0
 
 		// Restore seq counter from existing messages.
+		seq := 0
 		var msgs []any
 		if err := client.GetJSON(ctx, "/api/work-sessions/"+wsID+"/messages", &msgs); err == nil {
-			session.Seq = len(msgs)
+			seq = len(msgs)
 		}
 
-		persistSession(gitRoot, session)
+		session.track(wsID, issueID, seq)
+		if setActive {
+			session.setAmbient(wsID, issueID)
+			persistAmbient(gitRoot, session)
+		}
 
-		return mcp.TextResult(fmt.Sprintf("Resumed work session %s on issue %s (seq: %d)", wsID, issueID, session.Seq)), nil
+		ambientNote := ""
+		if !setActive {
+			ambientNote = " (ambient unchanged)"
+		}
+		return mcp.TextResult(fmt.Sprintf("Resumed work_session_id %s on issue %s (seq: %d)%s. Pass this work_session_id to every subsequent report_activity / complete_work call.", wsID, issueID, seq, ambientNote)), nil
 	})
 
 	// -----------------------------------------------------------------------
 	// fork_session
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "fork_session",
-		Description: "Fork an existing work session — creates a new session on the same issue with fresh tracking. Use when you want to try a different approach without overwriting the original session's history.",
+		Name: "fork_session",
+		Description: `Fork an existing work session — creates a new session on the same issue with fresh tracking. Use when you want to try a different approach without overwriting the original session's history.
+
+CAPTURE the returned new work_session_id and pass it to subsequent ` + "`report_activity`" + ` / ` + "`complete_work`" + ` calls. Subagents forking alongside an active parent should pass ` + "`set_active=false`" + `.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"work_session_id"},
 			"properties": map[string]any{
 				"work_session_id": map[string]any{"type": "string", "description": "Work session ID to fork from"},
+				"set_active":      map[string]any{"type": "boolean", "description": "Whether to also store the new session as the ambient session. Default true. Pass false from a subagent."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -879,6 +934,7 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
+		setActive := optBool(args, "set_active", true)
 
 		var result map[string]any
 		if err := client.PostJSON(ctx, "/api/work-sessions/"+wsID+"/fork", map[string]any{}, &result); err != nil {
@@ -887,12 +943,17 @@ HUMAN COMMUNICATION: When referencing the active issue to a human, use both iden
 
 		newID, _ := result["id"].(string)
 		issueID, _ := result["issue_id"].(string)
-		session.WorkSessionID = newID
-		session.IssueID = issueID
-		session.Seq = 0
 
-		persistSession(gitRoot, session)
+		session.track(newID, issueID, 0)
+		if setActive {
+			session.setAmbient(newID, issueID)
+			persistAmbient(gitRoot, session)
+		}
 
-		return mcp.TextResult(fmt.Sprintf("Forked session %s → new session %s on issue %s", wsID, newID, issueID)), nil
+		ambientNote := ""
+		if !setActive {
+			ambientNote = " (ambient unchanged)"
+		}
+		return mcp.TextResult(fmt.Sprintf("Forked session %s → new work_session_id %s on issue %s%s. Pass the new work_session_id to every subsequent report_activity / complete_work call.", wsID, newID, issueID, ambientNote)), nil
 	})
 }

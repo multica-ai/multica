@@ -374,7 +374,21 @@ Assignees are polymorphic — can be a member or an agent. `assignee_type` + `as
 
 ## Multica MCP Integration
 
-When the `multica` MCP server is connected and `get_me` shows an `active_session`, report activity at natural milestones using `report_activity`. This costs minimal tokens and gives visibility in the Multica UI.
+When the `multica` MCP server is connected, log activity to YOUR work session at natural milestones using `report_activity`. This costs minimal tokens and gives visibility in the Multica UI.
+
+**Routing — every activity tool needs an explicit `work_session_id`.**
+The MCP server does NOT pick the target session for you. `get_me.active_session` is an *ambient* pointer shared across this MCP process — parallel subagents will overwrite it. Always pass the `work_session_id` you got from `attach_session` (or `resume_session` / `fork_session`) to `report_activity` and `complete_work`.
+
+**Session lifecycle:**
+1. `attach_session(issue_id)` at the start of work — returns a `work_session_id`. **Capture and remember it.** Auto-reports git context.
+2. `report_activity(work_session_id=..., type=..., summary=...)` at milestones (see list below).
+3. `complete_work(work_session_id=..., summary=...)` when done. Auto-captures git diff.
+4. If interrupted without `complete_work`, the next MCP startup re-exposes the ambient session via `get_me` so a single agent can resume.
+
+**Parallel subagents (parent + N children sharing one MCP process):**
+- Children call `attach_session(issue_id, set_active=false)` so the parent's `get_me.active_session` pointer is preserved.
+- Each child uses the `work_session_id` it received — **never** read it back from `get_me`.
+- A child completing its session does not affect the parent's session.
 
 **When to call `report_activity`:**
 - `decision` — after choosing between two or more approaches
@@ -387,8 +401,3 @@ When the `multica` MCP server is connected and `get_me` shows an `active_session
 - After every file edit (captured automatically at `complete_work`)
 - For routine tool calls (reading files, searching)
 - For formatting or minor changes
-
-**Session lifecycle:**
-- `attach_session` at the start of work on an issue (auto-reports git context)
-- `complete_work` when done (auto-captures git diff and file changes)
-- If interrupted without `complete_work`, the next session auto-resumes
