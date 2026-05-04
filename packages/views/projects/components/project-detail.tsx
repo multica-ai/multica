@@ -285,7 +285,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
+      <div className="mx-auto w-full max-w-4xl px-3 sm:px-6 md:px-8 py-4 sm:py-6 md:py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-4 w-96" />
@@ -687,7 +687,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
         {isMobile && (
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-            <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+            <SheetContent side="right" showCloseButton={false} className="w-full max-w-[85vw] sm:max-w-[320px] overflow-y-auto p-4">
               {sidebarContent}
             </SheetContent>
           </Sheet>

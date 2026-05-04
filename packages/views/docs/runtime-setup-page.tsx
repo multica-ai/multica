@@ -13,7 +13,7 @@ export function RuntimeSetupDocsPage() {
   const slug = workspaces.find((w) => w.id === wsId)?.slug ?? "";
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+    <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 py-6 sm:py-10">
       <button
         onClick={() => push(`/${slug}/runtimes`)}
         className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

@@ -708,7 +708,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               >
                 <FolderIcon className="size-4" />
               </SheetTrigger>
-              <SheetContent side="left" className="flex w-72 flex-col p-0">
+              <SheetContent side="left" className="flex w-full max-w-[85vw] sm:w-72 sm:max-w-[18rem] flex-col p-0">
                 <SheetHeader className="sr-only">
                   <SheetTitle>Folders</SheetTitle>
                 </SheetHeader>

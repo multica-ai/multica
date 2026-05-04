@@ -43,7 +43,7 @@ export function WorkspaceDocuments() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-8 py-6">
+    <div className="mx-auto w-full max-w-5xl px-3 sm:px-6 md:px-8 py-4 sm:py-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Documents</h1>

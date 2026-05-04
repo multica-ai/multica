@@ -113,7 +113,7 @@ export function SettingsPage({
           <div className="flex-1 min-h-0 relative">{documentationContent}</div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto">
-            <div className="w-full max-w-3xl mx-auto p-6">
+            <div className="w-full max-w-3xl mx-auto p-3 sm:p-6">
               <TabsContent value="profile"><AccountTab /></TabsContent>
               <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
               <TabsContent value="appearance"><AppearanceTab /></TabsContent>

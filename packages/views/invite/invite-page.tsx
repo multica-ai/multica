@@ -232,12 +232,12 @@ function InviteShell({
 }) {
   const logout = useLogout();
   return (
-    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-6 py-12">
+    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-4 sm:px-6 py-6 sm:py-12">
       {onBack && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-12 left-12 text-muted-foreground"
+          className="absolute top-4 left-4 sm:top-12 sm:left-12 text-muted-foreground"
           onClick={onBack}
         >
           <ArrowLeft />
@@ -247,7 +247,7 @@ function InviteShell({
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-12 right-12 text-muted-foreground hover:text-destructive"
+        className="absolute top-4 right-4 sm:top-12 sm:right-12 text-muted-foreground hover:text-destructive"
         onClick={logout}
       >
         <LogOut />

@@ -19,7 +19,7 @@ interface PageHeaderProps {
 
 export function PageHeader({ children, className }: PageHeaderProps) {
   return (
-    <div className={cn("flex h-12 shrink-0 items-center border-b px-4", className)}>
+    <div className={cn("flex h-12 shrink-0 items-center border-b px-2 sm:px-4", className)}>
       <MobileSidebarTrigger />
       {children}
     </div>

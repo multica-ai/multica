@@ -392,7 +392,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           <Skeleton className="h-4 w-32" />
         </div>
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto p-6 space-y-8">
+          <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-8">
             <section className="space-y-4">
               <Skeleton className="h-3 w-20" />
               <div className="grid grid-cols-2 gap-4">

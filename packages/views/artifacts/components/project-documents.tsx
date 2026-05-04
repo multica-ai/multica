@@ -35,7 +35,7 @@ export function ProjectDocuments({ projectId }: { projectId: string }) {
   );
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-8 py-6">
+    <div className="mx-auto w-full max-w-4xl px-3 sm:px-6 md:px-8 py-4 sm:py-6">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-base font-semibold">Documents</h2>
         <Button size="sm" onClick={() => setCreating(true)}>

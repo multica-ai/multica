@@ -903,7 +903,7 @@ export function InboxPage() {
       }}
     />
   ) : selected ? (
-    <div className="p-6">
+    <div className="p-3 sm:p-6">
       <h2 className="text-lg font-semibold">{selected.title}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
