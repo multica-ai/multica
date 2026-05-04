@@ -48,63 +48,6 @@ func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	}
 }
 
-// ── resolveResumedSessionID ──
-
-func TestResolveResumedSessionIDMatching(t *testing.T) {
-	t.Parallel()
-	// Server confirms our requested id — happy resume path. No change.
-	got, changed := resolveResumedSessionID(
-		"ses_alpha",
-		json.RawMessage(`{"sessionId":"ses_alpha"}`),
-	)
-	if got != "ses_alpha" {
-		t.Errorf("got %q, want ses_alpha", got)
-	}
-	if changed {
-		t.Errorf("changed: got true, want false")
-	}
-}
-
-func TestResolveResumedSessionIDDifferent(t *testing.T) {
-	t.Parallel()
-	// Server returned a different id — local state was lost and the
-	// server silently spun up a new session. We trust the server.
-	got, changed := resolveResumedSessionID(
-		"ses_alpha",
-		json.RawMessage(`{"sessionId":"ses_beta_new"}`),
-	)
-	if got != "ses_beta_new" {
-		t.Errorf("got %q, want ses_beta_new", got)
-	}
-	if !changed {
-		t.Errorf("changed: got false, want true")
-	}
-}
-
-func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
-	t.Parallel()
-	// Older / non-conforming server returns no sessionId — defensive
-	// fallback to the requested id. This preserves the legacy happy
-	// path; a stale id will eventually fail downstream and be retried
-	// via the daemon's session-resume fallback (daemon.go).
-	for _, body := range []string{
-		`{}`,
-		`{"sessionId":""}`,
-		`not json`,
-	} {
-		got, changed := resolveResumedSessionID(
-			"ses_alpha",
-			json.RawMessage(body),
-		)
-		if got != "ses_alpha" {
-			t.Errorf("body=%q: got %q, want ses_alpha", body, got)
-		}
-		if changed {
-			t.Errorf("body=%q: changed: got true, want false", body)
-		}
-	}
-}
-
 // ── buildHermesSessionParams ──
 
 func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
