@@ -3,7 +3,6 @@
 # Usage:
 #   cp .env.example .env
 #   # Edit .env — change JWT_SECRET at minimum
-#   # Optional: put local OAuth / bot secrets in .env.bot
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
 # Frontend: http://localhost:3000
@@ -35,9 +34,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - path: .env
-        required: false
-      - path: .env.bot
-        required: false
+        required: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,9 +43,8 @@ services:
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
-      # Keep only container-topology defaults here. OAuth/secrets/app URL
-      # settings come from env_file above; explicit environment entries override
-      # .env.bot and can accidentally replace configured values with blanks.
+      # Container-topology overrides. Secrets/app URLs come from .env via
+      # env_file above; explicit entries here take precedence over .env.
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
       APP_ENV: ${APP_ENV:-production}
