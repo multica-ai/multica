@@ -1,5 +1,21 @@
+import type { ReactNode } from "react";
 import { source } from "@/lib/source";
 import { DocsPanelClient, type DocPage } from "./docs-panel-client";
+
+/**
+ * Multica-styled Callout — used by some MDX content (e.g. self-hosting docs)
+ * that was originally written for fumadocs-ui. Shimming it here lets us drop
+ * fumadocs-ui from the embedded view while still supporting the existing MDX.
+ */
+function Callout({ children }: { children: ReactNode }) {
+  return (
+    <div className="my-4 rounded-md border border-l-4 border-l-primary bg-muted/40 px-4 py-3 text-sm">
+      {children}
+    </div>
+  );
+}
+
+const mdxComponents = { Callout };
 
 export function DocsPanel() {
   // source.getPages() returns all docs collected by fumadocs-mdx. We
@@ -13,7 +29,7 @@ export function DocsPanel() {
       title: page.data.title,
       description: page.data.description,
       group: slugs.length > 1 ? slugs[0] : undefined,
-      content: <Body />,
+      content: <Body components={mdxComponents} />,
     };
   });
   return <DocsPanelClient pages={pages} />;
