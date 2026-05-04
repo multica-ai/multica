@@ -92,19 +92,18 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 }
 
 const createOrGetQueuedChatTask = `-- name: CreateOrGetQueuedChatTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id, triggered_by_user_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+VALUES ($1, $2, NULL, 'queued', $3, $4)
 ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
 DO UPDATE SET priority = agent_task_queue.priority
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, triggered_by_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
 `
 
 type CreateOrGetQueuedChatTaskParams struct {
-	AgentID           pgtype.UUID `json:"agent_id"`
-	RuntimeID         pgtype.UUID `json:"runtime_id"`
-	Priority          int32       `json:"priority"`
-	ChatSessionID     pgtype.UUID `json:"chat_session_id"`
-	TriggeredByUserID pgtype.UUID `json:"triggered_by_user_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	RuntimeID     pgtype.UUID `json:"runtime_id"`
+	Priority      int32       `json:"priority"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 }
 
 // Race-safe enqueue with coalescing. Inserts a queued chat task; if one is
@@ -119,7 +118,6 @@ func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGet
 		arg.RuntimeID,
 		arg.Priority,
 		arg.ChatSessionID,
-		arg.TriggeredByUserID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -141,7 +139,6 @@ func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGet
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
-		&i.TriggeredByUserID,
 	)
 	return i, err
 }

@@ -210,7 +210,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, triggered_by_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
 `
 
 type CreateAutopilotTaskParams struct {
@@ -223,8 +223,6 @@ type CreateAutopilotTaskParams struct {
 // =====================
 // Task Queue (run_only mode)
 // =====================
-// Autopilot tasks have no human trigger by definition — triggered_by_user_id
-// is left NULL so per-user budget caps don't apply (workspace caps still do).
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
@@ -252,7 +250,6 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
-		&i.TriggeredByUserID,
 	)
 	return i, err
 }

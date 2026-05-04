@@ -159,37 +159,6 @@ func (q *Queries) IncrementBudgetState(ctx context.Context, arg IncrementBudgetS
 	return err
 }
 
-const insertBudgetChangeLog = `-- name: InsertBudgetChangeLog :exec
-INSERT INTO budget_change_log
-    (workspace_id, changed_by, scope_type, scope_id, field, old_value_cents, new_value_cents, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-`
-
-type InsertBudgetChangeLogParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	ChangedBy     pgtype.UUID `json:"changed_by"`
-	ScopeType     string      `json:"scope_type"`
-	ScopeID       pgtype.UUID `json:"scope_id"`
-	Field         string      `json:"field"`
-	OldValueCents pgtype.Int8 `json:"old_value_cents"`
-	NewValueCents pgtype.Int8 `json:"new_value_cents"`
-	Reason        pgtype.Text `json:"reason"`
-}
-
-func (q *Queries) InsertBudgetChangeLog(ctx context.Context, arg InsertBudgetChangeLogParams) error {
-	_, err := q.db.Exec(ctx, insertBudgetChangeLog,
-		arg.WorkspaceID,
-		arg.ChangedBy,
-		arg.ScopeType,
-		arg.ScopeID,
-		arg.Field,
-		arg.OldValueCents,
-		arg.NewValueCents,
-		arg.Reason,
-	)
-	return err
-}
-
 const listBudgetStateForWindow = `-- name: ListBudgetStateForWindow :many
 SELECT workspace_id, scope_type, scope_id, window_type, window_start, cents_spent, last_updated FROM budget_state
 WHERE workspace_id = $1

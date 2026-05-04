@@ -159,8 +159,6 @@ RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
--- Autopilot tasks have no human trigger by definition — triggered_by_user_id
--- is left NULL so per-user budget caps don't apply (workspace caps still do).
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;

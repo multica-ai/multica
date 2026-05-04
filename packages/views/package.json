@@ -42,7 +42,6 @@
     "./search": "./search/index.ts",
     "./chat": "./chat/index.ts",
     "./settings": "./settings/index.ts",
-    "./users": "./users/index.ts",
     "./invite": "./invite/index.ts",
     "./platform": "./platform/index.ts"
   },

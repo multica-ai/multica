@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -37,18 +36,6 @@ type TaskService struct {
 
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
 	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
-}
-
-// triggeredByUserID extracts the human user behind the current request, if
-// any. Returns an invalid pgtype.UUID for system-driven contexts (autopilot
-// tickers, daemon-token requests, background workers) where no member is
-// attached. Used to attribute tasks for per-user budget enforcement and
-// JEH-324 scope toggles.
-func triggeredByUserID(ctx context.Context) pgtype.UUID {
-	if m, ok := middleware.MemberFromContext(ctx); ok {
-		return m.UserID
-	}
-	return pgtype.UUID{}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -84,12 +71,11 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:           issue.AssigneeID,
-		RuntimeID:         agent.RuntimeID,
-		IssueID:           issue.ID,
-		Priority:          priorityToInt(issue.Priority),
-		TriggerCommentID:  commentID,
-		TriggeredByUserID: triggeredByUserID(ctx),
+		AgentID:          issue.AssigneeID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: commentID,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -123,12 +109,11 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:           agentID,
-		RuntimeID:         agent.RuntimeID,
-		IssueID:           issue.ID,
-		Priority:          priorityToInt(issue.Priority),
-		TriggerCommentID:  triggerCommentID,
-		TriggeredByUserID: triggeredByUserID(ctx),
+		AgentID:          agentID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: triggerCommentID,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -165,11 +150,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	// Race-safety is enforced by a partial unique index on
 	// (chat_session_id) WHERE status = 'queued' (migration 057).
 	task, err := s.Queries.CreateOrGetQueuedChatTask(ctx, db.CreateOrGetQueuedChatTaskParams{
-		AgentID:           chatSession.AgentID,
-		RuntimeID:         agent.RuntimeID,
-		Priority:          2, // medium priority for chat
-		ChatSessionID:     chatSession.ID,
-		TriggeredByUserID: triggeredByUserID(ctx),
+		AgentID:       chatSession.AgentID,
+		RuntimeID:     agent.RuntimeID,
+		Priority:      2, // medium priority for chat
+		ChatSessionID: chatSession.ID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)

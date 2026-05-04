@@ -45,16 +45,6 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
-  scope_enforcement_enabled: boolean;
-  budget_enforcement_enabled: boolean;
-}
-
-export interface MemberUsage {
-  user_id: string;
-  daily_cents: number;
-  monthly_cents: number;
-  daily_window: string;
-  monthly_window: string;
 }
 
 export interface Invitation {

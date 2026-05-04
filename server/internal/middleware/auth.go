@@ -73,17 +73,6 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
 
-				// Scope='user' is the JEH-324 admin opt-out: the
-				// triggering member has the wider permission set
-				// turned on, so promote this 1h token to ScopeUser
-				// instead of locking it to the task's resources.
-				// The token still revokes at task completion.
-				if tt.Scope == "user" {
-					ctx := withUserScope(r.Context())
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
-
 				ctx := withTaskScope(r.Context(), TaskScopeContext{
 					TaskID:      uuidToString(tt.TaskID),
 					IssueID:     uuidToString(tt.IssueID),

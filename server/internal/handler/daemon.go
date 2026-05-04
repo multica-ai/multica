@@ -63,17 +63,9 @@ func (h *Handler) workspaceIDForTask(ctx context.Context, task db.AgentTaskQueue
 	return pgtype.UUID{}, nil
 }
 
-// mintTaskToken generates and stores a task-bound token. The scope field
-// controls how the auth middleware later treats it:
-//   - "task" (default): URL-ID-matched, locked to this task's resources
-//   - "user": admin opt-out for the triggering user (JEH-324 toggle off);
-//     auth middleware promotes to ScopeUser so the agent has full member
-//     access for the 1-hour TTL. Lifecycle (revoke on completion) stays
-//     identical so a leaked token still dies when the task ends.
-//
-// Returns the plain-text token to hand to the daemon — only the hash is
-// persisted.
-func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID, scope string) (string, error) {
+// mintTaskToken generates and stores a task-scoped token. Returns the
+// plain-text token to hand to the daemon — only the hash is persisted.
+func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string) (string, error) {
 	raw, err := auth.GenerateTaskToken()
 	if err != nil {
 		return "", fmt.Errorf("generate task token: %w", err)
@@ -82,52 +74,18 @@ func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, wor
 	wsUUID := pgtype.UUID{}
 	_ = wsUUID.Scan(workspaceID)
 
-	if scope == "" {
-		scope = "task"
-	}
-
 	if err := h.Queries.CreateTaskToken(ctx, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashTokenBytes(raw),
 		TaskID:      task.ID,
 		IssueID:     task.IssueID,
 		AgentID:     task.AgentID,
 		WorkspaceID: wsUUID,
-		Scope:       scope,
+		Scope:       "task",
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(taskTokenTTL), Valid: true},
 	}); err != nil {
 		return "", fmt.Errorf("persist task token: %w", err)
 	}
 	return raw, nil
-}
-
-// resolveTaskTokenScope returns "user" when the triggering member has
-// opted out of JEH-324 scope enforcement (admin granted the wider
-// 1-hour ScopeUser fallback), else "task". A NULL or unresolvable
-// triggering user always means the strict default.
-func (h *Handler) resolveTaskTokenScope(ctx context.Context, task db.AgentTaskQueue) string {
-	if !task.TriggeredByUserID.Valid || !task.AgentID.Valid {
-		return "task"
-	}
-	wsID, err := h.workspaceIDForTask(ctx, task)
-	if err != nil || !wsID.Valid {
-		return "task"
-	}
-	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      task.TriggeredByUserID,
-		WorkspaceID: wsID,
-	})
-	if err != nil {
-		return "task"
-	}
-	if member.ScopeEnforcementEnabled {
-		return "task"
-	}
-	slog.Warn("task minting wide-scope token: member opted out of JEH-324 scope enforcement",
-		"task_id", uuidToString(task.ID),
-		"member_id", uuidToString(member.ID),
-		"user_id", uuidToString(task.TriggeredByUserID),
-	)
-	return "user"
 }
 
 // ---------------------------------------------------------------------------
@@ -674,7 +632,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if pending, err := h.Queries.ListPendingTasksByRuntime(r.Context(), parseUUID(runtimeID)); err == nil {
 		for _, candidate := range pending {
 			wsID, _ := h.workspaceIDForTask(r.Context(), candidate)
-			decision := h.BudgetService.CheckPreClaim(r.Context(), wsID, candidate.AgentID, candidate.TriggeredByUserID)
+			decision := h.BudgetService.CheckPreClaim(r.Context(), wsID, candidate.AgentID)
 			if !decision.Allowed {
 				slog.Info("task claim blocked by budget", "task_id", uuidToString(candidate.ID), "reason", decision.Reason)
 				_ = h.Queries.MarkTaskBlockedByBudget(r.Context(), db.MarkTaskBlockedByBudgetParams{
@@ -880,10 +838,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// for the spawned agent process. Scoped to the task's issue/agent/
 	// workspace; expires after taskTokenTTL. Replaces the previous
 	// behavior where the daemon shared its full PAT with every agent.
-	// Triggering member can opt out of strict scope (see resolveTaskTokenScope)
-	// to receive a 1-hour user-scoped fallback instead.
-	tokenScope := h.resolveTaskTokenScope(r.Context(), *task)
-	token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID, tokenScope)
+	token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID)
 	if err != nil {
 		slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
