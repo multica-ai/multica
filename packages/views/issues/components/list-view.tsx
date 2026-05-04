@@ -40,15 +40,59 @@ export function ListView({
   const toggleListCollapsed = useViewStore(
     (s) => s.toggleListCollapsed
   );
+  const collapsedParentIds = useViewStore((s) => s.collapsedParentIds);
+  const toggleParentCollapsed = useViewStore((s) => s.toggleParentCollapsed);
 
-  const issuesByStatus = useMemo(() => {
-    const map = new Map<IssueStatus, Issue[]>();
-    for (const status of visibleStatuses) {
-      const filtered = issues.filter((i) => i.status === status);
-      map.set(status, sortIssues(filtered, sortBy, sortDirection));
+  // Build a map from parent_issue_id → child issues, scoped to the issues
+  // currently visible (post-filter, post-scope). A child whose parent is
+  // also in `issues` is treated as nested; a child whose parent has been
+  // filtered out becomes an "orphan" and renders at the top level so it
+  // isn't silently hidden when a status filter excludes the parent.
+  const { issuesByStatus, childrenByParent, orphanedChildIds } = useMemo(() => {
+    const parentIds = new Set<string>();
+    for (const i of issues) parentIds.add(i.id);
+
+    const childrenMap = new Map<string, Issue[]>();
+    const orphans = new Set<string>();
+    for (const i of issues) {
+      if (i.parent_issue_id && parentIds.has(i.parent_issue_id)) {
+        const arr = childrenMap.get(i.parent_issue_id);
+        if (arr) arr.push(i);
+        else childrenMap.set(i.parent_issue_id, [i]);
+      } else if (i.parent_issue_id) {
+        orphans.add(i.id);
+      }
     }
-    return map;
+
+    // Sort children by the same view-level sort (so order is consistent
+    // with siblings at the top level).
+    for (const [pid, arr] of childrenMap) {
+      childrenMap.set(pid, sortIssues(arr, sortBy, sortDirection));
+    }
+
+    // Top-level issues per status: any issue with no parent OR with a
+    // parent that isn't in the visible set (orphans surface here).
+    const byStatus = new Map<IssueStatus, Issue[]>();
+    for (const status of visibleStatuses) {
+      const filtered = issues.filter(
+        (i) =>
+          i.status === status &&
+          (!i.parent_issue_id || !parentIds.has(i.parent_issue_id)),
+      );
+      byStatus.set(status, sortIssues(filtered, sortBy, sortDirection));
+    }
+
+    return {
+      issuesByStatus: byStatus,
+      childrenByParent: childrenMap,
+      orphanedChildIds: orphans,
+    };
   }, [issues, visibleStatuses, sortBy, sortDirection]);
+
+  const collapsedSet = useMemo(
+    () => new Set(collapsedParentIds),
+    [collapsedParentIds],
+  );
 
   const expandedStatuses = useMemo(
     () =>
@@ -83,7 +127,11 @@ export function ListView({
             key={status}
             status={status}
             issues={issuesByStatus.get(status) ?? []}
+            childrenByParent={childrenByParent}
+            collapsedParentIds={collapsedSet}
+            onToggleParent={toggleParentCollapsed}
             childProgressMap={childProgressMap}
+            orphanedChildIds={orphanedChildIds}
             myIssuesOpts={myIssuesOpts}
           />
         ))}
@@ -95,12 +143,20 @@ export function ListView({
 function StatusAccordionItem({
   status,
   issues,
+  childrenByParent,
+  collapsedParentIds,
+  onToggleParent,
   childProgressMap,
+  orphanedChildIds,
   myIssuesOpts,
 }: {
   status: IssueStatus;
   issues: Issue[];
+  childrenByParent: Map<string, Issue[]>;
+  collapsedParentIds: Set<string>;
+  onToggleParent: (parentId: string) => void;
   childProgressMap: Map<string, ChildProgress>;
+  orphanedChildIds: Set<string>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -111,9 +167,23 @@ function StatusAccordionItem({
     myIssuesOpts,
   );
 
-  const issueIds = issues.map((i) => i.id);
-  const selectedCount = issueIds.filter((id) => selectedIds.has(id)).length;
-  const allSelected = issues.length > 0 && selectedCount === issues.length;
+  // Selection at the status level covers ALL rows that will render
+  // under this status — including currently-visible children — so
+  // shift-click and "select all" behave the same with or without nesting.
+  const visibleRowIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const issue of issues) {
+      ids.push(issue.id);
+      const children = childrenByParent.get(issue.id);
+      if (children && !collapsedParentIds.has(issue.id)) {
+        for (const c of children) ids.push(c.id);
+      }
+    }
+    return ids;
+  }, [issues, childrenByParent, collapsedParentIds]);
+
+  const selectedCount = visibleRowIds.filter((id) => selectedIds.has(id)).length;
+  const allSelected = visibleRowIds.length > 0 && selectedCount === visibleRowIds.length;
   const someSelected = selectedCount > 0;
 
   return (
@@ -128,9 +198,9 @@ function StatusAccordionItem({
             }}
             onChange={() => {
               if (allSelected) {
-                deselect(issueIds);
+                deselect(visibleRowIds);
               } else {
-                select(issueIds);
+                select(visibleRowIds);
               }
             }}
             className="cursor-pointer accent-primary"
@@ -165,9 +235,37 @@ function StatusAccordionItem({
       <Accordion.Panel className="pt-1">
         {issues.length > 0 ? (
           <>
-            {issues.map((issue) => (
-              <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
-            ))}
+            {issues.map((issue) => {
+              const children = childrenByParent.get(issue.id);
+              const hasChildren = !!children && children.length > 0;
+              const collapsed = collapsedParentIds.has(issue.id);
+              return (
+                <div key={issue.id}>
+                  <ListRow
+                    issue={issue}
+                    childProgress={childProgressMap.get(issue.id)}
+                    hasChildren={hasChildren}
+                    collapsed={collapsed}
+                    onToggleCollapsed={
+                      hasChildren ? () => onToggleParent(issue.id) : undefined
+                    }
+                    isOrphan={orphanedChildIds.has(issue.id)}
+                  />
+                  {hasChildren && !collapsed && (
+                    <div role="group" aria-label={`Sub-issues of ${issue.identifier}`}>
+                      {children!.map((child) => (
+                        <ListRow
+                          key={child.id}
+                          issue={child}
+                          childProgress={childProgressMap.get(child.id)}
+                          indentLevel={1}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {hasMore && (
               <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
             )}
