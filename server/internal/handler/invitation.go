@@ -95,7 +95,19 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if there is already a pending invitation.
+	// Drop any past-due pending invitations to 'expired' first. The partial unique
+	// index idx_invitation_unique_pending only filters by status = 'pending', so a
+	// stale row would otherwise block CreateInvitation below — see issue #2055.
+	if err := h.Queries.ExpireStalePendingInvitations(r.Context(), db.ExpireStalePendingInvitationsParams{
+		WorkspaceID:  requester.WorkspaceID,
+		InviteeEmail: email,
+	}); err != nil {
+		slog.Warn("expire stale invitations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to create invitation")
+		return
+	}
+
+	// Check if there is still a live pending invitation.
 	_, err = h.Queries.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
 		WorkspaceID:  requester.WorkspaceID,
 		InviteeEmail: email,
