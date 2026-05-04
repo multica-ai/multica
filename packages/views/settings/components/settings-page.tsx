@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles, Bell, BookText } from "lucide-react";
+import { User, Palette, Key, Settings, FolderGit2, Sparkles, Bell, BookText } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
@@ -9,7 +9,6 @@ import { AppearanceTab } from "./appearance-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
-import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { AgentProfileTab } from "./agent-profile-tab";
 
@@ -21,10 +20,11 @@ const accountTabs = [
   { value: "tokens", label: "API Tokens", icon: Key },
 ];
 
+// Members management has moved to its own top-level Users page
+// (sidebar entry). Settings keeps only workspace-config tabs now.
 const workspaceTabs = [
   { value: "workspace", label: "General", icon: Settings },
   { value: "repositories", label: "Repositories", icon: FolderGit2 },
-  { value: "members", label: "Members", icon: Users },
 ];
 
 export interface ExtraSettingsTab {
@@ -121,7 +121,6 @@ export function SettingsPage({
               <TabsContent value="tokens"><TokensTab /></TabsContent>
               <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
               <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-              <TabsContent value="members"><MembersTab /></TabsContent>
               {extraAccountTabs?.map((extraTab) => (
                 <TabsContent key={extraTab.value} value={extraTab.value}>{extraTab.content}</TabsContent>
               ))}

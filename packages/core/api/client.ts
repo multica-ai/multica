@@ -25,6 +25,7 @@ import type {
   Workspace,
   WorkspaceRepo,
   MemberWithUser,
+  MemberUsage,
   User,
   Skill,
   CreateSkillRequest,
@@ -753,6 +754,36 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",
     });
+  }
+
+  async setMemberScopeEnforcement(
+    workspaceId: string,
+    memberId: string,
+    enabled: boolean,
+    reason?: string,
+  ): Promise<MemberWithUser> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/members/${memberId}/scope-enforcement`,
+      { method: "PATCH", body: JSON.stringify({ enabled, reason }) },
+    );
+  }
+
+  async setMemberBudgetEnforcement(
+    workspaceId: string,
+    memberId: string,
+    enabled: boolean,
+    reason?: string,
+  ): Promise<MemberWithUser> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/members/${memberId}/budget-enforcement`,
+      { method: "PATCH", body: JSON.stringify({ enabled, reason }) },
+    );
+  }
+
+  async getMemberUsage(workspaceId: string, memberId: string): Promise<MemberUsage> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/members/${memberId}/usage`,
+    );
   }
 
   async leaveWorkspace(workspaceId: string): Promise<void> {

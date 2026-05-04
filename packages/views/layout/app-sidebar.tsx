@@ -32,6 +32,7 @@ import {
   FolderKanban,
   MessageSquare,
   FileText,
+  Users,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -110,6 +111,7 @@ type NavKey =
   | "agents"
   | "runtimes"
   | "skills"
+  | "users"
   | "settings";
 
 const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
@@ -127,6 +129,7 @@ const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "runtimes", label: "Runtimes", icon: Monitor },
   { key: "skills", label: "Skills", icon: BookOpenText },
+  { key: "users", label: "Users", icon: Users },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 

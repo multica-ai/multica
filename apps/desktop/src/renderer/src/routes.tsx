@@ -29,6 +29,7 @@ import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/views/notifications";
 import { SettingsPage } from "@multica/views/settings";
+import { UsersPage } from "@multica/views/users";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
@@ -153,6 +154,7 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          { path: "users", element: <UsersPage />, handle: { title: "Users" } },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "notifications",
