@@ -854,6 +854,12 @@ export class ApiClient {
       channels_enabled_set?: boolean;
       channel_retention_days?: number | null;
       channel_retention_days_set?: boolean;
+      // Paired-bool pattern so callers can distinguish "don't touch" from
+      // "explicitly clear to null". Pass orchestrator_agent_id_set=true and
+      // orchestrator_agent_id=null to clear; orchestrator_agent_id="<uuid>"
+      // to set; both fields omitted to leave the value untouched.
+      orchestrator_agent_id?: string | null;
+      orchestrator_agent_id_set?: boolean;
     },
   ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {

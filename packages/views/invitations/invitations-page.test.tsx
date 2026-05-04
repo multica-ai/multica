@@ -90,6 +90,7 @@ const mkWs = (id: string, slug: string) => ({
   settings: {},
   repos: [],
   issue_prefix: slug.toUpperCase(),
+  orchestrator_agent_id: null,
   created_at: "",
   updated_at: "",
 });

@@ -54,6 +54,7 @@ type Task struct {
 	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
 	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`       // other non-archived agents in the same workspace, for orchestrator routing
+	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // server set this true when the claiming agent IS the workspace's orchestrator AND the trigger was agent-authored — adapts the prompt
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task

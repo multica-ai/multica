@@ -1338,6 +1338,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		} else {
 			slog.Warn("task claim: failed to list peer agents (continuing without)", "workspace_id", resp.WorkspaceID, "error", err)
 		}
+
+		// Decide whether this claim is an orchestrator wake: the claiming
+		// agent IS the workspace's configured orchestrator AND the
+		// triggering comment was authored by another agent. Best-effort —
+		// a workspace fetch failure or a missing orchestrator pointer just
+		// leaves the flag false (no behavior change).
+		if ws, err := h.Queries.GetWorkspace(r.Context(), workspaceUUID); err == nil &&
+			ws.OrchestratorAgentID.Valid &&
+			uuidToString(ws.OrchestratorAgentID) == uuidToString(task.AgentID) &&
+			resp.TriggerAuthorType == "agent" {
+			resp.IsOrchestratorWake = true
+		}
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID, "peer_agents", len(resp.PeerAgents))

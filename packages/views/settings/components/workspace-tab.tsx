@@ -24,10 +24,18 @@ import { useAuthStore } from "@multica/core/auth";
 import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  agentListOptions,
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@multica/ui/components/ui/select";
 import { api } from "@multica/core/api";
 import {
   resolvePostAuthDestination,
@@ -97,6 +105,13 @@ export function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  // Sentinel "" → "no orchestrator selected" (clears the pointer on save).
+  // The Select component disallows actual empty-string values, so we use
+  // a NONE sentinel for the rendered <SelectItem> and translate at save time.
+  const ORCHESTRATOR_NONE = "__none__";
+  const [orchestratorAgentId, setOrchestratorAgentId] = useState<string>(
+    workspace?.orchestrator_agent_id ?? ORCHESTRATOR_NONE,
+  );
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -122,16 +137,37 @@ export function WorkspaceTab() {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
+    setOrchestratorAgentId(workspace?.orchestrator_agent_id ?? ORCHESTRATOR_NONE);
   }, [workspace]);
+
+  // Agents available to pick as the orchestrator. Filtered to non-archived;
+  // the orchestrator field is forced to NULL by the schema's ON DELETE
+  // SET NULL when archived/deleted, but offering archived agents in the
+  // picker would be misleading.
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const activeAgents = agents.filter((a) => !a.archived_at);
 
   const handleSave = async () => {
     if (!workspace) return;
     setSaving(true);
     try {
+      const orchestratorChanged =
+        (workspace.orchestrator_agent_id ?? "") !==
+        (orchestratorAgentId === ORCHESTRATOR_NONE ? "" : orchestratorAgentId);
       const updated = await api.updateWorkspace(workspace.id, {
         name,
         description,
         context,
+        // Only send the paired orchestrator fields when the user actually
+        // changed the picker — avoids sending a no-op write that would
+        // otherwise look like an explicit "set" in audit logs.
+        ...(orchestratorChanged
+          ? {
+              orchestrator_agent_id_set: true,
+              orchestrator_agent_id:
+                orchestratorAgentId === ORCHESTRATOR_NONE ? null : orchestratorAgentId,
+            }
+          : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
@@ -231,6 +267,40 @@ export function WorkspaceTab() {
               <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {workspace.slug}
               </div>
+            </div>
+            {/*
+             * Orchestrator agent: when set, the server enqueues a task for
+             * this agent on every agent-authored issue comment so it can
+             * coordinate cross-agent workflows (acknowledge work, reassign,
+             * change status, ping a human). Self-loops and assignee-collisions
+             * are skipped server-side. Members and archived agents are
+             * excluded from the picker.
+             */}
+            <div>
+              <Label className="text-xs text-muted-foreground">Orchestrator agent</Label>
+              <Select
+                value={orchestratorAgentId}
+                onValueChange={(v) => { if (v) setOrchestratorAgentId(v); }}
+                disabled={!canManageWorkspace}
+              >
+                <SelectTrigger className="mt-1 w-full">
+                  <SelectValue placeholder="No orchestrator (default)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ORCHESTRATOR_NONE}>No orchestrator</SelectItem>
+                  {activeAgents.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Optional. When set, this agent gets woken on every agent-authored issue
+                comment to coordinate the workflow — acknowledge completion, reassign,
+                change status, or notify a human. Leave as &quot;No orchestrator&quot; to
+                keep the current behavior (only the assigned agent is woken).
+              </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button

@@ -24,6 +24,7 @@ function makeWorkspace(over: Partial<Workspace>): Workspace {
     settings: {},
     repos: [],
     issue_prefix: "DEF",
+    orchestrator_agent_id: null,
     created_at: "",
     updated_at: "",
     channels_enabled: false,

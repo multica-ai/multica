@@ -156,6 +156,7 @@ type AgentTaskResponse struct {
 	ProjectTitle            string                `json:"project_title,omitempty"`      // for surfacing in agent context
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`  // resources attached to the project
 	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`        // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
+	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // true when the claiming agent is the workspace's configured orchestrator AND the trigger was an agent-authored comment. Tells the prompt builder to render the orchestrator review-and-act block instead of the generic "decide whether to reply" block.
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue

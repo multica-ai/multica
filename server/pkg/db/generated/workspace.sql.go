@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id
 `
 
 type CreateWorkspaceParams struct {
@@ -48,6 +48,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.IssueCounter,
 		&i.ChannelRetentionDays,
 		&i.ChannelsEnabled,
+		&i.OrchestratorAgentID,
 	)
 	return i, err
 }
@@ -62,7 +63,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id FROM workspace
 WHERE id = $1
 `
 
@@ -83,12 +84,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.IssueCounter,
 		&i.ChannelRetentionDays,
 		&i.ChannelsEnabled,
+		&i.OrchestratorAgentID,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id FROM workspace
 WHERE slug = $1
 `
 
@@ -109,6 +111,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.IssueCounter,
 		&i.ChannelRetentionDays,
 		&i.ChannelsEnabled,
+		&i.OrchestratorAgentID,
 	)
 	return i, err
 }
@@ -127,7 +130,7 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled, w.orchestrator_agent_id FROM workspace w
 JOIN member m ON m.workspace_id = w.id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
@@ -156,6 +159,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.ChannelRetentionDays,
 			&i.ChannelsEnabled,
+			&i.OrchestratorAgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -183,9 +187,14 @@ UPDATE workspace SET
         WHEN $10::bool THEN $11
         ELSE channel_retention_days
     END,
+    orchestrator_agent_id = CASE
+        WHEN $12::boolean
+        THEN $13::uuid
+        ELSE orchestrator_agent_id
+    END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id
 `
 
 type UpdateWorkspaceParams struct {
@@ -200,13 +209,19 @@ type UpdateWorkspaceParams struct {
 	ChannelsEnabled         pgtype.Bool `json:"channels_enabled"`
 	ChannelRetentionDaysSet bool        `json:"channel_retention_days_set"`
 	ChannelRetentionDays    pgtype.Int4 `json:"channel_retention_days"`
+	OrchestratorAgentIDSet  bool        `json:"orchestrator_agent_id_set"`
+	OrchestratorAgentID     pgtype.UUID `json:"orchestrator_agent_id"`
 }
 
-// channels_enabled / channel_retention_days follow the same pattern as the
-// per-channel retention update in channel.sql: an explicit `*_set` flag
-// distinguishes "leave alone" from "set to NULL/false". Without the flag,
-// a missing JSON field would always coerce to false/NULL and a single
-// name-update PATCH would silently disable channels.
+// Three paired-bool fields use the same "leave alone" / "explicitly write" pattern:
+//
+//   - channels_enabled / channels_enabled_set + channel_retention_days /
+//     channel_retention_days_set: a missing JSON field would otherwise coerce
+//     to false/NULL and a single name-update PATCH would silently disable
+//     channels or wipe the retention override.
+//
+//   - orchestrator_agent_id / orchestrator_agent_id_set: distinguishes "don't
+//     change" from "explicitly clear to NULL". Same narg+bool pattern.
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
 	row := q.db.QueryRow(ctx, updateWorkspace,
 		arg.ID,
@@ -220,6 +235,8 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.ChannelsEnabled,
 		arg.ChannelRetentionDaysSet,
 		arg.ChannelRetentionDays,
+		arg.OrchestratorAgentIDSet,
+		arg.OrchestratorAgentID,
 	)
 	var i Workspace
 	err := row.Scan(
@@ -236,6 +253,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.IssueCounter,
 		&i.ChannelRetentionDays,
 		&i.ChannelsEnabled,
+		&i.OrchestratorAgentID,
 	)
 	return i, err
 }

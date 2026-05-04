@@ -18,11 +18,15 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
--- channels_enabled / channel_retention_days follow the same pattern as the
--- per-channel retention update in channel.sql: an explicit `*_set` flag
--- distinguishes "leave alone" from "set to NULL/false". Without the flag,
--- a missing JSON field would always coerce to false/NULL and a single
--- name-update PATCH would silently disable channels.
+-- Three paired-bool fields use the same "leave alone" / "explicitly write" pattern:
+--
+-- - channels_enabled / channels_enabled_set + channel_retention_days /
+--   channel_retention_days_set: a missing JSON field would otherwise coerce
+--   to false/NULL and a single name-update PATCH would silently disable
+--   channels or wipe the retention override.
+--
+-- - orchestrator_agent_id / orchestrator_agent_id_set: distinguishes "don't
+--   change" from "explicitly clear to NULL". Same narg+bool pattern.
 UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -37,6 +41,11 @@ UPDATE workspace SET
     channel_retention_days = CASE
         WHEN sqlc.arg('channel_retention_days_set')::bool THEN sqlc.narg('channel_retention_days')
         ELSE channel_retention_days
+    END,
+    orchestrator_agent_id = CASE
+        WHEN sqlc.arg('orchestrator_agent_id_set')::boolean
+        THEN sqlc.narg('orchestrator_agent_id')::uuid
+        ELSE orchestrator_agent_id
     END,
     updated_at = now()
 WHERE id = $1

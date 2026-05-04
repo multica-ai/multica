@@ -517,6 +517,7 @@ type Workspace struct {
 	IssueCounter         int32              `json:"issue_counter"`
 	ChannelRetentionDays pgtype.Int4        `json:"channel_retention_days"`
 	ChannelsEnabled      bool               `json:"channels_enabled"`
+	OrchestratorAgentID  pgtype.UUID        `json:"orchestrator_agent_id"`
 }
 
 type WorkspaceInvitation struct {

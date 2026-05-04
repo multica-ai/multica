@@ -118,7 +118,21 @@ func buildCommentPrompt(task Task) string {
 		}
 		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
-		if task.TriggerAuthorType == "agent" {
+		switch {
+		case task.IsOrchestratorWake:
+			// The orchestrator pattern — this agent is configured as the
+			// workspace's orchestrator and was woken because a peer agent
+			// posted on this issue. Different default than the generic
+			// agent-to-agent case: the orchestrator is SUPPOSED to react.
+			// "Silence is the preferred way to end agent-to-agent threads"
+			// would defeat the whole point.
+			b.WriteString("**You are this workspace's orchestrator.** A peer agent just posted on an issue — review it, decide on the next step, and act. Common moves:\n\n")
+			b.WriteString("- **Acknowledge + change status**: e.g. when a peer reports work complete, update the issue status (`multica issue status <id> in_review` or `done`) and post a brief acknowledgment.\n")
+			b.WriteString("- **Reassign**: if the comment indicates the work belongs to a different agent (e.g. \"this needs the reviewer\"), `multica issue assign <id> --to <peer-name>` and post a one-liner explaining the handoff.\n")
+			b.WriteString("- **Ping a human**: when a peer asks for clarification or flags a blocker that needs human input, @mention the appropriate workspace member in your reply so they get notified.\n")
+			b.WriteString("- **Drive forward**: if the work is mid-flight and you have context the peer is missing, post a directive comment on the same thread.\n\n")
+			b.WriteString("Do NOT do nothing. Do NOT post \"acknowledged\" with no follow-up — silence isn't your job here. If you genuinely have no action to take, post a one-liner explaining why (the user will read it).\n\n")
+		case task.TriggerAuthorType == "agent":
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}
 	}
