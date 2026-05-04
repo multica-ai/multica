@@ -1,14 +1,22 @@
 "use client";
 
-import { ArrowLeft, ShieldCheck, Wallet, Crown, Shield, User as UserIcon } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Wallet, Crown, Shield, User as UserIcon, UserMinus } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useState } from "react";
 import { ActorAvatar } from "../common/actor-avatar";
 import type { MemberRole, MemberWithUser } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Switch } from "@multica/ui/components/ui/switch";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@multica/ui/components/ui/select";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -19,6 +27,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
+import { useNavigation } from "../navigation";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
@@ -55,9 +64,15 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
 
   const [busy, setBusy] = useState(false);
   const [confirmScopeOff, setConfirmScopeOff] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const navigation = useNavigation();
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const isOwner = currentMember?.role === "owner";
+  const isSelf = member?.user_id === user?.id;
+  const canEditRole = canManage && !isSelf && (member?.role !== "owner" || isOwner);
+  const canRemove = canManage && !isSelf && (member?.role !== "owner" || isOwner);
 
   if (!workspace) return null;
 
@@ -65,10 +80,10 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
     return (
       <div className="mx-auto max-w-2xl p-6">
         <AppLink
-          href={paths.workspace(workspace.slug).settings()}
+          href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to Settings
+          <ArrowLeft className="h-4 w-4" /> Back to Members
         </AppLink>
         <p className="mt-4 text-sm text-muted-foreground">Member not found in this workspace.</p>
       </div>
@@ -122,13 +137,43 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
     }
   };
 
+  const handleRoleChange = async (role: MemberRole) => {
+    if (role === member.role) return;
+    setBusy(true);
+    try {
+      const updated = await api.updateMember(workspace.id, member.id, { role });
+      qc.setQueryData<MemberWithUser[]>(workspaceKeys.members(wsId), (prev) =>
+        prev?.map((m) => (m.id === member.id ? { ...m, ...updated } : m)) ?? prev,
+      );
+      toast.success("Role updated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update role");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setBusy(true);
+    try {
+      await api.deleteMember(workspace.id, member.id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+      toast.success(`${member.name} removed from workspace`);
+      navigation.push(`${paths.workspace(workspace.slug).settings()}?tab=members`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to remove member");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
       <AppLink
-        href={paths.workspace(workspace.slug).settings()}
+        href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to Settings
+        <ArrowLeft className="h-4 w-4" /> Back to Members
       </AppLink>
 
       <header className="flex items-center gap-4">
@@ -142,6 +187,45 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
           {rc.label}
         </Badge>
       </header>
+
+      <Card>
+        <CardContent className="space-y-3">
+          <h2 className="text-sm font-medium">Role</h2>
+          {canEditRole ? (
+            <Select
+              value={member.role}
+              onValueChange={(v) => handleRoleChange(v as MemberRole)}
+              disabled={busy}
+            >
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
+                  ([role, config]) => {
+                    if (role === "owner" && !isOwner) return null;
+                    const Icon = config.icon;
+                    return (
+                      <SelectItem key={role} value={role}>
+                        <span className="inline-flex items-center gap-2">
+                          <Icon className="h-3.5 w-3.5" />
+                          {config.label}
+                        </span>
+                      </SelectItem>
+                    );
+                  },
+                )}
+              </SelectContent>
+            </Select>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {isSelf
+                ? "You cannot change your own role from this page."
+                : "Only an owner can change this member's role."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-6">
@@ -204,6 +288,28 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
         </CardContent>
       </Card>
 
+      {canRemove && (
+        <Card>
+          <CardContent className="space-y-3">
+            <h2 className="text-sm font-medium text-destructive">Danger zone</h2>
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-xs text-muted-foreground">
+                Remove {member.name} from this workspace. They will lose access immediately.
+              </p>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={busy}
+                onClick={() => setConfirmRemove(true)}
+              >
+                <UserMinus className="h-3.5 w-3.5" />
+                Remove
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <AlertDialog open={confirmScopeOff} onOpenChange={(v) => !v && setConfirmScopeOff(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -223,6 +329,29 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
               }}
             >
               Disable
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmRemove} onOpenChange={(v) => !v && setConfirmRemove(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {member.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {member.name} will lose access to {workspace.name}. They can be re-invited later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={async () => {
+                setConfirmRemove(false);
+                await handleRemove();
+              }}
+            >
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

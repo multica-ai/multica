@@ -45,12 +45,68 @@ interface SettingsPageProps {
   documentationContent?: React.ReactNode;
 }
 
+// Tab values that the page can persist in the URL via ?tab=X. Anything
+// outside this list falls back to "profile" so a stale link can't show
+// a tab that no longer exists.
+const VALID_TAB_VALUES = new Set([
+  "profile",
+  "agent-profile",
+  "appearance",
+  "notifications",
+  "tokens",
+  "workspace",
+  "repositories",
+  "members",
+  "documentation",
+]);
+
+function readInitialTab(extraTabs?: ExtraSettingsTab[]): string {
+  if (typeof window === "undefined") return "profile";
+  const requested = new URLSearchParams(window.location.search).get("tab");
+  if (!requested) return "profile";
+  if (VALID_TAB_VALUES.has(requested)) return requested;
+  if (extraTabs?.some((t) => t.value === requested)) return requested;
+  return "profile";
+}
+
 export function SettingsPage({
   extraAccountTabs,
   documentationContent,
 }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
-  const [tab, setTab] = React.useState("profile");
+  const [tab, setTab] = React.useState(() => readInitialTab(extraAccountTabs));
+  // Tracks whether the on-mount URL→tab sync has run. We need to
+  // suppress the tab→URL write on the first render, otherwise SSR's
+  // "profile" default would clobber a real ?tab=members URL the user
+  // landed on (effects run client-side AFTER hydration, when window
+  // is available — but useState's initializer ran server-side without
+  // window).
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const fromUrl = readInitialTab(extraAccountTabs);
+    if (fromUrl !== tab) {
+      setTab(fromUrl);
+    }
+    mountedRef.current = true;
+    // Intentionally fire only once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror tab changes into ?tab= so a refresh / "Back to Members"
+  // navigation lands on the same view. replaceState keeps history
+  // clean — switching between settings tabs isn't real navigation.
+  React.useEffect(() => {
+    if (!mountedRef.current || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") === tab) return;
+    if (tab === "profile") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", tab);
+    }
+    window.history.replaceState(null, "", url.toString());
+  }, [tab]);
 
   return (
     <Tabs
