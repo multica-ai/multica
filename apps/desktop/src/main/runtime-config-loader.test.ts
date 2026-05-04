@@ -53,6 +53,27 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
+  it("parses a valid packaged desktop.json", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
+    const configPath = join(dir, "desktop.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ schemaVersion: 1, apiUrl: "https://api.example.com" }),
+    );
+
+    await expect(
+      loadRuntimeConfig({ isDev: false, configPath, env: {} }),
+    ).resolves.toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://api.example.com",
+        wsUrl: "wss://api.example.com/ws",
+        appUrl: "https://api.example.com",
+      },
+    });
+  });
+
   it("fails closed when packaged desktop.json is invalid", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     const configPath = join(dir, "desktop.json");

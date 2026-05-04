@@ -194,12 +194,21 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
+    const viteEnv = import.meta.env as ImportMetaEnv & {
+      readonly VITE_API_URL?: string;
+      readonly VITE_WS_URL?: string;
+      readonly VITE_APP_URL?: string;
+    };
+
     runtimeConfigResult = await loadRuntimeConfig({
       isDev: is.dev,
+      // electron-vite exposes VITE_* on import.meta.env for the main process;
+      // keep dev URL overrides on the same source the renderer used before
+      // runtime config moved endpoint resolution into main/preload.
       env: {
-        apiUrl: process.env.VITE_API_URL,
-        wsUrl: process.env.VITE_WS_URL,
-        appUrl: process.env.VITE_APP_URL,
+        apiUrl: viteEnv.VITE_API_URL,
+        wsUrl: viteEnv.VITE_WS_URL,
+        appUrl: viteEnv.VITE_APP_URL,
       },
     });
 

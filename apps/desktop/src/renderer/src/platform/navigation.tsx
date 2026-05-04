@@ -15,10 +15,15 @@ import {
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
-// Public web app URL resolved by the main process from runtime config.
-const APP_URL = window.desktopAPI.runtimeConfig.ok
-  ? window.desktopAPI.runtimeConfig.config.appUrl
-  : "";
+function requireRuntimeAppUrl(scope: string): string {
+  const runtimeConfig = window.desktopAPI.runtimeConfig;
+  if (!runtimeConfig.ok) {
+    throw new Error(
+      `Invariant violated: ${scope} rendered before App accepted runtime config`,
+    );
+  }
+  return runtimeConfig.config.appUrl;
+}
 
 /**
  * Extract the leading workspace slug from a path, or null if the path isn't
@@ -115,6 +120,7 @@ export function DesktopNavigationProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const appUrl = requireRuntimeAppUrl("DesktopNavigationProvider");
   // Primitive-only subscriptions so this component doesn't re-render on
   // unrelated store updates (e.g. an inactive tab's router tick). We
   // resolve the active router here only to subscribe once per tab switch.
@@ -185,9 +191,9 @@ export function DesktopNavigationProvider({
         const tabId = store.openTab(path, title ?? path, icon);
         if (tabId) store.setActiveTab(tabId);
       },
-      getShareableUrl: (path: string) => `${APP_URL}${path}`,
+      getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
-    [location],
+    [appUrl, location],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
@@ -210,6 +216,7 @@ export function TabNavigationProvider({
   router: DataRouter;
   children: React.ReactNode;
 }) {
+  const appUrl = requireRuntimeAppUrl("TabNavigationProvider");
   const [location, setLocation] = useState(router.state.location);
 
   useEffect(() => {
@@ -245,9 +252,9 @@ export function TabNavigationProvider({
         const tabId = store.openTab(path, title ?? path, icon);
         if (tabId) store.setActiveTab(tabId);
       },
-      getShareableUrl: (path: string) => `${APP_URL}${path}`,
+      getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
-    [router, location],
+    [appUrl, router, location],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
