@@ -62,3 +62,13 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
 That's it! Your agent is now part of the team.
+
+## Optional: Use Multica from Claude Code
+
+If you use Claude Code, install the Multica MCP server so Claude can read issues, comment, and update status as native tools:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main/scripts/install-mcp.sh | bash
+```
+
+See [MCP for Claude Code](/cli/mcp) for details.
