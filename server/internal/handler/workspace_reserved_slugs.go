@@ -56,6 +56,7 @@ var reservedSlugs = map[string]bool{
 	"runtimes":   true,
 	"skills":     true,
 	"settings":   true,
+	"members":    true,
 	"workspaces": true, // global /workspaces/new workspace creation page
 	"teams":      true, // reserved for future team management routes
 
