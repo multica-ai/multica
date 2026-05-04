@@ -1313,7 +1313,34 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
+	// Inject peer agents — every other non-archived agent in the workspace.
+	// Orchestrator agents (Hermes, picker patterns, etc.) need to know which
+	// peers exist so they can route work by name instead of self-assigning
+	// because they don't realise a coding agent is available. Best-effort:
+	// failure to list logs and continues with an empty list rather than
+	// failing the claim.
+	if workspaceUUID, err := util.ParseUUID(resp.WorkspaceID); err == nil {
+		if peers, err := h.Queries.ListAgents(r.Context(), workspaceUUID); err == nil {
+			out := make([]PeerAgentData, 0, len(peers))
+			for _, p := range peers {
+				if uuidToString(p.ID) == uuidToString(task.AgentID) {
+					continue // exclude the claiming agent
+				}
+				out = append(out, PeerAgentData{
+					ID:           uuidToString(p.ID),
+					Name:         p.Name,
+					Instructions: p.Instructions,
+				})
+			}
+			if len(out) > 0 {
+				resp.PeerAgents = out
+			}
+		} else {
+			slog.Warn("task claim: failed to list peer agents (continuing without)", "workspace_id", resp.WorkspaceID, "error", err)
+		}
+	}
+
+	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID, "peer_agents", len(resp.PeerAgents))
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 

@@ -1346,6 +1346,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectID:               task.ProjectID,
 		ProjectTitle:            task.ProjectTitle,
 		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
+		PeerAgents:              convertPeerAgentsForEnv(task.PeerAgents),
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1950,6 +1951,21 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertPeerAgentsForEnv(peers []PeerAgentData) []execenv.PeerAgentForEnv {
+	if len(peers) == 0 {
+		return nil
+	}
+	result := make([]execenv.PeerAgentForEnv, len(peers))
+	for i, p := range peers {
+		result[i] = execenv.PeerAgentForEnv{
+			ID:           p.ID,
+			Name:         p.Name,
+			Instructions: p.Instructions,
 		}
 	}
 	return result

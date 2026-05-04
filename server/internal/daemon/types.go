@@ -30,6 +30,16 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// PeerAgentData mirrors handler.PeerAgentData — a non-archived peer agent
+// in the same workspace as the claiming agent. Sent so orchestrator agents
+// can route work by name instead of self-assigning because they don't know
+// what other agents exist.
+type PeerAgentData struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -43,6 +53,7 @@ type Task struct {
 	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
+	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`       // other non-archived agents in the same workspace, for orchestrator routing
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task

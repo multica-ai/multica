@@ -219,6 +219,108 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
+// TestPrepareWithPeerAgents covers the orchestrator-routing fix: when the
+// claiming agent has peers in the same workspace, runtime_config.md
+// surfaces them by name + id so an orchestrator-style agent (e.g. one that
+// delegates coding work) can route to a peer instead of self-assigning
+// because it doesn't know other agents exist.
+func TestPrepareWithPeerAgents(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID: "44444444-5555-6666-7777-888888888888",
+		PeerAgents: []PeerAgentForEnv{
+			{
+				ID:           "aaaa1111-bbbb-2222-cccc-333344445555",
+				Name:         "Claude Code",
+				Instructions: "Coding agent. Implements features and fixes bugs in code.\nUse for any task that involves writing or modifying source files.",
+			},
+			{
+				ID:   "bbbb2222-cccc-3333-dddd-444455556666",
+				Name: "Reviewer",
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-peer-agents",
+		TaskID:         "44444444-5555-6666-7777-888888888888",
+		AgentName:      "Test Orchestrator",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Peer Agents in this Workspace",
+		"**Claude Code**",
+		"aaaa1111-bbbb-2222-cccc-333344445555",
+		// First non-empty line of multi-line instructions only — proves
+		// we're surfacing the role one-liner, not pasting the whole
+		// instruction block.
+		"Coding agent. Implements features and fixes bugs in code.",
+		"**Reviewer**",
+		// Reassignment hint — the actionable next step for an
+		// orchestrator that just decided to route to a peer.
+		"multica issue assign",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+	// Must NOT bleed the second line of the multi-line peer instructions.
+	if strings.Contains(s, "Use for any task that involves writing or modifying source files.") {
+		t.Errorf("CLAUDE.md leaked second line of peer instructions; should only show first line")
+	}
+}
+
+// TestPrepareWithoutPeerAgents covers the negative path: a single-agent
+// workspace renders no Peer Agents section so we don't pollute the prompt
+// with an empty heading.
+func TestPrepareWithoutPeerAgents(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	taskCtx := TaskContextForEnv{
+		IssueID:    "55555555-6666-7777-8888-999999999999",
+		PeerAgents: nil,
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-no-peers",
+		TaskID:         "55555555-6666-7777-8888-999999999999",
+		AgentName:      "Solo Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(content), "Peer Agents in this Workspace") {
+		t.Errorf("CLAUDE.md unexpectedly rendered Peer Agents section with no peers")
+	}
+}
+
 // When the issue's project has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.

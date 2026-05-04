@@ -29,6 +29,17 @@ type ProjectResourceForEnv struct {
 	Label        string          // optional user-supplied label
 }
 
+// PeerAgentForEnv describes another non-archived agent in the same workspace
+// as the claiming agent. The runtime config renders a "Peer Agents" section
+// listing them by name and id, so orchestrators that select an assignee
+// (e.g. via `multica issue assign --to <name>`) can resolve a real peer
+// instead of self-assigning because they don't know other agents exist.
+type PeerAgentForEnv struct {
+	ID           string
+	Name         string
+	Instructions string // short description / role; surfaced as a one-liner
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
@@ -52,6 +63,7 @@ type TaskContextForEnv struct {
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	PeerAgents              []PeerAgentForEnv       // other non-archived agents in this workspace, surfaced to orchestrators so they can route by name
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string              // non-empty for autopilot run_only tasks
 	AutopilotID             string

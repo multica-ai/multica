@@ -155,6 +155,7 @@ type AgentTaskResponse struct {
 	ProjectID               string                `json:"project_id,omitempty"`         // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`      // for surfacing in agent context
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`  // resources attached to the project
+	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`        // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
@@ -211,6 +212,15 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+}
+
+// PeerAgentData is a lightweight projection of another agent in the same
+// workspace, sent to the claiming agent so orchestrators can route work to
+// peers by name. Excludes the claiming agent itself and archived agents.
+type PeerAgentData struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Instructions string `json:"instructions,omitempty"` // short description / role; useful for orchestrators picking the right peer
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
