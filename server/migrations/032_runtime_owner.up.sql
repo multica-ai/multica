@@ -1,4 +1,4 @@
-ALTER TABLE agent_runtime ADD COLUMN owner_id UUID REFERENCES "user"(id);
+ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES "user"(id);
 
 -- Backfill: set existing runtimes' owner to the workspace owner
 UPDATE agent_runtime ar

@@ -1,1 +1,1 @@
-ALTER TABLE workspace ADD COLUMN context TEXT;
+ALTER TABLE workspace ADD COLUMN IF NOT EXISTS context TEXT;

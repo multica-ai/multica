@@ -1,2 +1,2 @@
-ALTER TABLE work_session ADD COLUMN name TEXT;
-ALTER TABLE work_session ADD COLUMN branch TEXT;
+ALTER TABLE work_session ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE work_session ADD COLUMN IF NOT EXISTS branch TEXT;

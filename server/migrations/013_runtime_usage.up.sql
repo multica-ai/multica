@@ -1,4 +1,4 @@
-CREATE TABLE runtime_usage (
+CREATE TABLE IF NOT EXISTS runtime_usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     runtime_id UUID NOT NULL REFERENCES agent_runtime(id) ON DELETE CASCADE,
     date DATE NOT NULL,
@@ -13,4 +13,4 @@ CREATE TABLE runtime_usage (
     UNIQUE (runtime_id, date, provider, model)
 );
 
-CREATE INDEX idx_runtime_usage_runtime_date ON runtime_usage(runtime_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_usage_runtime_date ON runtime_usage(runtime_id, date DESC);

@@ -3,6 +3,6 @@
 -- Change to per-(issue, agent) so each agent can independently have one pending task.
 DROP INDEX IF EXISTS idx_one_pending_task_per_issue;
 
-CREATE UNIQUE INDEX idx_one_pending_task_per_issue_agent
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_pending_task_per_issue_agent
     ON agent_task_queue (issue_id, agent_id)
     WHERE status IN ('queued', 'dispatched');

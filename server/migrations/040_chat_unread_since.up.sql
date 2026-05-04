@@ -5,7 +5,7 @@
 -- an assistant reply lands and the column was NULL. It's RESET to NULL
 -- when the user marks the session as read. Existing rows start as NULL,
 -- meaning "no unread to track" — historic chats are not mass-flagged.
-ALTER TABLE chat_session ADD COLUMN unread_since TIMESTAMPTZ;
+ALTER TABLE chat_session ADD COLUMN IF NOT EXISTS unread_since TIMESTAMPTZ;
 
 -- GetPendingChatTask runs on every session open / switch and filters by
 -- chat_session_id + in-flight status + orders by created_at. A partial

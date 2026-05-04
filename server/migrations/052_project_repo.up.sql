@@ -1,1 +1,1 @@
-ALTER TABLE project ADD COLUMN repo_url TEXT;
+ALTER TABLE project ADD COLUMN IF NOT EXISTS repo_url TEXT;

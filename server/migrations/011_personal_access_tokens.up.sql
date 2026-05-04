@@ -1,4 +1,4 @@
-CREATE TABLE personal_access_token (
+CREATE TABLE IF NOT EXISTS personal_access_token (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -10,5 +10,5 @@ CREATE TABLE personal_access_token (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_pat_user ON personal_access_token(user_id, revoked);
-CREATE UNIQUE INDEX idx_pat_token_hash ON personal_access_token(token_hash);
+CREATE INDEX IF NOT EXISTS idx_pat_user ON personal_access_token(user_id, revoked);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pat_token_hash ON personal_access_token(token_hash);

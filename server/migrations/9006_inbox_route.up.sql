@@ -6,10 +6,10 @@
 -- changing preferences later does NOT retroactively shuffle existing items.
 
 ALTER TABLE inbox_item
-    ADD COLUMN route TEXT NOT NULL DEFAULT 'inbox'
+    ADD COLUMN IF NOT EXISTS route TEXT NOT NULL DEFAULT 'inbox'
     CHECK (route IN ('inbox', 'notifications'));
 
 -- Existing index covers (recipient_type, recipient_id, read). Add a route-aware
 -- index so list/count queries can filter cheaply.
-CREATE INDEX idx_inbox_recipient_route
+CREATE INDEX IF NOT EXISTS idx_inbox_recipient_route
     ON inbox_item(recipient_type, recipient_id, route, archived);

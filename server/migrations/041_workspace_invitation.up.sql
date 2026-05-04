@@ -1,4 +1,4 @@
-CREATE TABLE workspace_invitation (
+CREATE TABLE IF NOT EXISTS workspace_invitation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     inviter_id UUID NOT NULL REFERENCES "user"(id),
@@ -12,9 +12,9 @@ CREATE TABLE workspace_invitation (
 );
 
 -- Only one pending invitation per workspace + email at a time.
-CREATE UNIQUE INDEX idx_invitation_unique_pending
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invitation_unique_pending
     ON workspace_invitation(workspace_id, invitee_email) WHERE status = 'pending';
 
 -- Fast lookup of pending invitations for a user (by email or user_id).
-CREATE INDEX idx_invitation_invitee_email ON workspace_invitation(invitee_email) WHERE status = 'pending';
-CREATE INDEX idx_invitation_invitee_user  ON workspace_invitation(invitee_user_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_invitation_invitee_email ON workspace_invitation(invitee_email) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_invitation_invitee_user  ON workspace_invitation(invitee_user_id) WHERE status = 'pending';

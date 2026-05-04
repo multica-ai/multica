@@ -3,4 +3,4 @@
 -- TRUE/FALSE forces sandbox on/off for tasks claimed by this runtime,
 -- regardless of what the daemon's env var says.
 ALTER TABLE agent_runtime
-    ADD COLUMN sandbox_enabled BOOLEAN;
+    ADD COLUMN IF NOT EXISTS sandbox_enabled BOOLEAN;

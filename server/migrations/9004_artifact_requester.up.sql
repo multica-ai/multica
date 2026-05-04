@@ -3,6 +3,6 @@
 -- and requester is the user who prompted them. Member-authored artifacts can
 -- leave this null (the author IS the requester).
 
-ALTER TABLE artifact ADD COLUMN requester_user_id UUID REFERENCES "user"(id) ON DELETE SET NULL;
+ALTER TABLE artifact ADD COLUMN IF NOT EXISTS requester_user_id UUID REFERENCES "user"(id) ON DELETE SET NULL;
 
-CREATE INDEX idx_artifact_requester ON artifact(requester_user_id) WHERE requester_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifact_requester ON artifact(requester_user_id) WHERE requester_user_id IS NOT NULL;
