@@ -25,7 +25,7 @@ interface CreateModeState {
 export const useCreateModeStore = create<CreateModeState>()(
   persist(
     (set) => ({
-      lastMode: "agent",
+      lastMode: "manual",
       setLastMode: (mode) => set({ lastMode: mode }),
     }),
     {
