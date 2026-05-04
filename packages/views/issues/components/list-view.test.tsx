@@ -165,6 +165,52 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
+// Capture the handlers DndContext is mounted with so tests can fire
+// synthetic drag events directly. PointerSensor + jsdom doesn't have
+// real pointer events, and dragging in a unit test is too brittle —
+// invoking onDragEnd with a synthetic event proves the wiring without
+// depending on the sensor.
+type CapturedHandlers = {
+  onDragEnd: ((e: any) => void) | null;
+  onDragStart: ((e: any) => void) | null;
+};
+const dndHandlers: CapturedHandlers = vi.hoisted(() => ({
+  onDragEnd: null,
+  onDragStart: null,
+}));
+
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({ children, onDragEnd, onDragStart }: any) => {
+    dndHandlers.onDragEnd = onDragEnd ?? null;
+    dndHandlers.onDragStart = onDragStart ?? null;
+    return <div data-testid="dnd-context">{children}</div>;
+  },
+  DragOverlay: ({ children }: any) => <div data-testid="drag-overlay">{children}</div>,
+  PointerSensor: class {},
+  useSensor: () => ({}),
+  useSensors: () => [],
+  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
+  pointerWithin: vi.fn(),
+  closestCenter: vi.fn(),
+}));
+
+vi.mock("@dnd-kit/sortable", () => ({
+  SortableContext: ({ children }: any) => children,
+  verticalListSortingStrategy: {},
+  useSortable: () => ({
+    attributes: {},
+    listeners: {},
+    setNodeRef: vi.fn(),
+    transform: null,
+    transition: null,
+    isDragging: false,
+  }),
+}));
+
+vi.mock("@dnd-kit/utilities", () => ({
+  CSS: { Transform: { toString: () => undefined } },
+}));
+
 // Render Accordion as plain divs so the panel content always shows
 // (the real impl gates on aria-expanded which depends on real DOM events).
 vi.mock("@base-ui/react/accordion", () => ({
@@ -259,6 +305,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockViewState.collapsedParentIds = [];
   mockViewState.listCollapsedStatuses = [];
+  dndHandlers.onDragEnd = null;
+  dndHandlers.onDragStart = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -335,5 +383,135 @@ describe("ListView — nested sub-issues", () => {
     expect(
       collapseLabels.filter((l) => l && /sub-issues/i.test(l)).length,
     ).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drag-to-move tests
+// ---------------------------------------------------------------------------
+
+const todoIssue: Issue = {
+  ...issueDefaults,
+  id: "issue-todo",
+  number: 10,
+  identifier: "TES-10",
+  title: "Todo item",
+  status: "todo",
+  position: 1,
+};
+
+const inProgressIssue: Issue = {
+  ...issueDefaults,
+  id: "issue-inprog",
+  number: 11,
+  identifier: "TES-11",
+  title: "In progress item",
+  status: "in_progress",
+  position: 1,
+};
+
+describe("ListView — drag to move", () => {
+  it("does NOT mount DndContext when onMoveIssue is not provided (read-only)", () => {
+    renderWithQuery(
+      <ListView issues={[todoIssue]} visibleStatuses={["todo"]} />,
+    );
+    expect(screen.queryByTestId("dnd-context")).not.toBeInTheDocument();
+  });
+
+  it("mounts DndContext when onMoveIssue is provided", () => {
+    const onMove = vi.fn();
+    renderWithQuery(
+      <ListView
+        issues={[todoIssue]}
+        visibleStatuses={["todo"]}
+        onMoveIssue={onMove}
+      />,
+    );
+    expect(screen.getByTestId("dnd-context")).toBeInTheDocument();
+  });
+
+  it("calls onMoveIssue with new status when dropped on another status section", () => {
+    const onMove = vi.fn();
+    renderWithQuery(
+      <ListView
+        issues={[todoIssue, inProgressIssue]}
+        visibleStatuses={["todo", "in_progress"]}
+        onMoveIssue={onMove}
+      />,
+    );
+
+    // Drop the todo issue on the in_progress status section.
+    dndHandlers.onDragEnd?.({
+      active: { id: "issue-todo" },
+      over: { id: "list-status:in_progress" },
+    });
+
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(onMove).toHaveBeenCalledWith(
+      "issue-todo",
+      "in_progress",
+      expect.any(Number),
+    );
+  });
+
+  it("calls onMoveIssue with target status when dropped on a row in another status", () => {
+    const onMove = vi.fn();
+    renderWithQuery(
+      <ListView
+        issues={[todoIssue, inProgressIssue]}
+        visibleStatuses={["todo", "in_progress"]}
+        onMoveIssue={onMove}
+      />,
+    );
+
+    // Drop the todo issue ON another row that's in in_progress — target
+    // status is derived from the over-row's status.
+    dndHandlers.onDragEnd?.({
+      active: { id: "issue-todo" },
+      over: { id: "issue-inprog" },
+    });
+
+    expect(onMove).toHaveBeenCalledWith(
+      "issue-todo",
+      "in_progress",
+      expect.any(Number),
+    );
+  });
+
+  it("does NOT call onMoveIssue when status + position would be unchanged", () => {
+    const onMove = vi.fn();
+    renderWithQuery(
+      <ListView
+        issues={[todoIssue]}
+        visibleStatuses={["todo"]}
+        onMoveIssue={onMove}
+      />,
+    );
+
+    // "Drop" on the same item — same status, same position computed.
+    dndHandlers.onDragEnd?.({
+      active: { id: "issue-todo" },
+      over: { id: "issue-todo" },
+    });
+
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call onMoveIssue when there's no drop target (drag cancelled)", () => {
+    const onMove = vi.fn();
+    renderWithQuery(
+      <ListView
+        issues={[todoIssue]}
+        visibleStatuses={["todo"]}
+        onMoveIssue={onMove}
+      />,
+    );
+
+    dndHandlers.onDragEnd?.({
+      active: { id: "issue-todo" },
+      over: null,
+    });
+
+    expect(onMove).not.toHaveBeenCalled();
   });
 });

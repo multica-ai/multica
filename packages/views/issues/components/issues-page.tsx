@@ -164,7 +164,12 @@ export function IssuesPage() {
                 childProgressMap={childProgressMap}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
+              <ListView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
+                childProgressMap={childProgressMap}
+                onMoveIssue={handleMoveIssue}
+              />
             )}
           </div>
         )}
