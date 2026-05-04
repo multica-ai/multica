@@ -252,7 +252,7 @@ function CommentRow({
       {editing ? (
         <div
           {...dropZoneProps}
-          className="relative mt-1.5 pl-8"
+          className="relative mt-1.5 pl-2 sm:pl-8"
           onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
         >
           <div className="text-sm leading-relaxed">
@@ -280,10 +280,10 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
+          <div className="mt-1.5 pl-2 sm:pl-8 text-sm leading-relaxed text-foreground/85">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-8" />
           {!isTemp && (
             <ReactionBar
               reactions={reactions}
@@ -291,7 +291,7 @@ function CommentRow({
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
               getActorName={getActorName}
               hideAddButton={!isLongContent}
-              className="mt-1.5 pl-8"
+              className="mt-1.5 pl-2 sm:pl-8"
             />
           )}
         </>
@@ -375,7 +375,7 @@ function CommentCard({
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
-        <div className="px-4 py-3">
+        <div className="px-3 sm:px-4 py-3">
           <div className="flex items-center gap-2.5">
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
@@ -460,11 +460,11 @@ function CommentCard({
         {/* Collapsible body */}
         <CollapsibleContent>
           {/* Parent comment body */}
-          <div className="px-4 pb-3">
+          <div className="px-3 sm:px-4 pb-3">
             {editing ? (
               <div
                 {...parentDropZoneProps}
-                className="relative pl-10"
+                className="relative pl-2 sm:pl-10"
                 onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
               >
                 <div className="text-sm leading-relaxed">
@@ -492,10 +492,10 @@ function CommentCard({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-sm leading-relaxed text-foreground/85">
+                <div className="pl-2 sm:pl-10 text-sm leading-relaxed text-foreground/85">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-10" />
                 {!isTemp && (
                   <ReactionBar
                     reactions={reactions}
@@ -503,7 +503,7 @@ function CommentCard({
                     onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
                     getActorName={getActorName}
                     hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
+                    className="mt-1.5 pl-2 sm:pl-10"
                   />
                 )}
               </>
@@ -512,7 +512,7 @@ function CommentCard({
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
-            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-3 sm:px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
               <CommentRow
                 issueId={issueId}
                 entry={reply}
@@ -525,7 +525,7 @@ function CommentCard({
           ))}
 
           {/* Reply input */}
-          <div className="border-t border-border/50 px-4 py-2.5">
+          <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
               placeholder="Leave a reply..."
