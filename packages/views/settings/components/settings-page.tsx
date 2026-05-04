@@ -37,9 +37,18 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Additional tabs injected by platform (e.g. desktop daemon settings) */
   extraAccountTabs?: ExtraSettingsTab[];
+  /**
+   * Content rendered inside the Documentation tab. The platform layer is
+   * responsible for loading MDX/source data; SettingsPage only frames it.
+   * When omitted, the Documentation tab is hidden entirely.
+   */
+  documentationContent?: React.ReactNode;
 }
 
-export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
+export function SettingsPage({
+  extraAccountTabs,
+  documentationContent,
+}: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
   const [tab, setTab] = React.useState("profile");
 
@@ -82,26 +91,26 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
             </TabsTrigger>
           ))}
 
-          {/* Resources group */}
-          <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
-            Resources
-          </span>
-          <TabsTrigger value="documentation">
-            <BookText className="h-4 w-4" />
-            Documentation
-          </TabsTrigger>
+          {documentationContent && (
+            <>
+              {/* Resources group */}
+              <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
+                Resources
+              </span>
+              <TabsTrigger value="documentation">
+                <BookText className="h-4 w-4" />
+                Documentation
+              </TabsTrigger>
+            </>
+          )}
         </TabsList>
       </div>
 
-      {/* Right content. Documentation fills the pane with an iframe; other tabs
-          share a constrained, scrollable container. */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {tab === "documentation" ? (
-          <iframe
-            src="/docs"
-            title="Documentation"
-            className="flex-1 min-h-0 w-full border-0"
-          />
+      {/* Right content. Documentation gets the full pane (it brings its own
+          internal layout); other tabs share a constrained, scrollable container. */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        {tab === "documentation" && documentationContent ? (
+          <div className="flex-1 min-h-0">{documentationContent}</div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto">
             <div className="w-full max-w-3xl mx-auto p-6">
