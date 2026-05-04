@@ -25,7 +25,6 @@ import {
   Plus,
   Check,
   BookOpenText,
-  BookText,
   SquarePen,
   CircleUser,
   X,
@@ -644,16 +643,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </SidebarMenuItem>
                   );
                 })}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={pathname.startsWith("/docs")}
-                    render={<AppLink href="/docs" />}
-                    className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                  >
-                    <BookText />
-                    <span>Documentation</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

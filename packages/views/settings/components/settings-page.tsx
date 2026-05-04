@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles, Bell } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles, Bell, BookText } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { AppLink } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -75,6 +76,18 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               {tab.label}
             </TabsTrigger>
           ))}
+
+          {/* Resources group — links out of the settings page */}
+          <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground">
+            Resources
+          </span>
+          <AppLink
+            href="/docs"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          >
+            <BookText className="h-4 w-4" />
+            Documentation
+          </AppLink>
         </TabsList>
       </div>
 
