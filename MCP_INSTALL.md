@@ -7,8 +7,10 @@
 In your terminal (or Claude Code's bash):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main/scripts/install-mcp.sh | bash
+gh api "repos/firtal-group/firtal-cerebro/contents/scripts/install-mcp.sh?ref=main" --jq '.content' | base64 -d | bash
 ```
+
+> **Note:** This requires the [GitHub CLI](https://cli.github.com/) (`gh`) with access to the firtal-group organization. Run `gh auth login` first if you haven't authenticated.
 
 The script:
 1. Verifies the `claude` CLI is installed (Claude Code).
@@ -31,7 +33,7 @@ If `claude --version` does not work, install Claude Code: https://claude.com/cla
 ### 2. Install the Multica CLI
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main/scripts/install.sh | bash
+gh api "repos/firtal-group/firtal-cerebro/contents/scripts/install.sh?ref=main" --jq '.content' | base64 -d | bash
 ```
 
 Verify:
