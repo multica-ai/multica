@@ -1,4 +1,4 @@
-CREATE TABLE comment_reaction (
+CREATE TABLE IF NOT EXISTS comment_reaction (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     comment_id UUID NOT NULL REFERENCES comment(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
@@ -9,4 +9,4 @@ CREATE TABLE comment_reaction (
     UNIQUE (comment_id, actor_type, actor_id, emoji)
 );
 
-CREATE INDEX idx_comment_reaction_comment_id ON comment_reaction(comment_id);
+CREATE INDEX IF NOT EXISTS idx_comment_reaction_comment_id ON comment_reaction(comment_id);

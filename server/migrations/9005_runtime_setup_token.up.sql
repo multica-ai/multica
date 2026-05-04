@@ -8,7 +8,7 @@
 --      personal_access_token to drive the daemon.
 --   3. Token is marked used and cannot be redeemed again.
 
-CREATE TABLE runtime_setup_token (
+CREATE TABLE IF NOT EXISTS runtime_setup_token (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token_hash    TEXT NOT NULL UNIQUE,
     token_prefix  TEXT NOT NULL,
@@ -21,6 +21,6 @@ CREATE TABLE runtime_setup_token (
     used_pat_id   UUID REFERENCES personal_access_token(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_runtime_setup_token_user      ON runtime_setup_token(user_id, created_at DESC);
-CREATE INDEX idx_runtime_setup_token_workspace ON runtime_setup_token(workspace_id, created_at DESC);
-CREATE INDEX idx_runtime_setup_token_expires   ON runtime_setup_token(expires_at) WHERE used_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_runtime_setup_token_user      ON runtime_setup_token(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_setup_token_workspace ON runtime_setup_token(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runtime_setup_token_expires   ON runtime_setup_token(expires_at) WHERE used_at IS NULL;

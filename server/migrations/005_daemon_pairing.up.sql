@@ -1,4 +1,4 @@
-CREATE TABLE daemon_pairing_session (
+CREATE TABLE IF NOT EXISTS daemon_pairing_session (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token TEXT NOT NULL UNIQUE,
     daemon_id TEXT NOT NULL,
@@ -16,5 +16,5 @@ CREATE TABLE daemon_pairing_session (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_daemon_pairing_session_token ON daemon_pairing_session (token);
-CREATE INDEX idx_daemon_pairing_session_status_expires ON daemon_pairing_session (status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_daemon_pairing_session_token ON daemon_pairing_session (token);
+CREATE INDEX IF NOT EXISTS idx_daemon_pairing_session_status_expires ON daemon_pairing_session (status, expires_at);

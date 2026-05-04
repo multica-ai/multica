@@ -1,4 +1,4 @@
-CREATE TABLE task_usage (
+CREATE TABLE IF NOT EXISTS task_usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_id UUID NOT NULL REFERENCES agent_task_queue(id) ON DELETE CASCADE,
     provider TEXT NOT NULL DEFAULT '',
@@ -11,4 +11,4 @@ CREATE TABLE task_usage (
     UNIQUE (task_id, provider, model)
 );
 
-CREATE INDEX idx_task_usage_task_id ON task_usage(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_usage_task_id ON task_usage(task_id);

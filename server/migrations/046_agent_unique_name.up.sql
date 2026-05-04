@@ -18,5 +18,9 @@ USING (
 WHERE a.id = ranked.id AND ranked.rn > 1;
 
 -- Step 2: add the constraint
-ALTER TABLE agent
-    ADD CONSTRAINT agent_workspace_name_unique UNIQUE (workspace_id, name);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_workspace_name_unique') THEN
+        ALTER TABLE agent
+            ADD CONSTRAINT agent_workspace_name_unique UNIQUE (workspace_id, name);
+    END IF;
+END $$;

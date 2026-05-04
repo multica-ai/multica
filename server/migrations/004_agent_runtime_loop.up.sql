@@ -1,4 +1,4 @@
-CREATE TABLE agent_runtime (
+CREATE TABLE IF NOT EXISTS agent_runtime (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     daemon_id TEXT,
@@ -15,7 +15,7 @@ CREATE TABLE agent_runtime (
 );
 
 ALTER TABLE agent
-    ADD COLUMN runtime_id UUID;
+    ADD COLUMN IF NOT EXISTS runtime_id UUID;
 
 INSERT INTO agent_runtime (
     workspace_id,
@@ -60,33 +60,51 @@ SELECT
     END,
     a.created_at,
     a.updated_at
-FROM agent a;
+FROM agent a
+WHERE NOT EXISTS (
+    SELECT 1 FROM agent_runtime ar
+    WHERE ar.metadata->>'migrated_agent_id' = a.id::text
+);
 
 UPDATE agent a
 SET runtime_id = ar.id
 FROM agent_runtime ar
-WHERE ar.metadata->>'migrated_agent_id' = a.id::text;
+WHERE ar.metadata->>'migrated_agent_id' = a.id::text
+  AND a.runtime_id IS DISTINCT FROM ar.id;
 
 ALTER TABLE agent
-    ALTER COLUMN runtime_id SET NOT NULL,
-    ADD CONSTRAINT agent_runtime_id_fkey
-        FOREIGN KEY (runtime_id) REFERENCES agent_runtime(id) ON DELETE RESTRICT;
+    ALTER COLUMN runtime_id SET NOT NULL;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_runtime_id_fkey') THEN
+        ALTER TABLE agent
+            ADD CONSTRAINT agent_runtime_id_fkey
+                FOREIGN KEY (runtime_id) REFERENCES agent_runtime(id) ON DELETE RESTRICT;
+    END IF;
+END $$;
 
 ALTER TABLE agent_task_queue
-    ADD COLUMN runtime_id UUID;
+    ADD COLUMN IF NOT EXISTS runtime_id UUID;
 
 UPDATE agent_task_queue atq
 SET runtime_id = a.runtime_id
 FROM agent a
-WHERE a.id = atq.agent_id;
+WHERE a.id = atq.agent_id
+  AND atq.runtime_id IS DISTINCT FROM a.runtime_id;
 
 ALTER TABLE agent_task_queue
-    ALTER COLUMN runtime_id SET NOT NULL,
-    ADD CONSTRAINT agent_task_queue_runtime_id_fkey
-        FOREIGN KEY (runtime_id) REFERENCES agent_runtime(id) ON DELETE CASCADE;
+    ALTER COLUMN runtime_id SET NOT NULL;
 
-CREATE INDEX idx_agent_runtime_workspace ON agent_runtime(workspace_id);
-CREATE INDEX idx_agent_runtime_status ON agent_runtime(workspace_id, status);
-CREATE INDEX idx_agent_task_queue_runtime_pending
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_task_queue_runtime_id_fkey') THEN
+        ALTER TABLE agent_task_queue
+            ADD CONSTRAINT agent_task_queue_runtime_id_fkey
+                FOREIGN KEY (runtime_id) REFERENCES agent_runtime(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_agent_runtime_workspace ON agent_runtime(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agent_runtime_status ON agent_runtime(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_task_queue_runtime_pending
     ON agent_task_queue(runtime_id, priority DESC, created_at ASC)
     WHERE status IN ('queued', 'dispatched');

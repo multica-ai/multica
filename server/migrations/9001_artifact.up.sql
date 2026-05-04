@@ -3,7 +3,7 @@
 -- Distinct from attachment (which is a file blob) and comment (which is a thread
 -- entry): an artifact is a durable, addressable, renderable document.
 
-CREATE TABLE artifact (
+CREATE TABLE IF NOT EXISTS artifact (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     project_id   UUID REFERENCES project(id) ON DELETE CASCADE,
@@ -22,7 +22,7 @@ CREATE TABLE artifact (
     )
 );
 
-CREATE INDEX idx_artifact_workspace ON artifact(workspace_id, created_at DESC);
-CREATE INDEX idx_artifact_project   ON artifact(project_id, created_at DESC) WHERE project_id IS NOT NULL;
-CREATE INDEX idx_artifact_issue     ON artifact(issue_id, created_at DESC)   WHERE issue_id IS NOT NULL;
-CREATE INDEX idx_artifact_kind      ON artifact(workspace_id, kind);
+CREATE INDEX IF NOT EXISTS idx_artifact_workspace ON artifact(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_artifact_project   ON artifact(project_id, created_at DESC) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifact_issue     ON artifact(issue_id, created_at DESC)   WHERE issue_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifact_kind      ON artifact(workspace_id, kind);

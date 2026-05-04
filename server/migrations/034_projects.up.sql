@@ -1,5 +1,5 @@
 -- Project table
-CREATE TABLE project (
+CREATE TABLE IF NOT EXISTS project (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
@@ -13,8 +13,8 @@ CREATE TABLE project (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_project_workspace ON project(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);
 
 -- Add project_id to issue
-ALTER TABLE issue ADD COLUMN project_id UUID REFERENCES project(id) ON DELETE SET NULL;
-CREATE INDEX idx_issue_project ON issue(project_id);
+ALTER TABLE issue ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES project(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_issue_project ON issue(project_id);

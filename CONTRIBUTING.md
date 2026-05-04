@@ -255,6 +255,67 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+## Writing Migrations
+
+Migration files live in `server/migrations/` as paired `NNN_name.up.sql` and
+`NNN_name.down.sql`. The runner is `server/cmd/migrate/main.go`; it tracks
+applied versions in a `schema_migrations` table.
+
+**Every migration must be idempotent.** A migration must be safe to execute a
+second time against a database where it has already been applied — running it
+twice in a row must produce the same end state without raising an error. This
+is required because a deploy that fails partway through (parallel branch,
+manual intervention, or a crash) can leave `schema_migrations` out of sync
+with the actual schema, and the next deploy must be able to recover by
+re-running each migration.
+
+Use these patterns:
+
+| Statement                                | Idempotent form                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| `CREATE TABLE foo`                       | `CREATE TABLE IF NOT EXISTS foo`                                       |
+| `CREATE INDEX idx_foo`                   | `CREATE INDEX IF NOT EXISTS idx_foo`                                   |
+| `CREATE UNIQUE INDEX idx_foo`            | `CREATE UNIQUE INDEX IF NOT EXISTS idx_foo`                            |
+| `CREATE INDEX CONCURRENTLY idx_foo`      | `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_foo`                      |
+| `ALTER TABLE foo ADD COLUMN bar`         | `ALTER TABLE foo ADD COLUMN IF NOT EXISTS bar`                         |
+| `DROP TABLE foo`                         | `DROP TABLE IF EXISTS foo`                                             |
+| `DROP INDEX idx_foo`                     | `DROP INDEX IF EXISTS idx_foo`                                         |
+| `ALTER TABLE foo DROP COLUMN bar`        | `ALTER TABLE foo DROP COLUMN IF EXISTS bar`                            |
+| `INSERT INTO foo ...` (data backfill)    | Add `ON CONFLICT DO NOTHING`, or `WHERE NOT EXISTS (...)` on the SELECT|
+
+`ALTER TABLE foo ALTER COLUMN bar SET/DROP NOT NULL` and
+`ALTER TABLE foo ALTER COLUMN bar SET DEFAULT ...` are already idempotent in
+PostgreSQL — they don't error if the column is already in the desired state.
+
+`ALTER TABLE foo ADD CONSTRAINT bar ...` does **not** support `IF NOT EXISTS`.
+Either drop the constraint first:
+
+```sql
+ALTER TABLE foo DROP CONSTRAINT IF EXISTS bar;
+ALTER TABLE foo ADD CONSTRAINT bar ...;
+```
+
+or wrap in a guard that checks `pg_constraint`:
+
+```sql
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bar') THEN
+        ALTER TABLE foo ADD CONSTRAINT bar ...;
+    END IF;
+END $$;
+```
+
+`UPDATE` statements that backfill data are usually idempotent because the
+second run produces the same result. If the second run could clobber values
+the application has since written (e.g. setting `issue_prefix` to a derived
+default), gate the update with a `WHERE` clause that only matches rows that
+still need backfilling.
+
+The test `TestMigrationsAreIdempotent` in `server/cmd/migrate/idempotent_test.go`
+runs every `*.up.sql` against a throwaway database twice. The second pass
+catches any migration that would fail on a partial-recovery rerun. It runs as
+part of `make test` and `make check`.
+
 ## How Database Creation Works
 
 Database creation is automatic.

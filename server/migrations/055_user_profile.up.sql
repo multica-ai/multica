@@ -9,7 +9,7 @@
 -- which enforces auth.user_id == row.user_id. Do not query this table from
 -- anywhere else.
 
-CREATE TABLE user_profile (
+CREATE TABLE IF NOT EXISTS user_profile (
     user_id UUID PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
     persona TEXT NOT NULL CHECK (persona IN ('utalmodig', 'ekspert', 'grundig', 'larling')),
     language TEXT NOT NULL DEFAULT 'da' CHECK (language IN ('da', 'en')),

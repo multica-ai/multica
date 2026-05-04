@@ -2,7 +2,7 @@
 -- Only created when pg_bigm is installed.
 DO $$
 BEGIN
-  CREATE INDEX idx_comment_content_bigm ON comment USING gin (content gin_bigm_ops);
+  CREATE INDEX IF NOT EXISTS idx_comment_content_bigm ON comment USING gin (content gin_bigm_ops);
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'skipping bigram index on comment (pg_bigm not installed)';
 END

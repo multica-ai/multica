@@ -12,8 +12,8 @@ $$;
 -- Only created when pg_bigm is installed.
 DO $$
 BEGIN
-  CREATE INDEX idx_issue_title_bigm ON issue USING gin (title gin_bigm_ops);
-  CREATE INDEX idx_issue_description_bigm ON issue USING gin (COALESCE(description, '') gin_bigm_ops);
+  CREATE INDEX IF NOT EXISTS idx_issue_title_bigm ON issue USING gin (title gin_bigm_ops);
+  CREATE INDEX IF NOT EXISTS idx_issue_description_bigm ON issue USING gin (COALESCE(description, '') gin_bigm_ops);
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'skipping bigram indexes (pg_bigm not installed)';
 END

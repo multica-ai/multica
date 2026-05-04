@@ -3,4 +3,4 @@
 -- was merged into this row so the previous identity remains traceable for
 -- debugging and audit after the old row is deleted.
 ALTER TABLE agent_runtime
-    ADD COLUMN legacy_daemon_id TEXT;
+    ADD COLUMN IF NOT EXISTS legacy_daemon_id TEXT;
