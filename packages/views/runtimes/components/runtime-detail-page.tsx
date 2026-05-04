@@ -2,9 +2,12 @@
 
 import { Server } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useNavigation } from "../../navigation";
 import { RuntimeDetail } from "./runtime-detail";
 
 /**
@@ -17,7 +20,18 @@ import { RuntimeDetail } from "./runtime-detail";
  */
 export function RuntimeDetailPage({ runtimeId }: { runtimeId: string }) {
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const navigation = useNavigation();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: runtimes, isLoading } = useQuery(runtimeListOptions(wsId));
+
+  const myRole = members.find((m) => m.user_id === currentUserId)?.role ?? null;
+  const isAdmin = myRole === "owner" || myRole === "admin";
+
+  if (!isAdmin && myRole !== null) {
+    navigation.push("/");
+    return null;
+  }
 
   if (isLoading) {
     return (

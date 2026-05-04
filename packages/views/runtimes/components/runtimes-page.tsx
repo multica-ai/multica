@@ -19,6 +19,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { PageHeader } from "../../layout/page-header";
+import { useNavigation } from "../../navigation";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { RuntimeList } from "./runtime-list";
 
@@ -92,6 +93,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const navigation = useNavigation();
   const [scope, setScope] = useState<RuntimeFilter>("mine");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [search, setSearch] = useState("");
@@ -159,6 +161,12 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   }, [scopedRuntimes, healthFilter, search, now]);
 
   if (isLoading || membersLoading || fetching) return <RuntimesPageSkeleton />;
+
+  // Members have no management access to runtimes — redirect them away.
+  if (!isAdmin) {
+    navigation.push("/");
+    return null;
+  }
 
   const totalCount = runtimes.length;
   const scopedTotal = scopedRuntimes.length;

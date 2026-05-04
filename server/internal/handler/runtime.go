@@ -394,16 +394,14 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	for i, rt := range runtimes {
 		item := runtimeToResponse(rt)
 		if !isAdmin {
-			// Strip infrastructure-revealing fields for non-admins.
-			// Members need runtime status for agent presence display,
-			// but not the provider type (hermes/openclaw) or launch command.
-			//
-			// The daemon registers runtimes with names like "Hermes (ben-corpay)".
-			// Strip the "Provider (" prefix and trailing ")" so members see
-			// just the device name (e.g. "ben-corpay") without the provider type.
+			// Strip all infrastructure-revealing fields for non-admins.
+			// Members need runtime status/name for agent presence display only.
+			// They must not see provider type, model info, or system environment.
 			item.Name = stripProviderFromName(item.Name, rt.Provider)
 			item.Provider = ""
 			item.LaunchHeader = ""
+			item.DeviceInfo = "" // e.g. "Hermes Agent v0.11.0 ... Python: 3.12.3"
+			item.Metadata = map[string]any{} // may contain provider-specific config
 		}
 		resp[i] = item
 	}

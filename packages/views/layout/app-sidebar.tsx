@@ -63,7 +63,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
-import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { workspaceListOptions, myInvitationListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@multica/core/api";
@@ -318,6 +318,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
 
   const wsId = workspace?.id;
+  const { data: wsMembers = [] } = useQuery({ ...memberListOptions(wsId ?? ""), enabled: !!wsId });
+  const myWsRole = wsMembers.find((m) => m.user_id === userId)?.role ?? null;
+  const isWorkspaceAdmin = myWsRole === "owner" || myWsRole === "admin";
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
     queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
     queryFn: () => api.listInbox(),
@@ -493,14 +496,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore.getState().open("create-workspace")
-                      }
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Create workspace
-                    </DropdownMenuItem>
+                    {isWorkspaceAdmin && (
+                      <DropdownMenuItem
+                        onClick={() =>
+                          useModalStore.getState().open("create-workspace")
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Create workspace
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   {myInvitations.length > 0 && (
                     <>
