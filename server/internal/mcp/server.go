@@ -47,6 +47,17 @@ func (s *Server) RegisterTool(tool Tool, handler ToolHandler) {
 	s.handlers[tool.Name] = handler
 }
 
+// Call invokes a registered tool handler by name. Useful for tests that want
+// to exercise the tool dispatch path without piping JSON-RPC over stdio.
+// Returns the same CallToolResult the JSON-RPC `tools/call` path would produce.
+func (s *Server) Call(ctx context.Context, name string, args map[string]any) (CallToolResult, error) {
+	h, ok := s.handlers[name]
+	if !ok {
+		return ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
+	}
+	return h(ctx, args)
+}
+
 // Run starts the stdio server loop. It blocks until stdin is closed or ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(os.Stdin)
