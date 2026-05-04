@@ -194,8 +194,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("hermes returned a different session id on resume — original was likely lost; continuing with the new id",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
@@ -1072,6 +1078,24 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// resolveResumedSessionID picks which session id we should treat as live
+// after a `session/resume` round-trip. Hermes (and other ACP servers)
+// return the canonical sessionId in the response — when the local
+// state.db has been wiped, the server silently creates a brand-new
+// session and returns its new id rather than failing. If we keep using
+// our requested id in that case, every subsequent session/prompt is
+// addressed to a session the server doesn't know about and fails with
+// JSON-RPC -32603. Returns (chosenID, changed). When the response is
+// malformed or omits sessionId we fall back to the requested id so the
+// happy path keeps working against older / non-conforming servers.
+func resolveResumedSessionID(requested string, response json.RawMessage) (string, bool) {
+	got := extractACPSessionID(response)
+	if got == "" {
+		return requested, false
+	}
+	return got, got != requested
 }
 
 // buildHermesSessionParams constructs the params map for the ACP `session/new`
