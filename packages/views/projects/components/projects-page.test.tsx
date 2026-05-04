@@ -182,6 +182,23 @@ describe("ProjectsPage — inline title rename", () => {
     expect(input.value).toBe("Original Title");
   });
 
+  it("renders a hover-revealed Rename button next to the title", async () => {
+    renderWithQuery(<ProjectsPage />);
+    await screen.findByText("Original Title");
+    const renameBtn = screen.getByRole("button", { name: /rename original title/i });
+    expect(renameBtn).toBeInTheDocument();
+  });
+
+  it("flips into edit mode when the pencil button is clicked (no double-click required)", async () => {
+    renderWithQuery(<ProjectsPage />);
+    await screen.findByText("Original Title");
+    fireEvent.click(screen.getByRole("button", { name: /rename original title/i }));
+
+    const input = await screen.findByLabelText<HTMLInputElement>("Project name");
+    expect(input).toBeInTheDocument();
+    expect(input.value).toBe("Original Title");
+  });
+
   it("commits a renamed title on Enter and calls updateProject", async () => {
     renderWithQuery(<ProjectsPage />);
     fireEvent.doubleClick(await screen.findByText("Original Title"));
