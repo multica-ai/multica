@@ -262,6 +262,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
+						// Per-member enforcement toggles powering
+						// the new Users page (JEH-324 + JEH-327).
+						r.Patch("/scope-enforcement", h.PatchMemberScopeEnforcement)
+						r.Patch("/budget-enforcement", h.PatchMemberBudgetEnforcement)
+						r.Get("/usage", h.GetMemberUsage)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 				})

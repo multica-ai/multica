@@ -290,14 +290,16 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 type MemberWithUserResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	UserID      string  `json:"user_id"`
-	Role        string  `json:"role"`
-	CreatedAt   string  `json:"created_at"`
-	Name        string  `json:"name"`
-	Email       string  `json:"email"`
-	AvatarURL   *string `json:"avatar_url"`
+	ID                       string  `json:"id"`
+	WorkspaceID              string  `json:"workspace_id"`
+	UserID                   string  `json:"user_id"`
+	Role                     string  `json:"role"`
+	CreatedAt                string  `json:"created_at"`
+	Name                     string  `json:"name"`
+	Email                    string  `json:"email"`
+	AvatarURL                *string `json:"avatar_url"`
+	ScopeEnforcementEnabled  bool    `json:"scope_enforcement_enabled"`
+	BudgetEnforcementEnabled bool    `json:"budget_enforcement_enabled"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -312,14 +314,16 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	resp := make([]MemberWithUserResponse, len(members))
 	for i, m := range members {
 		resp[i] = MemberWithUserResponse{
-			ID:          uuidToString(m.ID),
-			WorkspaceID: uuidToString(m.WorkspaceID),
-			UserID:      uuidToString(m.UserID),
-			Role:        m.Role,
-			CreatedAt:   timestampToString(m.CreatedAt),
-			Name:        m.UserName,
-			Email:       m.UserEmail,
-			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			ID:                       uuidToString(m.ID),
+			WorkspaceID:              uuidToString(m.WorkspaceID),
+			UserID:                   uuidToString(m.UserID),
+			Role:                     m.Role,
+			CreatedAt:                timestampToString(m.CreatedAt),
+			Name:                     m.UserName,
+			Email:                    m.UserEmail,
+			AvatarURL:                textToPtr(m.UserAvatarUrl),
+			ScopeEnforcementEnabled:  m.ScopeEnforcementEnabled,
+			BudgetEnforcementEnabled: m.BudgetEnforcementEnabled,
 		}
 	}
 
@@ -333,14 +337,16 @@ type CreateMemberRequest struct {
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
 	return MemberWithUserResponse{
-		ID:          uuidToString(member.ID),
-		WorkspaceID: uuidToString(member.WorkspaceID),
-		UserID:      uuidToString(member.UserID),
-		Role:        member.Role,
-		CreatedAt:   timestampToString(member.CreatedAt),
-		Name:        user.Name,
-		Email:       user.Email,
-		AvatarURL:   textToPtr(user.AvatarUrl),
+		ID:                       uuidToString(member.ID),
+		WorkspaceID:              uuidToString(member.WorkspaceID),
+		UserID:                   uuidToString(member.UserID),
+		Role:                     member.Role,
+		CreatedAt:                timestampToString(member.CreatedAt),
+		Name:                     user.Name,
+		Email:                    user.Email,
+		AvatarURL:                textToPtr(user.AvatarUrl),
+		ScopeEnforcementEnabled:  member.ScopeEnforcementEnabled,
+		BudgetEnforcementEnabled: member.BudgetEnforcementEnabled,
 	}
 }
 
