@@ -27,6 +27,7 @@ import {
   MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -406,7 +407,7 @@ export function AgentCreatePanel({
             >
               {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />Sent</span>
-              ) : "Create (⌘↵)"}
+              ) : `Create (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
         </div>
