@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@multica/ui/lib/utils";
 
 export interface DocPage {
@@ -22,8 +23,24 @@ interface DocsPanelClientProps {
  * existing prose tokens for styling — no fumadocs UI, no iframe.
  */
 export function DocsPanelClient({ pages }: DocsPanelClientProps) {
-  const [activeSlug, setActiveSlug] = useState(pages[0]?.slug ?? "");
+  const searchParams = useSearchParams();
+  const initialSlug = searchParams.get("doc") ?? pages[0]?.slug ?? "";
+  const [activeSlug, setActiveSlug] = useState(initialSlug);
   const active = pages.find((p) => p.slug === activeSlug) ?? pages[0];
+
+  // Keep ?doc=<slug> in sync with the active page so users can deep-link.
+  // Use replaceState to avoid pushing history entries for every nav click,
+  // and skip the Next router so the rest of Settings doesn't re-render.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (active?.slug && active.slug !== "/") {
+      url.searchParams.set("doc", active.slug);
+    } else {
+      url.searchParams.delete("doc");
+    }
+    window.history.replaceState(null, "", url.toString());
+  }, [active?.slug]);
 
   // Group pages by their top-level segment so the nav is structured.
   const grouped = new Map<string, DocPage[]>();
@@ -41,7 +58,7 @@ export function DocsPanelClient({ pages }: DocsPanelClientProps) {
   });
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="absolute inset-0 flex">
       {/* Inner left nav */}
       <nav className="w-56 shrink-0 border-r overflow-y-auto p-3">
         {sortedGroups.map(([group, groupPages]) => (

@@ -110,7 +110,7 @@ export function SettingsPage({
           internal layout); other tabs share a constrained, scrollable container. */}
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
         {tab === "documentation" && documentationContent ? (
-          <div className="flex-1 min-h-0">{documentationContent}</div>
+          <div className="flex-1 min-h-0 relative">{documentationContent}</div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto">
             <div className="w-full max-w-3xl mx-auto p-6">
