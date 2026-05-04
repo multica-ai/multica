@@ -1308,7 +1308,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	agentName := "agent"
-	var agentID string
+	agentID := task.AgentID
 	var skills []SkillData
 	var instructions string
 	if task.Agent != nil {
@@ -1342,6 +1342,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 	}
 
+	agentEnv := d.taskAgentEnv(task, agentName, agentID, slot)
+
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// predicted root for a fresh Prepare and the prior root for Reuse — they
@@ -1372,9 +1374,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			AgentName:      agentName,
 			Provider:       provider,
 			CodexVersion:   codexVersion,
+			Context:        ctx,
+			AfterCreate:    projectAfterCreateHook(task, agentEnv),
 			Task:           taskCtx,
 		}, d.logger)
 		if err != nil {
+			var hookErr *execenv.AfterCreateHookError
+			if errors.As(err, &hookErr) {
+				return TaskResult{
+					Status:        "blocked",
+					Comment:       hookErr.Error(),
+					WorkDir:       hookErr.WorkDir,
+					EnvRoot:       hookErr.EnvRoot,
+					FailureReason: "agent_error",
+				}, nil
+			}
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
@@ -1395,34 +1409,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
-	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
-	// per-agent. When one daemon hosts multiple agents, slots index shared
-	// daemon-level resources such as GPUs.
-	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
-	}
-	if task.AutopilotRunID != "" {
-		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-	}
-	if task.AutopilotID != "" {
-		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-	}
-	// Quick-create marker — when set, the multica CLI's `issue create`
-	// command stamps the new issue with origin_type=quick_create +
-	// origin_id=<task_id> so the completion handler can find it
-	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
-		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
-	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
@@ -1908,6 +1894,51 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 		}
 	}
 	return result
+}
+
+func (d *Daemon) taskAgentEnv(task Task, agentName, agentID string, slot int) map[string]string {
+	// Pass the daemon's auth credentials and context so the spawned agent CLI
+	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
+	// per-agent. When one daemon hosts multiple agents, slots index shared
+	// daemon-level resources such as GPUs.
+	agentEnv := map[string]string{
+		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_AGENT_ID":     agentID,
+		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	if task.ProjectID != "" {
+		agentEnv["MULTICA_PROJECT_ID"] = task.ProjectID
+	}
+	if task.AutopilotRunID != "" {
+		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+	}
+	if task.AutopilotID != "" {
+		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
+	}
+	// Quick-create marker — when set, the multica CLI's `issue create`
+	// command stamps the new issue with origin_type=quick_create +
+	// origin_id=<task_id> so the completion handler can find it
+	// deterministically (see GetIssueByOrigin).
+	if task.QuickCreatePrompt != "" {
+		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+	}
+	return agentEnv
+}
+
+func projectAfterCreateHook(task Task, env map[string]string) *execenv.AfterCreateHook {
+	if task.ProjectHooks == nil || strings.TrimSpace(task.ProjectHooks.AfterCreate) == "" {
+		return nil
+	}
+	return &execenv.AfterCreateHook{
+		Script: task.ProjectHooks.AfterCreate,
+		Env:    env,
+	}
 }
 
 // markActiveEnvRoot records that a task is currently using the given env root,

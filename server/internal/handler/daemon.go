@@ -186,6 +186,57 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
+func projectResourcesForClaim(rows []db.ProjectResource) ([]ProjectResourceData, []RepoData) {
+	resources := make([]ProjectResourceData, 0, len(rows))
+	projectRepos := make([]RepoData, 0)
+	for _, row := range rows {
+		label := ""
+		if row.Label.Valid {
+			label = row.Label.String
+		}
+		ref := json.RawMessage(row.ResourceRef)
+		if len(ref) == 0 {
+			ref = json.RawMessage("{}")
+		}
+		resources = append(resources, ProjectResourceData{
+			ID:           uuidToString(row.ID),
+			ResourceType: row.ResourceType,
+			ResourceRef:  ref,
+			Label:        label,
+		})
+
+		// Lift github_repo resources into the daemon's repo list so `multica
+		// repo checkout` and the meta-skill render them as the task's repos.
+		if row.ResourceType == "github_repo" {
+			var payload struct {
+				URL string `json:"url"`
+			}
+			if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+				projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+			}
+		}
+	}
+	return resources, projectRepos
+}
+
+func (h *Handler) applyProjectContextToClaim(ctx context.Context, resp *AgentTaskResponse, projectID pgtype.UUID) []RepoData {
+	if !projectID.Valid {
+		return nil
+	}
+	resp.ProjectID = uuidToString(projectID)
+	if proj, err := h.Queries.GetProject(ctx, projectID); err == nil {
+		resp.ProjectTitle = proj.Title
+		resp.ProjectHooks = projectHooksFromSettings(proj.Settings)
+	}
+	rows := h.listProjectResourcesForProject(ctx, projectID)
+	if len(rows) == 0 {
+		return nil
+	}
+	resources, projectRepos := projectResourcesForClaim(rows)
+	resp.ProjectResources = resources
+	return projectRepos
+}
+
 func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
 	return daemonWorkspaceReposResponse{
@@ -912,41 +963,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
-				resp.ProjectID = uuidToString(issue.ProjectID)
-				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
-					resp.ProjectTitle = proj.Title
-				}
-				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
-					out := make([]ProjectResourceData, 0, len(rows))
-					for _, row := range rows {
-						label := ""
-						if row.Label.Valid {
-							label = row.Label.String
-						}
-						ref := json.RawMessage(row.ResourceRef)
-						if len(ref) == 0 {
-							ref = json.RawMessage("{}")
-						}
-						out = append(out, ProjectResourceData{
-							ID:           uuidToString(row.ID),
-							ResourceType: row.ResourceType,
-							ResourceRef:  ref,
-							Label:        label,
-						})
-						// Lift github_repo resources into the daemon's repo list
-						// so `multica repo checkout` and the meta-skill render
-						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
-							var payload struct {
-								URL string `json:"url"`
-							}
-							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL})
-							}
-						}
-					}
-					resp.ProjectResources = out
-				}
+				projectRepos = h.applyProjectContextToClaim(r.Context(), &resp, issue.ProjectID)
 			}
 
 			if len(projectRepos) > 0 {
@@ -1096,7 +1113,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
-			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
+			var projectRepos []RepoData
+			if qc.ProjectID != "" {
+				if projectID, err := util.ParseUUID(qc.ProjectID); err == nil && projectID.Valid {
+					projectRepos = h.applyProjectContextToClaim(r.Context(), &resp, projectID)
+				} else {
+					slog.Warn("quick-create claim: invalid project_id in context",
+						"task_id", uuidToString(task.ID),
+						"project_id", qc.ProjectID,
+						"error", err,
+					)
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos

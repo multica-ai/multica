@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
@@ -1283,8 +1284,10 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// workspace's repos list.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, "Claim project repo override").Scan(&projectID); err != nil {
+		INSERT INTO project (workspace_id, title, settings)
+		VALUES ($1, $2, $3::jsonb)
+		RETURNING id
+	`, testWorkspaceID, "Claim project repo override", `{"hooks":{"after_create":"echo project setup"}}`).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
@@ -1341,6 +1344,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 		Task *struct {
 			Repos            []RepoData            `json:"repos"`
 			ProjectID        string                `json:"project_id"`
+			ProjectHooks     *projectHooksWire     `json:"project_hooks"`
 			ProjectResources []ProjectResourceData `json:"project_resources"`
 		} `json:"task"`
 	}
@@ -1355,6 +1359,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
 		t.Fatalf("expected resp.Repos to contain only the project repo URL, got %+v", resp.Task.Repos)
+	}
+	if resp.Task.ProjectHooks == nil || resp.Task.ProjectHooks.AfterCreate != "echo project setup" {
+		t.Fatalf("expected project after_create hook in claim response, got %+v", resp.Task.ProjectHooks)
 	}
 	for _, r := range resp.Task.Repos {
 		if strings.HasSuffix(r.URL, "workspace-repo-a") || strings.HasSuffix(r.URL, "workspace-repo-b") {
@@ -1438,6 +1445,109 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.Repos) != 1 || !strings.HasSuffix(resp.Task.Repos[0].URL, "workspace-fallback") {
 		t.Fatalf("expected workspace fallback repo, got %+v", resp.Task.Repos)
+	}
+}
+
+func TestClaimTask_QuickCreateProjectContext(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": "https://github.com/example/workspace-quick-create", "description": "ws"},
+	})
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, settings)
+		VALUES ($1, $2, $3::jsonb)
+		RETURNING id
+	`, testWorkspaceID, "Quick Create Project", `{"hooks":{"after_create":"echo quick project setup"}}`).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	const projectRepoURL = "https://github.com/example/quick-create-project-repo"
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`"}`); err != nil {
+		t.Fatalf("create project_resource: %v", err)
+	}
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	contextJSON, err := json.Marshal(map[string]string{
+		"type":         service.QuickCreateContextType,
+		"prompt":       "create a scoped issue",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+		"project_id":   projectID,
+	})
+	if err != nil {
+		t.Fatalf("marshal context: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, context
+		) VALUES ($1, $2, NULL, 'queued', 999, $3::jsonb)
+		RETURNING id
+	`, agentID, runtimeID, contextJSON).Scan(&taskID); err != nil {
+		t.Fatalf("create quick-create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-quick-project")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			QuickCreatePrompt string                `json:"quick_create_prompt"`
+			Repos             []RepoData            `json:"repos"`
+			ProjectID         string                `json:"project_id"`
+			ProjectTitle      string                `json:"project_title"`
+			ProjectHooks      *projectHooksWire     `json:"project_hooks"`
+			ProjectResources  []ProjectResourceData `json:"project_resources"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if resp.Task.QuickCreatePrompt != "create a scoped issue" {
+		t.Fatalf("quick_create_prompt = %q", resp.Task.QuickCreatePrompt)
+	}
+	if resp.Task.ProjectID != projectID {
+		t.Fatalf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectTitle != "Quick Create Project" {
+		t.Fatalf("project_title = %q", resp.Task.ProjectTitle)
+	}
+	if resp.Task.ProjectHooks == nil || resp.Task.ProjectHooks.AfterCreate != "echo quick project setup" {
+		t.Fatalf("expected project after_create hook in claim response, got %+v", resp.Task.ProjectHooks)
+	}
+	if len(resp.Task.ProjectResources) != 1 {
+		t.Fatalf("expected 1 project resource, got %d", len(resp.Task.ProjectResources))
+	}
+	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
+		t.Fatalf("expected project repo override, got %+v", resp.Task.Repos)
 	}
 }
 

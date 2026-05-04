@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -67,6 +67,256 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+
+function getAfterCreateHook(settings: unknown): string {
+  if (!settings || typeof settings !== "object") return "";
+  const hooks = (settings as { hooks?: unknown }).hooks;
+  if (!hooks || typeof hooks !== "object") return "";
+  const value = (hooks as { after_create?: unknown }).after_create;
+  return typeof value === "string" ? value : "";
+}
+
+function settingsWithAfterCreateHook(settings: unknown, script: string) {
+  const base =
+    settings && typeof settings === "object" && !Array.isArray(settings)
+      ? { ...(settings as Record<string, unknown>) }
+      : {};
+  const hooks =
+    base.hooks && typeof base.hooks === "object" && !Array.isArray(base.hooks)
+      ? { ...(base.hooks as Record<string, unknown>) }
+      : {};
+
+  if (script) {
+    hooks.after_create = script;
+    base.hooks = hooks;
+    return base;
+  }
+
+  delete hooks.after_create;
+  if (Object.keys(hooks).length > 0) {
+    base.hooks = hooks;
+  } else {
+    delete base.hooks;
+  }
+  return base;
+}
+
+const BASH_WORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "elif",
+  "fi",
+  "for",
+  "while",
+  "until",
+  "do",
+  "done",
+  "case",
+  "esac",
+  "in",
+  "function",
+  "select",
+  "set",
+  "export",
+  "local",
+  "readonly",
+  "return",
+  "exit",
+  "source",
+  "cd",
+  "echo",
+  "test",
+  "bash",
+  "git",
+  "pnpm",
+  "npm",
+  "node",
+  "mkdir",
+  "cp",
+  "rm",
+  "mv",
+]);
+
+function renderBashPlain(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  const wordRe = /[A-Za-z_][A-Za-z0-9_-]*/g;
+  for (const match of text.matchAll(wordRe)) {
+    const index = match.index ?? 0;
+    const word = match[0];
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+    if (BASH_WORDS.has(word)) {
+      nodes.push(
+        <span key={`${keyPrefix}-${index}`} className="text-amber-600 dark:text-amber-400">
+          {word}
+        </span>,
+      );
+    } else {
+      nodes.push(word);
+    }
+    cursor = index + word.length;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
+
+function renderBashLine(line: string, lineIndex: number): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  let plain = "";
+
+  const flushPlain = () => {
+    if (!plain) return;
+    nodes.push(...renderBashPlain(plain, `plain-${lineIndex}-${i}`));
+    plain = "";
+  };
+
+  while (i < line.length) {
+    const char = line[i];
+    if (char === "#" && (i === 0 || /\s/.test(line[i - 1] ?? ""))) {
+      flushPlain();
+      nodes.push(
+        <span key={`comment-${lineIndex}-${i}`} className="text-muted-foreground">
+          {line.slice(i)}
+        </span>,
+      );
+      return nodes;
+    }
+
+    if (char === "'" || char === '"') {
+      flushPlain();
+      const quote = char;
+      let end = i + 1;
+      while (end < line.length) {
+        if (line[end] === "\\" && quote === '"') {
+          end += 2;
+          continue;
+        }
+        if (line[end] === quote) {
+          end += 1;
+          break;
+        }
+        end += 1;
+      }
+      nodes.push(
+        <span key={`string-${lineIndex}-${i}`} className="text-emerald-700 dark:text-emerald-400">
+          {line.slice(i, end)}
+        </span>,
+      );
+      i = end;
+      continue;
+    }
+
+    if (char === "$") {
+      flushPlain();
+      let end = i + 1;
+      if (line[end] === "{") {
+        end += 1;
+        while (end < line.length && line[end] !== "}") end += 1;
+        if (line[end] === "}") end += 1;
+      } else if (line[end] === "(") {
+        end += 1;
+        while (end < line.length && line[end] !== ")") end += 1;
+        if (line[end] === ")") end += 1;
+      } else {
+        while (end < line.length && /[A-Za-z0-9_]/.test(line[end] ?? "")) end += 1;
+      }
+      nodes.push(
+        <span key={`var-${lineIndex}-${i}`} className="text-sky-700 dark:text-sky-400">
+          {line.slice(i, end)}
+        </span>,
+      );
+      i = end;
+      continue;
+    }
+
+    plain += char;
+    i += 1;
+  }
+
+  flushPlain();
+  return nodes;
+}
+
+function renderBashScript(script: string): React.ReactNode[] {
+  return script.split("\n").flatMap((line, index, lines) => [
+    ...renderBashLine(line, index),
+    ...(index < lines.length - 1 ? ["\n"] : []),
+  ]);
+}
+
+function BashScriptEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const highlightRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    if (!highlightRef.current) return;
+    highlightRef.current.scrollTop = target.scrollTop;
+    highlightRef.current.scrollLeft = target.scrollLeft;
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      toast.error("Failed to copy setup script");
+    }
+  }, [value]);
+
+  return (
+    <div className="h-64 overflow-hidden rounded-lg border border-input bg-muted/50 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+      <div className="flex h-8 items-center justify-between border-b border-border/60 px-2.5">
+        <span className="font-mono text-xs text-muted-foreground">bash</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground hover:text-foreground"
+          disabled={!value}
+          onClick={handleCopy}
+          aria-label="Copy setup script"
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        </Button>
+      </div>
+      <div className="relative h-[calc(100%-2rem)]">
+        <pre
+          ref={highlightRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 m-0 overflow-hidden p-3 font-mono text-[13px] leading-5 text-foreground"
+        >
+          <code className="block min-w-max whitespace-pre">
+            {value ? renderBashScript(value) : null}
+          </code>
+        </pre>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onScroll={handleScroll}
+          disabled={disabled}
+          spellCheck={false}
+          wrap="off"
+          aria-label="Project setup bash script"
+          placeholder="git clone https://github.com/org/repo.git ."
+          className="absolute inset-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-[13px] leading-5 text-transparent caret-foreground outline-none placeholder:text-muted-foreground selection:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+        />
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -218,6 +468,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [setupOpen, setSetupOpen] = useState(true);
+  const [afterCreateDraft, setAfterCreateDraft] = useState("");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -232,6 +484,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       sidebarRef.current?.collapse();
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    setAfterCreateDraft(getAfterCreateHook(project?.settings));
+  }, [project?.id, project?.settings]);
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
@@ -257,6 +513,43 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       },
     });
   }, [project, deleteProject, router, wsPaths]);
+
+  const currentAfterCreate = getAfterCreateHook(project?.settings);
+  const saveAfterCreateHook = useCallback(() => {
+    if (!project) return;
+    updateProject.mutate(
+      {
+        id: project.id,
+        settings: settingsWithAfterCreateHook(
+          project.settings,
+          afterCreateDraft,
+        ),
+      },
+      {
+        onSuccess: () => toast.success("Project setup hook saved"),
+        onError: () => toast.error("Failed to save setup hook"),
+      },
+    );
+  }, [afterCreateDraft, project, updateProject]);
+  const clearAfterCreateHook = useCallback(() => {
+    if (!project) {
+      setAfterCreateDraft("");
+      return;
+    }
+    updateProject.mutate(
+      {
+        id: project.id,
+        settings: settingsWithAfterCreateHook(project.settings, ""),
+      },
+      {
+        onSuccess: () => {
+          setAfterCreateDraft("");
+          toast.success("Project setup hook cleared");
+        },
+        onError: () => toast.error("Failed to clear setup hook"),
+      },
+    );
+  }, [project, updateProject]);
 
   if (isLoading) {
     return (
@@ -492,6 +785,44 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${setupOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setSetupOpen(!setupOpen)}
+        >
+          Setup
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${setupOpen ? "rotate-90" : ""}`} />
+        </button>
+        {setupOpen && (
+          <div className="space-y-2 pl-2">
+            <BashScriptEditor
+              value={afterCreateDraft}
+              onChange={setAfterCreateDraft}
+              disabled={updateProject.isPending}
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={(!afterCreateDraft && !currentAfterCreate) || updateProject.isPending}
+                onClick={clearAfterCreateHook}
+              >
+                Clear
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={afterCreateDraft === currentAfterCreate || updateProject.isPending}
+                onClick={saveAfterCreateHook}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <ProjectResourcesSection projectId={projectId} />
     </div>
   );

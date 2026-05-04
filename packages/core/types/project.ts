@@ -2,6 +2,13 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export interface ProjectSettings {
+  hooks?: {
+    after_create?: string;
+  };
+  [key: string]: unknown;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -10,6 +17,7 @@ export interface Project {
   icon: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
+  settings: ProjectSettings;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
   created_at: string;
@@ -24,6 +32,7 @@ export interface CreateProjectRequest {
   icon?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  settings?: ProjectSettings;
   lead_type?: "member" | "agent";
   lead_id?: string;
   // Resources to attach in the same transaction as the project. Server returns
@@ -37,6 +46,7 @@ export interface UpdateProjectRequest {
   icon?: string | null;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  settings?: ProjectSettings;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
 }

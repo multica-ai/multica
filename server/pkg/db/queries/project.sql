@@ -16,9 +16,10 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, settings
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    COALESCE(sqlc.narg('settings')::jsonb, '{}'::jsonb)
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -28,6 +29,7 @@ UPDATE project SET
     icon = sqlc.narg('icon'),
     status = COALESCE(sqlc.narg('status'), status),
     priority = COALESCE(sqlc.narg('priority'), priority),
+    settings = COALESCE(sqlc.narg('settings')::jsonb, settings),
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
     updated_at = now()

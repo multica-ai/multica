@@ -50,6 +50,7 @@ export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, Pe
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
+  ProjectSettings,
   ProjectStatus,
   ProjectPriority,
   CreateProjectRequest,

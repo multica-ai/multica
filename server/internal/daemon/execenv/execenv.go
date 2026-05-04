@@ -4,6 +4,7 @@
 package execenv
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,8 @@ type PrepareParams struct {
 	AgentName      string            // for git branch naming only
 	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
+	Context        context.Context   // optional task context for cancellable setup hooks
+	AfterCreate    *AfterCreateHook  // optional project hook run only for fresh env creation
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -53,7 +56,7 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID           string                  // non-empty for chat tasks
-	AutopilotRunID          string              // non-empty for autopilot run_only tasks
+	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
@@ -134,6 +137,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		logger:  logger,
 	}
 
+	if params.AfterCreate != nil {
+		ctx := params.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := runAfterCreateHook(ctx, envRoot, workDir, *params.AfterCreate, logger); err != nil {
+			return nil, err
+		}
+	}
+
 	// Write context files into workdir (skills go to provider-native paths).
 	if err := writeContextFiles(workDir, params.Provider, params.Task); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
@@ -147,6 +160,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}
 		if err := writeCodexWorkspaceSkills(codexHome, params.Task.AgentSkills); err != nil {
 			return nil, fmt.Errorf("execenv: write codex skills: %w", err)
+		}
+		if err := ensureCodexTrustedProjectConfig(filepath.Join(codexHome, "config.toml"), workDir); err != nil {
+			return nil, fmt.Errorf("execenv: trust codex workdir: %w", err)
 		}
 		env.CodexHome = codexHome
 	}
@@ -188,6 +204,9 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 			env.CodexHome = codexHome
 			if err := writeCodexWorkspaceSkills(codexHome, task.AgentSkills); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
+			}
+			if err := ensureCodexTrustedProjectConfig(filepath.Join(codexHome, "config.toml"), workDir); err != nil {
+				logger.Warn("execenv: refresh codex trusted workdir failed", "error", err)
 			}
 		}
 	}

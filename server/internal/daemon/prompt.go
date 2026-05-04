@@ -76,8 +76,18 @@ func buildQuickCreatePrompt(task Task) string {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
 	}
 
+	// project
+	if task.ProjectID != "" {
+		if task.ProjectTitle != "" {
+			fmt.Fprintf(&b, "- **project**: selected project is %q. Pass `--project %q` exactly; do not substitute the project title.\n", task.ProjectTitle, task.ProjectID)
+		} else {
+			fmt.Fprintf(&b, "- **project**: pass `--project %q` exactly.\n", task.ProjectID)
+		}
+	} else {
+		b.WriteString("- **project**: omit. No project was selected for this quick-create request.\n")
+	}
+
 	// fields to omit
-	b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 

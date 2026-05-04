@@ -16,6 +16,12 @@ export interface CreateIssueRequest {
   attachment_ids?: string[];
 }
 
+export interface QuickCreateIssueRequest {
+  agent_id: string;
+  prompt: string;
+  project_id?: string;
+}
+
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;

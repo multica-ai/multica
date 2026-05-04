@@ -198,6 +198,27 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	return agentID
 }
 
+func enableQuickCreateForRuntime(t *testing.T, runtimeID string) {
+	t.Helper()
+
+	var previous []byte
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT metadata FROM agent_runtime WHERE id = $1`,
+		runtimeID,
+	).Scan(&previous); err != nil {
+		t.Fatalf("load runtime metadata: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET metadata = '{"cli_version":"0.2.20"}'::jsonb WHERE id = $1`,
+		runtimeID,
+	); err != nil {
+		t.Fatalf("set runtime cli_version: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE agent_runtime SET metadata = $2::jsonb WHERE id = $1`, runtimeID, previous)
+	})
+}
+
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
@@ -615,6 +636,115 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	}
 	if child.ProjectID == nil || *child.ProjectID != childProjectID {
 		t.Fatalf("CreateIssue child: expected explicit project_id %q, got %v", childProjectID, child.ProjectID)
+	}
+}
+
+func TestQuickCreateIssueStoresProjectID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	enableQuickCreateForRuntime(t, runtimeID)
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'Quick create selected project')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		req := newRequest("DELETE", "/api/projects/"+projectID, nil)
+		req = withURLParam(req, "id", projectID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/quick-create?workspace_id="+testWorkspaceID, map[string]any{
+		"agent_id":   agentID,
+		"prompt":     "Create this in the selected project",
+		"project_id": projectID,
+	})
+	testHandler.QuickCreateIssue(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("QuickCreateIssue: expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp QuickCreateIssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, resp.TaskID)
+	})
+
+	var rawContext []byte
+	if err := testPool.QueryRow(ctx,
+		`SELECT context FROM agent_task_queue WHERE id = $1`,
+		resp.TaskID,
+	).Scan(&rawContext); err != nil {
+		t.Fatalf("load queued task context: %v", err)
+	}
+	var qc service.QuickCreateContext
+	if err := json.Unmarshal(rawContext, &qc); err != nil {
+		t.Fatalf("unmarshal quick-create context: %v", err)
+	}
+	if qc.ProjectID != projectID {
+		t.Fatalf("context project_id = %q, want %q; context=%s", qc.ProjectID, projectID, string(rawContext))
+	}
+}
+
+func TestQuickCreateIssueRejectsProjectOutsideWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	enableQuickCreateForRuntime(t, runtimeID)
+
+	var foreignWorkspaceID, foreignProjectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, issue_prefix)
+		VALUES ('Quick Create Foreign', 'quick-create-foreign-workspace', 'QCF')
+		RETURNING id
+	`).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'Foreign project')
+		RETURNING id
+	`, foreignWorkspaceID).Scan(&foreignProjectID); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/quick-create?workspace_id="+testWorkspaceID, map[string]any{
+		"agent_id":   agentID,
+		"prompt":     "Should not enqueue",
+		"project_id": foreignProjectID,
+	})
+	testHandler.QuickCreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("QuickCreateIssue with foreign project: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

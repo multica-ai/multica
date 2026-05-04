@@ -263,6 +263,7 @@ export function ManualCreatePanel({
     setLastMode("agent");
     onSwitchMode?.({
       prompt,
+      ...(projectId ? { project_id: projectId } : {}),
       ...(assigneeType === "agent" && assigneeId
         ? { agent_id: assigneeId }
         : {}),

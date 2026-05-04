@@ -100,7 +100,20 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+  }: {
+    projectId: string | null;
+    onUpdate: (updates: { project_id?: string | null }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onUpdate({ project_id: projectId ? null : "project-1" })}
+    >
+      Project {projectId ?? "none"}
+    </button>
+  ),
 }));
 
 vi.mock("../common/pill-button", () => ({
@@ -243,5 +256,27 @@ describe("AgentCreatePanel", () => {
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("submits the selected project id", async () => {
+    const user = userEvent.setup();
+
+    render(<AgentCreatePanel onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Project none" }));
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Create this in the selected project");
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Create this in the selected project",
+        project_id: "project-1",
+      });
+    });
   });
 });
