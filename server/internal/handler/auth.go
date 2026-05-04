@@ -262,21 +262,30 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid or expired code")
-		return
-	}
+	// Local-only master code: when MULTICA_DEV_MASTER_CODE is set (only in
+	// local .env, NEVER in production), accept it as a code for any email
+	// without consulting the verification_code table. The empty default
+	// makes this a no-op everywhere it isn't explicitly opted into.
+	devMaster := strings.TrimSpace(os.Getenv("MULTICA_DEV_MASTER_CODE"))
+	if devMaster != "" && subtle.ConstantTimeCompare([]byte(code), []byte(devMaster)) == 1 {
+		slog.Warn("login via dev master code (MULTICA_DEV_MASTER_CODE) — disable in production", "email", email)
+	} else {
+		dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid or expired code")
+			return
+		}
 
-	if subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
-		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
-		writeError(w, http.StatusBadRequest, "invalid or expired code")
-		return
-	}
+		if subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+			_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
+			writeError(w, http.StatusBadRequest, "invalid or expired code")
+			return
+		}
 
-	if err := h.Queries.MarkVerificationCodeUsed(r.Context(), dbCode.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to verify code")
-		return
+		if err := h.Queries.MarkVerificationCodeUsed(r.Context(), dbCode.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to verify code")
+			return
+		}
 	}
 
 	user, err := h.findOrCreateUser(r.Context(), email)
