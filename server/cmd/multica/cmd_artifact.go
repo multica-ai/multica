@@ -68,12 +68,73 @@ var artifactDeleteCmd = &cobra.Command{
 	RunE:  runArtifactDelete,
 }
 
+var artifactSetFolderCmd = &cobra.Command{
+	Use:   "set-folder <id>",
+	Short: "Move an artifact into a folder (or to root)",
+	Long:  "Place an artifact in a folder, or move it to root by passing --folder \"\" (or omitting --folder).",
+	Example: `  # Move artifact into folder
+  $ multica artifact set-folder abc123 --folder fld456
+
+  # Move artifact back to root
+  $ multica artifact set-folder abc123 --folder ""`,
+	Args: exactArgs(1),
+	RunE: runArtifactSetFolder,
+}
+
+var artifactFolderCmd = &cobra.Command{
+	Use:   "folder",
+	Short: "Manage artifact folders",
+	Long:  "Folders group artifacts inside a workspace. They are workspace-wide and orthogonal to issue/project scope.",
+}
+
+var artifactFolderListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all artifact folders in the workspace",
+	Long:  "List every folder in the workspace. Returns id, parent_id, name. Build the tree client-side via parent_id; null parent_id is a root folder.",
+	RunE:  runArtifactFolderList,
+}
+
+var artifactFolderCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create an artifact folder",
+	Long:  "Create a folder for grouping artifacts. Folder names must be unique within their parent.",
+	Example: `  # Create a root folder
+  $ multica artifact folder create --name "Daily sales reports"
+
+  # Create a nested folder
+  $ multica artifact folder create --name "2026" --parent <parent-folder-id>`,
+	RunE: runArtifactFolderCreate,
+}
+
+var artifactFolderUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Rename or reparent an artifact folder",
+	Long:  "Update an artifact folder. At least one of --name or --parent must be set. Pass --parent \"\" to move to root.",
+	Args:  exactArgs(1),
+	RunE:  runArtifactFolderUpdate,
+}
+
+var artifactFolderDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete an artifact folder",
+	Long:  "Delete a folder. Subfolders are deleted along with it. Artifacts inside fall back to the root.",
+	Args:  exactArgs(1),
+	RunE:  runArtifactFolderDelete,
+}
+
 func init() {
 	artifactCmd.AddCommand(artifactCreateCmd)
 	artifactCmd.AddCommand(artifactGetCmd)
 	artifactCmd.AddCommand(artifactUpdateCmd)
 	artifactCmd.AddCommand(artifactListCmd)
 	artifactCmd.AddCommand(artifactDeleteCmd)
+	artifactCmd.AddCommand(artifactSetFolderCmd)
+	artifactCmd.AddCommand(artifactFolderCmd)
+
+	artifactFolderCmd.AddCommand(artifactFolderListCmd)
+	artifactFolderCmd.AddCommand(artifactFolderCreateCmd)
+	artifactFolderCmd.AddCommand(artifactFolderUpdateCmd)
+	artifactFolderCmd.AddCommand(artifactFolderDeleteCmd)
 
 	artifactCreateCmd.Flags().String("kind", "note", "Artifact kind: report, plan, decision, diagram, note")
 	artifactCreateCmd.Flags().String("title", "", "Artifact title (required)")
@@ -96,6 +157,19 @@ func init() {
 	artifactListCmd.Flags().String("issue", "", "List artifacts scoped to this issue")
 	artifactListCmd.Flags().String("project", "", "List artifacts scoped to this project")
 	artifactListCmd.Flags().String("output", "json", "Output format: table or json")
+
+	artifactSetFolderCmd.Flags().String("folder", "", "Target folder ID. Pass an empty string (or omit) to move to root.")
+	artifactSetFolderCmd.Flags().String("output", "json", "Output format: table or json")
+
+	artifactFolderListCmd.Flags().String("output", "json", "Output format: table or json")
+
+	artifactFolderCreateCmd.Flags().String("name", "", "Folder name (required)")
+	artifactFolderCreateCmd.Flags().String("parent", "", "Optional parent folder ID for nesting")
+	artifactFolderCreateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	artifactFolderUpdateCmd.Flags().String("name", "", "New folder name")
+	artifactFolderUpdateCmd.Flags().String("parent", "", "New parent folder ID. Pass an empty string to move to root.")
+	artifactFolderUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 func runArtifactCreate(cmd *cobra.Command, _ []string) error {
@@ -262,5 +336,110 @@ func runArtifactDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("delete artifact: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Deleted artifact %s\n", args[0])
+	return nil
+}
+
+func runArtifactSetFolder(cmd *cobra.Command, args []string) error {
+	folderID, _ := cmd.Flags().GetString("folder")
+
+	req := map[string]any{"folder_id": nil}
+	if folderID != "" {
+		req["folder_id"] = folderID
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/artifacts/"+args[0]+"/folder", req, &result); err != nil {
+		return fmt.Errorf("move artifact: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runArtifactFolderList(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result []map[string]any
+	if err := client.GetJSON(ctx, "/api/artifact-folders", &result); err != nil {
+		return fmt.Errorf("list artifact folders: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runArtifactFolderCreate(cmd *cobra.Command, _ []string) error {
+	name, _ := cmd.Flags().GetString("name")
+	if name == "" {
+		return fmt.Errorf("--name is required")
+	}
+
+	req := map[string]any{"name": name}
+	if parent, _ := cmd.Flags().GetString("parent"); parent != "" {
+		req["parent_id"] = parent
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/artifact-folders", req, &result); err != nil {
+		return fmt.Errorf("create artifact folder: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runArtifactFolderUpdate(cmd *cobra.Command, args []string) error {
+	req := map[string]any{}
+	if cmd.Flags().Changed("name") {
+		name, _ := cmd.Flags().GetString("name")
+		req["name"] = name
+	}
+	if cmd.Flags().Changed("parent") {
+		parent, _ := cmd.Flags().GetString("parent")
+		req["parent_id"] = parent
+	}
+	if len(req) == 0 {
+		return fmt.Errorf("nothing to update; provide --name or --parent")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/artifact-folders/"+args[0], req, &result); err != nil {
+		return fmt.Errorf("update artifact folder: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runArtifactFolderDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := client.DeleteJSON(ctx, "/api/artifact-folders/"+args[0]); err != nil {
+		return fmt.Errorf("delete artifact folder: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Deleted artifact folder %s\n", args[0])
 	return nil
 }
