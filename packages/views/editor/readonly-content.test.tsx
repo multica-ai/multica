@@ -60,6 +60,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("ReadonlyContent memoization", () => {
+  // Long-timeline issues (Inbox + IssueDetail with thousands of comments)
+  // freeze the tab when each comment re-runs the full react-markdown pipeline
+  // on every parent re-render. Wrapping the component in React.memo is the
+  // mitigation; this test guards against a future revert that would silently
+  // reintroduce the perf regression.
+  it("is wrapped in React.memo", () => {
+    const memoTypeSymbol = Symbol.for("react.memo");
+    expect((ReadonlyContent as unknown as { $$typeof: symbol }).$$typeof).toBe(
+      memoTypeSymbol,
+    );
+  });
+});
+
 describe("ReadonlyContent math rendering", () => {
   it("renders inline and block LaTeX with KaTeX markup", () => {
     const { container } = render(
