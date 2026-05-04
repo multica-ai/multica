@@ -1,6 +1,6 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-VALUES ($1, $2, $3, $4)
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
 RETURNING *;
 
 -- name: GetChatSession :one
@@ -42,6 +42,7 @@ RETURNING *;
 UPDATE chat_session
 SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
+    runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     updated_at = now()
 WHERE id = sqlc.arg('id');
 
@@ -78,7 +79,7 @@ RETURNING *;
 -- may have established a real agent session before failing, and we'd rather
 -- resume there than start over and lose conversation memory. Used as a
 -- fallback when chat_session.session_id is NULL.
-SELECT session_id, work_dir FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE chat_session_id = $1
   AND status IN ('completed', 'failed')
   AND session_id IS NOT NULL

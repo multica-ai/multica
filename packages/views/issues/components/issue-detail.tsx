@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -229,7 +229,14 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({
+  issueId,
+  onDelete,
+  onDone,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  highlightCommentId,
+}: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -255,7 +262,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(defaultSidebarOpen);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] =
+    useState(defaultSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -327,6 +335,67 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     deleteComment,
     toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+
+  // Memoized timeline grouping. The same Map / groups references are reused
+  // across re-renders that don't change `timeline`, so React.memo on
+  // CommentCard can skip re-rendering when the only thing that moved was
+  // unrelated parent state (e.g. composer draft, sidebar toggle).
+  const timelineView = useMemo(() => {
+    const topLevel = timeline.filter(
+      (e) => e.type === "activity" || !e.parent_id,
+    );
+    const repliesByParent = new Map<string, TimelineEntry[]>();
+    for (const e of timeline) {
+      if (e.type === "comment" && e.parent_id) {
+        const list = repliesByParent.get(e.parent_id) ?? [];
+        list.push(e);
+        repliesByParent.set(e.parent_id, list);
+      }
+    }
+
+    // Coalesce: same actor + same action within 2 min → keep last only
+    const COALESCE_MS = 2 * 60 * 1000;
+    const coalesced: TimelineEntry[] = [];
+    for (const entry of topLevel) {
+      if (entry.type === "activity") {
+        const prev = coalesced[coalesced.length - 1];
+        if (
+          prev?.type === "activity" &&
+          prev.action === entry.action &&
+          prev.actor_type === entry.actor_type &&
+          prev.actor_id === entry.actor_id &&
+          Math.abs(
+            new Date(entry.created_at).getTime() -
+              new Date(prev.created_at).getTime(),
+          ) <= COALESCE_MS
+        ) {
+          coalesced[coalesced.length - 1] = entry;
+          continue;
+        }
+      }
+      coalesced.push(entry);
+    }
+
+    // Group consecutive activities together so the connector line works
+    const groups: {
+      type: "activities" | "comment";
+      entries: TimelineEntry[];
+    }[] = [];
+    for (const entry of coalesced) {
+      if (entry.type === "activity") {
+        const last = groups[groups.length - 1];
+        if (last?.type === "activities") {
+          last.entries.push(entry);
+        } else {
+          groups.push({ type: "activities", entries: [entry] });
+        }
+      } else {
+        groups.push({ type: "comment", entries: [entry] });
+      }
+    }
+
+    return { repliesByParent, groups };
+  }, [timeline]);
 
   const {
     reactions: issueReactions,
@@ -491,26 +560,47 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`}
           />
         </button>
-        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          <PropRow label="Status">
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Priority">
-            <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Assignee">
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label="Due date">
-            <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label="Project">
-            <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label="Labels">
-            <LabelPicker issueId={issue.id} align="start" />
-          </PropRow>
-        </div>}
+        {propertiesOpen && (
+          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+            <PropRow label="Status">
+              <StatusPicker
+                status={issue.status}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Priority">
+              <PriorityPicker
+                priority={issue.priority}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Assignee">
+              <AssigneePicker
+                assigneeType={issue.assignee_type}
+                assigneeId={issue.assignee_id}
+                onUpdate={handleUpdateField}
+                align="start"
+              />
+            </PropRow>
+            <PropRow label="Due date">
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={handleUpdateField}
+              />
+            </PropRow>
+            <PropRow label="Project">
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+              />
+            </PropRow>
+            <PropRow label="Labels">
+              <LabelPicker issueId={issue.id} align="start" />
+            </PropRow>
+          </div>
+        )}
       </div>
 
       {/* Parent issue */}
@@ -558,18 +648,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`}
           />
         </button>
-        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          <PropRow label="Created by">
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
-            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-          </PropRow>
-          <PropRow label="Created">
-            <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-          </PropRow>
-          <PropRow label="Updated">
-            <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-          </PropRow>
-        </div>}
+        {detailsOpen && (
+          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+            <PropRow label="Created by">
+              <ActorAvatar
+                actorType={issue.creator_type}
+                actorId={issue.creator_id}
+                size={18}
+                enableHoverCard
+              />
+              <span className="cursor-pointer truncate">
+                {getActorName(issue.creator_type, issue.creator_id)}
+              </span>
+            </PropRow>
+            <PropRow label="Created">
+              <span className="text-muted-foreground">
+                {shortDate(issue.created_at)}
+              </span>
+            </PropRow>
+            <PropRow label="Updated">
+              <span className="text-muted-foreground">
+                {shortDate(issue.updated_at)}
+              </span>
+            </PropRow>
+          </div>
+        )}
       </div>
 
       {/* Execution log — active runs + collapsed past runs. Self-contained;
@@ -589,24 +692,34 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`}
             />
           </button>
-          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-            <PropRow label="Input">
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
-            </PropRow>
-            <PropRow label="Output">
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
-            </PropRow>
-            {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label="Cache">
+          {tokenUsageOpen && (
+            <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+              <PropRow label="Input">
                 <span className="text-muted-foreground">
-                  {formatTokenCount(usage.total_cache_read_tokens)} read / {formatTokenCount(usage.total_cache_write_tokens)} write
+                  {formatTokenCount(usage.total_input_tokens)}
                 </span>
               </PropRow>
-            )}
-            <PropRow label="Runs">
-              <span className="text-muted-foreground">{usage.task_count}</span>
-            </PropRow>
-          </div>}
+              <PropRow label="Output">
+                <span className="text-muted-foreground">
+                  {formatTokenCount(usage.total_output_tokens)}
+                </span>
+              </PropRow>
+              {(usage.total_cache_read_tokens > 0 ||
+                usage.total_cache_write_tokens > 0) && (
+                <PropRow label="Cache">
+                  <span className="text-muted-foreground">
+                    {formatTokenCount(usage.total_cache_read_tokens)} read /{" "}
+                    {formatTokenCount(usage.total_cache_write_tokens)} write
+                  </span>
+                </PropRow>
+              )}
+              <PropRow label="Runs">
+                <span className="text-muted-foreground">
+                  {usage.task_count}
+                </span>
+              </PropRow>
+            </div>
+          )}
         </div>
       )}
 
@@ -660,23 +773,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
-                  >
-                    <CircleCheck />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Mark as done</TooltipContent>
-            </Tooltip>
-          )}
+          {onDone &&
+            issue.status !== "done" &&
+            issue.status !== "cancelled" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => {
+                        handleUpdateField({ status: "done" });
+                        onDone?.();
+                      }}
+                    >
+                      <CircleCheck />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Mark as done</TooltipContent>
+              </Tooltip>
+            )}
           {onDone && issue.status === "done" && (
             <Tooltip>
               <TooltipTrigger
@@ -685,7 +803,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground"
-                    onClick={() => { onDone(); }}
+                    onClick={() => {
+                      onDone();
+                    }}
                   >
                     <Archive />
                   </Button>
@@ -700,14 +820,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
+                  className={cn(
+                    "text-muted-foreground",
+                    actions.isPinned && "text-foreground",
+                  )}
                   onClick={actions.togglePin}
                 >
                   {actions.isPinned ? <PinOff /> : <Pin />}
                 </Button>
               }
             />
-            <TooltipContent side="bottom">{actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}</TooltipContent>
+            <TooltipContent side="bottom">
+              {actions.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+            </TooltipContent>
           </Tooltip>
           <IssueActionsDropdown
             issue={issue}
@@ -716,7 +841,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             // above and skip navigation. Otherwise the modal navigates for us.
             onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
             trigger={
-              <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+              >
                 <MoreHorizontal />
               </Button>
             }
@@ -740,10 +869,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       </PageHeader>
 
       {/* Content — scrollable */}
-      <div
-        ref={scrollContainerRef}
-        className="relative flex-1 overflow-y-auto"
-      >
+      <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -878,12 +1004,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             type="button"
                             className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                             onClick={() =>
-                              useModalStore
-                                .getState()
-                                .open("create-issue", {
-                                  parent_issue_id: issue.id,
-                                  parent_issue_identifier: issue.identifier,
-                                })
+                              useModalStore.getState().open("create-issue", {
+                                parent_issue_id: issue.id,
+                                parent_issue_identifier: issue.identifier,
+                              })
                             }
                             aria-label="Add sub-issue"
                           >
@@ -1038,47 +1162,42 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               })}
                           </CommandGroup>
                         )}
-                        {agents.filter((a) => !a.archived_at).length >
-                          0 && (
-                            <CommandGroup heading="Agents">
-                              {agents
-                                .filter((a) => !a.archived_at)
-                                .map((a) => {
-                                  const sub = subscribers.find(
-                                    (s) =>
-                                      s.user_type === "agent" &&
-                                      s.user_id === a.id,
-                                  );
-                                  const isSubbed = !!sub;
-                                  return (
-                                    <CommandItem
-                                      key={`agent-${a.id}`}
-                                      onSelect={() =>
-                                        toggleSubscriber(
-                                          a.id,
-                                          "agent",
-                                          isSubbed,
-                                        )
-                                      }
-                                      className="flex items-center gap-2.5"
-                                    >
-                                      <Checkbox
-                                        checked={isSubbed}
-                                        className="pointer-events-none"
-                                      />
-                                      <ActorAvatar
-                                        actorType="agent"
-                                        actorId={a.id}
-                                        size={22}
-                                      />
-                                      <span className="truncate flex-1">
-                                        {a.name}
-                                      </span>
-                                    </CommandItem>
-                                  );
-                                })}
-                            </CommandGroup>
-                          )}
+                        {agents.filter((a) => !a.archived_at).length > 0 && (
+                          <CommandGroup heading="Agents">
+                            {agents
+                              .filter((a) => !a.archived_at)
+                              .map((a) => {
+                                const sub = subscribers.find(
+                                  (s) =>
+                                    s.user_type === "agent" &&
+                                    s.user_id === a.id,
+                                );
+                                const isSubbed = !!sub;
+                                return (
+                                  <CommandItem
+                                    key={`agent-${a.id}`}
+                                    onSelect={() =>
+                                      toggleSubscriber(a.id, "agent", isSubbed)
+                                    }
+                                    className="flex items-center gap-2.5"
+                                  >
+                                    <Checkbox
+                                      checked={isSubbed}
+                                      className="pointer-events-none"
+                                    />
+                                    <ActorAvatar
+                                      actorType="agent"
+                                      actorId={a.id}
+                                      size={22}
+                                    />
+                                    <span className="truncate flex-1">
+                                      {a.name}
+                                    </span>
+                                  </CommandItem>
+                                );
+                              })}
+                          </CommandGroup>
+                        )}
                       </CommandList>
                     </Command>
                   </PopoverContent>
@@ -1094,168 +1213,106 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">
-              {(() => {
-                const topLevel = timeline.filter(
-                  (e) => e.type === "activity" || !e.parent_id,
-                );
-                const repliesByParent = new Map<string, TimelineEntry[]>();
-                for (const e of timeline) {
-                  if (e.type === "comment" && e.parent_id) {
-                    const list = repliesByParent.get(e.parent_id) ?? [];
-                    list.push(e);
-                    repliesByParent.set(e.parent_id, list);
-                  }
-                }
-
-                // Coalesce: same actor + same action within 2 min → keep last only
-                const COALESCE_MS = 2 * 60 * 1000;
-                const coalesced: TimelineEntry[] = [];
-                for (const entry of topLevel) {
-                  if (entry.type === "activity") {
-                    const prev = coalesced[coalesced.length - 1];
-                    if (
-                      prev?.type === "activity" &&
-                      prev.action === entry.action &&
-                      prev.actor_type === entry.actor_type &&
-                      prev.actor_id === entry.actor_id &&
-                      Math.abs(
-                        new Date(entry.created_at).getTime() -
-                        new Date(prev.created_at).getTime(),
-                      ) <= COALESCE_MS
-                    ) {
-                      // Replace previous with this one (keep the later result)
-                      coalesced[coalesced.length - 1] = entry;
-                      continue;
-                    }
-                  }
-                  coalesced.push(entry);
-                }
-
-                // Group consecutive activities together so the connector line works
-                const groups: {
-                  type: "activities" | "comment";
-                  entries: TimelineEntry[];
-                }[] = [];
-                for (const entry of coalesced) {
-                  if (entry.type === "activity") {
-                    const last = groups[groups.length - 1];
-                    if (last?.type === "activities") {
-                      last.entries.push(entry);
-                    } else {
-                      groups.push({ type: "activities", entries: [entry] });
-                    }
-                  } else {
-                    groups.push({ type: "comment", entries: [entry] });
-                  }
-                }
-
-                return groups.map((group) => {
-                  if (group.type === "comment") {
-                    const entry = group.entries[0]!;
-                    return (
-                      <div key={entry.id} id={`comment-${entry.id}`}>
-                        <CommentCard
-                          issueId={id}
-                          entry={entry}
-                          allReplies={repliesByParent}
-                          currentUserId={user?.id}
-                          canModerate={canModerateComments}
-                          onReply={submitReply}
-                          onEdit={editComment}
-                          onDelete={deleteComment}
-                          onToggleReaction={handleToggleReaction}
-                          highlightedCommentId={highlightedId}
-                        />
-                      </div>
-                    );
-                  }
-
+              {timelineView.groups.map((group) => {
+                if (group.type === "comment") {
+                  const entry = group.entries[0]!;
                   return (
-                    <div
-                      key={group.entries[0]!.id}
-                      className="px-4 flex flex-col gap-3"
-                    >
-                      {group.entries.map((entry, _idx) => {
-                        const details = (entry.details ?? {}) as Record<
-                          string,
-                          string
-                        >;
-                        const isStatusChange =
-                          entry.action === "status_changed";
-                        const isPriorityChange =
-                          entry.action === "priority_changed";
-                        const isDueDateChange =
-                          entry.action === "due_date_changed";
-
-                        let leadIcon: React.ReactNode;
-                        if (isStatusChange && details.to) {
-                          leadIcon = (
-                            <StatusIcon
-                              status={details.to as IssueStatus}
-                              className="h-4 w-4 shrink-0"
-                            />
-                          );
-                        } else if (isPriorityChange && details.to) {
-                          leadIcon = (
-                            <PriorityIcon
-                              priority={details.to as IssuePriority}
-                              className="h-4 w-4 shrink-0"
-                            />
-                          );
-                        } else if (isDueDateChange) {
-                          leadIcon = (
-                            <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          );
-                        } else {
-                          leadIcon = (
-                            <ActorAvatar
-                              actorType={entry.actor_type}
-                              actorId={entry.actor_id}
-                              size={16}
-                            />
-                          );
-                        }
-
-                        return (
-                          <div
-                            key={entry.id}
-                            className="flex items-center text-xs text-muted-foreground"
-                          >
-                            <div className="mr-2 flex w-4 shrink-0 justify-center">
-                              {leadIcon}
-                            </div>
-                            <div className="flex min-w-0 flex-1 items-center gap-1">
-                              <span className="shrink-0 font-medium">
-                                {getActorName(
-                                  entry.actor_type,
-                                  entry.actor_id,
-                                )}
-                              </span>
-                              <span className="truncate">
-                                {formatActivity(entry, getActorName)}
-                              </span>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <span className="ml-auto shrink-0 cursor-default">
-                                      {timeAgo(entry.created_at)}
-                                    </span>
-                                  }
-                                />
-                                <TooltipContent side="top">
-                                  {new Date(
-                                    entry.created_at,
-                                  ).toLocaleString()}
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div key={entry.id} id={`comment-${entry.id}`}>
+                      <CommentCard
+                        issueId={id}
+                        entry={entry}
+                        allReplies={timelineView.repliesByParent}
+                        currentUserId={user?.id}
+                        canModerate={canModerateComments}
+                        onReply={submitReply}
+                        onEdit={editComment}
+                        onDelete={deleteComment}
+                        onToggleReaction={handleToggleReaction}
+                        highlightedCommentId={highlightedId}
+                      />
                     </div>
                   );
-                });
-              })()}
+                }
+
+                return (
+                  <div
+                    key={group.entries[0]!.id}
+                    className="px-4 flex flex-col gap-3"
+                  >
+                    {group.entries.map((entry, _idx) => {
+                      const details = (entry.details ?? {}) as Record<
+                        string,
+                        string
+                      >;
+                      const isStatusChange = entry.action === "status_changed";
+                      const isPriorityChange =
+                        entry.action === "priority_changed";
+                      const isDueDateChange =
+                        entry.action === "due_date_changed";
+
+                      let leadIcon: React.ReactNode;
+                      if (isStatusChange && details.to) {
+                        leadIcon = (
+                          <StatusIcon
+                            status={details.to as IssueStatus}
+                            className="h-4 w-4 shrink-0"
+                          />
+                        );
+                      } else if (isPriorityChange && details.to) {
+                        leadIcon = (
+                          <PriorityIcon
+                            priority={details.to as IssuePriority}
+                            className="h-4 w-4 shrink-0"
+                          />
+                        );
+                      } else if (isDueDateChange) {
+                        leadIcon = (
+                          <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        );
+                      } else {
+                        leadIcon = (
+                          <ActorAvatar
+                            actorType={entry.actor_type}
+                            actorId={entry.actor_id}
+                            size={16}
+                          />
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={entry.id}
+                          className="flex items-center text-xs text-muted-foreground"
+                        >
+                          <div className="mr-2 flex w-4 shrink-0 justify-center">
+                            {leadIcon}
+                          </div>
+                          <div className="flex min-w-0 flex-1 items-center gap-1">
+                            <span className="shrink-0 font-medium">
+                              {getActorName(entry.actor_type, entry.actor_id)}
+                            </span>
+                            <span className="truncate">
+                              {formatActivity(entry, getActorName)}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="ml-auto shrink-0 cursor-default">
+                                    {timeAgo(entry.created_at)}
+                                  </span>
+                                }
+                              />
+                              <TooltipContent side="top">
+                                {new Date(entry.created_at).toLocaleString()}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Bottom comment input — no avatar, full width */}
@@ -1273,7 +1330,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            className="w-[320px] overflow-y-auto p-4"
+          >
             {sidebarContent}
           </SheetContent>
         </Sheet>
@@ -1282,7 +1343,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+    <ResizablePanelGroup
+      orientation="horizontal"
+      className="flex-1 min-h-0"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
       </ResizablePanel>
@@ -1298,9 +1364,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
       >
         <div className="overflow-y-auto border-l h-full">
-          <div className="p-4">
-            {sidebarContent}
-          </div>
+          <div className="p-4">{sidebarContent}</div>
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>

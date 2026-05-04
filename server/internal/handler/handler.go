@@ -61,7 +61,7 @@ type Handler struct {
 	EmailService          *service.EmailService
 	RedmineClient         *service.RedmineClient
 	UpdateStore           *UpdateStore
-	ModelListStore        *ModelListStore
+	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	Storage               storage.Storage
@@ -100,7 +100,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:          emailService,
 		RedmineClient:         service.NewRedmineClient(),
 		UpdateStore:           NewUpdateStore(),
-		ModelListStore:        NewModelListStore(),
+		ModelListStore:        NewInMemoryModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		Storage:               store,

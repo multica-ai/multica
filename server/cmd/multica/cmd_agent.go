@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,6 +69,13 @@ var agentTasksCmd = &cobra.Command{
 	RunE:  runAgentTasks,
 }
 
+var agentAvatarCmd = &cobra.Command{
+	Use:   "avatar <id>",
+	Short: "Upload an avatar image for an agent",
+	Args:  exactArgs(1),
+	RunE:  runAgentAvatar,
+}
+
 // Agent skills subcommands.
 
 var agentSkillsCmd = &cobra.Command{
@@ -97,6 +105,7 @@ func init() {
 	agentCmd.AddCommand(agentArchiveCmd)
 	agentCmd.AddCommand(agentRestoreCmd)
 	agentCmd.AddCommand(agentTasksCmd)
+	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
@@ -148,6 +157,10 @@ func init() {
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// agent avatar
+	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
+	agentAvatarCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent skills list
 	agentSkillsListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -321,13 +334,14 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, agent)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
 	rows := [][]string{{
 		strVal(agent, "id"),
 		strVal(agent, "name"),
 		strVal(agent, "status"),
 		strVal(agent, "runtime_mode"),
 		strVal(agent, "visibility"),
+		strVal(agent, "avatar_url"),
 		strVal(agent, "description"),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -567,6 +581,86 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 			strVal(t, "created_at"),
 		})
 	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAgentAvatar(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	filePath, _ := cmd.Flags().GetString("file")
+	if filePath == "" {
+		return fmt.Errorf("--file is required")
+	}
+
+	// Validate file exists.
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("file not found: %w", err)
+	}
+
+	// Validate extension.
+	ext := strings.ToLower(filepath.Ext(filePath))
+	validExts := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+	if !validExts[ext] {
+		return fmt.Errorf("unsupported file format %q: must be .png, .jpg, .jpeg, .gif, or .webp", ext)
+	}
+
+	// Client-side size guard: reject files > 5MB.
+	const maxSize = 5 << 20 // 5 MB
+	if info.Size() > maxSize {
+		return fmt.Errorf("file too large: %d bytes (max 5MB)", info.Size())
+	}
+
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+
+	// Defensive re-check: guard against TOCTOU race where the file
+	// was swapped between stat and read.
+	if len(fileData) > maxSize {
+		return fmt.Errorf("file too large: %d bytes (max 5MB)", len(fileData))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Agent existence pre-check.
+	var agent map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0], &agent); err != nil {
+		return fmt.Errorf("get agent: %w", err)
+	}
+
+	id, url, err := client.UploadFileWithURL(ctx, fileData, filePath)
+	if err != nil {
+		return fmt.Errorf("upload avatar: %w", err)
+	}
+
+	body := map[string]any{"avatar_url": url}
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0], body, &result); err != nil {
+		return fmt.Errorf("update agent avatar: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"id":         id,
+			"agent_id":   args[0],
+			"avatar_url": url,
+		})
+	}
+
+	headers := []string{"ID", "AGENT_ID", "AVATAR_URL"}
+	rows := [][]string{{
+		id,
+		args[0],
+		url,
+	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
