@@ -18,6 +18,7 @@ import (
 type S3Storage struct {
 	client      *s3.Client
 	bucket      string
+	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
 	cdnDomain   string // if set, returned URLs use this instead of bucket name
 	endpointURL string // if set, use path-style URLs (e.g. MinIO)
 }
@@ -74,6 +75,7 @@ func NewS3StorageFromEnv() *S3Storage {
 	return &S3Storage{
 		client:      s3.NewFromConfig(cfg, s3Opts...),
 		bucket:      bucket,
+		region:      region,
 		cdnDomain:   cdnDomain,
 		endpointURL: endpointURL,
 	}
@@ -94,6 +96,8 @@ func (s *S3Storage) storageClass() types.StorageClass {
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
 // e.g. "https://multica-static.copilothub.ai/abc123.png" → "abc123.png"
+//
+//	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	if s.endpointURL != "" {
 		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
@@ -102,11 +106,26 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 		}
 	}
 
-	// Strip the "https://domain/" prefix.
-	for _, prefix := range []string{
-		"https://" + s.cdnDomain + "/",
-		"https://" + s.bucket + "/",
-	} {
+	// Strip known "https://host/" prefixes. Order matters: the more specific
+	// region-qualified hosts come first so they win over the legacy bucket-only
+	// prefix that we used to write before the suffix bug was fixed.
+	prefixes := make([]string, 0, 5)
+	if s.cdnDomain != "" {
+		prefixes = append(prefixes, "https://"+s.cdnDomain+"/")
+	}
+	if s.region != "" {
+		// virtual-hosted-style: https://<bucket>.s3.<region>.amazonaws.com/<key>
+		prefixes = append(prefixes,
+			"https://"+s.bucket+".s3."+s.region+".amazonaws.com/",
+			// path-style: https://s3.<region>.amazonaws.com/<bucket>/<key>
+			"https://s3."+s.region+".amazonaws.com/"+s.bucket+"/",
+		)
+	}
+	// Legacy / fallback: the buggy "https://<bucket>/<key>" form that older
+	// records may still hold, plus a generic bucket-host prefix.
+	prefixes = append(prefixes, "https://"+s.bucket+"/")
+
+	for _, prefix := range prefixes {
 		if strings.HasPrefix(rawURL, prefix) {
 			return strings.TrimPrefix(rawURL, prefix)
 		}
@@ -161,10 +180,17 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 }
 
 // uploadedURL returns the URL stored for client consumption after an upload.
-// Priority: CDN domain > custom endpoint > bucket. The CDN domain wins even when
-// a custom endpoint is set so S3-compatible backends (MinIO, R2, B2, Wasabi, etc.)
-// can be paired with a separate public-read domain — writes still go through the
-// SDK with the custom endpoint; only the reader-facing URL changes.
+// Priority: CDN domain > custom endpoint > AWS S3 region-qualified host. The CDN
+// domain wins even when a custom endpoint is set so S3-compatible backends
+// (MinIO, R2, B2, Wasabi, etc.) can be paired with a separate public-read
+// domain — writes still go through the SDK with the custom endpoint; only the
+// reader-facing URL changes.
+//
+// For the default AWS S3 case, virtual-hosted-style is preferred:
+// https://<bucket>.s3.<region>.amazonaws.com/<key>. When the bucket name
+// contains dots, the AWS-issued wildcard TLS certificate (`*.s3.amazonaws.com`)
+// fails to validate the host, so we fall back to path-style:
+// https://s3.<region>.amazonaws.com/<bucket>/<key>.
 func (s *S3Storage) uploadedURL(key string) string {
 	if s.cdnDomain != "" {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
@@ -172,5 +198,8 @@ func (s *S3Storage) uploadedURL(key string) string {
 	if s.endpointURL != "" {
 		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
 	}
-	return fmt.Sprintf("https://%s/%s", s.bucket, key)
+	if strings.Contains(s.bucket, ".") {
+		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
+	}
+	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
 }
