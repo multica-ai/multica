@@ -284,6 +284,35 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.24",
+        date: "2026-05-03",
+        title: "Repo Checkout `--ref`, Hermes Replay Fix & Multi-Replica Model Picker",
+        changes: [],
+        features: [
+          "`multica repo checkout --ref` targets a branch, tag, or specific commit when pulling a repo into the workspace",
+          "`multica agent avatar` uploads an agent avatar straight from the CLI",
+          "Inbox shows an archive button on done tasks; the redundant mark-as-done hover button is gone",
+        ],
+        improvements: [
+          "Long-timeline issues open instantly from Inbox — the markdown render pipeline is memoized so unrelated WS events no longer re-render thousands of comments",
+          "Model picker works on multi-replica deployments — pending requests persist via Redis, with daemon retries on transient report failures",
+          "Daemon empty-claim cache TTL bumped, further reducing idle DB load",
+        ],
+        fixes: [
+          "Newly created agents show up everywhere immediately — the agent cache is hydrated on create",
+          "Hermes no longer replays the previous answer when a new turn starts — historical chunks are gated behind a per-turn flag",
+          "Codex runtime model picker exposes the GPT-5.5 family",
+          "`multica login --token <PAT>` accepts the PAT as a flag value instead of rejecting it",
+          "CLI update completion status is now reliable",
+          "Session resume is guarded by runtime, preventing cross-runtime resume",
+          "Kanban display settings survive when dragging issues across columns",
+          "Autopilot list is responsive on mobile viewports",
+          "Quick Create prompts produce higher-fidelity descriptions from the user's input",
+          "Skill upsert sanitizes null bytes, fixing a PostgreSQL UTF8 error",
+          "Connect Remote dialog points to the correct install script URL",
+        ],
+      },
+      {
         version: "0.2.21",
         date: "2026-04-30",
         title: "Quick Capture Overhaul, Mermaid Diagrams & Typed Project Resources",

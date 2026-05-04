@@ -63,7 +63,7 @@ type Handler struct {
 	ChannelMessageService *channel.MessageService
 	EmailService          *service.EmailService
 	UpdateStore           *UpdateStore
-	ModelListStore        *ModelListStore
+	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	Storage               storage.Storage
@@ -103,7 +103,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ChannelMessageService: channel.NewMessageService(queries),
 		EmailService:          emailService,
 		UpdateStore:           NewUpdateStore(),
-		ModelListStore:        NewModelListStore(),
+		ModelListStore:        NewInMemoryModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		Storage:               store,

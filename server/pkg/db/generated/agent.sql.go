@@ -1029,7 +1029,7 @@ func (q *Queries) GetLastChannelMentionSession(ctx context.Context, arg GetLastC
 }
 
 const getLastTaskSession = `-- name: GetLastTaskSession :one
-SELECT session_id, work_dir FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'
@@ -1048,6 +1048,7 @@ type GetLastTaskSessionParams struct {
 type GetLastTaskSessionRow struct {
 	SessionID pgtype.Text `json:"session_id"`
 	WorkDir   pgtype.Text `json:"work_dir"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
 }
 
 // Returns the session_id and work_dir from the most recent task for a given
@@ -1066,7 +1067,7 @@ type GetLastTaskSessionRow struct {
 func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSessionParams) (GetLastTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastTaskSession, arg.AgentID, arg.IssueID)
 	var i GetLastTaskSessionRow
-	err := row.Scan(&i.SessionID, &i.WorkDir)
+	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
 	return i, err
 }
 

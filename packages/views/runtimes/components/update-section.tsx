@@ -99,6 +99,7 @@ export function UpdateSection({
   const [error, setError] = useState("");
   const [output, setOutput] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [targetVersion, setTargetVersion] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const cleanup = useCallback(() => {
@@ -115,10 +116,32 @@ export function UpdateSection({
     fetchLatestVersion().then(setLatestVersion);
   }, []);
 
+  const markCompleted = useCallback(
+    (message: string) => {
+      setStatus("completed");
+      setOutput(message);
+      setUpdating(false);
+      setTargetVersion(null);
+      cleanup();
+      // Auto-clear status after a few seconds so the UI refreshes to show the
+      // new version from the re-fetched runtime data.
+      setTimeout(() => setStatus(null), 5000);
+    },
+    [cleanup],
+  );
+
+  useEffect(() => {
+    if (!updating || !targetVersion || !currentVersion) return;
+    if (!isNewer(targetVersion, currentVersion)) {
+      markCompleted(`Updated to ${targetVersion}`);
+    }
+  }, [currentVersion, markCompleted, targetVersion, updating]);
+
   const handleUpdate = async () => {
     if (!latestVersion) return;
     cleanup();
     setUpdating(true);
+    setTargetVersion(latestVersion);
     setStatus("pending");
     setError("");
     setOutput("");
@@ -132,18 +155,16 @@ export function UpdateSection({
           setStatus(result.status as RuntimeUpdateStatus);
 
           if (result.status === "completed") {
-            setOutput(result.output ?? "");
-            setUpdating(false);
-            cleanup();
-            // Auto-clear status after a few seconds so the UI
-            // refreshes to show the new version from the re-fetched runtime data.
-            setTimeout(() => setStatus(null), 5000);
+            markCompleted(
+              result.output ?? `Updated to ${targetVersion ?? latestVersion}`,
+            );
           } else if (
             result.status === "failed" ||
             result.status === "timeout"
           ) {
             setError(result.error ?? "Unknown error");
             setUpdating(false);
+            setTargetVersion(null);
             cleanup();
           }
         } catch {
@@ -154,6 +175,7 @@ export function UpdateSection({
       setStatus("failed");
       setError("Failed to initiate update");
       setUpdating(false);
+      setTargetVersion(null);
     }
   };
 
