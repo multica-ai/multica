@@ -10,8 +10,12 @@ The Multica MCP server lets Claude Code use Multica tools directly — no manual
 In your terminal (or Claude Code's bash):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firtal-group/firtal-cerebro/main/scripts/install-mcp.sh | bash
+gh api "repos/firtal-group/firtal-cerebro/contents/scripts/install-mcp.sh?ref=main" --jq '.content' | base64 -d | bash
 ```
+
+<Callout type="info">
+This command requires the [GitHub CLI](https://cli.github.com/) (`gh`) with access to the firtal-group organization. Run `gh auth login` first if you haven't authenticated.
+</Callout>
 
 The script:
 
