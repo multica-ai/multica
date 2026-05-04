@@ -30,7 +30,11 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  // Empty string when this task is bound to a chat session or autopilot
+  // run instead of an issue (migration 033 made issue_id nullable;
+  // server marshals NULL as the empty UUID string).
   issue_id: string;
+  chat_session_id?: string;
   status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
   priority: number;
   dispatched_at: string | null;

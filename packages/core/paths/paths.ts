@@ -39,6 +39,7 @@ function workspaceScoped(slug: string) {
     runtimes: () => `${ws}/runtimes`,
     skills: () => `${ws}/skills`,
     settings: () => `${ws}/settings`,
+    memberDetail: (memberId: string) => `${ws}/members/${encode(memberId)}`,
   };
 }
 

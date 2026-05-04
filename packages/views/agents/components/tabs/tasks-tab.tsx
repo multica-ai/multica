@@ -65,7 +65,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
       <div>
         <h3 className="text-sm font-semibold">Task Queue</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Issues assigned to this agent and their execution status.
+          Issues, chat sessions and autopilot runs handled by this agent.
         </p>
       </div>
 
@@ -82,7 +82,11 @@ export function TasksTab({ agent }: { agent: Agent }) {
           {sortedTasks.map((task) => {
             const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
             const Icon = config.icon;
-            const issue = issueMap.get(task.issue_id);
+            const hasIssue = !!task.issue_id;
+            const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
+            const isChat = !hasIssue && !!task.chat_session_id;
+            // Tasks with neither issue_id nor chat_session_id are
+            // autopilot-run tasks (no clickable destination yet).
             const isActive = task.status === "running" || task.status === "dispatched";
             const isRunning = task.status === "running";
             const rowClassName = `flex items-center gap-3 rounded-lg border px-4 py-3 transition-shadow hover:shadow-sm ${
@@ -92,6 +96,25 @@ export function TasksTab({ agent }: { agent: Agent }) {
                   ? "border-info/40 bg-info/5"
                   : ""
             }`;
+
+            let label: string;
+            if (issue) {
+              label = issue.title;
+            } else if (hasIssue) {
+              label = `Issue ${task.issue_id.slice(0, 8)}…`;
+            } else if (isChat) {
+              label = `Chat session ${task.chat_session_id!.slice(0, 8)}…`;
+            } else {
+              label = "Autopilot run";
+            }
+
+            const href = issue
+              ? paths.issueDetail(task.issue_id)
+              : hasIssue
+                ? paths.issueDetail(task.issue_id)
+                : isChat
+                  ? `${paths.inbox()}?chat=${task.chat_session_id}`
+                  : null;
 
             const content = (
               <>
@@ -108,7 +131,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       </span>
                     )}
                     <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
-                      {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
+                      {label}
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
@@ -129,10 +152,18 @@ export function TasksTab({ agent }: { agent: Agent }) {
               </>
             );
 
+            if (!href) {
+              return (
+                <div key={task.id} className={`${rowClassName} text-foreground`}>
+                  {content}
+                </div>
+              );
+            }
+
             return (
               <AppLink
                 key={task.id}
-                href={paths.issueDetail(task.issue_id)}
+                href={href}
                 className={`${rowClassName} text-foreground no-underline hover:no-underline`}
               >
                 {content}

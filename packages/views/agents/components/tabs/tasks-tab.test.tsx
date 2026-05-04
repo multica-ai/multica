@@ -166,7 +166,7 @@ describe("TasksTab", () => {
       expect(mockListAgentTasks).toHaveBeenCalledWith("agent-1");
     });
 
-    const title = await screen.findByText("Issue 12345678...");
+    const title = await screen.findByText("Issue 12345678…");
     const link = title.closest("a");
 
     expect(link?.getAttribute("href")).toBe("/test/issues/12345678-fallback");

@@ -39,9 +39,10 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, paths } from "@multica/core/paths";
 import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { AppLink } from "../../navigation";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
   owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },
@@ -51,6 +52,7 @@ const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; descri
 
 function MemberRow({
   member,
+  workspaceSlug,
   canManage,
   canManageOwners,
   isSelf,
@@ -59,6 +61,7 @@ function MemberRow({
   onRemove,
 }: {
   member: MemberWithUser;
+  workspaceSlug: string;
   canManage: boolean;
   canManageOwners: boolean;
   isSelf: boolean;
@@ -75,10 +78,13 @@ function MemberRow({
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <ActorAvatar actorType="member" actorId={member.user_id} size={32} />
-      <div className="min-w-0 flex-1">
+      <AppLink
+        href={paths.workspace(workspaceSlug).memberDetail(member.id)}
+        className="min-w-0 flex-1 hover:underline"
+      >
         <div className="text-sm font-medium truncate">{member.name}</div>
         <div className="text-xs text-muted-foreground truncate">{member.email}</div>
-      </div>
+      </AppLink>
       {showMenu && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -333,6 +339,7 @@ export function MembersTab() {
               <div key={m.id} className={i > 0 ? "border-t border-border/50" : ""}>
                 <MemberRow
                   member={m}
+                  workspaceSlug={workspace.slug}
                   canManage={canManageWorkspace}
                   canManageOwners={isOwner}
                   isSelf={m.user_id === user?.id}

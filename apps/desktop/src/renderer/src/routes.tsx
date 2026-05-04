@@ -29,6 +29,7 @@ import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/views/notifications";
 import { SettingsPage } from "@multica/views/settings";
+import { MemberDetailPage } from "@multica/views/members";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
@@ -153,6 +154,11 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          {
+            path: "members/:memberId",
+            element: <MemberDetailRoute />,
+            handle: { title: "Member" },
+          },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "notifications",
@@ -213,4 +219,9 @@ function DocumentEditRoute() {
 function AttachmentViewRoute() {
   const params = useParams<{ id: string }>();
   return <AttachmentViewPage attachmentId={params.id ?? ""} />;
+}
+
+function MemberDetailRoute() {
+  const params = useParams<{ memberId: string }>();
+  return <MemberDetailPage memberId={params.memberId ?? ""} />;
 }
