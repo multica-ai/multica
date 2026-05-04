@@ -552,6 +552,20 @@ func (c *codexClient) respond(id int, result any) {
 	_, _ = c.stdin.Write(data)
 }
 
+func (c *codexClient) respondError(id int, code int, message string) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	_, _ = c.stdin.Write(data)
+}
+
 func (c *codexClient) closeAllPending(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -632,8 +646,11 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/fileChange/requestApproval", "applyPatchApproval":
 		c.respond(id, map[string]any{"decision": "accept"})
+	case "mcpServer/elicitation/request":
+		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
-		c.respond(id, map[string]any{})
+		c.cfg.Logger.Warn("codex: unhandled server request", "method", method, "id", id)
+		c.respondError(id, -32601, fmt.Sprintf("unhandled server request: %s", method))
 	}
 }
 
