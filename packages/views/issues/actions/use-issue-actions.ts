@@ -7,6 +7,7 @@ import type {
   Issue,
   MemberWithUser,
   Agent,
+  Project,
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -18,6 +19,7 @@ import {
   memberListOptions,
   agentListOptions,
 } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
@@ -28,6 +30,7 @@ export interface UseIssueActionsResult {
   // Derived data for rendering menu rows
   members: MemberWithUser[];
   agents: Agent[];
+  projects: Project[];
   isPinned: boolean;
   // Handlers
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
@@ -53,6 +56,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -164,6 +168,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   return {
     members,
     agents: filteredAgents,
+    projects,
     isPinned,
     updateField,
     togglePin,

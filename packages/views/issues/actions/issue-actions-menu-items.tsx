@@ -4,6 +4,8 @@ import {
   ArrowDown,
   ArrowUp,
   Calendar,
+  Check,
+  FolderKanban,
   Link2,
   MoreHorizontal,
   Pin,
@@ -22,6 +24,7 @@ import {
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -85,6 +88,7 @@ export function IssueActionsMenuItems({
   const {
     members,
     agents,
+    projects,
     isPinned,
     updateField,
     togglePin,
@@ -101,6 +105,9 @@ export function IssueActionsMenuItems({
     d.setDate(d.getDate() + days);
     return d.toISOString();
   };
+  const currentProject = issue.project_id
+    ? projects.find((project) => project.id === issue.project_id)
+    : null;
 
   return (
     <>
@@ -193,6 +200,43 @@ export function IssueActionsMenuItems({
               )}
             </P.Item>
           ))}
+        </P.SubContent>
+      </P.Sub>
+
+      {/* Project */}
+      <P.Sub>
+        <P.SubTrigger>
+          {currentProject ? (
+            <ProjectIcon project={currentProject} size="sm" />
+          ) : (
+            <FolderKanban className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+          Project
+        </P.SubTrigger>
+        <P.SubContent className="max-h-72 min-w-56 overflow-y-auto">
+          <P.Item onClick={() => updateField({ project_id: null })}>
+            <FolderKanban className="h-3.5 w-3.5 text-muted-foreground" />
+            No project
+            {!issue.project_id && (
+              <Check className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </P.Item>
+          {projects.length > 0 && <P.Separator />}
+          {projects.map((project) => (
+            <P.Item
+              key={project.id}
+              onClick={() => updateField({ project_id: project.id })}
+            >
+              <ProjectIcon project={project} size="md" />
+              <span className="truncate">{project.title}</span>
+              {issue.project_id === project.id && (
+                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+            </P.Item>
+          ))}
+          {projects.length === 0 && (
+            <P.Item disabled>No projects yet</P.Item>
+          )}
         </P.SubContent>
       </P.Sub>
 
