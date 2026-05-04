@@ -30,7 +30,7 @@ jobs:
         run: pnpm install
 
       - name: Build, type check, and test
-        run: pnpm exec turbo build typecheck test --filter='!@multica/docs'
+        run: pnpm exec turbo build typecheck test
 
   backend:
     runs-on: ubuntu-latest
