@@ -1,0 +1,16 @@
+name: Fork Patch Guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-patches:
+    runs-on: depot-ubuntu-24.04-2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Forge fork patches
+        run: bash scripts/verify-patches.sh
