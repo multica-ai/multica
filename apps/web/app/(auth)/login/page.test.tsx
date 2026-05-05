@@ -3,11 +3,18 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { I18nProvider } from "@multica/i18n/react";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    <QueryClientProvider client={qc}>
+      <I18nProvider initialLocale="en" dictionaries={{ en, zh }}>
+        {children}
+      </I18nProvider>
+    </QueryClientProvider>
   );
 }
 
