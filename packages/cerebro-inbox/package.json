@@ -6,8 +6,28 @@
   "exports": {
     ".": "./index.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "react-resizable-panels": "^3.0.7",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:"
+  },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

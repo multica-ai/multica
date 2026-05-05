@@ -28,6 +28,8 @@
     "./inbox": "./inbox/index.ts",
     "./inbox/components/inbox-list-item": "./inbox/components/inbox-list-item.tsx",
     "./inbox/components/inbox-detail-label": "./inbox/components/inbox-detail-label.tsx",
+    "./inbox/components/inbox-chat-panel": "./inbox/components/inbox-chat-panel.tsx",
+    "./layout/page-header": "./layout/page-header.tsx",
     "./runtimes": "./runtimes/index.ts",
     "./docs": "./docs/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",

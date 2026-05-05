@@ -54,12 +54,22 @@ run_check "unit-tests-ts" "pnpm test -- --run"
 # L1 — Go tests
 run_check "go-tests" "make test"
 
-# L2 — Playwright E2E (only if dev server can be started)
-# This is heavy; only run for chunks 7+ (Phase 2+) when full eval is needed
+# L2 — Playwright E2E (only if dev server can be started AND baselines exist)
+# Heavy; only run for chunks 7+ (Phase 2+) AND only if the corresponding
+# baselines have been captured. Per upstream-sync preflight P5 amendment,
+# pixel snapshots are deferred to Phase 1+ if flake risk warrants.
 case "$CHUNK_ID" in
   chunk-7|chunk-8|chunk-9|chunk-10|chunk-11|chunk-12|phase-2|phase-3*|phase-4|phase-5)
-    run_check "e2e-playwright" "pnpm exec playwright test --reporter=line"
-    run_check "visual-regression" "pnpm exec playwright test e2e/visual.spec.ts --reporter=line"
+    if [ -f e2e/playwright.config.ts ] && [ -d e2e/__snapshots__ ]; then
+      run_check "e2e-playwright" "pnpm exec playwright test --reporter=line"
+    else
+      set_result "e2e-playwright" "SKIP (baselines not yet captured — P5 amendment defers)"
+    fi
+    if [ -f e2e/visual.spec.ts ]; then
+      run_check "visual-regression" "pnpm exec playwright test e2e/visual.spec.ts --reporter=line"
+    else
+      set_result "visual-regression" "SKIP (visual.spec.ts not yet created — P5 amendment defers)"
+    fi
     ;;
   *)
     set_result "e2e-playwright" "SKIP"

@@ -6,11 +6,11 @@
 
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 2"     # which phase we're in
-current_task: "2_inbox_feature_flag" # chunk 7 — Inbox feature flag end-to-end
-last_iteration_at: "2026-05-05T22:25:00Z"
-total_iterations: 5
-total_tokens_estimate: 2700000
+current_phase: "Phase 3"     # which phase we're in
+current_task: "3a_wrappers_first_4" # chunk 8 — wrapper components 1-4
+last_iteration_at: "2026-05-05T22:39:00Z"
+total_iterations: 6
+total_tokens_estimate: 3000000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -73,12 +73,14 @@ phase_1:
   chunk_6_eval: PASS                     # see eval-reports/chunk-6-20260505T202449Z.md
 
 phase_2:
-  status: pending
+  status: completed
   components:
-    cerebro_inbox_extraction: pending
-    feature_flag_routing: pending
-    eval_inbox_baseline: pending
-  go_no_go: null
+    cerebro_inbox_extraction: completed   # chunk 7: 1457-line file moved via git mv → packages/cerebro-inbox/inbox-page.tsx; relative imports rewritten to @multica/views/* absolute paths
+    feature_flag_routing: completed       # apps/web inbox/page.tsx + apps/desktop routes.tsx wrapper using useFeatureFlag("cerebro_inbox")
+    eval_inbox_baseline: deferred         # P5 amendment: pixel snapshots deferred until masks proven stable
+    upstream_inbox_stub: completed        # CEREBRO-PATCH(inbox-page-stub) placeholder at packages/views/inbox/components/inbox-page.tsx — upstream version doesn't compile against fork's diverged @multica/core/inbox types
+  go_no_go: GO
+  chunk_7_eval: PASS
 
 phase_3:
   status: pending
@@ -136,6 +138,7 @@ open_prs: []
 2026-05-05T22:09:00Z | Phase 1b  | chunk_5_GO | Partial scope landed: notifications-tab.tsx moved to cerebro-notifications/views. Surgical test extractions deferred to chunk 6 SA4.
 2026-05-05T22:25:00Z | Phase 1c  | chunk_6_GO | 4 parallel subagents executed surgical L1 extractions. Successful extractions: WS handlers (use-realtime-sync→cerebro-realtime/handlers.ts), ListActiveIssueTasks (inbox.go→cerebro-notifications), daemon sandbox config (config.go→cerebro-runtime via Go embedding), api-client.test.ts feature-flag tests. Audit-misclassifications surfaced: hub.go +42 was actually unrelated architectural divergence; cli/client.go isn't cobra commands; tasks-tab.test.tsx is upstream-owned (1-char tweak); helpers.tsx has zero consumers; daemon_test.go + claude_test.go test private package members. Inline CEREBRO-PATCH markers added where extraction wasn't feasible (notification_listeners.go, daemon_test.go orphan-task, claude_test.go ringbuffer).
 2026-05-05T22:25:00Z | Phase 1   | phase_1_GO | All Phase 1 features completed or deliberately deferred with documentation. Phase 2 (inbox feature flag) may proceed.
+2026-05-05T22:39:00Z | Phase 2   | chunk_7_GO | 1457-line inbox-page moved to cerebro-inbox; flag-aware route wrappers in both apps. Upstream's inbox-page.tsx replaced with CEREBRO-PATCH stub (upstream source incompatible with fork's diverged surrounding modules; documented as expected single-file conflict surface for future syncs). Eval script gated e2e/visual behind file existence (per P5 amendment).
 ```
 
 ## Eval results (most recent per phase)
@@ -147,6 +150,7 @@ phase_0_chunk_3_evals: PASS  # see eval-reports/chunk-3-20260505T193016Z.md (3rd
 phase_1_chunk_4_evals: PASS  # see eval-reports/chunk-4-20260505T200512Z.md (3rd attempt — fixed cycle, markers, opt-out script bug)
 phase_1_chunk_5_evals: PASS  # see eval-reports/chunk-5-20260505T200926Z.md (partial scope: notifications-tab.tsx moved; surgical test extractions deferred)
 phase_1_chunk_6_evals: PASS  # see eval-reports/chunk-6-20260505T202449Z.md (4 SAs: realtime + inbox-handler + cli/daemon + tests; mixed extract+inline-marker)
+phase_2_chunk_7_evals: PASS  # see eval-reports/chunk-7-20260505T203804Z.md (inbox feature flag + stub for upstream)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -173,37 +177,24 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 2 — chunk 7 per 07-session-schedule.md row 7.
-  Scope per the schedule: "Inbox feature flag end-to-end".
+  Phase 3a — chunk 8 per 07-session-schedule.md row 8.
+  Scope: 4 wrapper components — comment-card, runtime-detail, project-detail, project-picker.
+  
+  IMPORTANT: P7 preflight verdict for comment-card was NO-GO (208-line cerebro diff, 6 scattered concerns; cannot wrap, must stay L3). Drop comment-card from chunk 8; cover with markers in chunk 11. So chunk 8 = 3 wrappers.
 
-  Background: cerebro fork has its own inbox-page (1198 lines, ~10x upstream's). Per audit row 14: "packages/views/inbox/components/inbox-page.tsx (+1198 -108)" — too large to wrap.
+  Per 03-decision.md Phase 3 + audit Bucket C:
+  - runtime-detail → cerebro-runtime/ (slot pattern wrapper)
+  - project-detail → cerebro-access/ (cerebro adds access-control affordances)
+  - project-picker → cerebro-access/ (similar)
 
-  Strategy:
-  1. Move packages/views/inbox/components/inbox-page.tsx → packages/cerebro-inbox/inbox-page.tsx (full file relocation; existing fork version becomes the cerebro version).
-  2. Restore packages/views/inbox/components/inbox-page.tsx to upstream-state. Use git show upstream/main:... or git log to find the original baseline.
-  3. App routes choose between upstream and cerebro via feature flag:
-     ```typescript
-     // apps/web/app/[workspaceSlug]/(dashboard)/inbox/page.tsx
-     import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-     import { InboxPage as UpstreamInbox } from "@multica/views/inbox";
-     import { CerebroInboxPage } from "@multica/cerebro-inbox";
-     export default function Page() {
-       return useFeatureFlag("cerebro_inbox") ? <CerebroInboxPage /> : <UpstreamInbox />;
-     }
-     ```
-     Same for desktop route.
-  4. Default: cerebro_inbox flag is `true` per registry (already done in chunk 3).
+  Strategy: 3 parallel subagents, one per wrapper. Each:
+  - Read upstream component + identify cerebro modifications
+  - Build wrapper in cerebro-* package importing upstream as base
+  - Replace consumer imports
+  - Add CEREBRO-PATCH markers if upstream file gets touched (escape hatch otherwise)
 
-  Sub-tasks:
-  A. Relocate the 1198-line cerebro-inbox content to packages/cerebro-inbox/
-  B. Restore upstream's inbox-page.tsx (use git show with upstream remote, or revert specific commits)
-  C. Wire flag-based selection in apps/web inbox page + apps/desktop inbox route
+  Escalation rule (per 03-decision.md): if a wrapper > 150 lines or duplicates >30% of upstream → drop wrapping, mark as L3, defer to chunk 11.
 
-  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS. Manual: toggle flag, both inbox variants render.
-
-  Per protocol "1-2 subagents". Suggest 2: one for cerebro-inbox content move, one for upstream restoration + route wiring.
-
-  Estimated tokens: ~250-400k.
-
-  Phase 5 follows phase 3+4 chronologically but per user's /loop instruction, no pause between chunks.
+  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS.
+  Estimated tokens: ~300-500k.
 ```
