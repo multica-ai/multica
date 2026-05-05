@@ -1,5 +1,23 @@
 "use client";
 
+// CEREBRO-PATCH(runtime-detail): full rewrite of upstream runtime-detail.tsx.
+// Wrapping was evaluated in Phase 3 (chunk 8 SA1) and rejected: cerebro and
+// upstream diverge on layout, data wiring, and sibling components — no clean
+// composition seam exists. Differences kept intentionally:
+//   1. Sandbox-toggle section (admin-only Switch + reset-to-default + error
+//      surface). Drives `useUpdateRuntimeSandbox` + `runtime.sandbox_enabled`.
+//   2. PingSection (cerebro-only sibling component, not upstream).
+//   3. StatusBadge + InfoField (cerebro-only exports from shared.tsx).
+//      Upstream uses HealthBadge + deriveRuntimeHealth + useNowTick.
+//   4. Custom metadata <pre> dump + timestamps grid at bottom.
+//   5. Removed upstream presence wiring (useWorkspacePresenceMap,
+//      agentListOptions, useNowTick, AgentsCard, DaemonCard).
+//   6. Removed upstream breadcrumb topbar (ArrowLeft + AppLink + ChevronRight)
+//      and Read-only lock indicator.
+// L3 status: keep as marked patch. Resync strategy = manual review of upstream
+// diffs in this file each sync cycle. See docs/upstream-sync/03-decision.md
+// "Phase 3 escalation" + chunk 8 report.
+
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";

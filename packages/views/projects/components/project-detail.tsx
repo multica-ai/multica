@@ -24,6 +24,7 @@ import { useModalStore } from "@multica/core/modals";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
+// CEREBRO-PATCH(project-detail-tabs): Documents-tab + Access-tab imports for cerebro tab system
 import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
@@ -69,6 +70,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+// CEREBRO-PATCH(project-detail-access): RestrictedLock indicator + ProjectAccessTab content for access control
 import { RestrictedLock } from "../../common/restricted-lock";
 import { ProjectAccessTab } from "./project-access-tab";
 
@@ -239,6 +241,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  // CEREBRO-PATCH(project-detail-tabs): tab state for Issues/Documents/Access tab switcher
   const [projectTab, setProjectTab] = useState<"issues" | "documents" | "access">("issues");
 
   // Sidebar panel
@@ -646,6 +649,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </div>
           </PageHeader>
 
+          {/* CEREBRO-PATCH(project-detail-tabs): wraps upstream's single issues view in Issues/Documents/Access tab system */}
           <Tabs
               value={projectTab}
               onValueChange={(v) => setProjectTab(v as "issues" | "documents" | "access")}

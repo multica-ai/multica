@@ -1,5 +1,13 @@
 "use client";
 
+// CEREBRO-PATCH: SA3 — L3-marked (cannot wrap cleanly).
+// Two intertwined deviations from upstream:
+//   1) Replaces ProjectIcon with inline icon/color-dot rendering
+//   2) Adds RestrictedLock indicator after icon, in both trigger and items
+// No injection slot exists inside DropdownMenuTrigger/Item children — wrapping
+// would require duplicating the entire JSX tree, eliminating upstream-tracking
+// benefit. Resolution deferred to chunk 11 (likely path-alias shadow with
+// cerebro-access/project-picker.tsx as the canonical fork).
 import { Check, FolderKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";

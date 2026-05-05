@@ -6,11 +6,11 @@
 
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 3"     # which phase we're in
-current_task: "3a_wrappers_first_4" # chunk 8 — wrapper components 1-4
-last_iteration_at: "2026-05-05T22:39:00Z"
-total_iterations: 6
-total_tokens_estimate: 3000000
+current_phase: "Phase 4"     # SKIP chunks 9+10 — Phase 3 escalation rule fired
+current_task: "4_l3_markers" # chunk 11 — mark remaining ~13 L3 files
+last_iteration_at: "2026-05-05T22:48:00Z"
+total_iterations: 7
+total_tokens_estimate: 3300000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -83,22 +83,28 @@ phase_2:
   chunk_7_eval: PASS
 
 phase_3:
-  status: pending
+  status: completed_with_escalation
+  # Escalation rule fired at chunk 8: 3 of 3 attempted wrappers escalated to L3
+  # (combined with comment-card P7 NO-GO = 4 NO-GOs of first 4 attempted).
+  # Per 03-decision.md NO-GO rule: ">5 wrappers fejler → Stop. Konvertér resterende
+  # til L3." We pre-empt: chunks 9+10 skipped; all 14 wrapper-candidates handled
+  # as L3 markers in chunk 11.
   wrappers:
-    comment_card: pending
-    runtime_detail: pending
-    project_detail: pending
-    project_picker: pending
-    chat_input: pending
-    chat_message_list: pending
-    issue_detail: pending
-    agent_live_card: pending
-    list_row: pending
-    reply_input: pending
-    readonly_content: pending
-    tasks_tab: pending
-    agents_page: pending
-  go_no_go: null
+    comment_card: L3              # P7 preflight NO-GO (208-line scattered diff)
+    runtime_detail: L3            # chunk 8 SA1 NO-GO (252-line structural rewrite, removed subsystems)
+    project_detail: L3            # chunk 8 SA2 NO-GO (5 scattered cerebro mods + 7 unrelated upstream-pending changes)
+    project_picker: L3            # chunk 8 SA3 NO-GO (intertwined icon+lock concerns inside JSX)
+    chat_input: L3_pending        # chunk 11
+    chat_message_list: L3_pending # chunk 11
+    issue_detail: L3_pending      # chunk 11
+    agent_live_card: L3_pending   # chunk 11
+    list_row: L3_pending          # chunk 11
+    reply_input: L3_pending       # chunk 11
+    readonly_content: L3_pending  # chunk 11
+    tasks_tab: L3_pending         # chunk 11
+    agents_page: L3_pending       # chunk 11
+  go_no_go: HOLD                  # consistent with plan: "L3 conversion accepted, Phase 4 handles"
+  chunk_8_eval: PASS
 
 phase_4:
   status: pending
@@ -139,6 +145,8 @@ open_prs: []
 2026-05-05T22:25:00Z | Phase 1c  | chunk_6_GO | 4 parallel subagents executed surgical L1 extractions. Successful extractions: WS handlers (use-realtime-sync→cerebro-realtime/handlers.ts), ListActiveIssueTasks (inbox.go→cerebro-notifications), daemon sandbox config (config.go→cerebro-runtime via Go embedding), api-client.test.ts feature-flag tests. Audit-misclassifications surfaced: hub.go +42 was actually unrelated architectural divergence; cli/client.go isn't cobra commands; tasks-tab.test.tsx is upstream-owned (1-char tweak); helpers.tsx has zero consumers; daemon_test.go + claude_test.go test private package members. Inline CEREBRO-PATCH markers added where extraction wasn't feasible (notification_listeners.go, daemon_test.go orphan-task, claude_test.go ringbuffer).
 2026-05-05T22:25:00Z | Phase 1   | phase_1_GO | All Phase 1 features completed or deliberately deferred with documentation. Phase 2 (inbox feature flag) may proceed.
 2026-05-05T22:39:00Z | Phase 2   | chunk_7_GO | 1457-line inbox-page moved to cerebro-inbox; flag-aware route wrappers in both apps. Upstream's inbox-page.tsx replaced with CEREBRO-PATCH stub (upstream source incompatible with fork's diverged surrounding modules; documented as expected single-file conflict surface for future syncs). Eval script gated e2e/visual behind file existence (per P5 amendment).
+2026-05-05T22:48:00Z | Phase 3a  | chunk_8_HOLD_escalate_all | 3 wrappers attempted, all 3 NO-GO (runtime-detail full structural rewrite; project-detail 5 scattered concerns + 7 unrelated upstream-pending; project-picker intertwined JSX). Combined with P7 comment-card NO-GO = 4 of 4 attempted Phase 3 wrappers escalated. Per 03-decision.md NO-GO rule (">5 fail → Stop, convert remaining to L3"), pre-empting chunks 9+10. All 14 wrapper-candidates now route to chunk 11 L3 markers.
+2026-05-05T22:48:00Z | Phase 3   | phase_3_HOLD | Phase 3 closed in HOLD state — wrapping pattern fundamentally infeasible for this fork's components (cerebro mods are scattered + non-composable + structurally rewritten). All 14 candidates marked for L3 handling in chunk 11.
 ```
 
 ## Eval results (most recent per phase)
@@ -151,6 +159,7 @@ phase_1_chunk_4_evals: PASS  # see eval-reports/chunk-4-20260505T200512Z.md (3rd
 phase_1_chunk_5_evals: PASS  # see eval-reports/chunk-5-20260505T200926Z.md (partial scope: notifications-tab.tsx moved; surgical test extractions deferred)
 phase_1_chunk_6_evals: PASS  # see eval-reports/chunk-6-20260505T202449Z.md (4 SAs: realtime + inbox-handler + cli/daemon + tests; mixed extract+inline-marker)
 phase_2_chunk_7_evals: PASS  # see eval-reports/chunk-7-20260505T203804Z.md (inbox feature flag + stub for upstream)
+phase_3_chunk_8_evals: PASS  # see eval-reports/chunk-8-20260505T204646Z.md (3 wrappers all escalated to L3 markers)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -177,24 +186,26 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 3a — chunk 8 per 07-session-schedule.md row 8.
-  Scope: 4 wrapper components — comment-card, runtime-detail, project-detail, project-picker.
-  
-  IMPORTANT: P7 preflight verdict for comment-card was NO-GO (208-line cerebro diff, 6 scattered concerns; cannot wrap, must stay L3). Drop comment-card from chunk 8; cover with markers in chunk 11. So chunk 8 = 3 wrappers.
+  Phase 4 — chunk 11 per 07-session-schedule.md row 11.
+  Scope: tilføj CEREBRO-PATCH(<navn>): markører til alle resterende upstream-zone filer der har cerebro-modifikationer. Dokumentér i docs/cerebro-patches.md.
 
-  Per 03-decision.md Phase 3 + audit Bucket C:
-  - runtime-detail → cerebro-runtime/ (slot pattern wrapper)
-  - project-detail → cerebro-access/ (cerebro adds access-control affordances)
-  - project-picker → cerebro-access/ (similar)
+  Files needing markers (from audit + chunks 6-8 escalations):
+  - 4 already marked (chunk 8 SA1-3 + comment-card from P7): runtime-detail, project-detail, project-picker, comment-card (P7-marked? need to verify)
+  - 10 wrappers deferred from chunks 9+10 — need feasibility check + markers:
+    chat_input, chat_message_list, issue_detail, agent_live_card, list_row, reply_input, readonly_content, tasks_tab, agents_page
+  - Plus the original 42-file L3 list from audit (which now includes the deferred wrappers)
 
-  Strategy: 3 parallel subagents, one per wrapper. Each:
-  - Read upstream component + identify cerebro modifications
-  - Build wrapper in cerebro-* package importing upstream as base
-  - Replace consumer imports
-  - Add CEREBRO-PATCH markers if upstream file gets touched (escape hatch otherwise)
+  Strategy: 6 parallel subagents per protocol, each handles ~7 files. Markers + registry creation.
 
-  Escalation rule (per 03-decision.md): if a wrapper > 150 lines or duplicates >30% of upstream → drop wrapping, mark as L3, defer to chunk 11.
+  Sub-tasks:
+  A. Identify all upstream-zone files with cerebro modifications (use git diff upstream/main)
+  B. Add CEREBRO-PATCH(<descriptive-name>): markers at modification sites
+  C. Create docs/cerebro-patches.md with one entry per unique patch-name
+  D. Verify scripts/validate-cerebro-patches.sh reports all markers found
+  E. Total patch-line count (target ≤200, escalate if >300)
 
   Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS.
-  Estimated tokens: ~300-500k.
+  Estimated tokens: ~400-600k (mass marker work).
+
+  After chunk 11: Phase 4 done. Chunk 12 = Phase 5 sync-validation merge.
 ```
