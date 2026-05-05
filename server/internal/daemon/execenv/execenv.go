@@ -40,6 +40,22 @@ type PeerAgentForEnv struct {
 	Instructions string // short description / role; surfaced as a one-liner
 }
 
+// MemoryArtifactForEnv describes a memory artifact anchored to the issue or
+// its project, delivered into the agent's runtime context as part of
+// CLAUDE.md / AGENTS.md. The meta-skill renderer groups by anchor_type so
+// the agent can tell "this is about THIS issue" vs "this is about the
+// surrounding project."
+type MemoryArtifactForEnv struct {
+	ID         string   // server-assigned UUID
+	Kind       string   // wiki_page | agent_note | runbook | decision
+	Title      string   // short header
+	Content    string   // markdown body — already trimmed by the server side cap
+	Tags       []string // free-form labels (e.g. "auth", "deploy")
+	AnchorType string   // "issue" | "project" — used for section grouping
+	AnchorID   string   // for fetch-more-via-CLI suggestions
+	UpdatedAt  string   // ISO8601 — surfaced so agent can reason about freshness
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
@@ -64,6 +80,7 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
 	PeerAgents              []PeerAgentForEnv       // other non-archived agents in this workspace, surfaced to orchestrators so they can route by name
+	MemoryArtifacts         []MemoryArtifactForEnv  // wiki/notes/runbooks/decisions anchored to this issue or its project
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string              // non-empty for autopilot run_only tasks
 	AutopilotID             string

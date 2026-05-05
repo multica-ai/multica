@@ -2248,3 +2248,113 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 }
+
+// Memory artifacts anchored to the issue and its project should appear in
+// CLAUDE.md grouped by anchor_type so the agent can distinguish issue-
+// specific notes from project-wide ones. Verifies the kind label rendering,
+// tag formatting, and the artifact-id footer that lets follow-up tooling
+// reference back to specific entries.
+func TestInjectRuntimeConfigEmbedsMemoryArtifacts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Auth platform",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "runbook",
+				Title:      "Login deploy procedure",
+				Content:    "1. Drain green pool\n2. Push artifact\n3. Flip traffic",
+				Tags:       []string{"deploy", "auth"},
+				AnchorType: "issue",
+				AnchorID:   "11111111-2222-3333-4444-555555555555",
+				UpdatedAt:  "2026-05-01T12:00:00Z",
+			},
+			{
+				ID:         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "decision",
+				Title:      "Why JWT over sessions",
+				Content:    "We picked JWT because the mobile clients can't carry a session cookie cleanly.",
+				AnchorType: "project",
+				AnchorID:   "22222222-3333-4444-5555-666666666666",
+				UpdatedAt:  "2026-04-15T09:30:00Z",
+			},
+			{
+				ID:         "cccccccc-cccc-cccc-cccc-cccccccccccc",
+				Kind:       "wiki_page",
+				Title:      "Onboarding overview",
+				Content:    "General workspace orientation, no anchor.",
+				AnchorType: "", // free-floating — should land in the catch-all section
+				UpdatedAt:  "2026-03-20T14:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	// Top-level Memory section + the introductory framing.
+	for _, want := range []string{
+		"## Memory",
+		"Workspace knowledge anchored to this issue or its project",
+		// Group headings — order matters: issue first (most specific).
+		"### On this issue",
+		"### On the project",
+		"### Workspace-level",
+		// Issue-anchored artifact body and metadata.
+		"#### Runbook — Login deploy procedure",
+		"_Tags: deploy, auth_",
+		"1. Drain green pool",
+		"<sub>Memory artifact `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` · updated 2026-05-01T12:00:00Z</sub>",
+		// Project-anchored artifact.
+		"#### Decision — Why JWT over sessions",
+		"We picked JWT because the mobile clients can't carry a session cookie cleanly.",
+		// Workspace-level (no anchor) artifact.
+		"#### Wiki — Onboarding overview",
+		"General workspace orientation, no anchor.",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// "On this issue" must appear before "On the project" so issue-specific
+	// memory takes visual priority. The same heading-order assertion guards
+	// against future refactors that group by kind instead of anchor.
+	if idxIssue := strings.Index(s, "### On this issue"); idxIssue == -1 {
+		t.Fatal("missing issue heading")
+	} else if idxProject := strings.Index(s, "### On the project"); idxProject == -1 {
+		t.Fatal("missing project heading")
+	} else if idxIssue > idxProject {
+		t.Errorf("issue heading should precede project heading; issue=%d project=%d", idxIssue, idxProject)
+	}
+}
+
+// When no memory artifacts are attached, the Memory section must not render
+// at all — empty section headers in CLAUDE.md add token noise without
+// signal and can confuse smaller models into hallucinating "memory".
+func TestInjectRuntimeConfigOmitsEmptyMemorySection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+	}); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(content), "## Memory") {
+		t.Errorf("CLAUDE.md should not include Memory section when MemoryArtifacts is empty")
+	}
+}

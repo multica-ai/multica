@@ -31,6 +31,25 @@ func primaryProjectRepoURL(resources []ProjectResourceForEnv) string {
 	return ""
 }
 
+// formatMemoryKindLabel renders a memory_artifact.kind as a short, human-
+// readable badge for the meta-skill heading. Unknown kinds fall back to the
+// raw string so future kinds (added on the server side) are still legible
+// without a daemon update.
+func formatMemoryKindLabel(kind string) string {
+	switch kind {
+	case "wiki_page":
+		return "Wiki"
+	case "agent_note":
+		return "Agent note"
+	case "runbook":
+		return "Runbook"
+	case "decision":
+		return "Decision"
+	default:
+		return kind
+	}
+}
+
 // formatProjectResource renders a single resource as a human-readable bullet.
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
@@ -242,6 +261,57 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
+	}
+
+	// Inject memory artifacts anchored to this issue (and its parent project,
+	// if any). The server-side claim handler caps the count and ordering so
+	// the renderer here is purely presentation: group by anchor_type so the
+	// agent can tell "about THIS issue" vs "about the surrounding project."
+	//
+	// Title/content render verbatim — the artifacts ARE the content the user
+	// or another agent curated, so we don't paraphrase or compress. Each
+	// artifact gets a stable ID footer so the agent can reference it back
+	// (and we'll wire `multica memory get <id>` in a follow-up so the agent
+	// can pull updated content if it suspects staleness).
+	if len(ctx.MemoryArtifacts) > 0 {
+		b.WriteString("## Memory\n\n")
+		b.WriteString("Workspace knowledge anchored to this issue or its project. ")
+		b.WriteString("Treat as authoritative context — these are runbooks, decisions, and notes the team has explicitly attached. ")
+		b.WriteString("Read what's relevant; don't blindly act on every artifact.\n\n")
+
+		issueArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
+		projectArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
+		otherArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
+		for _, a := range ctx.MemoryArtifacts {
+			switch a.AnchorType {
+			case "issue":
+				issueArtifacts = append(issueArtifacts, a)
+			case "project":
+				projectArtifacts = append(projectArtifacts, a)
+			default:
+				otherArtifacts = append(otherArtifacts, a)
+			}
+		}
+
+		writeArtifacts := func(header string, list []MemoryArtifactForEnv) {
+			if len(list) == 0 {
+				return
+			}
+			fmt.Fprintf(&b, "### %s\n\n", header)
+			for _, a := range list {
+				fmt.Fprintf(&b, "#### %s — %s\n\n", formatMemoryKindLabel(a.Kind), a.Title)
+				if len(a.Tags) > 0 {
+					fmt.Fprintf(&b, "_Tags: %s_\n\n", strings.Join(a.Tags, ", "))
+				}
+				b.WriteString(strings.TrimSpace(a.Content))
+				b.WriteString("\n\n")
+				fmt.Fprintf(&b, "<sub>Memory artifact `%s` · updated %s</sub>\n\n", a.ID, a.UpdatedAt)
+			}
+		}
+
+		writeArtifacts("On this issue", issueArtifacts)
+		writeArtifacts("On the project", projectArtifacts)
+		writeArtifacts("Workspace-level", otherArtifacts)
 	}
 
 	b.WriteString("### Workflow\n\n")

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -165,6 +166,73 @@ type UpdateMemoryArtifactRequest struct {
 	AnchorID   *string         `json:"anchor_id"`
 	Tags       *[]string       `json:"tags"`
 	Metadata   json.RawMessage `json:"metadata"`
+}
+
+// fetchMemoryArtifactsForTask pulls memory artifacts anchored to the given
+// issue and (optionally) its project, returning a flattened slice for
+// injection into the daemon claim response. Caller-side concerns:
+//
+//   - Issue-scoped artifacts come first because they're more specific to
+//     the work the agent is about to do; project-scoped come second.
+//   - Errors are logged and swallowed — a failed memory lookup must not
+//     fail the task claim. The agent can still work without memory.
+//   - The limit applies *per anchor*, not globally. Issue + project = up
+//     to 2 × limit artifacts in the worst case. Tune at the call site.
+//
+// Lives in the memory_artifact handler file (rather than daemon.go) so the
+// pgtype + db.ListMemoryArtifactsByAnchorParams plumbing stays colocated
+// with the rest of the memory handlers.
+func (h *Handler) fetchMemoryArtifactsForTask(
+	ctx context.Context,
+	workspaceID, issueID, projectID pgtype.UUID,
+	limitPerAnchor int32,
+) []MemoryArtifactData {
+	var out []MemoryArtifactData
+
+	appendByAnchor := func(anchorType string, anchorID pgtype.UUID) {
+		if !anchorID.Valid {
+			return
+		}
+		rows, err := h.Queries.ListMemoryArtifactsByAnchor(ctx, db.ListMemoryArtifactsByAnchorParams{
+			WorkspaceID: workspaceID,
+			AnchorType:  pgtype.Text{String: anchorType, Valid: true},
+			AnchorID:    anchorID,
+			Limit:       limitPerAnchor,
+		})
+		if err != nil {
+			slog.Warn("fetchMemoryArtifactsForTask: list by anchor failed",
+				"anchor_type", anchorType, "error", err)
+			return
+		}
+		for _, row := range rows {
+			tags := row.Tags
+			if tags == nil {
+				tags = []string{}
+			}
+			anchorIDStr := ""
+			if row.AnchorID.Valid {
+				anchorIDStr = uuidToString(row.AnchorID)
+			}
+			anchorTypeStr := ""
+			if row.AnchorType.Valid {
+				anchorTypeStr = row.AnchorType.String
+			}
+			out = append(out, MemoryArtifactData{
+				ID:         uuidToString(row.ID),
+				Kind:       row.Kind,
+				Title:      row.Title,
+				Content:    row.Content,
+				Tags:       tags,
+				AnchorType: anchorTypeStr,
+				AnchorID:   anchorIDStr,
+				UpdatedAt:  timestampToString(row.UpdatedAt),
+			})
+		}
+	}
+
+	appendByAnchor("issue", issueID)
+	appendByAnchor("project", projectID)
+	return out
 }
 
 // ---------------------------------------------------------------------------
