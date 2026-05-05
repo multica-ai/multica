@@ -136,7 +136,8 @@ export function MyTimePage() {
   const { data: currentEntry } = useCurrentTimerQuery();
   const { data: listData, isLoading } = useTimeEntriesQuery({ limit: 200 });
 
-  const entries = listData?.entries ?? [];
+  // API returns TimeEntry[] directly
+  const entries: TimeEntry[] = listData ?? [];
 
   // Sort entries newest-first and group by day.
   const grouped = useMemo(() => {

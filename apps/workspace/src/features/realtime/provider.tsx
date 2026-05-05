@@ -60,7 +60,7 @@ export function WSProvider({ children }: { children: ReactNode }) {
   // Centralized WS → store sync (uses state so it re-subscribes when WS changes)
   useRealtimeSync(wsClient);
   // Time tracking WS sync.
-  useTimeTrackingSync();
+  useTimeTrackingSync(wsClient);
 
   const subscribe = useCallback(
     (event: WSEventType, handler: EventHandler) => {
