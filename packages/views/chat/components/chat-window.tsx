@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -334,6 +335,8 @@ export function ChatWindow() {
     setOpen(false);
   }, [activeSessionId, pendingTaskId, setOpen]);
 
+  const isExpanded = useChatStore((s) => s.isExpanded);
+
   const windowRef = useRef<HTMLDivElement>(null);
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
 
@@ -341,24 +344,37 @@ export function ChatWindow() {
   // a real message, or a pending task whose timeline will stream in.
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  const isVisible = isOpen && boundsReady;
+  const isVisible = isOpen && (isExpanded || boundsReady);
 
-  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
+  const containerClass = isExpanded
+    ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
+    : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = {
-    width: `${renderWidth}px`,
-    height: `${renderHeight}px`,
-    opacity: isVisible ? 1 : 0,
-    transform: isVisible ? "scale(1)" : "scale(0.95)",
+    ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
-    transition: isDragging
-      ? "none"
-      : "width 200ms ease-out, height 200ms ease-out, opacity 150ms ease-out, transform 150ms ease-out",
   };
 
   return (
-    <div ref={windowRef} className={containerClass} style={containerStyle}>
-      <ChatResizeHandles onDragStart={startDrag} />
+    <motion.div
+      ref={windowRef}
+      className={containerClass}
+      style={containerStyle}
+      layout="position"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{
+        opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : 0.95,
+      }}
+      transition={{
+        layout: isDragging
+          ? { duration: 0 }
+          : { type: "spring", duration: 0.3, bounce: 0 },
+        opacity: { duration: 0.15 },
+        scale: { type: "spring", duration: 0.2, bounce: 0 },
+      }}
+    >
+      {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
@@ -398,10 +414,10 @@ export function ChatWindow() {
                 />
               }
             >
-              {isAtMax ? <Minimize2 /> : <Maximize2 />}
+              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
             </TooltipTrigger>
             <TooltipContent side="top">
-              {isAtMax ? "Restore" : "Expand"}
+              {isExpanded || isAtMax ? "Restore" : "Fullscreen"}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -474,7 +490,7 @@ export function ChatWindow() {
         }
         rightAdornment={<ContextAnchorButton />}
       />
-    </div>
+    </motion.div>
   );
 }
 

@@ -280,6 +280,7 @@ export function AgentsPage() {
 
   const handleCreate = async (data: CreateAgentRequest) => {
     const agent = await api.createAgent(data);
+    let cachedAgent = agent;
     // When duplicating, carry the source agent's skill assignments over.
     // Skills aren't part of CreateAgentRequest (they're managed via
     // setAgentSkills) so the create endpoint can't take them inline; we
@@ -291,10 +292,17 @@ export function AgentsPage() {
         await api.setAgentSkills(agent.id, {
           skill_ids: duplicateTemplate.skills.map((s) => s.id),
         });
+        cachedAgent = { ...agent, skills: duplicateTemplate.skills };
       } catch {
         // Surfaced softly; the agent itself is fine.
       }
     }
+    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === cachedAgent.id);
+      return exists
+        ? current.map((a) => (a.id === cachedAgent.id ? cachedAgent : a))
+        : [...current, cachedAgent];
+    });
     setShowCreate(false);
     setDuplicateTemplate(null);
     navigation.push(paths.agentDetail(agent.id));

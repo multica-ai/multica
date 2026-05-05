@@ -73,14 +73,14 @@ export function RepositoriesTab() {
             </p>
 
             {repos.map((repo, index) => (
-              <div key={index} className="flex gap-2">
+              <div key={index} className="flex items-start gap-2">
                 <Input
                   type="url"
                   value={repo.url}
                   onChange={(e) => handleRepoChange(index, e.target.value)}
                   disabled={!canManageWorkspace}
                   placeholder="https://git.example.com/org/repo.git"
-                  className="flex-1 text-sm"
+                  className="flex-1 min-w-0 text-sm"
                 />
                 {canManageWorkspace && (
                   <Button
@@ -96,7 +96,7 @@ export function RepositoriesTab() {
             ))}
 
             {canManageWorkspace && (
-              <div className="flex items-center justify-between pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <Button variant="outline" size="sm" onClick={handleAddRepo}>
                   <Plus className="h-3 w-3" />
                   Add repository
