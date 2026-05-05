@@ -16,6 +16,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { toast } from "sonner";
+import { useWSEvent } from "@multica/core/realtime";
+import type { IssueUpdatedPayload } from "@multica/core/types";
+
+const FINAL_ISSUE_STATUSES = ["done", "cancelled"] as const;
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -43,6 +47,11 @@ export function SidebarTimerIndicator() {
   const [elapsed, setElapsed] = useState(0);
   const [comment, setComment] = useState("");
   const commentRef = useRef<HTMLInputElement>(null);
+
+  // Keep a ref so the WS handler always reads the latest timer without
+  // needing it as a dependency (avoids re-subscribing on every tick).
+  const timerRef = useRef(timer);
+  timerRef.current = timer;
 
   const wsId = useWorkspaceId();
   const createEntry = useCreateTimeEntry();
@@ -115,6 +124,58 @@ export function SidebarTimerIndicator() {
     setComment("");
     setOpen(false);
   }, [discardTimer]);
+
+  // Auto-stop the timer when its issue moves to a final state.
+  const handleIssueUpdated = useCallback(
+    (payload: unknown) => {
+      const { issue } = payload as IssueUpdatedPayload;
+      if (!issue?.id) return;
+      if (
+        !FINAL_ISSUE_STATUSES.includes(
+          issue.status as (typeof FINAL_ISSUE_STATUSES)[number],
+        )
+      )
+        return;
+
+      const activeTimer = timerRef.current;
+      if (!activeTimer || activeTimer.issueId !== issue.id) return;
+
+      const result = stopTimer();
+      if (!result) return;
+
+      setComment("");
+      setOpen(false);
+
+      createEntry.mutate(
+        {
+          issueId: result.issueId,
+          data: {
+            duration_minutes: result.durationMinutes,
+            redmine_activity_id: activeTimer.activityId,
+            activity_name: activeTimer.activityName,
+            spent_on: new Date().toISOString().split("T")[0],
+            timer_started_at: result.startedAt,
+            timer_stopped_at: result.stoppedAt,
+          },
+        },
+        {
+          onSuccess: (entry) => {
+            const syncLabel =
+              entry.sync_status === "synced" ? " → synced to Redmine" : "";
+            toast.info(
+              `Timer stopped: task moved to ${issue.status}. Logged ${formatDurationShort(result.durationMinutes)}${syncLabel}`,
+            );
+          },
+          onError: () => {
+            toast.error("Timer stopped but failed to log time entry");
+          },
+        },
+      );
+    },
+    [stopTimer, createEntry],
+  );
+
+  useWSEvent("issue:updated", handleIssueUpdated);
 
   const handleNavigateToIssue = useCallback(() => {
     if (!timer || !workspace) return;
