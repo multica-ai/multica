@@ -43,7 +43,8 @@ type Cache struct {
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
-	repoLocks sync.Map // barePath -> *sync.Mutex
+	repoLocks sync.Map  // barePath -> *sync.Mutex
+	syncWg    sync.WaitGroup // tracks in-flight Sync calls
 }
 
 // New creates a new repo cache rooted at the given directory.
@@ -70,7 +71,15 @@ func (c *Cache) lockForRepo(barePath string) *sync.Mutex {
 // via lockForRepo. Different repos run sequentially within a single Sync call
 // but concurrent Sync calls (different workspaces, or the same workspace
 // re-synced while checkouts are running) do not block each other.
+// Wait blocks until all in-flight Sync calls have returned. Tests that spawn
+// async Sync goroutines should call this (via t.Cleanup) before the temp
+// directories created by t.TempDir are removed, to avoid ENOTEMPTY races.
+func (c *Cache) Wait() { c.syncWg.Wait() }
+
 func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
+	c.syncWg.Add(1)
+	defer c.syncWg.Done()
+
 	wsDir := filepath.Join(c.root, workspaceID)
 	if err := os.MkdirAll(wsDir, 0o755); err != nil {
 		return fmt.Errorf("create workspace cache dir: %w", err)

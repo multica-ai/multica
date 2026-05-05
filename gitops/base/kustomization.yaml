@@ -33,9 +33,6 @@ resources:
   - service-backend.yaml
   - service-web.yaml
   - ingress.yaml
-  # Per-workspace daemon runtime — see runtime-controller/kustomization.yaml
-  # and docs/proposals/per-workspace-daemon-runtimes.md.
-  - runtime-controller
 
 labels:
   - pairs:

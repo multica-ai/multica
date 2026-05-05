@@ -24,20 +24,6 @@ gitops/
 │   ├── service-backend.yaml             # ClusterIP :8080 → backend
 │   ├── service-web.yaml                 # ClusterIP :80 → web :3000
 │   ├── ingress.yaml                     # nginx-external, agentfarm.g2.com, Cloudflare-proxied
-│   ├── runtime-controller/              # Per-workspace daemon runtime — see docs/proposals/per-workspace-daemon-runtimes.md
-│   │   ├── serviceaccount.yaml          # ServiceAccount: agentfarm-runtime-controller
-│   │   ├── rbac.yaml                    # Namespace-scoped Role(s) + RoleBindings (no cluster-scope perms)
-│   │   ├── iam.yaml                     # Crossplane IAM: ssm:GetParameter on /agentfarm/tools/runtime-controller/* + tag-scoped ec2:DeleteVolume (no iam:*)
-│   │   ├── workspaceiam-xrd.yaml        # Crossplane CompositeResourceDefinition: WorkspaceIAM
-│   │   ├── workspaceiam-composition.yaml # Crossplane Composition: per-workspace Role + Policy + RolePolicyAttachment
-│   │   ├── storageclass.yaml            # gp3 encrypted, reclaimPolicy: Retain, EBS volumes tagged for controller cleanup
-│   │   ├── configmap.yaml               # Cloud-tuned daemon defaults (MAX_CONCURRENT_TASKS=2, GC_TTL=6h)
-│   │   ├── externalsecret-controller.yaml # Pulls LiteLLM Management Key + proxy URL from /agentfarm/tools/runtime-controller/*
-│   │   ├── deployment.yaml              # Controller Deployment (1 replica, --dry-run=true by default for v1)
-│   │   ├── templates/                   # NOT applied — per-workspace shapes the controller renders at runtime
-│   │   │   ├── README.md                # What's in here and why it's not in kustomization.yaml resources
-│   │   │   └── externalsecret-per-workspace.yaml
-│   │   └── kustomization.yaml
 │   └── kustomization.yaml
 └── environments/
     └── tools/
@@ -53,8 +39,7 @@ gitops/
 - **Traffic**: `agentfarm.g2.com` → NLB → `nginx-external` Ingress → `agentfarm-web` Service → Next.js pod. The frontend proxies `/api/*` to the backend Service.
 - **Scheduling**: all pods run on the `shared` Karpenter NodePool targeting arm64 (Graviton), matching vibekanban's pattern. `nodeSelector: {karpenter.sh/nodepool: shared, kubernetes.io/arch: arm64}`. Images are built `linux/arm64` only (on ubicloud `-arm` runners); the `devops` NodePool is amd64-only and would fail with `exec format error`.
 - **Secrets**: SSM Parameter Store `/agentfarm/tools/*` → ExternalSecrets Operator (10-minute refresh) → single k8s Secret `agentfarm-secret-store` (bulk `dataFrom.find`, SSM prefix stripped). Reloader rolls pods when SSM values change.
-- **IAM**: Three roles via Crossplane. `agentfarm-role` (SSM-read) is assumed by `agentfarm` SA. `agentfarm-backend-role` (S3 bucket operations) is assumed by `agentfarm-backend` SA. `agentfarm-runtime-controller-role` (SSM read on its own prefix + tag-scoped `ec2:DeleteVolume`) is assumed by `agentfarm-runtime-controller` SA. The runtime controller deliberately has **no** `iam:*` permissions; per-workspace IAM roles are reconciled by Crossplane from `WorkspaceIAM` CRs the controller writes (see `runtime-controller/workspaceiam-composition.yaml`).
-- **Runtime controller**: `agentfarm-runtime-controller` (single replica, leader-elected) reconciles per-workspace daemon runtimes — Deployment, ServiceAccount, PVC, ExternalSecret, `WorkspaceIAM` CR, plus LiteLLM team + virtual keys per workspace. Per-workspace resources are intentionally **not** in Git. v1 ships with `--dry-run=true`; flip to write mode after the smoke test in [the proposal's rollout step 3](../docs/proposals/per-workspace-daemon-runtimes.md#13-rollout).
+- **IAM**: Two roles via Crossplane. `agentfarm-role` (SSM-read) is assumed by `agentfarm` SA. `agentfarm-backend-role` (S3 bucket operations) is assumed by `agentfarm-backend` SA.
 - **Database**: Aurora Serverless v2 Postgres 16.4 provisioned via **upbound Crossplane** (`gitops/base/rds-*.yaml`), following the canonical `optio` and `user-mapping-db` pattern. Master password is seeded into SSM by the operator (single key `POSTGRES_MASTER_PASSWORD`) and read into the RDS Cluster via `masterPasswordSecretRef` pointing at `agentfarm-secret-store`. Upbound then writes `endpoint`, `port`, `master_username`, `attribute.master_password`, `reader_endpoint` back into `agentfarm-rds-connection-secret`. Consumers (backend Deployment, pgvector Job) bind these to `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD` via `secretKeyRef`, hardcode `POSTGRES_DB=agentfarm` to match `rds-cluster.yaml`'s `databaseName` (Upbound does not echo the db name into the connection secret), and compose `DATABASE_URL` inline with `$(VAR)` substitution — the Go binary reads a single `DATABASE_URL` env var. No secret templating, no bootstrap Job, no manual SSM round-trip. The pgvector init Job runs as an ArgoCD `PostSync` hook.
 - **S3 uploads**: `g2-agentfarm-tools-uploads` bucket (us-east-1, AES256 SSE) provisioned via contrib Crossplane. 
 - **TLS**: terminates at the NLB via ACM.
@@ -77,12 +62,10 @@ gitops/
    | `/agentfarm/tools/GOOGLE_CLIENT_SECRET` | OAuth |
    | `/agentfarm/tools/GOOGLE_REDIRECT_URI` | `https://agentfarm.g2.com/auth/callback` |
    | `/agentfarm/tools/NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Frontend OAuth client ID |
-   | `/agentfarm/tools/MULTICA_SERVER_URL` | `https://agentfarm.g2.com` — read by the `multica` CLI / daemon. The daemon's `NormalizeServerBaseURL` (`server/internal/daemon/config.go`) accepts `ws://`, `wss://`, `http://`, `https://` interchangeably and strips a trailing `/ws`, but standardize on the HTTPS form here so the value matches what the runtime controller injects into per-workspace Secrets. |
+   | `/agentfarm/tools/MULTICA_SERVER_URL` | `wss://agentfarm.g2.com/ws` |
    | `/agentfarm/tools/MULTICA_APP_URL` | `https://agentfarm.g2.com` |
    | `/agentfarm/tools/S3_BUCKET` | `g2-agentfarm-tools-uploads` |
    | `/agentfarm/tools/S3_REGION` | `us-east-1` |
-   | `/agentfarm/tools/runtime-controller/LITELLM_MANAGEMENT_KEY` | LiteLLM **Management** key (NOT master). Permissions: `team/{new,update,delete}`, `key/{generate,update,delete}` (only on teams it created), spend reads. Used by `agentfarm-runtime-controller` to mint per-workspace virtual keys. See [proposal §7](../docs/proposals/per-workspace-daemon-runtimes.md#7-controller-scoped-litellm-credentials). |
-   | `/agentfarm/tools/runtime-controller/LITELLM_PROXY_URL` | URL of the LiteLLM proxy the controller calls (`/team/new`, `/key/generate`, etc.) and that becomes `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` in per-workspace daemon Secrets. |
 
    DB master user (`agentfarmadmin`) and DB name (`agentfarm`) are hardcoded in `rds-cluster.yaml` — no SSM key required. If you need to change them, edit the manifest (it's a greenfield cluster, not hot-swappable).
 

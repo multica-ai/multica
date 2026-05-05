@@ -368,9 +368,14 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	cache := repocache.New(t.TempDir(), slog.Default())
+	// Wait for any in-flight Sync goroutines before t.TempDir cleanup runs.
+	// Without this, concurrent git subprocesses writing to the bare repo can
+	// race with os.RemoveAll and produce ENOTEMPTY failures.
+	t.Cleanup(cache.Wait)
 	return &Daemon{
 		client:       NewClient(srv.URL),
-		repoCache:    repocache.New(t.TempDir(), slog.Default()),
+		repoCache:    cache,
 		logger:       slog.Default(),
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
