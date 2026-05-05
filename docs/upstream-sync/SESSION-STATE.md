@@ -160,36 +160,39 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
   Phase 0b — chunk 3 per 07-session-schedule.md.
-  Goal: complete the Phase 0 foundation. After chunk 3 the foundation is done and chunk 4 (Phase 1a renames) can start.
+  Scope per the schedule: "Feature flag-system + Settings-tab + eval-baselines + CLAUDE.md".
 
-  Sub-tasks (2-3 parallel subagents per protocol):
-  A. Feature flag system (cerebro-feature-flags package) per docs/upstream-sync/preflight/P8.md:
-     - registry.ts (flag keys + defaults)
+  Sub-tasks (2-3 parallel subagents):
+  A. Frontend feature flag (packages/cerebro-feature-flags) per docs/upstream-sync/preflight/P8.md:
+     - registry.ts (flag keys + defaults — initial: cerebro_inbox, cerebro_access_control, cerebro_members_admin, cerebro_sandbox_ui, cerebro_mcp_guide; all default-on)
      - store.ts (Zustand + persist + workspace-aware storage; model after packages/core/issues/stores/comment-collapse-store.ts)
-     - api.ts (TanStack Query hooks: useFeatureFlag, useSetFeatureFlag)
-     - settings-tab.tsx (ExtraSettingsTab content)
+     - api.ts (TanStack Query hooks useFeatureFlag/useSetFeatureFlag using existing api client)
+     - settings-tab.tsx (ExtraSettingsTab content with toggle UI)
      - index.ts (exports + featureFlagTabs array)
-     - Wire into apps/web settings page + apps/desktop routes.tsx (extraAccountTabs)
+     - Wire into apps/web settings page + apps/desktop routes.tsx (merge with existing Daemon tab)
      - Add storage cleanup entry in packages/core/platform/storage-cleanup.ts
-  B. Server feature flag handler + migration:
-     - server/internal/cerebro/feature_flags/handler.go (GET/PUT)
-     - server/internal/cerebro/queries/feature_flags.sql for sqlc
-     - WS broadcast on PUT (feature_flag:changed)
-     - Update sqlc.yaml to add cerebro package per P3 recommendation
-     - server/migrations/9010_cerebro_feature_flags.up.sql + .down.sql
-  C. Multi-dir migrate + 9NNN move (per P4 amendment):
-     - Patch server/cmd/migrate/main.go for multi-dir glob + basename sort (~15 lines)
-     - Patch server/cmd/migrate/idempotent_test.go same
-     - git mv server/migrations/9*.sql server/migrations/cerebro/ (20 files)
-     - Add unit test for multi-dir merge order
-  D. CLAUDE.md update:
-     - Add "Cerebro extension discipline" section (4 points per 03-decision.md Phase 0.7)
-  E. Eval baseline (per P5 amendment):
-     - Add data-testid hooks for "loaded" markers
-     - Defer pixel-snapshot baselines to chunk 4+ (semantic E2E sufficient for chunk 3 gate)
-     - Document fallback in eval-reports
+  B. Backend feature flag (server/internal/cerebro/feature_flags) per P8:
+     - server/internal/cerebro/feature_flags/handler.go (GET/PUT, default-on semantics via LEFT JOIN)
+     - server/internal/cerebro/queries/feature_flags.sql for sqlc (Get / Upsert / ListForUser)
+     - WS broadcast on PUT (feature_flag:changed payload {key, enabled})
+     - Update sqlc.yaml to add cerebro package per P3 (uses server/internal/cerebro/queries/ + server/internal/cerebro/db/migrations/)
+     - server/migrations/9010_cerebro_feature_flags.up.sql (lives in server/migrations/, NOT cerebro/ subdir — multi-dir migrate is deferred)
+     - Schema: cerebro_feature_flags(workspace_id uuid, user_id uuid, flag_key text, enabled bool, updated_at, PK(workspace_id, user_id, flag_key))
+  C. CLAUDE.md update per 03-decision.md Phase 0.7:
+     - Add "Cerebro extension discipline" section (4 numbered points: cerebro-* zone, CEREBRO-PATCH markers ≤5 lines, 9NNN_cerebro_* migration namespace, feature-flag every cerebro feature)
+     - Reference scripts/validate-cerebro-patches.sh + .eslintrc as enforcement
+  D. Eval baseline (per P5 amendment — semantic E2E only, defer pixel snapshots):
+     - Add data-testid="<page>-loaded" hooks where missing on inbox/projects/settings (already has many testids)
+     - Document fallback: pixel snapshots deferred to chunk 4+ until masks proven stable
+     - Capture API contract baseline if straightforward (run existing E2E specs once and snapshot key responses)
 
-  Eval gate: pnpm typecheck + pnpm test + make test (with multi-dir migrations) + cerebro-patches green. Feature flag toggleable via Settings tab on at least one app.
-  Branches: stay on chore/upstream-sync-analysis for now (no separate phase branch yet).
-  Estimated tokens: ~600-800k (substantial chunk).
+  Explicit non-scope (deferred to later chunks):
+  - Multi-dir migrate patch (server/cmd/migrate/main.go) — defer to chunk 11 (Phase 4) when 9NNN move actually happens
+  - 9NNN file move from server/migrations/ to server/migrations/cerebro/ — defer to chunk 11 alongside multi-dir patch
+  - PR creation against main — deferred until Phase 1 done; chore/upstream-sync-analysis stays as working branch
+
+  Eval gate: pnpm typecheck + pnpm test + make test + cerebro-patches all PASS.
+  Manual smoke: feature flag UI loads in settings; toggle persists to server; Settings-tab renders the cerebro section.
+  Branches: stay on chore/upstream-sync-analysis.
+  Estimated tokens: ~500-700k (large chunk; A+B can run parallel, C+D smaller).
 ```
