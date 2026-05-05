@@ -70,3 +70,17 @@ jobs:
 
       - name: Test
         run: cd server && go test ./...
+
+  upstream-zone-guard:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      BASE_REF: origin/main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate CEREBRO-PATCH markers
+        run: bash scripts/validate-cerebro-patches.sh

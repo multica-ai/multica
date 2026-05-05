@@ -1,0 +1,15 @@
+{
+  "name": "@multica/cerebro-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./augment": "./augment.ts",
+    "./aliases": "./aliases.ts"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

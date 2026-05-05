@@ -1,0 +1,30 @@
+# scripts/cerebro-zones.txt
+#
+# Source of truth for which paths are considered "upstream zone" — diffs in
+# these paths require a CEREBRO-PATCH(<name>): marker. Used by:
+#   - scripts/validate-cerebro-patches.sh
+#   - future CODEOWNERS / sync-script reporting
+#
+# Format:
+#   - One glob per line.
+#   - Lines starting with `!` are exclusions (path is OUTSIDE the upstream zone).
+#   - Lines starting with `#` are comments. Blank lines ignored.
+#   - Globs are shell-style: `*` matches a single path segment, `**` matches
+#     across segments. The validator translates them to regex (see
+#     glob_to_regex in validate-cerebro-patches.sh).
+#
+# Order matters only for human readability; matching is "first include, then
+# any exclude removes" — the script applies all includes then all excludes.
+
+# --- Includes (upstream zone) ---
+packages/views/**
+packages/core/**
+packages/ui/**
+server/**
+
+# --- Excludes (cerebro-only carve-outs) ---
+!packages/cerebro-*/**
+!server/internal/cerebro/**
+!server/migrations/cerebro/**
+!**/*.test.*
+!**/*.spec.*
