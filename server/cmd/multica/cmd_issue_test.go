@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -502,22 +503,40 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
-	expected := map[string]bool{
-		"backlog":     true,
-		"todo":        true,
-		"in_progress": true,
-		"in_review":   true,
-		"done":        true,
-		"blocked":     true,
-		"cancelled":   true,
-	}
-	for _, s := range validIssueStatuses {
-		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
+func TestIssueStatusAllowsCustomStatusKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
 		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":     "issue-1",
+			"title":  "Custom status issue",
+			"status": "ready_for_demo",
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := issueStatusCmd
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := runIssueStatus(cmd, []string{"issue-1", "ready_for_demo"}); err != nil {
+		t.Fatalf("runIssueStatus custom key returned error: %v", err)
 	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
+	if gotPath != "/api/issues/issue-1" {
+		t.Fatalf("path = %q, want /api/issues/issue-1", gotPath)
+	}
+	if gotBody["status"] != "ready_for_demo" {
+		t.Fatalf("status body = %v, want ready_for_demo", gotBody["status"])
 	}
 }

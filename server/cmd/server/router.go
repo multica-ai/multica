@@ -310,6 +310,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					r.Get("/available-transitions", h.GetIssueAvailableTransitions)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)

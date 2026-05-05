@@ -92,6 +92,13 @@ var issueStatusCmd = &cobra.Command{
 	RunE:  runIssueStatus,
 }
 
+var issueTransitionsCmd = &cobra.Command{
+	Use:   "transitions <id>",
+	Short: "List available status transitions for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueTransitions,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -178,10 +185,6 @@ var issueSearchCmd = &cobra.Command{
 	RunE:  runIssueSearch,
 }
 
-var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
-}
-
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
@@ -189,6 +192,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueTransitionsCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -243,6 +247,9 @@ func init() {
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue transitions
+	issueTransitionsCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent)")
@@ -696,17 +703,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
 
-	valid := false
-	for _, s := range validIssueStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validIssueStatuses, ", "))
-	}
-
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -727,6 +723,45 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
+	return nil
+}
+
+func runIssueTransitions(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+args[0]+"/available-transitions", &result); err != nil {
+		return fmt.Errorf("list transitions: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	current, _ := result["current_status"].(map[string]any)
+	fmt.Fprintf(os.Stdout, "Current status: %s\n", strVal(current, "key"))
+	transitions, _ := result["transitions"].([]any)
+	rows := make([][]string, 0, len(transitions))
+	for _, raw := range transitions {
+		tr, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			strVal(tr, "key"),
+			strVal(tr, "name"),
+			strVal(tr, "category"),
+			strVal(tr, "action_label"),
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"STATUS", "NAME", "CATEGORY", "ACTION"}, rows)
 	return nil
 }
 
