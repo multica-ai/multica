@@ -1070,6 +1070,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Memory artifact injection — pull anything anchored to this
+			// issue (always) and the issue's project (when present). Issue-
+			// scoped artifacts come first because they're the most specific.
+			//
+			// Best-effort: a failed lookup logs and continues with no
+			// artifacts rather than failing the claim. Limit per anchor caps
+			// the total payload — the agent can fetch more via the API if it
+			// needs to. Default 10 each = at most 20 artifacts × the per-
+			// artifact content cap (100KB) = ~2MB worst case, but typical
+			// workspaces will have <5 anchored at any one time.
+			const maxArtifactsPerAnchor = 10
+			resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+				r.Context(), issue.WorkspaceID, issue.ID, issue.ProjectID, maxArtifactsPerAnchor,
+			)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

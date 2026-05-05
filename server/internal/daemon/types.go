@@ -40,6 +40,22 @@ type PeerAgentData struct {
 	Instructions string `json:"instructions,omitempty"`
 }
 
+// MemoryArtifactData mirrors handler.MemoryArtifactData — a single memory
+// artifact (wiki page, agent note, runbook, decision) anchored to the
+// issue or its project, delivered to the daemon for runtime context
+// injection. The daemon doesn't interpret content beyond passing it to
+// the meta-skill renderer.
+type MemoryArtifactData struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	Tags       []string `json:"tags,omitempty"`
+	AnchorType string   `json:"anchor_type,omitempty"`
+	AnchorID   string   `json:"anchor_id,omitempty"`
+	UpdatedAt  string   `json:"updated_at"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -55,6 +71,7 @@ type Task struct {
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
 	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`       // other non-archived agents in the same workspace, for orchestrator routing
 	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // server set this true when the claiming agent IS the workspace's orchestrator AND the trigger was agent-authored — adapts the prompt
+	MemoryArtifacts         []MemoryArtifactData  `json:"memory_artifacts,omitempty"`  // workspace knowledge anchored to this issue or its project
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
