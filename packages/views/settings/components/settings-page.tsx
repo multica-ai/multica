@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
-import { NotificationsTab } from "./notifications-tab";
+import { NotificationsTab } from "@multica/cerebro-notifications/views/notifications-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";

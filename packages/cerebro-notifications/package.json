@@ -17,7 +17,8 @@
     "./core/auto-subscribe": "./core/auto-subscribe.ts",
     "./views": "./views/index.ts",
     "./views/components": "./views/components/index.ts",
-    "./views/components/notifications-page": "./views/components/notifications-page.tsx"
+    "./views/components/notifications-page": "./views/components/notifications-page.tsx",
+    "./views/notifications-tab": "./views/notifications-tab.tsx"
   },
   "dependencies": {
     "@multica/core": "workspace:*",

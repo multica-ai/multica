@@ -60,9 +60,9 @@ phase_1:
   status: in_progress
   features:
     rename_isolated_packages: completed  # chunk 4: 7 packages renamed (artifacts, attachments, notifications x core+views, members→cerebro-users)
-    cerebro_test: pending                # chunk 5
-    cerebro_users: in_progress           # chunk 4 created skeleton; chunk 5 fills
-    cerebro_notifications: in_progress   # chunk 4 renamed source; chunk 5 may add fork-only files
+    cerebro_test: deferred               # 4 partial-extraction cases (api-client.test.ts, helpers.tsx, daemon_test.go, claude_test.go) deferred — need surgical cerebro/upstream split
+    cerebro_users: completed             # chunk 4 moved members→cerebro-users/views; no further fork-only content per audit
+    cerebro_notifications: completed     # chunk 5: notifications-tab.tsx moved from packages/views/settings/components/ to packages/cerebro-notifications/views/notifications-tab.tsx
     cerebro_mcp: pending                 # chunk 6
     cerebro_realtime: pending            # chunk 6
     cerebro_runtime: pending             # chunk 6
@@ -140,6 +140,7 @@ phase_minus_1_evals: N/A  # docs-only chunk; see eval-reports/chunk-1-20260505T2
 phase_0_chunk_2_evals: PASS  # see eval-reports/chunk-2-20260505T191025Z.md
 phase_0_chunk_3_evals: PASS  # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt)
 phase_1_chunk_4_evals: PASS  # see eval-reports/chunk-4-20260505T200512Z.md (3rd attempt — fixed cycle, markers, opt-out script bug)
+phase_1_chunk_5_evals: PASS  # see eval-reports/chunk-5-20260505T200926Z.md (partial scope: notifications-tab.tsx moved; surgical test extractions deferred)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -166,32 +167,29 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 1b — chunk 5 per 07-session-schedule.md row 5.
-  Scope: move feature content INTO existing cerebro-* skeletons (chunk 2 created skeletons; chunk 4 renamed isolated packages; chunk 5 moves NEW cerebro-only feature content).
+  Phase 1c — chunk 6 per 07-session-schedule.md row 6.
+  Scope: move 4 features into existing cerebro-* skeletons (mcp, realtime, runtime, cerebro-api).
+  Per 03-decision.md Phase 1.2 ordering: cerebro-mcp, cerebro-realtime, cerebro-runtime + sandbox + profile, cerebro-api sub-client.
 
-  Per 03-decision.md Phase 1.2 + 01-audit.md L1 listings, chunk 5 covers (least-risk first):
-  1. cerebro-test additions — test-only files added by cerebro fork. Audit lists ~3 files. Move to packages/cerebro-test/.
-  2. cerebro-users content beyond the rename — any user/member-related fork additions not yet in cerebro-users/views/. Audit + grep for "CEREBRO" comments in user-related code.
-  3. cerebro-notifications fork-only files — e.g., notifications-tab.tsx (currently lives at packages/views/settings/components/notifications-tab.tsx per SA3 chunk-4 finding). Decision: move it into packages/cerebro-notifications/views/components/ as a settings-tab subdir.
+  IMPORTANT: chunk 5 deferred 4 partial-extraction cases that need handling SOMEWHERE before Phase 1 closes — preferably as part of chunk 6 or a chunk 5.5:
+  - packages/core/api/client.test.ts: extract cerebro-additions to packages/cerebro-test/api-client.test.ts
+  - apps/web/test/helpers.tsx: extract cerebro test-helpers to packages/cerebro-test/web-helpers.tsx
+  - server/internal/handler/daemon_test.go: extract +96 lines of fork enforcement tests to server/internal/cerebro/users/enforcement_test.go
+  - server/pkg/agent/claude_test.go: extract sandbox tests to server/internal/cerebro/sandbox/claude_test.go
 
-  Strategy (3 parallel subagents per protocol):
-   - SA1: cerebro-test — find test-only fork additions (likely under packages/views/__tests__ or root e2e/), move into cerebro-test
-   - SA2: cerebro-users fork additions — grep packages/views, packages/core for cerebro-users-relevant fork code
-   - SA3: cerebro-notifications fork additions — at minimum move notifications-tab.tsx; check audit for any other notifications-only files
+  Strategy:
+  - Identify cerebro-mcp content (likely scattered: MCP guide UI, install-onboarding hooks, server handlers if any)
+  - Identify cerebro-realtime additions (vores realtime patches per audit)
+  - Identify cerebro-runtime + sandbox + profile additions (sandbox UI, profile UI, runtime hooks)
+  - cerebro-api sub-client: API client methods that wrap cerebro endpoints — possibly already done in chunk 3 (listFeatureFlags, setFeatureFlag); audit for more
 
-  Each subagent:
-  - Identifies fork-only files via git log + grep for CEREBRO comments + audit doc
-  - git mv each into the appropriate cerebro-* destination
-  - Updates imports across consumers
-  - Adds CEREBRO-PATCH markers to upstream-zone files it had to modify (e.g., wiring imports), or notes that mechanical rename allow-no-patch applies
-  - Reports findings concisely
+  Use audit doc 01-audit.md for the canonical L1 list. Read it carefully BEFORE dispatching subagents.
 
-  Orchestrator:
-  - Runs pnpm install + eval after subagents complete
-  - If chunk 5 mostly mechanical, use CEREBRO-ALLOW-NO-PATCH again for import edits
-  - If chunk 5 adds new logic in upstream files, those need explicit markers
+  3-4 parallel subagents: one per feature. After all complete, also handle the 4 deferred extractions if context allows.
 
-  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS.
+  Eval gate: same as chunks 2-4. Use CEREBRO-ALLOW-NO-PATCH again if rename is mechanical; explicit markers if new logic added in upstream files.
   Branches: stay on chore/upstream-sync-analysis.
-  Estimated tokens: ~200-350k.
+  Estimated tokens: ~400-600k (substantial — 4 features + 4 deferred extractions).
+
+  After chunk 6: Phase 1 done. Per 07-session-schedule.md row 6: "Auto-progression: GO til Chunk 7? NEJ — Phase 2 er user-pause." But user's /loop instruction overrides: "Do not pause at phase boundaries — only stop on catastrophic conditions". So chunk 7 (Phase 2 inbox feature flag) starts immediately if chunk 6 evals pass.
 ```
