@@ -77,6 +77,7 @@ function ProjectRow({ project }: { project: Project }) {
       <AppLink
         href={wsPaths.projectDetail(project.id)}
         className="flex min-w-0 flex-1 items-center gap-2"
+        data-testid={`project-row-${project.id}`}
       >
         <span className="shrink-0 w-[24px] text-center text-base">{project.icon || "📁"}</span>
         <span className="min-w-0 flex-1 truncate font-medium">

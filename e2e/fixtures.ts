@@ -26,6 +26,7 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
   private createdInboxItemIds: string[] = [];
+  private createdProjectIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -140,6 +141,47 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async createProject(title: string, opts?: Record<string, unknown>) {
+    const res = await this.authedFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        status: "in_progress",
+        priority: "medium",
+        ...opts,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`createProject failed: ${res.status} ${await res.text()}`);
+    }
+    const project = await res.json();
+    this.createdProjectIds.push(project.id);
+    return project;
+  }
+
+  async deleteProject(id: string) {
+    await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async updateProjectAccess(id: string, access: "workspace" | "restricted") {
+    const res = await this.authedFetch(`/api/projects/${id}/access`, {
+      method: "PATCH",
+      body: JSON.stringify({ access }),
+    });
+    if (!res.ok) {
+      throw new Error(`updateProjectAccess failed: ${res.status} ${await res.text()}`);
+    }
+    return res.json();
+  }
+
+  async listProjectMembers(id: string): Promise<{ members: Array<{ user_id: string; name: string }> }> {
+    const res = await this.authedFetch(`/api/projects/${id}/members`);
+    if (!res.ok) {
+      throw new Error(`listProjectMembers failed: ${res.status}`);
+    }
+    return res.json();
+  }
+
   /** Clean up all issues + inbox items created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {
@@ -150,6 +192,15 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+
+    for (const id of this.createdProjectIds) {
+      try {
+        await this.deleteProject(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdProjectIds = [];
 
     if (this.createdInboxItemIds.length > 0) {
       const client = new pg.Client(DATABASE_URL);
