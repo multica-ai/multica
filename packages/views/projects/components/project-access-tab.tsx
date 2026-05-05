@@ -99,7 +99,7 @@ export function ProjectAccessTab({ project }: Props) {
         </div>
         <p>
           {project.access === "restricted"
-            ? "Only listed members and workspace admins can see this project. Ask an admin to change access."
+            ? "Only selected members and workspace admins can see this project. Ask an admin to change access."
             : "Every member of this workspace can see this project."}
         </p>
       </div>
@@ -128,7 +128,7 @@ export function ProjectAccessTab({ project }: Props) {
               <span className="inline-flex items-center gap-2">
                 Restricted
                 <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                  <Lock className="size-3" /> only listed people
+                  <Lock className="size-3" /> selected people only
                 </span>
               </span>
             }

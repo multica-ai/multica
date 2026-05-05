@@ -27,7 +27,7 @@ export function RestrictedDot({ className }: { className?: string }) {
         }
       />
       <TooltipContent side="top">
-        Restricted — only listed members can see this project
+        Restricted — only selected members can see this project
       </TooltipContent>
     </Tooltip>
   );

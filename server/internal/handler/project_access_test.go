@@ -190,6 +190,79 @@ func TestListMemberProjects_AdminSeesRestrictedOnly(t *testing.T) {
 	}
 }
 
+// Regression: ProjectResponse must include the `access` field so the UI
+// can render the Restricted dot and the members panel. Missing this field
+// silently broke the project-access tab in production: project.access was
+// undefined on the client → the members panel never appeared after flipping
+// to restricted, and dots never showed in the projects list.
+func TestProjectResponse_IncludesAccess(t *testing.T) {
+	f := setupFilterFixture(t)
+
+	owner, _ := testHandler.Queries.GetMemberByUserAndWorkspace(
+		newReqAs("GET", "/", testUserID, db.Member{}).Context(),
+		db.GetMemberByUserAndWorkspaceParams{
+			UserID:      util.ParseUUID(testUserID),
+			WorkspaceID: util.ParseUUID(testWorkspaceID),
+		})
+
+	req := newReqAs("GET", "/api/projects", testUserID, owner)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, owner))
+	rec := httptest.NewRecorder()
+	testHandler.ListProjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list projects: want 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Projects []map[string]any `json:"projects"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Projects) == 0 {
+		t.Fatalf("expected at least one project in response")
+	}
+	for _, p := range body.Projects {
+		access, ok := p["access"].(string)
+		if !ok {
+			t.Fatalf("project missing access field, got keys=%v", keys(p))
+		}
+		if access != "workspace" && access != "restricted" {
+			t.Fatalf("invalid access value: %q", access)
+		}
+		if id, _ := p["id"].(string); id == f.restrictedID && access != "restricted" {
+			t.Fatalf("restricted project's access should be 'restricted', got %q", access)
+		}
+	}
+
+	// Single-project GET path also needs it.
+	req2 := newReqAs("GET", "/api/projects/"+f.restrictedID, testUserID, owner)
+	req2.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req2 = req2.WithContext(middleware.SetMemberContext(req2.Context(), testWorkspaceID, owner))
+	req2 = withURLParam(req2, "id", f.restrictedID)
+	rec2 := httptest.NewRecorder()
+	testHandler.GetProject(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("get project: want 200, got %d body=%s", rec2.Code, rec2.Body.String())
+	}
+	var single map[string]any
+	json.Unmarshal(rec2.Body.Bytes(), &single)
+	if single["access"] != "restricted" {
+		t.Fatalf("GET project: access=%v, want restricted", single["access"])
+	}
+}
+
+func keys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestListProjectMembers_RestrictedHiddenFromOutsider(t *testing.T) {
 	f := setupFilterFixture(t)
 
