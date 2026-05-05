@@ -19,11 +19,13 @@ export function ProjectPicker({
   onUpdate,
   triggerRender,
   align = "start",
+  required = false,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   triggerRender?: React.ReactElement;
   align?: "start" | "center" | "end";
+  required?: boolean;
 }) {
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
@@ -41,6 +43,11 @@ export function ProjectPicker({
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate">{current ? current.title : "No project"}</span>
+        {required && (
+          <span aria-label="Project required" className="text-destructive">
+            *
+          </span>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((p) => (

@@ -140,6 +140,7 @@ export function ManualCreatePanel({
     setDraft({ assigneeType: type, assigneeId: id });
   };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const canSubmit = !!title.trim() && !!projectId && !submitting;
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
@@ -166,7 +167,7 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -400,6 +401,7 @@ export function ManualCreatePanel({
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
+                required
               />
 
               {/* Parent chip — appears when parent is set.
@@ -548,7 +550,7 @@ export function ManualCreatePanel({
                   />
                   Create another
                 </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+                <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
                   {submitting ? "Creating..." : "Create Issue"}
                 </Button>
               </div>

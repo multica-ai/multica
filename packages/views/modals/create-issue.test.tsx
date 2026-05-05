@@ -142,7 +142,27 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+    required,
+  }: {
+    projectId: string | null;
+    onUpdate: (updates: { project_id: string | null }) => void;
+    required?: boolean;
+  }) => (
+    <div data-testid="project-picker">
+      <span>{projectId ? "Project selected" : "No project"}</span>
+      {required && (
+        <span aria-label="Project required" className="text-destructive">
+          *
+        </span>
+      )}
+      <button type="button" onClick={() => onUpdate({ project_id: "project-1" })}>
+        Select project
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
@@ -258,7 +278,7 @@ describe("CreateIssueModal", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    renderModal(<CreateIssueModal onClose={onClose} />);
+    renderModal(<CreateIssueModal onClose={onClose} data={{ project_id: "project-1" }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "  Ship create issue regression coverage  ");
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
@@ -274,7 +294,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: "project-1",
       });
     });
 
@@ -303,7 +323,7 @@ describe("CreateIssueModal", () => {
     const onClose = vi.fn();
     mockQuickCreateStore.keepOpen = true;
 
-    renderModal(<CreateIssueModal onClose={onClose} />);
+    renderModal(<CreateIssueModal onClose={onClose} data={{ project_id: "project-1" }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
     await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
@@ -320,7 +340,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: "project-1",
       });
     });
 
@@ -335,6 +355,35 @@ describe("CreateIssueModal", () => {
       assigneeType: undefined,
       assigneeId: undefined,
       dueDate: null,
+    });
+  });
+
+  it("requires a project before creating a manual issue", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+
+    expect(screen.getByLabelText("Project required")).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Needs a project");
+
+    const createButton = screen.getByRole("button", { name: "Create Issue" });
+    expect(createButton).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Select project" }));
+
+    expect(createButton).toBeEnabled();
+
+    await user.click(createButton);
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Needs a project",
+          project_id: "project-1",
+        }),
+      );
     });
   });
 });
