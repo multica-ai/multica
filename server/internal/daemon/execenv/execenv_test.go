@@ -2305,11 +2305,14 @@ func TestInjectRuntimeConfigEmbedsMemoryArtifacts(t *testing.T) {
 	// Top-level Memory section + the introductory framing.
 	for _, want := range []string{
 		"## Memory",
-		"Workspace knowledge anchored to this issue or its project",
+		"Workspace knowledge anchored to this task",
 		// Group headings — order matters: issue first (most specific).
 		"### On this issue",
 		"### On the project",
-		"### Workspace-level",
+		// Free-floating (anchor_type == "") artifacts land under the "Other"
+		// catch-all because they have no specific anchor; the named anchor
+		// groups (issue/project/channel/agent) handle the typed cases.
+		"### Other",
 		// Issue-anchored artifact body and metadata.
 		"#### Runbook — Login deploy procedure",
 		"_Tags: deploy, auth_",
@@ -2318,7 +2321,7 @@ func TestInjectRuntimeConfigEmbedsMemoryArtifacts(t *testing.T) {
 		// Project-anchored artifact.
 		"#### Decision — Why JWT over sessions",
 		"We picked JWT because the mobile clients can't carry a session cookie cleanly.",
-		// Workspace-level (no anchor) artifact.
+		// Free-floating artifact, now rendered under "Other".
 		"#### Wiki — Onboarding overview",
 		"General workspace orientation, no anchor.",
 	} {
@@ -2336,6 +2339,72 @@ func TestInjectRuntimeConfigEmbedsMemoryArtifacts(t *testing.T) {
 		t.Fatal("missing project heading")
 	} else if idxIssue > idxProject {
 		t.Errorf("issue heading should precede project heading; issue=%d project=%d", idxIssue, idxProject)
+	}
+}
+
+// Pins the per-anchor headings introduced by the agent + channel anchor
+// extension. The renderer must surface "On this channel" and "Notes I've
+// kept (agent-anchored)" with content under each — the prompt builder
+// relies on these labels to scope agents' attention.
+func TestInjectRuntimeConfigRendersAgentAndChannelAnchorHeadings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "agent_note",
+				Title:      "Prefer rebase over merge",
+				Content:    "I rebase by default; only use merge commits for shared branches.",
+				AnchorType: "agent",
+				AnchorID:   "33333333-3333-3333-3333-333333333333",
+				UpdatedAt:  "2026-05-04T10:00:00Z",
+			},
+			{
+				ID:         "22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "wiki_page",
+				Title:      "#deploys channel norms",
+				Content:    "Mention @release-bot for prod cuts; rollbacks need a thread.",
+				AnchorType: "channel",
+				AnchorID:   "44444444-4444-4444-4444-444444444444",
+				UpdatedAt:  "2026-05-03T08:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	for _, want := range []string{
+		"### On this channel",
+		"#### Wiki — #deploys channel norms",
+		"Mention @release-bot for prod cuts",
+		"### Notes I've kept (agent-anchored)",
+		"#### Agent note — Prefer rebase over merge",
+		"I rebase by default",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// Channel anchor (more specific to the active conversation) must
+	// precede agent anchor (long-lived persona) in the rendered output.
+	idxChan := strings.Index(s, "### On this channel")
+	idxAgent := strings.Index(s, "### Notes I've kept (agent-anchored)")
+	if idxChan == -1 || idxAgent == -1 {
+		t.Fatalf("expected both headings; chan=%d agent=%d", idxChan, idxAgent)
+	}
+	if idxChan > idxAgent {
+		t.Errorf("channel heading should precede agent heading; chan=%d agent=%d", idxChan, idxAgent)
 	}
 }
 

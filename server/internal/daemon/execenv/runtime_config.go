@@ -275,22 +275,18 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// can pull updated content if it suspects staleness).
 	if len(ctx.MemoryArtifacts) > 0 {
 		b.WriteString("## Memory\n\n")
-		b.WriteString("Workspace knowledge anchored to this issue or its project. ")
+		b.WriteString("Workspace knowledge anchored to this task. ")
 		b.WriteString("Treat as authoritative context — these are runbooks, decisions, and notes the team has explicitly attached. ")
 		b.WriteString("Read what's relevant; don't blindly act on every artifact.\n\n")
 
-		issueArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
-		projectArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
-		otherArtifacts := make([]MemoryArtifactForEnv, 0, len(ctx.MemoryArtifacts))
+		// Group by anchor type. Issue and project anchors come from the
+		// issue-claim path; agent anchors carry long-lived agent persona/
+		// preferences and ride along on every task; channel anchors come
+		// from the channel-mention claim path. Order matches the per-task
+		// fetch order: most-specific anchor first.
+		byAnchor := make(map[string][]MemoryArtifactForEnv)
 		for _, a := range ctx.MemoryArtifacts {
-			switch a.AnchorType {
-			case "issue":
-				issueArtifacts = append(issueArtifacts, a)
-			case "project":
-				projectArtifacts = append(projectArtifacts, a)
-			default:
-				otherArtifacts = append(otherArtifacts, a)
-			}
+			byAnchor[a.AnchorType] = append(byAnchor[a.AnchorType], a)
 		}
 
 		writeArtifacts := func(header string, list []MemoryArtifactForEnv) {
@@ -309,9 +305,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 		}
 
-		writeArtifacts("On this issue", issueArtifacts)
-		writeArtifacts("On the project", projectArtifacts)
-		writeArtifacts("Workspace-level", otherArtifacts)
+		// Render in fixed order. Anchor types not in the known set get
+		// dropped into a generic "Other" bucket — better than silently
+		// hiding them when a future anchor type is added on the server.
+		writeArtifacts("On this issue", byAnchor["issue"])
+		writeArtifacts("On the project", byAnchor["project"])
+		writeArtifacts("On this channel", byAnchor["channel"])
+		writeArtifacts("Notes I've kept (agent-anchored)", byAnchor["agent"])
+		var unknown []MemoryArtifactForEnv
+		for kind, list := range byAnchor {
+			switch kind {
+			case "issue", "project", "channel", "agent":
+				continue
+			}
+			unknown = append(unknown, list...)
+		}
+		writeArtifacts("Other", unknown)
 	}
 
 	b.WriteString("### Workflow\n\n")

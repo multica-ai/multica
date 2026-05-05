@@ -168,43 +168,66 @@ type UpdateMemoryArtifactRequest struct {
 	Metadata   json.RawMessage `json:"metadata"`
 }
 
-// fetchMemoryArtifactsForTask pulls memory artifacts anchored to the given
-// issue and (optionally) its project, returning a flattened slice for
-// injection into the daemon claim response. Caller-side concerns:
+// taskAnchor identifies one (anchor_type, anchor_id) pair to consult when
+// hydrating memory artifacts for a claimed task. The slice form lets the
+// claim path mix anchor sources (issue + project + agent for issue claims;
+// channel + agent for channel-mention claims) without an ever-growing
+// argument list. Order matters: artifacts come back in the order their
+// anchors are listed, with deduplication by id so an artifact anchored
+// to multiple things doesn't appear twice.
+type taskAnchor struct {
+	Type string
+	ID   pgtype.UUID
+}
+
+// fetchMemoryArtifactsForTask pulls memory artifacts anchored to any of the
+// given (type, id) pairs, returning a flattened slice for injection into
+// the daemon claim response. Caller-side concerns:
 //
-//   - Issue-scoped artifacts come first because they're more specific to
-//     the work the agent is about to do; project-scoped come second.
+//   - Order is preserved by anchor: callers should pass the *most specific*
+//     anchor first (issue before project, channel before agent). The agent
+//     prompt uses this ordering when rendering the ## Memory section.
 //   - Errors are logged and swallowed — a failed memory lookup must not
 //     fail the task claim. The agent can still work without memory.
-//   - The limit applies *per anchor*, not globally. Issue + project = up
-//     to 2 × limit artifacts in the worst case. Tune at the call site.
+//   - The limit applies *per anchor*, not globally. N anchors = up to
+//     N × limit artifacts in the worst case. Tune at the call site.
+//   - Artifacts that match multiple anchors (e.g. a runbook tagged to BOTH
+//     the issue and the project) appear only once, under their first-
+//     matched anchor.
 //
 // Lives in the memory_artifact handler file (rather than daemon.go) so the
 // pgtype + db.ListMemoryArtifactsByAnchorParams plumbing stays colocated
 // with the rest of the memory handlers.
 func (h *Handler) fetchMemoryArtifactsForTask(
 	ctx context.Context,
-	workspaceID, issueID, projectID pgtype.UUID,
+	workspaceID pgtype.UUID,
+	anchors []taskAnchor,
 	limitPerAnchor int32,
 ) []MemoryArtifactData {
 	var out []MemoryArtifactData
+	seen := make(map[string]bool)
 
-	appendByAnchor := func(anchorType string, anchorID pgtype.UUID) {
-		if !anchorID.Valid {
-			return
+	for _, anchor := range anchors {
+		if !anchor.ID.Valid || anchor.Type == "" {
+			continue
 		}
 		rows, err := h.Queries.ListMemoryArtifactsByAnchor(ctx, db.ListMemoryArtifactsByAnchorParams{
 			WorkspaceID: workspaceID,
-			AnchorType:  pgtype.Text{String: anchorType, Valid: true},
-			AnchorID:    anchorID,
+			AnchorType:  pgtype.Text{String: anchor.Type, Valid: true},
+			AnchorID:    anchor.ID,
 			Limit:       limitPerAnchor,
 		})
 		if err != nil {
 			slog.Warn("fetchMemoryArtifactsForTask: list by anchor failed",
-				"anchor_type", anchorType, "error", err)
-			return
+				"anchor_type", anchor.Type, "error", err)
+			continue
 		}
 		for _, row := range rows {
+			id := uuidToString(row.ID)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			tags := row.Tags
 			if tags == nil {
 				tags = []string{}
@@ -218,7 +241,7 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 				anchorTypeStr = row.AnchorType.String
 			}
 			out = append(out, MemoryArtifactData{
-				ID:         uuidToString(row.ID),
+				ID:         id,
 				Kind:       row.Kind,
 				Title:      row.Title,
 				Content:    row.Content,
@@ -229,9 +252,6 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 			})
 		}
 	}
-
-	appendByAnchor("issue", issueID)
-	appendByAnchor("project", projectID)
 	return out
 }
 
