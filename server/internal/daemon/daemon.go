@@ -1161,6 +1161,60 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 	return sem
 }
 
+// shouldInterruptAgent decides whether the running agent should be cancelled
+// based on the latest GetTaskStatus call. Pure function so the decision is
+// trivially testable; the polling goroutine in watchTaskCancellation is just
+// I/O around it.
+//
+// Two cases trigger cancellation:
+//
+//  1. status == "cancelled" — the server moved the task to cancelled
+//     (issue reassigned, user cancel, ...).
+//  2. err is a 404 with "task not found" — the task row was deleted while
+//     the agent was running. Without this we'd let the local agent keep
+//     emitting tool calls against a dead task for its full timeout window.
+//
+// All other errors (transient network, 5xx, ...) intentionally do NOT
+// trigger cancellation — the next tick will retry and we don't want a
+// flaky link to kill an in-flight agent.
+func shouldInterruptAgent(status string, err error) bool {
+	if err != nil {
+		return isTaskNotFoundError(err)
+	}
+	return status == "cancelled"
+}
+
+// watchTaskCancellation polls the server for the task's status on the given
+// interval and returns a channel that is closed when the running agent
+// should be interrupted. The polling goroutine stops when ctx is cancelled,
+// so callers should pass the runCtx that was set up around the agent run.
+func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
+	cancelled := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				status, err := d.client.GetTaskStatus(ctx, taskID)
+				if !shouldInterruptAgent(status, err) {
+					continue
+				}
+				if err != nil {
+					taskLog.Info("task gone server-side, interrupting agent", "error", err)
+				} else {
+					taskLog.Info("task cancelled by server, interrupting agent")
+				}
+				close(cancelled)
+				return
+			}
+		}
+	}()
+	return cancelled
+}
+
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
@@ -1190,27 +1244,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	// Create a cancellable context so we can interrupt the running agent
-	// when the server-side task status changes to 'cancelled'.
+	// when the server signals the task should stop — either status moves
+	// to "cancelled" or the task row is deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// Poll for cancellation every 5 seconds while the task is running.
-	cancelledByPoll := make(chan struct{})
+	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, 5*time.Second, taskLog)
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case <-ticker.C:
-				if status, err := d.client.GetTaskStatus(ctx, task.ID); err == nil && status == "cancelled" {
-					taskLog.Info("task cancelled by server, interrupting agent")
-					runCancel()
-					close(cancelledByPoll)
-					return
-				}
-			}
+		select {
+		case <-cancelledByPoll:
+			runCancel()
+		case <-runCtx.Done():
 		}
 	}()
 
