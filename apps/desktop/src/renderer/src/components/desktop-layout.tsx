@@ -15,6 +15,7 @@ import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { StarterContentPrompt } from "@multica/views/onboarding";
 import { IdleDetector } from "@multica/views/time-tracking/idle-detector";
+import { TimerFinalStateGuard } from "@multica/views/time-tracking/timer-final-state-guard";
 import {
   WorkspaceSlugProvider,
   paths,
@@ -185,6 +186,7 @@ export function DesktopShell() {
         {slug && <SearchCommand />}
         {slug && <StarterContentPrompt />}
         {slug && <IdleDetector />}
+        {slug && <TimerFinalStateGuard />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

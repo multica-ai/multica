@@ -6,6 +6,7 @@ import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { StarterContentPrompt } from "@multica/views/onboarding";
 import { IdleDetector } from "@multica/views/time-tracking/idle-detector";
+import { TimerFinalStateGuard } from "@multica/views/time-tracking/timer-final-state-guard";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -19,6 +20,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <ChatFab />
           <StarterContentPrompt />
           <IdleDetector />
+          <TimerFinalStateGuard />
         </>
       }
     >
