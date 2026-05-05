@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -77,6 +79,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, signupConfig)
+
+	// CEREBRO: feature-flag handler kept in dedicated package so upstream-merges
+	// don't conflict on router wiring.
+	cerebroQueries := cerebrodb.New(pool)
+	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
 
 	r := chi.NewRouter()
 
@@ -251,6 +258,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					// above so agents can resolve mention targets.
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					// CEREBRO: per-user feature-flag overrides
+					r.Get("/feature-flags", featureFlagsHandler.List)
+					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

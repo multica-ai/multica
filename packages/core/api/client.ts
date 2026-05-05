@@ -276,6 +276,20 @@ export class ApiClient {
     });
   }
 
+  // Cerebro fork-specific: per-(workspace, user) feature flag overrides.
+  // Server returns ONLY the overrides — defaults are applied client-side
+  // from the cerebro-feature-flags registry.
+  async listFeatureFlags(wsId: string): Promise<{ overrides: Record<string, boolean> }> {
+    return this.fetch(`/api/workspaces/${wsId}/feature-flags`);
+  }
+
+  async setFeatureFlag(wsId: string, key: string, enabled: boolean): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
 
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {

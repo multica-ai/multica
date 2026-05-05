@@ -33,6 +33,7 @@ import { MemberDetailPage } from "@multica/views/members";
 import { Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
+import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags";
 
 /**
  * Sets document.title from the deepest matched route's handle.title.
@@ -176,6 +177,7 @@ export const appRoutes: RouteObject[] = [
                     icon: Server,
                     content: <DaemonSettingsTab />,
                   },
+                  ...cerebroFeatureFlagTabs,
                 ]}
               />
             ),

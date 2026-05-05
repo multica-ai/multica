@@ -17,6 +17,7 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica:chat:drafts",
   "multica:chat:expanded",
   "multica_navigation",
+  "cerebro_feature_flags",
 ];
 
 /** Remove all workspace-scoped storage entries for the given workspace slug. */

@@ -176,6 +176,25 @@ Both apps share the same CSS foundation from `packages/ui/styles/`.
 - **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
 - **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
 
+## Cerebro Extension Discipline
+
+This fork keeps cerebro-specific code separate from upstream multica so we can pull upstream syncs cleanly. Every contributor (human or AI) is bound by these four rules:
+
+1. **All new cerebro features land in `packages/cerebro-*/` or `server/internal/cerebro/*`.** Never modify upstream-files unless the modification is irreducible. The cerebro zone is excluded from the upstream-zone-guard CI check; landing in the right zone removes review friction.
+
+2. **When you must modify an upstream file**, mark the change with `// CEREBRO-PATCH(<descriptive-name>):` on the changed line, and document it in `docs/cerebro-patches.md`. Each patch must be ≤5 lines. Markers must appear on added (`^+`) lines in the diff — `scripts/validate-cerebro-patches.sh` enforces this in CI.
+
+3. **Cerebro database migrations use the `9NNN_cerebro_*.sql` namespace.** Today they live alongside upstream migrations in `server/migrations/`; a multi-dir scanner + relocation to `server/migrations/cerebro/` is planned (see `docs/upstream-sync/preflight/P4.md`). Until then, the 9000+ numerical gap is the namespace boundary — never use a 9-prefix for an upstream migration, and never use a non-9-prefix for a cerebro migration.
+
+4. **Feature flag every cerebro feature** via `@multica/cerebro-feature-flags` so the user can disable cerebro behaviors without redeploy. Default values live in `packages/cerebro-feature-flags/registry.ts`. Server overrides are per-workspace + per-user. Defaults are applied client-side — server stores only overrides.
+
+Enforcement:
+- `scripts/validate-cerebro-patches.sh` (run as `upstream-zone-guard` CI job) validates rule 2 on every PR.
+- `scripts/cerebro-zones.txt` is the source of truth for "what counts as upstream zone" — keep it in sync if package layout changes.
+- The cerebro-types package augments upstream interfaces (`packages/cerebro-types/augment.ts`) when adding fields to upstream models — avoids needing CEREBRO-PATCH for type extensions.
+
+When in doubt: land in the cerebro zone. Pulling cerebro features back if the upstream sync demands it is far cheaper than fighting merge conflicts forever.
+
 ## Desktop-specific Rules
 
 These rules apply to `apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.

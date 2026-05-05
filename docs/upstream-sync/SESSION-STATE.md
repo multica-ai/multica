@@ -6,11 +6,11 @@
 
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 0"     # which phase we're in
-current_task: "0b_foundation" # which sub-task within phase (chunk 3)
-last_iteration_at: "2026-05-05T21:11:00Z"
-total_iterations: 2
-total_tokens_estimate: 850000
+current_phase: "Phase 1"     # which phase we're in
+current_task: "1a_rename"    # chunk 4 — rename 7 isolated packages
+last_iteration_at: "2026-05-05T21:30:00Z"
+total_iterations: 3
+total_tokens_estimate: 1450000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -43,17 +43,18 @@ phase_minus_1:
     - "P4: include git mv server/migrations/9*.sql server/migrations/cerebro/ as part of implementation"
 
 phase_0:
-  status: in_progress
+  status: completed
   components:
-    cerebro_zone_skeleton: completed   # 12 packages/cerebro-* + 13 server/internal/cerebro/* dirs + READMEs
-    feature_flag_system: pending       # chunk 3
-    lint_rule: completed               # scripts/validate-cerebro-patches.sh + cerebro-zones.txt + ci.yml job
-    sync_scripts: completed            # scripts/upstream-sync.sh skeleton with --help; full impl chunk 3+
-    eval_baseline: pending             # chunk 3 (visual + API contract + perf)
-    claude_md_update: pending          # chunk 3
-    multi_dir_migrate: pending         # chunk 3 (per P4 amendment — couples with 9NNN move)
-  go_no_go: null                       # set when all components complete (after chunk 3)
+    cerebro_zone_skeleton: completed   # chunk 2: 12 packages/cerebro-* + 13 server/internal/cerebro/* dirs + READMEs
+    feature_flag_system: completed     # chunk 3: TS package + Go handler + sqlc cerebrodb pkg + migration + WS event
+    lint_rule: completed               # chunk 2: scripts/validate-cerebro-patches.sh + cerebro-zones.txt + ci.yml job
+    sync_scripts: completed            # chunk 2: scripts/upstream-sync.sh skeleton with --help
+    eval_baseline: deferred            # chunk 3: pixel snapshots deferred per P5 amendment; semantic E2E sufficient
+    claude_md_update: completed        # chunk 3: "Cerebro Extension Discipline" section added
+    multi_dir_migrate: deferred        # moved to chunk 11 per chunk-3 brief tightening
+  go_no_go: GO                         # phase 0 foundation complete; phase 1 may proceed
   chunk_2_eval: PASS
+  chunk_3_eval: PASS                   # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt; first 2 caught migration idempotency + empty test set)
 
 phase_1:
   status: pending
@@ -126,6 +127,8 @@ open_prs: []
 2026-05-05T20:50:00Z | Phase -1 | proceed_to_phase_0 | Per autonomous protocol: 7 of 8 effective passes → HOLD → proceed with caveat documented in preflight/SUMMARY.md
 2026-05-05T21:11:00Z | Phase 0a | chunk_2_GO | All eval checks PASS (typecheck, vitest, Go tests, cerebro-patches script). 12 cerebro-* package skeletons + server/internal/cerebro/* + scripts/validate-cerebro-patches.sh + scripts/upstream-sync.sh skeleton + CI guard job landed. Bash 3.2 compat fix to per-session-eval.sh.
 2026-05-05T21:11:00Z | Phase 0a | proceed_to_chunk_3 | Foundation skeleton complete; chunk 3 now adds feature flags + multi-dir migrate + 9NNN move + CLAUDE.md.
+2026-05-05T21:30:00Z | Phase 0b | chunk_3_GO | Feature flag system end-to-end (frontend Zustand + persist + TanStack Query, backend Go handler + sqlc + migration + WS event), CLAUDE.md "Cerebro Extension Discipline" section, eval green after 2 retries (fixed migration idempotency with IF NOT EXISTS, fixed empty-test-set with --passWithNoTests). esbuild arm64 binary required pnpm install --force to refresh.
+2026-05-05T21:30:00Z | Phase 0   | foundation_GO | All 7 Phase 0 components complete or deliberately deferred. Phase 1 (L1 extraction) may begin with chunk 4 (rename 7 isolated packages).
 ```
 
 ## Eval results (most recent per phase)
@@ -133,6 +136,7 @@ open_prs: []
 ```yaml
 phase_minus_1_evals: N/A  # docs-only chunk; see eval-reports/chunk-1-20260505T205000Z.md
 phase_0_chunk_2_evals: PASS  # see eval-reports/chunk-2-20260505T191025Z.md
+phase_0_chunk_3_evals: PASS  # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -159,40 +163,45 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 0b — chunk 3 per 07-session-schedule.md.
-  Scope per the schedule: "Feature flag-system + Settings-tab + eval-baselines + CLAUDE.md".
+  Phase 1a — chunk 4 per 07-session-schedule.md row 4.
+  Scope: rename 7 isolated packages from upstream namespace into cerebro namespace. This is mechanical rename work — no new logic.
 
-  Sub-tasks (2-3 parallel subagents):
-  A. Frontend feature flag (packages/cerebro-feature-flags) per docs/upstream-sync/preflight/P8.md:
-     - registry.ts (flag keys + defaults — initial: cerebro_inbox, cerebro_access_control, cerebro_members_admin, cerebro_sandbox_ui, cerebro_mcp_guide; all default-on)
-     - store.ts (Zustand + persist + workspace-aware storage; model after packages/core/issues/stores/comment-collapse-store.ts)
-     - api.ts (TanStack Query hooks useFeatureFlag/useSetFeatureFlag using existing api client)
-     - settings-tab.tsx (ExtraSettingsTab content with toggle UI)
-     - index.ts (exports + featureFlagTabs array)
-     - Wire into apps/web settings page + apps/desktop routes.tsx (merge with existing Daemon tab)
-     - Add storage cleanup entry in packages/core/platform/storage-cleanup.ts
-  B. Backend feature flag (server/internal/cerebro/feature_flags) per P8:
-     - server/internal/cerebro/feature_flags/handler.go (GET/PUT, default-on semantics via LEFT JOIN)
-     - server/internal/cerebro/queries/feature_flags.sql for sqlc (Get / Upsert / ListForUser)
-     - WS broadcast on PUT (feature_flag:changed payload {key, enabled})
-     - Update sqlc.yaml to add cerebro package per P3 (uses server/internal/cerebro/queries/ + server/internal/cerebro/db/migrations/)
-     - server/migrations/9010_cerebro_feature_flags.up.sql (lives in server/migrations/, NOT cerebro/ subdir — multi-dir migrate is deferred)
-     - Schema: cerebro_feature_flags(workspace_id uuid, user_id uuid, flag_key text, enabled bool, updated_at, PK(workspace_id, user_id, flag_key))
-  C. CLAUDE.md update per 03-decision.md Phase 0.7:
-     - Add "Cerebro extension discipline" section (4 numbered points: cerebro-* zone, CEREBRO-PATCH markers ≤5 lines, 9NNN_cerebro_* migration namespace, feature-flag every cerebro feature)
-     - Reference scripts/validate-cerebro-patches.sh + .eslintrc as enforcement
-  D. Eval baseline (per P5 amendment — semantic E2E only, defer pixel snapshots):
-     - Add data-testid="<page>-loaded" hooks where missing on inbox/projects/settings (already has many testids)
-     - Document fallback: pixel snapshots deferred to chunk 4+ until masks proven stable
-     - Capture API contract baseline if straightforward (run existing E2E specs once and snapshot key responses)
+  Renames (per docs/upstream-sync/01-audit.md and 03-decision.md Phase 1.1):
+  1. packages/core/artifacts/      → packages/cerebro-artifacts/core/
+  2. packages/views/artifacts/     → packages/cerebro-artifacts/views/
+  3. packages/core/attachments/    → packages/cerebro-attachments/core/
+  4. packages/views/attachments/   → packages/cerebro-attachments/views/
+  5. packages/core/notifications/  → packages/cerebro-notifications/core/
+  6. packages/views/notifications/ → packages/cerebro-notifications/views/
+  7. packages/views/members/       → packages/cerebro-users/
 
-  Explicit non-scope (deferred to later chunks):
-  - Multi-dir migrate patch (server/cmd/migrate/main.go) — defer to chunk 11 (Phase 4) when 9NNN move actually happens
-  - 9NNN file move from server/migrations/ to server/migrations/cerebro/ — defer to chunk 11 alongside multi-dir patch
-  - PR creation against main — deferred until Phase 1 done; chore/upstream-sync-analysis stays as working branch
+  IMPORTANT: the cerebro-* destination packages already exist as skeletons (chunk 2). Rename = move source files INTO existing skeleton, then update package.json + index.ts + tsconfig.json to point at the moved code. Delete the old paths.
 
-  Eval gate: pnpm typecheck + pnpm test + make test + cerebro-patches all PASS.
-  Manual smoke: feature flag UI loads in settings; toggle persists to server; Settings-tab renders the cerebro section.
+  Per-package operations:
+  - git mv all source files (preserve history)
+  - Update destination package.json to declare correct exports + add deps from source
+  - Update destination tsconfig.json to include the moved source
+  - Update destination index.ts (or index.tsx) to re-export from the moved code
+  - grep for old import paths across the entire monorepo (apps/web, apps/desktop, packages/*) and replace with new
+  - Verify pnpm-workspace.yaml glob still picks them up (it does — packages/*)
+
+  Strategy (per protocol "7 parallel"):
+  Dispatch 4 parallel subagents:
+   - SA1: artifacts (core + views into cerebro-artifacts)
+   - SA2: attachments (core + views into cerebro-attachments)
+   - SA3: notifications (core + views into cerebro-notifications)
+   - SA4: members → cerebro-users
+  Each handles own subtree end-to-end and reports import paths it updated.
+
+  After all 4 complete, orchestrator:
+  - Runs `pnpm install` to refresh workspace links
+  - Runs `pnpm typecheck` + `pnpm test` + Go tests (no Go changes expected)
+  - Searches for stragglers: `grep -r "@multica/(core|views)/(artifacts|attachments|notifications|members)" apps/ packages/`
+  - Runs `scripts/per-session-eval.sh chunk-4`
+
+  Eval gate: same as chunks 2-3. All checks must PASS. Visual regression deferred per P5.
   Branches: stay on chore/upstream-sync-analysis.
-  Estimated tokens: ~500-700k (large chunk; A+B can run parallel, C+D smaller).
+  Estimated tokens: ~250-400k (mechanical work; subagents share consistent rename pattern).
+
+  Risk: import path replacements scattered across many files. If subagent misses paths, typecheck catches it. If typecheck fails after retry → reduce scope to one package per iteration.
 ```
