@@ -5,10 +5,10 @@
 ## Current state
 
 ```yaml
-status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 5"     # Final chunk: real upstream merge validation
-current_task: "5_sync_validation" # chunk 12
-last_iteration_at: "2026-05-05T23:18:00Z"
+status: COMPLETED            # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
+current_phase: "Phase 5 NO-GO — STOPPED for user review"
+current_task: "AWAITING USER DECISION"
+last_iteration_at: "2026-05-05T23:24:00Z"
 total_iterations: 8
 total_tokens_estimate: 3700000
 ```
@@ -119,13 +119,13 @@ phase_4:
   chunk_11_eval: PASS                   # technically green; escalation captured in registry header
 
 phase_5:
-  status: pending
-  conflict_files: null
-  conflict_lines: null
-  go_no_go: null
-  # Phase 5 executes the merge in chore/upstream-sync-validation branch.
-  # Autonomous loop does NOT land merge to main — that requires user review.
-  # Final state: merged branch + comprehensive go/no-go report ready for user.
+  status: NO_GO_HALT
+  conflict_files: 201       # vs <15 target (13x over) / >30 NO-GO threshold
+  conflict_lines: ">10000 estimate"  # not measured precisely; merge aborted
+  go_no_go: NO-GO
+  merge_attempted_at: chore/upstream-sync-validation (then aborted)
+  recommendation: Phase 6 — relocate 126 net-new fork files from upstream paths to cerebro-* zones
+  completion_report: docs/upstream-sync/COMPLETION-REPORT.md
 ```
 
 ## Branches in flight
@@ -155,6 +155,8 @@ open_prs: []
 2026-05-05T22:48:00Z | Phase 3   | phase_3_HOLD | Phase 3 closed in HOLD state — wrapping pattern fundamentally infeasible for this fork's components (cerebro mods are scattered + non-composable + structurally rewritten). All 14 candidates marked for L3 handling in chunk 11.
 2026-05-05T23:18:00Z | Phase 4   | chunk_11_HOLD_major_escalation | 280 files marked (vs 42 audited), 22,170 patch-lines (vs ≤200 target). True modifications: 154 files / 4,253 lines (still 21x over target). 126 net-new fork files in upstream paths flagged as relocation candidates. Per 03-decision.md NO-GO threshold (>300 lines), Phase 4 has fundamentally exceeded the design — fork is far more divergent than the audit estimated. Per autonomous protocol's catastrophic-only stop rule, we proceed to Phase 5 to measure the real conflict surface; the protocol's Phase 5 NO-GO will fire if conflicts exceed thresholds.
 2026-05-05T23:18:00Z | Phase 4   | golden_file_fix | Subagent over-marked: added marker to server/pkg/agent/sandbox/testdata/default.golden.sb which broke TestGenerate_Golden (golden files must match generator output bit-for-bit). Reverted; added !**/testdata/** to scripts/cerebro-zones.txt to prevent regression.
+2026-05-05T23:24:00Z | Phase 5   | chunk_12_NO_GO | Real upstream/main merge attempted on chore/upstream-sync-validation: 201 conflict files (vs <15 target, vs >30 NO-GO threshold). Auto-resolution patterns (--theirs apps/docs/, server/pkg/db/generated/) only resolved 6 paths because most docs files were deleted upstream (DD state). Merge aborted cleanly. Branch chore/upstream-sync-validation exists at chore/upstream-sync-analysis HEAD for user inspection. STOPPED for user review per /loop instruction.
+2026-05-05T23:24:00Z | DONE      | LOOP_STOPPED | COMPLETION-REPORT.md written. Strategy needs Phase 6 redirect (relocate 126 net-new fork files from upstream paths to cerebro-* zones). Cumulative tokens: ~3.7M / 7M = 53%.
 ```
 
 ## Eval results (most recent per phase)
