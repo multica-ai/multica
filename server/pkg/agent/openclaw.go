@@ -60,13 +60,16 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	// openclaw writes its --json output to stderr, not stdout.
-	stderr, err := cmd.StderrPipe()
+	// openclaw writes its --json output to stdout. Stderr carries log
+	// overflow (security warnings, tool errors, etc.) — capture it via a
+	// log writer so it surfaces in daemon logs without being fed into the
+	// JSON parser.
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("openclaw stderr pipe: %w", err)
+		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stdout = newLogWriter(b.cfg.Logger, "[openclaw:stdout] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -78,10 +81,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stderr when the context is cancelled so the scanner unblocks.
+	// Close stdout when the context is cancelled so the scanner unblocks.
 	go func() {
 		<-runCtx.Done()
-		_ = stderr.Close()
+		_ = stdout.Close()
 	}()
 
 	go func() {
@@ -90,7 +93,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processOutput(stderr, msgCh)
+		scanResult := b.processOutput(stdout, msgCh)
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
@@ -202,9 +205,10 @@ type openclawEventResult struct {
 	model string
 }
 
-// processOutput reads the JSON output from openclaw --json stderr and returns
-// the parsed result. OpenClaw writes its JSON output to stderr, which may also
-// contain non-JSON log lines. The stream may contain:
+// processOutput reads the JSON output from openclaw --json stdout and returns
+// the parsed result. OpenClaw writes its JSON output to stdout; stderr carries
+// log overflow and is captured separately by the caller. The stream may
+// contain:
 //
 //   - NDJSON streaming events (type: "text", "tool_use", "tool_result", "error",
 //     "step_start", "step_finish") — emitted in real time as the agent works
@@ -309,12 +313,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		}
 
 		// Not JSON — treat as log line.
-		b.cfg.Logger.Debug("[openclaw:stderr] " + line)
+		b.cfg.Logger.Debug("[openclaw:stdout] " + line)
 		rawLines = append(rawLines, line)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stderr: %v", err)}
+		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", err)}
 	}
 
 	// If we got no events at all, fall back to raw output.

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -234,8 +235,8 @@ func TestOpenclawProcessOutputReadError(t *testing.T) {
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
 	}
-	if !strings.Contains(res.errMsg, "read stderr") {
-		t.Errorf("errMsg: got %q, want it to contain 'read stderr'", res.errMsg)
+	if !strings.Contains(res.errMsg, "read stdout") {
+		t.Errorf("errMsg: got %q, want it to contain 'read stdout'", res.errMsg)
 	}
 
 	close(ch)
@@ -1162,4 +1163,68 @@ func countOccurrences(args []string, s string) int {
 		}
 	}
 	return n
+}
+
+// TestOpenclawProcessOutputStdoutFixture is the regression test for WOR-10.
+// It feeds a recorded `openclaw agent --local --json` blob (captured from
+// openclaw 2026.5.5 at the time of the fix) into processOutput exactly as
+// the swapped pipe would deliver it, and asserts the result + messages parse.
+//
+// Before the fix, the daemon read this same byte stream from stderr (where
+// nothing was written), produced "openclaw returned no parseable output",
+// and surfaced a system-typed comment to users. After the fix, processOutput
+// reads from stdout and this fixture parses cleanly.
+func TestOpenclawProcessOutputStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/openclaw-2026.5.5-stdout.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if len(data) < 1000 {
+		t.Fatalf("fixture too small (%d bytes); did the file get truncated?", len(data))
+	}
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", res.errMsg)
+	}
+	if res.output != "hi" {
+		t.Errorf("output: got %q, want %q", res.output, "hi")
+	}
+	if res.sessionID == "" {
+		t.Errorf("sessionID: got empty, want non-empty")
+	}
+	if res.model != "anthropic/claude-opus-4.7" {
+		t.Errorf("model: got %q, want %q", res.model, "anthropic/claude-opus-4.7")
+	}
+	if res.usage.InputTokens != 34620 {
+		t.Errorf("usage.InputTokens: got %d, want %d", res.usage.InputTokens, 34620)
+	}
+	if res.usage.OutputTokens != 6 {
+		t.Errorf("usage.OutputTokens: got %d, want %d", res.usage.OutputTokens, 6)
+	}
+	if res.usage.CacheWriteTokens != 46482 {
+		t.Errorf("usage.CacheWriteTokens: got %d, want %d", res.usage.CacheWriteTokens, 46482)
+	}
+
+	close(ch)
+
+	// At least one MessageText event should have been emitted carrying "hi".
+	var gotText bool
+	for msg := range ch {
+		if msg.Type == MessageText && strings.Contains(msg.Content, "hi") {
+			gotText = true
+		}
+	}
+	if !gotText {
+		t.Errorf("expected a MessageText event containing %q", "hi")
+	}
 }
