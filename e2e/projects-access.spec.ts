@@ -47,7 +47,7 @@ test.describe("Project access", () => {
     expect(found?.access).toBe("restricted");
   });
 
-  test("flipping to restricted reveals the members panel without a reload", async ({ page }) => {
+  test("restrict + pick members happens in one moment, members panel appears without reload", async ({ page }) => {
     const project = await api.createProject(`E2E Flip ${Date.now()}`);
     await page.goto(`/${slug}/projects/${project.id}`);
 
@@ -58,19 +58,21 @@ test.describe("Project access", () => {
     // Initially "Open to workspace" is selected; no members panel.
     await expect(page.getByTestId("project-members-panel")).toHaveCount(0);
 
-    // Pick Restricted radio → review panel appears.
+    // Pick Restricted radio → inline picker (not just a "review") appears.
     await page.getByRole("radio", { name: /Restricted/i }).click();
     await expect(page.getByTestId("access-review-panel")).toBeVisible();
+    await expect(page.getByTestId("restrict-picker-list")).toBeVisible();
 
-    // Confirm. Members panel must appear without a manual reload.
+    // Confirm without picking anyone — admins-only is a valid state.
     await page.getByRole("button", { name: "Make restricted" }).click();
+
+    // Members panel must appear without a manual reload.
     await expect(page.getByTestId("project-members-panel")).toBeVisible({
       timeout: 5000,
     });
     await expect(
       page.getByRole("heading", { name: "Project members" }),
     ).toBeVisible();
-    // The always-on workspace governance section must also render.
     await expect(
       page.getByRole("heading", { name: /always-on access/i }),
     ).toBeVisible();
@@ -86,7 +88,7 @@ test.describe("Project access", () => {
     // The row containing the restricted project must show the dot.
     const row = page.getByTestId(`project-row-${project.id}`);
     await expect(row).toBeVisible();
-    await expect(row.getByTestId("restricted-dot")).toBeVisible();
+    await expect(row.getByTestId("restricted-lock")).toBeVisible();
   });
 
   test("workspace-access projects do NOT show the dot", async ({ page }) => {
@@ -97,7 +99,7 @@ test.describe("Project access", () => {
 
     const row = page.getByTestId(`project-row-${project.id}`);
     await expect(row).toBeVisible();
-    await expect(row.getByTestId("restricted-dot")).toHaveCount(0);
+    await expect(row.getByTestId("restricted-lock")).toHaveCount(0);
   });
 
   test("toggling back to workspace hides the members panel", async ({ page }) => {

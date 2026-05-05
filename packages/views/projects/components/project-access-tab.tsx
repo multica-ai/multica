@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Lock } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Lock, Check } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
@@ -17,15 +17,17 @@ import { ActorAvatar } from "../../common/actor-avatar";
 type Props = { project: Project };
 
 /**
- * ProjectAccessTab — settings surface to flip a project between
- * "open to workspace" and "restricted", and (when restricted) manage
- * who's in. Only visible to workspace owners/admins; members get
- * a read-only summary.
+ * ProjectAccessTab — settings surface to flip a project between "open to
+ * workspace" and "restricted", and (when restricted) manage who's in.
  *
- * The signature interaction is the inline review-before-commit panel:
- * picking a different access mode reveals a panel listing who will
- * gain or lose access. The toggle doesn't apply until the user
- * confirms — no modal stack, no surprise lockouts.
+ * Going restricted is a single moment: when the user picks "Restricted",
+ * the same panel reveals an inline picker for selecting which workspace
+ * members keep access. Confirm runs `addProjectMember` for each picked
+ * user, then flips the access mode — so nobody experiences a brief
+ * lockout window between the flip and adding the first member.
+ *
+ * Only workspace owners/admins see the controls; regular members see a
+ * read-only summary.
  */
 export function ProjectAccessTab({ project }: Props) {
   const wsId = useWorkspaceId();
@@ -43,51 +45,81 @@ export function ProjectAccessTab({ project }: Props) {
     enabled: project.access === "restricted",
   });
 
-  const projectMemberUserIDs = new Set(
-    (projectMembersQuery.data?.members ?? []).map((m) => m.user_id),
-  );
   const adminUserIDs = new Set(
     members.filter((m) => m.role === "owner" || m.role === "admin").map((m) => m.user_id),
+  );
+  // Pickable = workspace members minus admins (admins always have access)
+  // and minus the current user (a workspace admin in practice; would be
+  // confusing to ask them to add themselves).
+  const pickableMembers = useMemo(
+    () => members.filter((m) => !adminUserIDs.has(m.user_id) && m.user_id !== user?.id),
+    [members, adminUserIDs, user?.id],
   );
 
   // Pending intent — the radio choice the user has selected but not yet
   // committed. null when the visible state matches the saved state.
   const [pending, setPending] = useState<ProjectAccess | null>(null);
+  const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
+  const [committing, setCommitting] = useState(false);
 
-  const updateAccess = useMutation({
-    mutationFn: (access: ProjectAccess) =>
-      api.updateProjectAccess(project.id, access),
-    onSuccess: (updated) => {
+  const next = pending ?? project.access;
+  const showRestrictPicker =
+    pending === "restricted" && project.access !== "restricted";
+  const showOpenReview =
+    pending === "workspace" && project.access === "restricted";
+
+  const handleSelectRestricted = () => {
+    setPending("restricted");
+    setPickedIds(new Set());
+  };
+
+  const handleConfirmRestrict = async () => {
+    setCommitting(true);
+    try {
+      // Add picked members FIRST so by the time access flips, the project
+      // already has its members. Order matters: if the flip ran first and
+      // a member-add failed, the project would be admin-only with the
+      // intended members missing — exactly the lockout this UX is meant
+      // to avoid.
+      for (const userId of Array.from(pickedIds)) {
+        try {
+          await api.addProjectMember(project.id, userId);
+        } catch (e) {
+          toast.error(`Failed to add member: ${e instanceof Error ? e.message : String(e)}`);
+          // Stop early so the access flip doesn't run with a half-applied
+          // member list.
+          setCommitting(false);
+          return;
+        }
+      }
+      const updated = await api.updateProjectAccess(project.id, "restricted");
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: ["projects", project.id, "members"] });
       qc.setQueryData(projectKeys.detail(wsId, project.id), updated);
       toast.success(
-        updated.access === "restricted"
-          ? "Project is now restricted"
-          : "Project is open to the workspace",
+        pickedIds.size === 0
+          ? "Project is now restricted (admins only)"
+          : `Project is now restricted (${pickedIds.size} member${pickedIds.size === 1 ? "" : "s"} + admins)`,
       );
+      setPending(null);
+      setPickedIds(new Set());
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  const openMutation = useMutation({
+    mutationFn: () => api.updateProjectAccess(project.id, "workspace"),
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: ["projects", project.id, "members"] });
+      qc.setQueryData(projectKeys.detail(wsId, project.id), updated);
+      toast.success("Project is open to the workspace");
       setPending(null);
     },
     onError: (e) =>
       toast.error(e instanceof Error ? e.message : "Failed to change access"),
   });
-
-  const next = pending ?? project.access;
-
-  // Members about to be affected: people who will lose access when going
-  // restricted = workspace members who are NOT admins and NOT in the
-  // project_member set.
-  const losingAccess = members.filter(
-    (m) =>
-      !adminUserIDs.has(m.user_id) &&
-      !projectMemberUserIDs.has(m.user_id) &&
-      m.user_id !== user?.id,
-  );
-  // Going from restricted to open: everyone outside admins + project_members
-  // gains access.
-  const gainingAccess = losingAccess;
-
-  const showReview = pending !== null && pending !== project.access;
 
   if (!isAdmin) {
     return (
@@ -116,14 +148,12 @@ export function ProjectAccessTab({ project }: Props) {
 
         <div className="rounded-md border border-border divide-y">
           <AccessOption
-            value="workspace"
             label="Open to workspace"
-            description={`Every member of this workspace can see this project, its issues, and everything inside it.`}
+            description="Every member of this workspace can see this project, its issues, and everything inside it."
             checked={next === "workspace"}
             onSelect={() => setPending("workspace")}
           />
           <AccessOption
-            value="restricted"
             label={
               <span className="inline-flex items-center gap-2">
                 Restricted
@@ -134,38 +164,62 @@ export function ProjectAccessTab({ project }: Props) {
             }
             description="Pick who can see this project. Workspace admins keep access automatically. AI agents triggered on issues here cannot see anything outside this project."
             checked={next === "restricted"}
-            onSelect={() => setPending("restricted")}
+            onSelect={handleSelectRestricted}
           />
         </div>
       </div>
 
-      {showReview && pending === "restricted" && (
-        <ReviewPanel
-          heading={`${losingAccess.length} ${
-            losingAccess.length === 1 ? "person" : "people"
-          } will lose access to this project`}
-          members={losingAccess}
-          confirmLabel="Make restricted"
-          loading={updateAccess.isPending}
-          onCancel={() => setPending(null)}
-          onConfirm={() => updateAccess.mutate("restricted")}
+      {showRestrictPicker && (
+        <RestrictPicker
+          pickable={pickableMembers}
+          pickedIds={pickedIds}
+          onTogglePicked={(id) => {
+            setPickedIds((prev) => {
+              const out = new Set(prev);
+              if (out.has(id)) out.delete(id);
+              else out.add(id);
+              return out;
+            });
+          }}
+          loading={committing}
+          onCancel={() => {
+            setPending(null);
+            setPickedIds(new Set());
+          }}
+          onConfirm={handleConfirmRestrict}
         />
       )}
 
-      {showReview && pending === "workspace" && (
-        <ReviewPanel
-          heading={`${gainingAccess.length} ${
-            gainingAccess.length === 1 ? "person" : "people"
-          } will gain access to this project`}
-          members={gainingAccess}
-          confirmLabel="Open to workspace"
-          loading={updateAccess.isPending}
-          onCancel={() => setPending(null)}
-          onConfirm={() => updateAccess.mutate("workspace")}
-        />
+      {showOpenReview && (
+        <div
+          data-testid="access-review-panel"
+          className="rounded-md border border-border bg-muted/40 p-4"
+        >
+          <p className="text-sm">
+            Open this project to the whole workspace? Everyone will be able
+            to see it again.
+          </p>
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPending(null)}
+              disabled={openMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => openMutation.mutate()}
+              disabled={openMutation.isPending}
+            >
+              {openMutation.isPending ? "Saving…" : "Open to workspace"}
+            </Button>
+          </div>
+        </div>
       )}
 
-      {project.access === "restricted" && !showReview && (
+      {project.access === "restricted" && pending === null && (
         <ProjectMembersPanel
           project={project}
           projectMembers={projectMembersQuery.data?.members ?? []}
@@ -192,7 +246,6 @@ function AccessOption({
   checked,
   onSelect,
 }: {
-  value: string;
   label: React.ReactNode;
   description: string;
   checked: boolean;
@@ -225,61 +278,112 @@ function AccessOption({
   );
 }
 
-function ReviewPanel({
-  heading,
-  members,
-  confirmLabel,
+function RestrictPicker({
+  pickable,
+  pickedIds,
+  onTogglePicked,
   loading,
   onCancel,
   onConfirm,
 }: {
-  heading: string;
-  members: Array<{ user_id: string; name: string; email: string }>;
-  confirmLabel: string;
+  pickable: Array<{ user_id: string; name: string; email: string }>;
+  pickedIds: Set<string>;
+  onTogglePicked: (userId: string) => void;
   loading: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const visible = members.slice(0, 4);
-  const more = Math.max(0, members.length - visible.length);
+  const [search, setSearch] = useState("");
+  const filtered = pickable.filter(
+    (m) =>
+      search === "" ||
+      m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.email.toLowerCase().includes(search.toLowerCase()),
+  );
   return (
     <div
       data-testid="access-review-panel"
       className="rounded-md border border-border bg-muted/40 overflow-hidden"
     >
       <div className="px-4 py-3 border-b border-border text-xs">
-        <strong className="text-foreground">Review change</strong>{" "}
-        <span className="text-muted-foreground">· {heading}</span>
+        <strong className="text-foreground">Pick who can see this project</strong>{" "}
+        <span className="text-muted-foreground">
+          · admins always have access
+        </span>
       </div>
-      <ul className="px-4 py-2 text-sm">
-        {visible.map((m) => (
-          <li
-            key={m.user_id}
-            className="flex items-center gap-3 py-1.5 border-t first:border-t-0 border-border/50"
-          >
-            <ActorAvatar actorType="member" actorId={m.user_id} size={20} />
-            <span className="flex-1 min-w-0 truncate">{m.name}</span>
-            <span className="text-[11px] text-muted-foreground">member</span>
-          </li>
-        ))}
-        {more > 0 && (
-          <li className="py-1.5 text-xs text-muted-foreground">
-            + {more} more
-          </li>
-        )}
-        {visible.length === 0 && (
-          <li className="py-1.5 text-xs text-muted-foreground">
-            Nobody is affected.
+
+      <div className="px-4 py-3 border-b border-border">
+        <Input
+          placeholder="Search workspace members…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search workspace members"
+        />
+      </div>
+
+      <ul
+        className="max-h-72 overflow-auto"
+        data-testid="restrict-picker-list"
+      >
+        {pickable.length === 0 && (
+          <li className="px-4 py-3 text-xs text-muted-foreground">
+            No additional members to pick — only admins will see this project.
           </li>
         )}
+        {pickable.length > 0 && filtered.length === 0 && (
+          <li className="px-4 py-3 text-xs text-muted-foreground">
+            No matches.
+          </li>
+        )}
+        {filtered.map((m) => {
+          const picked = pickedIds.has(m.user_id);
+          return (
+            <li key={m.user_id} className="border-t first:border-t-0 border-border/50">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={picked}
+                onClick={() => onTogglePicked(m.user_id)}
+                className={`flex w-full items-center gap-3 px-4 py-2 text-sm text-left ${
+                  picked ? "bg-accent/30" : "hover:bg-accent/10"
+                }`}
+              >
+                <span
+                  className={`inline-flex size-4 shrink-0 items-center justify-center rounded border ${
+                    picked
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border"
+                  }`}
+                >
+                  {picked && <Check className="size-3" strokeWidth={3} />}
+                </span>
+                <ActorAvatar actorType="member" actorId={m.user_id} size={20} />
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate">{m.name}</span>
+                  <span className="block text-xs text-muted-foreground truncate">
+                    {m.email}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
-      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border bg-background">
-        <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-          Cancel
-        </Button>
-        <Button size="sm" onClick={onConfirm} disabled={loading}>
-          {loading ? "Saving…" : confirmLabel}
-        </Button>
+
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border bg-background">
+        <span className="text-xs text-muted-foreground">
+          {pickedIds.size === 0
+            ? "Nobody selected — only admins will have access."
+            : `${pickedIds.size} ${pickedIds.size === 1 ? "person" : "people"} + admins will have access`}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={onConfirm} disabled={loading}>
+            {loading ? "Saving…" : "Make restricted"}
+          </Button>
+        </div>
       </div>
     </div>
   );

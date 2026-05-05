@@ -156,20 +156,65 @@ describe("ProjectAccessTab", () => {
     });
   });
 
-  it("shows the inline review panel when admin picks restricted", async () => {
+  it("shows the member picker when admin chooses restricted", async () => {
     renderWith(makeProject("workspace"));
-    // Wait for member list query to resolve
     await screen.findByText(/Open to workspace/i);
     fireEvent.click(screen.getByText(/Restricted/i));
     await waitFor(() => {
       expect(screen.getByTestId("access-review-panel")).toBeInTheDocument();
     });
-    // Lists names of non-admin, non-self members about to lose access
+    // Pickable list = workspace members minus admins/self.
     expect(screen.getByText("Anne Larsen")).toBeInTheDocument();
     expect(screen.getByText("Morten K")).toBeInTheDocument();
+    // The picker is interactive — checkboxes are present.
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.length).toBe(2);
+    // Default: nobody picked → admins-only message in footer.
+    expect(
+      screen.getByText(/only admins will have access/i),
+    ).toBeInTheDocument();
   });
 
-  it("calls api.updateProjectAccess on Make restricted", async () => {
+  it("adds picked members before flipping access on confirm", async () => {
+    mockAddProjectMember.mockResolvedValue({});
+    mockUpdateAccess.mockResolvedValue({
+      ...makeProject("restricted"),
+    });
+    const callOrder: string[] = [];
+    mockAddProjectMember.mockImplementation((..._args) => {
+      callOrder.push("addProjectMember");
+      return Promise.resolve({});
+    });
+    mockUpdateAccess.mockImplementation((..._args) => {
+      callOrder.push("updateProjectAccess");
+      return Promise.resolve(makeProject("restricted"));
+    });
+
+    renderWith(makeProject("workspace"));
+    await screen.findByText(/Open to workspace/i);
+    fireEvent.click(screen.getByText(/Restricted/i));
+    await screen.findByTestId("access-review-panel");
+
+    // Pick Anne.
+    const anneRow = screen.getByText("Anne Larsen").closest("button")!;
+    fireEvent.click(anneRow);
+    expect(
+      screen.getByText(/1 person \+ admins will have access/i),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Make restricted/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockAddProjectMember).toHaveBeenCalledWith("p-1", "user-1");
+      expect(mockUpdateAccess).toHaveBeenCalledWith("p-1", "restricted");
+    });
+    // Members must be added before the flip to avoid a brief lockout window.
+    expect(callOrder).toEqual(["addProjectMember", "updateProjectAccess"]);
+  });
+
+  it("flips to restricted with admins-only when nobody is picked", async () => {
     mockUpdateAccess.mockResolvedValue({
       ...makeProject("restricted"),
     });
@@ -185,6 +230,7 @@ describe("ProjectAccessTab", () => {
     await waitFor(() => {
       expect(mockUpdateAccess).toHaveBeenCalledWith("p-1", "restricted");
     });
+    expect(mockAddProjectMember).not.toHaveBeenCalled();
   });
 
   it("renders read-only summary for non-admin members", async () => {

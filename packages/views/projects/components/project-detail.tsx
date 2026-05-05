@@ -69,7 +69,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import { RestrictedDot } from "../../common/restricted-dot";
+import { RestrictedLock } from "../../common/restricted-lock";
 import { ProjectAccessTab } from "./project-access-tab";
 
 // ---------------------------------------------------------------------------
@@ -655,7 +655,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 <TabsTrigger value="issues">Issues</TabsTrigger>
                 <TabsTrigger value="documents">Documents</TabsTrigger>
                 <TabsTrigger value="access">
-                  {project.access === "restricted" && <RestrictedDot className="mr-1.5" />}
+                  {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
                   Access
                 </TabsTrigger>
               </TabsList>

@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { RestrictedDot } from "../../common/restricted-dot";
+import { RestrictedLock } from "../../common/restricted-lock";
 
 export function ProjectPicker({
   projectId,
@@ -44,7 +44,7 @@ export function ProjectPicker({
         ) : (
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        {current?.access === "restricted" && <RestrictedDot className="mr-1" />}
+        {current?.access === "restricted" && <RestrictedLock className="mr-1" />}
         <span className="truncate">{current ? current.title : "No project"}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
@@ -55,7 +55,7 @@ export function ProjectPicker({
             ) : (
               <span className={cn("size-2 rounded-full mr-1.5 shrink-0", getProjectColor(proj.color).dot)} />
             )}
-            {proj.access === "restricted" && <RestrictedDot className="mr-1" />}
+            {proj.access === "restricted" && <RestrictedLock className="mr-1" />}
             <span className="truncate">{proj.title}</span>
             {proj.id === projectId && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
           </DropdownMenuItem>

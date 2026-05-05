@@ -36,7 +36,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
 import { PageHeader } from "../../layout/page-header";
 import { PriorityIcon } from "../../issues/components/priority-icon";
-import { RestrictedDot } from "../../common/restricted-dot";
+import { RestrictedLock } from "../../common/restricted-lock";
 
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -81,7 +81,7 @@ function ProjectRow({ project }: { project: Project }) {
       >
         <span className="shrink-0 w-[24px] text-center text-base">{project.icon || "📁"}</span>
         <span className="min-w-0 flex-1 truncate font-medium">
-          {project.access === "restricted" && <RestrictedDot className="mr-1.5" />}
+          {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
           {project.title}
         </span>
       </AppLink>
