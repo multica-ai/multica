@@ -1,6 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { I18nProvider } from "@multica/i18n/react";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_STATUSES } from "@multica/core/issues/queries";
 import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
@@ -34,6 +37,16 @@ import {
   type MentionListRef,
   type MentionItem,
 } from "./mention-suggestion";
+
+function renderWithI18n(ui: React.ReactElement) {
+  return render(ui, {
+    wrapper: ({ children }) => (
+      <I18nProvider initialLocale="en" dictionaries={{ en, zh }}>
+        {children}
+      </I18nProvider>
+    ),
+  });
+}
 
 function fakeQc(data: {
   members?: Array<{ user_id: string; name: string; role?: string }>;
@@ -107,7 +120,7 @@ describe("createMentionSuggestion", () => {
       total: 1,
     });
 
-    render(<MentionList items={[]} query="协作" command={vi.fn()} />);
+    renderWithI18n(<MentionList items={[]} query="协作" command={vi.fn()} />);
 
     expect(screen.getByText("Searching...")).toBeInTheDocument();
 
@@ -125,7 +138,7 @@ describe("createMentionSuggestion", () => {
   });
 
   it("does not call searchIssues for an empty query", () => {
-    render(<MentionList items={[]} query="" command={vi.fn()} />);
+    renderWithI18n(<MentionList items={[]} query="" command={vi.fn()} />);
 
     expect(searchIssuesMock).not.toHaveBeenCalled();
   });
@@ -133,7 +146,7 @@ describe("createMentionSuggestion", () => {
   it("captures Enter while the popup has no selectable items", () => {
     const ref = createRef<MentionListRef>();
 
-    render(<MentionList ref={ref} items={[]} query="协作" command={vi.fn()} />);
+    renderWithI18n(<MentionList ref={ref} items={[]} query="协作" command={vi.fn()} />);
 
     expect(
       ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),

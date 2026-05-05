@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { I18nProvider } from "@multica/i18n/react";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
 
 // Mock @multica/core/issues/mutations to mimic TanStack Query v5's contract:
 // useMutation returns a fresh result wrapper on every render, but the
@@ -83,7 +87,15 @@ describe("useIssueTimeline callback stability", () => {
   // listing the whole mutation object as a dep flips its identity every time
   // — that is the exact regression this test guards against.
   it("submitReply / editComment / deleteComment / toggleReaction keep identity across unrelated re-renders", () => {
-    const { result, rerender } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <I18nProvider initialLocale="en" dictionaries={{ en, zh }}>
+        {children}
+      </I18nProvider>
+    );
+
+    const { result, rerender } = renderHook(() => useIssueTimeline("issue-1", "user-1"), {
+      wrapper,
+    });
 
     const first = {
       submitComment: result.current.submitComment,
