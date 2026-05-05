@@ -11,8 +11,9 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
-import { artifactKeys } from "@multica/cerebro-artifacts/core";
 import { pinKeys } from "../pins/queries";
+// CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+import { registerCerebroHandlers } from "@multica/cerebro-realtime";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import {
@@ -468,43 +469,8 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    // --- Artifact events ---
-    //
-    // Server emits {artifact: {id, issue_id, project_id, ...}}. Invalidate the
-    // detail cache and the relevant scope's list so create/update/delete from
-    // any client (including agents via MCP) reflects in the UI immediately.
-    const invalidateArtifact = (artifact: {
-      id: string;
-      issue_id: string | null;
-      project_id: string | null;
-    }) => {
-      const wsId = getCurrentWsId();
-      if (!wsId) return;
-      qc.invalidateQueries({ queryKey: artifactKeys.detail(wsId, artifact.id) });
-      if (artifact.issue_id) {
-        qc.invalidateQueries({
-          queryKey: artifactKeys.byIssue(wsId, artifact.issue_id),
-        });
-      }
-      if (artifact.project_id) {
-        qc.invalidateQueries({
-          queryKey: artifactKeys.byProject(wsId, artifact.project_id),
-        });
-      }
-    };
-
-    const unsubArtifactCreated = ws.on("artifact:created", (p) => {
-      const payload = p as { artifact: { id: string; issue_id: string | null; project_id: string | null } };
-      if (payload?.artifact) invalidateArtifact(payload.artifact);
-    });
-    const unsubArtifactUpdated = ws.on("artifact:updated", (p) => {
-      const payload = p as { artifact: { id: string; issue_id: string | null; project_id: string | null } };
-      if (payload?.artifact) invalidateArtifact(payload.artifact);
-    });
-    const unsubArtifactDeleted = ws.on("artifact:deleted", (p) => {
-      const payload = p as { artifact: { id: string; issue_id: string | null; project_id: string | null } };
-      if (payload?.artifact) invalidateArtifact(payload.artifact);
-    });
+    // CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+    const unsubCerebro = registerCerebroHandlers(ws, qc);
 
     return () => {
       unsubAny();
@@ -537,9 +503,7 @@ export function useRealtimeSync(
       unsubTaskFailed();
       unsubTaskCancelled();
       unsubChatSessionRead();
-      unsubArtifactCreated();
-      unsubArtifactUpdated();
-      unsubArtifactDeleted();
+      unsubCerebro();
       timers.forEach(clearTimeout);
       timers.clear();
     };

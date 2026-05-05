@@ -1,3 +1,10 @@
+// CEREBRO-PATCH(realtime-events): cerebro event types are defined in their own
+// packages (e.g. server/internal/cerebro/feature_flags.EventFeatureFlagChanged)
+// and broadcast via the standard hub.BroadcastToWorkspace API; no registration
+// hook is required here. Audit-claimed +42 -0 cerebro additions in this file
+// were not present at the time of extraction — divergence vs upstream is
+// architectural (scope-based vs workspace-based rooms) and out of scope for
+// chunk 6. Tracked for L3 review during Phase 4.
 package realtime
 
 import (

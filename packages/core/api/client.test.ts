@@ -144,36 +144,5 @@ describe("ApiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ submit_on_enter: true }));
   });
 
-  it("listFeatureFlags GETs the workspace feature-flags endpoint", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ overrides: { cerebro_inbox: false } }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    const res = await client.listFeatureFlags("ws-1");
-
-    expect(res.overrides).toEqual({ cerebro_inbox: false });
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("https://api.example.test/api/workspaces/ws-1/feature-flags");
-    expect(init?.method ?? "GET").toBe("GET");
-  });
-
-  it("setFeatureFlag PUTs to the per-flag endpoint with the enabled body", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await client.setFeatureFlag("ws-1", "cerebro_inbox", false);
-
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("https://api.example.test/api/workspaces/ws-1/feature-flags/cerebro_inbox");
-    expect(init?.method).toBe("PUT");
-    expect(init?.body).toBe(JSON.stringify({ enabled: false }));
-  });
 });
+// Cerebro feature-flag tests live in packages/cerebro-test/api-client.test.ts

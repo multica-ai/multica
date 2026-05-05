@@ -30,6 +30,7 @@
     "@multica/cerebro-attachments": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-notifications": "workspace:*",
+    "@multica/cerebro-realtime": "workspace:*",
     "@multica/cerebro-users": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

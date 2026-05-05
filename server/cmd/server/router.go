@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
+	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -84,6 +85,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	// don't conflict on router wiring.
 	cerebroQueries := cerebrodb.New(pool)
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only inbox handlers
+	// (ListActiveIssueTasks; future folders/archive endpoints) live in their
+	// own package so this wiring line is the only conflict surface upstream
+	// merges hit.
+	cerebroNotificationsHandler := cerebronotifications.New(queries)
 
 	r := chi.NewRouter()
 
@@ -506,7 +512,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
-				r.Get("/active-issue-tasks", h.ListActiveIssueTasks)
+				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
+				r.Get("/active-issue-tasks", cerebroNotificationsHandler.ListActiveIssueTasks)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)

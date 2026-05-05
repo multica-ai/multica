@@ -1,3 +1,12 @@
+// CEREBRO-PATCH(cerebro-listeners): cerebro modifies the upstream listener
+// registrations to consult per-user notification routing
+// (resolveRoute/routeOff in notification_routing.go) and pass an
+// assigneeMemberID to disambiguate split notification types (priority_changed,
+// due_date_changed) — assignees get a stronger default routing than passive
+// subscribers. The modifications are inline and span 12+ existing listener
+// bodies; per audit decision they cannot be cleanly extracted into a separate
+// listener-registration without rewriting upstream's notify*() helpers.
+// Markers below tag the cerebro-only call sites.
 package main
 
 import (
@@ -174,6 +183,7 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
 		isAssignee := assigneeMemberID != "" && subID == assigneeMemberID
 		route := resolveRoute(ctx, queries, "member", subID, notifType, isAssignee)
 		if route == routeOff {
@@ -244,6 +254,7 @@ func notifyDirect(
 		return
 	}
 
+	// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
 	route := resolveRoute(ctx, queries, recipientType, recipientID, notifType, recipientIsAssignee)
 	if route == routeOff {
 		return
@@ -326,6 +337,7 @@ func notifyMentionedMembers(
 		if id == e.ActorID || skip[id] {
 			continue
 		}
+		// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
 		// "mentioned" is not a split type; isAssignee value doesn't matter.
 		route := resolveRoute(ctx, queries, "member", id, "mentioned", false)
 		if route == routeOff {

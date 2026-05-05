@@ -215,6 +215,11 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 
 // UploadFile uploads a file via multipart form to /api/upload-file.
 // It returns the attachment ID from the server response.
+//
+// CEREBRO-PATCH(cli-attachments): rewritten on top of UploadAttachmentTo so
+// the cerebro-fork's chat-message attachment flow can reuse the same
+// transport. Upstream's UploadFile took only an issueID; ours delegates to
+// the richer target struct below.
 func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
 	result, err := c.UploadAttachment(ctx, fileData, filename, issueID, "")
 	if err != nil {
@@ -226,6 +231,16 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 	}
 	return id, nil
 }
+
+// CEREBRO-PATCH(cli-attachments): AttachmentTarget + UploadAttachment +
+// UploadAttachmentTo are cerebro-fork additions (PR #14, #c3e13db) that
+// extend upstream's UploadFile to support chat-message attachments and the
+// MCP add_attachment tool. Kept inline here because they are method-level
+// extensions of *APIClient called by shared call-sites in
+// `server/cmd/multica/cmd_attachment.go` and the cerebro MCP server.
+//
+// Future upstream merges should preserve this block; the only divergence
+// from upstream is the addition of ChatMessageID + the *To suffixed method.
 
 // AttachmentTarget identifies what an upload should be linked to. Any
 // combination may be empty; at least one is required by the server.
@@ -311,9 +326,11 @@ func (c *APIClient) UploadAttachmentTo(ctx context.Context, fileData []byte, fil
 // This is used for downloading attachments via their signed download_url.
 // Downloads are limited to 100 MB to match the upload size limit.
 //
-// When the URL is relative (e.g. "/uploads/..."), as returned by local storage
-// without LOCAL_UPLOAD_BASE_URL, it is resolved against c.BaseURL and auth
-// headers are sent so the request hits the same Multica server.
+// CEREBRO-PATCH(cli-attachments): same-origin handling (the `sameOrigin`
+// branch below) is a cerebro-fork addition. Upstream only handles absolute
+// URLs from signed-storage providers; we also accept relative paths from
+// local storage and resolve them against c.BaseURL with auth headers so
+// the request hits the same Multica server.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
 	sameOrigin := strings.HasPrefix(downloadURL, "/")
 	if sameOrigin {

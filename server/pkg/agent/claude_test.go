@@ -542,6 +542,10 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 	return data
 }
 
+// CEREBRO-PATCH(claude-stderr-tail-tests): cerebro fork addition.
+// Tests below cover unexported package functions (newRingBuffer, formatEmptyOutputReason,
+// truncate); extracting to internal/cerebro/sandbox would require exporting those
+// internals. Per chunk-6 SA4 audit, kept inline with this marker.
 func TestRingBufferRetainsTail(t *testing.T) {
 	t.Parallel()
 

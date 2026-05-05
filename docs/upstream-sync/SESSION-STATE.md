@@ -6,11 +6,11 @@
 
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 1"     # which phase we're in
-current_task: "1b_move_features" # chunk 5 — cerebro-test, cerebro-users, cerebro-notifications content
-last_iteration_at: "2026-05-05T22:05:00Z"
-total_iterations: 4
-total_tokens_estimate: 2100000
+current_phase: "Phase 2"     # which phase we're in
+current_task: "2_inbox_feature_flag" # chunk 7 — Inbox feature flag end-to-end
+last_iteration_at: "2026-05-05T22:25:00Z"
+total_iterations: 5
+total_tokens_estimate: 2700000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -57,18 +57,20 @@ phase_0:
   chunk_3_eval: PASS                   # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt; first 2 caught migration idempotency + empty test set)
 
 phase_1:
-  status: in_progress
+  status: completed
   features:
-    rename_isolated_packages: completed  # chunk 4: 7 packages renamed (artifacts, attachments, notifications x core+views, members→cerebro-users)
-    cerebro_test: deferred               # 4 partial-extraction cases (api-client.test.ts, helpers.tsx, daemon_test.go, claude_test.go) deferred — need surgical cerebro/upstream split
-    cerebro_users: completed             # chunk 4 moved members→cerebro-users/views; no further fork-only content per audit
-    cerebro_notifications: completed     # chunk 5: notifications-tab.tsx moved from packages/views/settings/components/ to packages/cerebro-notifications/views/notifications-tab.tsx
-    cerebro_mcp: pending                 # chunk 6
-    cerebro_realtime: pending            # chunk 6
-    cerebro_runtime: pending             # chunk 6
-    cerebro_api_subclient: pending       # chunk 6
-  go_no_go: null
+    rename_isolated_packages: completed  # chunk 4: 7 packages renamed
+    cerebro_test: completed              # chunk 6 SA4: api-client.test.ts extracted; 3 deferrals documented inline-with-markers
+    cerebro_users: completed             # chunk 4 moved members→cerebro-users/views
+    cerebro_notifications: completed     # chunks 5+6: notifications-tab moved; ListActiveIssueTasks extracted; inline patches marked
+    cerebro_mcp: deferred                # no clean extraction target found in audit; revisit in Phase 2+
+    cerebro_realtime: completed          # chunk 6 SA1: WS handlers extracted; hub.go has L3 marker (audit was stale)
+    cerebro_runtime: completed           # chunk 6 SA3: daemon/config.go sandbox fields extracted via Go embedding
+    cerebro_api_subclient: completed     # chunk 3+6: feature flag methods + cli/client.go documented inline (audit misclassification)
+  go_no_go: GO                           # Phase 1 done; Phase 2 inbox feature flag may proceed
   chunk_4_eval: PASS                     # see eval-reports/chunk-4-20260505T200512Z.md
+  chunk_5_eval: PASS                     # see eval-reports/chunk-5-20260505T200926Z.md
+  chunk_6_eval: PASS                     # see eval-reports/chunk-6-20260505T202449Z.md
 
 phase_2:
   status: pending
@@ -131,6 +133,9 @@ open_prs: []
 2026-05-05T21:30:00Z | Phase 0b | chunk_3_GO | Feature flag system end-to-end (frontend Zustand + persist + TanStack Query, backend Go handler + sqlc + migration + WS event), CLAUDE.md "Cerebro Extension Discipline" section, eval green after 2 retries (fixed migration idempotency with IF NOT EXISTS, fixed empty-test-set with --passWithNoTests). esbuild arm64 binary required pnpm install --force to refresh.
 2026-05-05T21:30:00Z | Phase 0   | foundation_GO | All 7 Phase 0 components complete or deliberately deferred. Phase 1 (L1 extraction) may begin with chunk 4 (rename 7 isolated packages).
 2026-05-05T22:05:00Z | Phase 1a  | chunk_4_GO | 87 file-level renames via git mv (history preserved). Cycles broken by removing cerebro-* deps from core/views package.json. Required fixes during eval: (a) remove core/views→cerebro-* deps to break Turbo cycle, (b) add CEREBRO-PATCH markers to chunk-3 holdovers, (c) update cerebro-zones.txt to exclude 9NNN migrations + sqlc generated, (d) FIX BUG in validate-cerebro-patches.sh: `git log | grep -q` with set -o pipefail caused SIGPIPE-induced false negatives on opt-out check, (e) use CEREBRO-ALLOW-NO-PATCH for mechanical import-rename diffs.
+2026-05-05T22:09:00Z | Phase 1b  | chunk_5_GO | Partial scope landed: notifications-tab.tsx moved to cerebro-notifications/views. Surgical test extractions deferred to chunk 6 SA4.
+2026-05-05T22:25:00Z | Phase 1c  | chunk_6_GO | 4 parallel subagents executed surgical L1 extractions. Successful extractions: WS handlers (use-realtime-sync→cerebro-realtime/handlers.ts), ListActiveIssueTasks (inbox.go→cerebro-notifications), daemon sandbox config (config.go→cerebro-runtime via Go embedding), api-client.test.ts feature-flag tests. Audit-misclassifications surfaced: hub.go +42 was actually unrelated architectural divergence; cli/client.go isn't cobra commands; tasks-tab.test.tsx is upstream-owned (1-char tweak); helpers.tsx has zero consumers; daemon_test.go + claude_test.go test private package members. Inline CEREBRO-PATCH markers added where extraction wasn't feasible (notification_listeners.go, daemon_test.go orphan-task, claude_test.go ringbuffer).
+2026-05-05T22:25:00Z | Phase 1   | phase_1_GO | All Phase 1 features completed or deliberately deferred with documentation. Phase 2 (inbox feature flag) may proceed.
 ```
 
 ## Eval results (most recent per phase)
@@ -141,6 +146,7 @@ phase_0_chunk_2_evals: PASS  # see eval-reports/chunk-2-20260505T191025Z.md
 phase_0_chunk_3_evals: PASS  # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt)
 phase_1_chunk_4_evals: PASS  # see eval-reports/chunk-4-20260505T200512Z.md (3rd attempt — fixed cycle, markers, opt-out script bug)
 phase_1_chunk_5_evals: PASS  # see eval-reports/chunk-5-20260505T200926Z.md (partial scope: notifications-tab.tsx moved; surgical test extractions deferred)
+phase_1_chunk_6_evals: PASS  # see eval-reports/chunk-6-20260505T202449Z.md (4 SAs: realtime + inbox-handler + cli/daemon + tests; mixed extract+inline-marker)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -167,29 +173,37 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 1c — chunk 6 per 07-session-schedule.md row 6.
-  Scope: move 4 features into existing cerebro-* skeletons (mcp, realtime, runtime, cerebro-api).
-  Per 03-decision.md Phase 1.2 ordering: cerebro-mcp, cerebro-realtime, cerebro-runtime + sandbox + profile, cerebro-api sub-client.
+  Phase 2 — chunk 7 per 07-session-schedule.md row 7.
+  Scope per the schedule: "Inbox feature flag end-to-end".
 
-  IMPORTANT: chunk 5 deferred 4 partial-extraction cases that need handling SOMEWHERE before Phase 1 closes — preferably as part of chunk 6 or a chunk 5.5:
-  - packages/core/api/client.test.ts: extract cerebro-additions to packages/cerebro-test/api-client.test.ts
-  - apps/web/test/helpers.tsx: extract cerebro test-helpers to packages/cerebro-test/web-helpers.tsx
-  - server/internal/handler/daemon_test.go: extract +96 lines of fork enforcement tests to server/internal/cerebro/users/enforcement_test.go
-  - server/pkg/agent/claude_test.go: extract sandbox tests to server/internal/cerebro/sandbox/claude_test.go
+  Background: cerebro fork has its own inbox-page (1198 lines, ~10x upstream's). Per audit row 14: "packages/views/inbox/components/inbox-page.tsx (+1198 -108)" — too large to wrap.
 
   Strategy:
-  - Identify cerebro-mcp content (likely scattered: MCP guide UI, install-onboarding hooks, server handlers if any)
-  - Identify cerebro-realtime additions (vores realtime patches per audit)
-  - Identify cerebro-runtime + sandbox + profile additions (sandbox UI, profile UI, runtime hooks)
-  - cerebro-api sub-client: API client methods that wrap cerebro endpoints — possibly already done in chunk 3 (listFeatureFlags, setFeatureFlag); audit for more
+  1. Move packages/views/inbox/components/inbox-page.tsx → packages/cerebro-inbox/inbox-page.tsx (full file relocation; existing fork version becomes the cerebro version).
+  2. Restore packages/views/inbox/components/inbox-page.tsx to upstream-state. Use git show upstream/main:... or git log to find the original baseline.
+  3. App routes choose between upstream and cerebro via feature flag:
+     ```typescript
+     // apps/web/app/[workspaceSlug]/(dashboard)/inbox/page.tsx
+     import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+     import { InboxPage as UpstreamInbox } from "@multica/views/inbox";
+     import { CerebroInboxPage } from "@multica/cerebro-inbox";
+     export default function Page() {
+       return useFeatureFlag("cerebro_inbox") ? <CerebroInboxPage /> : <UpstreamInbox />;
+     }
+     ```
+     Same for desktop route.
+  4. Default: cerebro_inbox flag is `true` per registry (already done in chunk 3).
 
-  Use audit doc 01-audit.md for the canonical L1 list. Read it carefully BEFORE dispatching subagents.
+  Sub-tasks:
+  A. Relocate the 1198-line cerebro-inbox content to packages/cerebro-inbox/
+  B. Restore upstream's inbox-page.tsx (use git show with upstream remote, or revert specific commits)
+  C. Wire flag-based selection in apps/web inbox page + apps/desktop inbox route
 
-  3-4 parallel subagents: one per feature. After all complete, also handle the 4 deferred extractions if context allows.
+  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS. Manual: toggle flag, both inbox variants render.
 
-  Eval gate: same as chunks 2-4. Use CEREBRO-ALLOW-NO-PATCH again if rename is mechanical; explicit markers if new logic added in upstream files.
-  Branches: stay on chore/upstream-sync-analysis.
-  Estimated tokens: ~400-600k (substantial — 4 features + 4 deferred extractions).
+  Per protocol "1-2 subagents". Suggest 2: one for cerebro-inbox content move, one for upstream restoration + route wiring.
 
-  After chunk 6: Phase 1 done. Per 07-session-schedule.md row 6: "Auto-progression: GO til Chunk 7? NEJ — Phase 2 er user-pause." But user's /loop instruction overrides: "Do not pause at phase boundaries — only stop on catastrophic conditions". So chunk 7 (Phase 2 inbox feature flag) starts immediately if chunk 6 evals pass.
+  Estimated tokens: ~250-400k.
+
+  Phase 5 follows phase 3+4 chronologically but per user's /loop instruction, no pause between chunks.
 ```

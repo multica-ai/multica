@@ -1223,6 +1223,11 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(orphan-task-test): cerebro fork addition.
+// Tests below depend on package-private fixtures (testHandler/testPool/testWorkspaceID);
+// extracting to internal/cerebro/users would require duplicating ~150 lines of test
+// infrastructure. Per chunk-6 SA4 audit, kept inline with this marker.
+//
 // Regression test for JEH-357: a task whose parent (chat_session,
 // autopilot_run, or workspace) was deleted ends up with every FK NULL
 // thanks to ON DELETE SET NULL. Pre-fix, ClaimTaskByRuntime silently

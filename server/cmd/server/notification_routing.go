@@ -1,3 +1,12 @@
+// CEREBRO-PATCH(cerebro-listeners): this entire file is cerebro-only — it
+// implements per-user notification routing (inbox / notifications-tab / off)
+// driven by user.preferences. Upstream baseline has no equivalent. Kept in
+// package main alongside notification_listeners.go because the listener
+// helpers call resolveRoute / issueAssigneeMemberID / responseAssigneeMemberID
+// directly; moving to a subpackage would force ~12 import-site edits in the
+// (heavily inline-modified) upstream listeners file and increase merge
+// conflict surface rather than reduce it. See docs/upstream-sync/01-audit.md
+// row "server/cmd/server/notification_listeners.go" for the rationale.
 package main
 
 import (
