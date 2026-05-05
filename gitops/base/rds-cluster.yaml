@@ -3,7 +3,7 @@ kind: Cluster
 metadata:
   name: agentfarm-postgres-cluster
 spec:
-  deletionPolicy: Delete
+  deletionPolicy: Orphan
   forProvider:
     region: us-east-1
     engine: aurora-postgresql
