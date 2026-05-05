@@ -107,6 +107,7 @@ type NavKey =
   | "agents"
   | "runtimes"
   | "skills"
+  | "wiki"
   | "settings";
 
 const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
@@ -119,6 +120,7 @@ const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "projects", label: "Projects", icon: FolderKanban },
   { key: "autopilots", label: "Autopilot", icon: Zap },
   { key: "agents", label: "Agents", icon: Bot },
+  { key: "wiki", label: "Wiki", icon: BookOpenText },
 ];
 
 const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
