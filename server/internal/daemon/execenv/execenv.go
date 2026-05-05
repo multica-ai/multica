@@ -53,7 +53,7 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID           string                  // non-empty for chat tasks
-	AutopilotRunID          string              // non-empty for autopilot run_only tasks
+	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
@@ -214,7 +214,11 @@ type GCMeta struct {
 const gcMetaFile = ".gc_meta.json"
 
 // WriteGCMeta writes GC metadata into the given directory.
-func WriteGCMeta(envRoot, issueID, workspaceID string) error {
+func WriteGCMeta(envRoot, issueID, workspaceID string, logger *slog.Logger) error {
+	if issueID == "" {
+		logger.Warn("execenv: skipping .gc_meta.json write: issue_id is empty", "envRoot", envRoot, "workspaceID", workspaceID)
+		return nil
+	}
 	if envRoot == "" {
 		return nil
 	}

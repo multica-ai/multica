@@ -1278,7 +1278,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// can look up the issue later. Written last so that a mid-task crash
 	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID); err != nil {
+		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}
