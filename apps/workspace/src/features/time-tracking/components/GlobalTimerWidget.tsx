@@ -35,6 +35,32 @@ export function GlobalTimerWidget() {
     }
   }, [expanded]);
 
+  // Update document.title while a timer is running, e.g. "1:23:45 · Multica".
+  // Resets to "Multica" when the timer stops or the component unmounts.
+  useEffect(() => {
+    if (!currentEntry) {
+      document.title = "Multica";
+      return;
+    }
+
+    const tick = () => {
+      const elapsedSeconds = Math.floor(Date.now() / 1000) + currentEntry.duration_seconds;
+      const h = Math.floor(elapsedSeconds / 3600);
+      const m = Math.floor((elapsedSeconds % 3600) / 60);
+      const s = elapsedSeconds % 60;
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const label = h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+      document.title = `${label} · Multica`;
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => {
+      clearInterval(id);
+      document.title = "Multica";
+    };
+  }, [currentEntry]);
+
   const handleStart = () => {
     const now = new Date().toISOString();
     startMutation.mutate(
