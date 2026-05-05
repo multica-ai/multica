@@ -378,6 +378,27 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MemoryArtifact struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Kind        string             `json:"kind"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Title       string             `json:"title"`
+	Content     string             `json:"content"`
+	Slug        pgtype.Text        `json:"slug"`
+	AnchorType  pgtype.Text        `json:"anchor_type"`
+	AnchorID    pgtype.UUID        `json:"anchor_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Tags        []string           `json:"tags"`
+	Metadata    []byte             `json:"metadata"`
+	ContentTsv  interface{}        `json:"content_tsv"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy  pgtype.UUID        `json:"archived_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
