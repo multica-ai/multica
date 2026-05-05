@@ -44,6 +44,7 @@
     "./time-tracking/timer-play-button": "./time-tracking/timer-play-button.tsx",
     "./time-tracking/sidebar-timer-indicator": "./time-tracking/sidebar-timer-indicator.tsx",
     "./time-tracking/idle-detector": "./time-tracking/idle-detector.tsx",
+    "./time-tracking/timer-final-state-guard": "./time-tracking/timer-final-state-guard.tsx",
     "./time-tracking/use-timer-auto-suggest": "./time-tracking/use-timer-auto-suggest.ts",
     "./time-tracking/dashboard": "./time-tracking/dashboard.tsx",
     "./time-tracking/monthly-calendar": "./time-tracking/monthly-calendar.tsx"
