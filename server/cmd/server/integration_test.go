@@ -539,6 +539,30 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 		t.Fatalf("status should be preserved, got '%s'", updated2["status"])
 	}
 
+	// PATCH the priority — same handler, different verb. Pins the route
+	// registration so a future cleanup of router.go can't silently strip
+	// PATCH support and re-break the MCP tools (multica_issue_update,
+	// multica_issue_status), which only know how to send PATCH.
+	resp = authRequest(t, "PATCH", "/api/issues/"+issueID, map[string]any{
+		"priority": "low",
+	})
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("PATCH UpdateIssue: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	var patched map[string]any
+	readJSON(t, resp, &patched)
+	if patched["priority"] != "low" {
+		t.Fatalf("expected priority 'low' after PATCH, got '%s'", patched["priority"])
+	}
+	if patched["title"] != "Renamed integration issue" {
+		t.Fatalf("PATCH should preserve title, got '%s'", patched["title"])
+	}
+	if patched["status"] != "in_progress" {
+		t.Fatalf("PATCH should preserve status, got '%s'", patched["status"])
+	}
+
 	// List
 	resp = authRequest(t, "GET", "/api/issues?workspace_id="+testWorkspaceID, nil)
 	if resp.StatusCode != 200 {
