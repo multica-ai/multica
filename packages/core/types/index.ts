@@ -99,3 +99,14 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  MemoryArtifact,
+  MemoryArtifactKind,
+  MemoryArtifactAnchorType,
+  MemoryArtifactAuthorType,
+  CreateMemoryArtifactRequest,
+  UpdateMemoryArtifactRequest,
+  ListMemoryArtifactsParams,
+  ListMemoryArtifactsResponse,
+  SearchMemoryArtifactsParams,
+} from "./memory";

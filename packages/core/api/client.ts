@@ -92,6 +92,13 @@ import type {
   CreateChannelMessageRequest,
   MarkChannelReadRequest,
   CreateOrFetchDMRequest,
+  MemoryArtifact,
+  CreateMemoryArtifactRequest,
+  UpdateMemoryArtifactRequest,
+  ListMemoryArtifactsParams,
+  ListMemoryArtifactsResponse,
+  SearchMemoryArtifactsParams,
+  MemoryArtifactAnchorType,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1400,5 +1407,82 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Memory artifacts — workspace-scoped, kind-discriminated markdown
+  // primitives (wiki pages, agent notes, runbooks, decision records).
+  // Server contract lives in server/internal/handler/memory_artifact.go.
+  async listMemoryArtifacts(
+    params?: ListMemoryArtifactsParams,
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.parent_id) search.set("parent_id", params.parent_id);
+    if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/memory${qs ? `?${qs}` : ""}`);
+  }
+
+  async getMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}`);
+  }
+
+  // "Show me everything anchored to issue X" — used by the daemon's
+  // runtime context injection and by issue/project detail pages.
+  async listMemoryArtifactsByAnchor(
+    anchorType: MemoryArtifactAnchorType,
+    anchorId: string,
+    params?: { limit?: number },
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.fetch(
+      `/api/memory/by-anchor/${anchorType}/${anchorId}${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async searchMemoryArtifacts(
+    params: SearchMemoryArtifactsParams,
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    search.set("q", params.q);
+    if (params.kind) search.set("kind", params.kind);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    return this.fetch(`/api/memory/search?${search.toString()}`);
+  }
+
+  async createMemoryArtifact(
+    data: CreateMemoryArtifactRequest,
+  ): Promise<MemoryArtifact> {
+    return this.fetch("/api/memory", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMemoryArtifact(
+    id: string,
+    data: UpdateMemoryArtifactRequest,
+  ): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}/archive`, { method: "POST" });
+  }
+
+  async restoreMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}/restore`, { method: "POST" });
+  }
+
+  async deleteMemoryArtifact(id: string): Promise<void> {
+    await this.fetch(`/api/memory/${id}`, { method: "DELETE" });
   }
 }
