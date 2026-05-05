@@ -19,7 +19,9 @@ export const useIdleStore = create<IdleState>()((set, get) => ({
   idleSince: null,
 
   recordActivity: () => {
-    set({ lastActivityAt: Date.now(), isIdle: false, idleSince: null });
+    // Only reset the idle timer. Do NOT clear isIdle here — the dialog must
+    // remain visible until the user explicitly acts on it via dismissIdle().
+    set({ lastActivityAt: Date.now() });
   },
 
   checkIdle: () => {
