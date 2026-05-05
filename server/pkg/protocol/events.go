@@ -99,6 +99,11 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Wiki events
+	EventWikiPageCreated = "wiki_page:created"
+	EventWikiPageUpdated = "wiki_page:updated"
+	EventWikiPageDeleted = "wiki_page:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
