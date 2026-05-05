@@ -186,7 +186,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
 	b.WriteString("- `multica autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
 	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
-	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
+	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n")
+	b.WriteString("- `multica memory list [--kind X] [--limit N] --output json` — List memory artifacts (wiki/runbook/decision/agent_note) in the workspace. The runtime context above already includes artifacts anchored to the current task; use this to browse the wider library.\n")
+	b.WriteString("- `multica memory get <id> --output json` — Get a memory artifact's full content. Use the IDs from the `## Memory` section above to fetch updated copies if you suspect the embedded content is stale.\n")
+	b.WriteString("- `multica memory search --q \"...\" [--kind X] --output json` — Full-text search memory artifacts via tsvector. Use this to find runbooks/decisions on a topic before duplicating one.\n")
+	b.WriteString("- `multica memory by-anchor <type> <id> --output json` — List artifacts anchored to a specific entity (e.g. `multica memory by-anchor issue <issue-id>`). Anchor types: issue | project | agent | channel.\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
@@ -214,7 +218,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
+	b.WriteString("- `multica memory create --kind <kind> --title \"...\" --content-file - [--anchor type:id] [--tags a,b,c]` — Create a memory artifact. Use `--content-file -` to pipe markdown via stdin (HEREDOC pattern as for comments). Anchor it to the current issue/project/channel — or to your own agent id — so the next agent on a similar task picks it up via runtime injection. Recommended kinds: `agent_note` for findings during work; `runbook` for procedures; `decision` for architectural choices; `wiki_page` for general knowledge.\n")
+	b.WriteString("- `multica memory update <id> [--title X] [--content-file -] [--tags ...] [--anchor type:id|none]` — Partial update; only fields you pass are changed. Pass `--anchor none` to clear the anchor.\n")
+	b.WriteString("- `multica memory archive <id>` — Soft-delete (reversible via `restore`). Prefer over `delete` so the history isn't lost.\n")
+	b.WriteString("- `multica memory restore <id>` — Restore an archived artifact.\n")
+	b.WriteString("- `multica memory delete <id>` — Hard-delete (irreversible — prefer `archive`).\n\n")
+	b.WriteString("**When to write memory:** if you discover something non-obvious during a task — a footgun, a constraint, a workaround — write a short `agent_note` artifact anchored to the issue or project (or to your own agent id for cross-task notes). The next agent dispatched to similar work will read it through the `## Memory` section automatically. Keep notes terse — one or two paragraphs, focused on the surprise.\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")

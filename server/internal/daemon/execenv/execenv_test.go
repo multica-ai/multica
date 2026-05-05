@@ -2411,6 +2411,11 @@ func TestInjectRuntimeConfigRendersAgentAndChannelAnchorHeadings(t *testing.T) {
 // When no memory artifacts are attached, the Memory section must not render
 // at all — empty section headers in CLAUDE.md add token noise without
 // signal and can confuse smaller models into hallucinating "memory".
+//
+// NOTE: We match the literal section heading `\n## Memory\n` rather than
+// the substring `"## Memory"` because the Available Commands prose
+// references the section name in inline backticks (e.g. "the `## Memory`
+// section above") and that's not the heading we're trying to suppress.
 func TestInjectRuntimeConfigOmitsEmptyMemorySection(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2423,7 +2428,7 @@ func TestInjectRuntimeConfigOmitsEmptyMemorySection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
-	if strings.Contains(string(content), "## Memory") {
-		t.Errorf("CLAUDE.md should not include Memory section when MemoryArtifacts is empty")
+	if strings.Contains(string(content), "\n## Memory\n") {
+		t.Errorf("CLAUDE.md should not include the ## Memory section heading when MemoryArtifacts is empty")
 	}
 }
