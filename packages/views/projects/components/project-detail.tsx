@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -146,10 +147,23 @@ function ProjectIssuesContent({
 
   if (projectIssues.length === 0) {
     return (
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
+      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
         <p className="text-sm">No issues linked</p>
-        <p className="text-xs">Assign issues to this project from the issue detail page.</p>
+        <p className="text-xs">Create a new issue or assign existing ones to this project.</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-1"
+          onClick={() =>
+            useModalStore
+              .getState()
+              .open("create-issue", { project_id: scope.replace("project:", "") })
+          }
+        >
+          <Plus className="size-3.5 mr-1.5" />
+          New Issue
+        </Button>
       </div>
     );
   }

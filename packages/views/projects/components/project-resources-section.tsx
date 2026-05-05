@@ -21,6 +21,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@multica/ui/components/ui/tooltip";
 
 // Project Resources sidebar section.
 //
@@ -125,7 +130,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <FolderGit className="size-3.5" />
-                        <span className="truncate flex-1">{repo.url}</span>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="truncate flex-1">{repo.url}</span>
+                            }
+                          />
+                          <TooltipContent side="top">{repo.url}</TooltipContent>
+                        </Tooltip>
                         {isAttached && (
                           <span className="text-[10px] text-muted-foreground">
                             attached
@@ -162,14 +174,21 @@ function ResourceRow({
     return (
       <div className="flex items-center gap-2 text-xs group">
         <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
-        <a
-          href={ref.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="truncate flex-1 hover:underline"
-        >
-          {resource.label || ref.url}
-        </a>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={ref.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="truncate flex-1 hover:underline"
+              >
+                {resource.label || ref.url}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{ref.url}</TooltipContent>
+        </Tooltip>
         <button
           type="button"
           onClick={onRemove}
