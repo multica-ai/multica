@@ -1,0 +1,93 @@
+# RBAC for the agentfarm-runtime-controller. Namespace-scoped only —
+# the controller manipulates per-workspace resources inside `agentfarm`
+# and never escalates to cluster-scope. See proposal §2.
+
+---
+# Reconciliation Role: full lifecycle on every resource type the
+# controller creates per workspace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentfarm-runtime-controller
+  labels:
+    app: agentfarm
+    component: runtime-controller
+rules:
+  # Per-workspace daemon Deployment + the Pod it owns.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+
+  # Per-workspace ServiceAccount + Secret + PVC.
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "secrets", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # ExternalSecrets so SSM-sourced values land in per-workspace Secrets.
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # WorkspaceIAM Composite — the controller writes the CR, Crossplane
+  # provider pod (different SA) reconciles it into AWS resources.
+  # See proposal §4.
+  - apiGroups: ["agentfarm.g2.com"]
+    resources: ["workspaceiams"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentfarm-runtime-controller
+  labels:
+    app: agentfarm
+    component: runtime-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agentfarm-runtime-controller
+subjects:
+  - kind: ServiceAccount
+    name: agentfarm-runtime-controller
+    namespace: agentfarm
+
+---
+# Diagnostic Role: read pod logs / events to surface daemon health
+# back to the agentfarm server. Read-only; split from the Reconciliation
+# Role so we can audit "what can the controller observe?" separately
+# from "what can it mutate?".
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentfarm-runtime-controller-diagnostics
+  labels:
+    app: agentfarm
+    component: runtime-controller
+rules:
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentfarm-runtime-controller-diagnostics
+  labels:
+    app: agentfarm
+    component: runtime-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agentfarm-runtime-controller-diagnostics
+subjects:
+  - kind: ServiceAccount
+    name: agentfarm-runtime-controller
+    namespace: agentfarm

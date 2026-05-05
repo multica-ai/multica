@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Per-workspace daemon runtime controller. See
+# docs/proposals/per-workspace-daemon-runtimes.md.
+#
+# This component is GitOps-managed; per-workspace resources (the actual
+# daemon Deployments, PVCs, Secrets, WorkspaceIAM CRs, LiteLLM teams +
+# keys) are created by the controller at runtime and intentionally NOT
+# committed to Git.
+resources:
+  - serviceaccount.yaml
+  - rbac.yaml
+  - iam.yaml
+  - workspaceiam-xrd.yaml
+  - workspaceiam-composition.yaml
+  - storageclass.yaml
+  - configmap.yaml
+  - externalsecret-controller.yaml
+  - deployment.yaml
+
+# Per-workspace resource templates the controller renders at runtime
+# live under templates/ and are intentionally NOT included as
+# kustomize resources — they contain placeholder workspace IDs and
+# would fail to apply. They're tracked so reviewers can audit the
+# shape the controller produces. See templates/README.md.
+
+labels:
+  - pairs:
+      app.kubernetes.io/component: runtime-controller

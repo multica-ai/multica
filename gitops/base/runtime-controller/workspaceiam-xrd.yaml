@@ -1,0 +1,69 @@
+# CompositeResourceDefinition for per-workspace IAM. See proposal §4.
+#
+# The runtime controller writes WorkspaceIAM CRs (one per workspace);
+# Crossplane reconciles each CR into a Role + Policy + RolePolicyAttachment
+# in AWS via the existing iam.aws.crossplane.io provider. This keeps
+# iam:* permissions out of the controller's IRSA grant entirely — the
+# only thing the controller needs at the AWS API is what's in iam.yaml.
+
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: workspaceiams.agentfarm.g2.com
+spec:
+  group: agentfarm.g2.com
+  names:
+    kind: WorkspaceIAM
+    plural: workspaceiams
+  claimNames:
+    kind: WorkspaceIAMClaim
+    plural: workspaceiamclaims
+  defaultCompositionRef:
+    name: workspaceiam.agentfarm.g2.com
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - parameters
+              properties:
+                parameters:
+                  type: object
+                  required:
+                    - workspaceId
+                    - serviceAccountName
+                  properties:
+                    workspaceId:
+                      type: string
+                      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      description: |
+                        Workspace UUID. Used as the suffix of the IAM role name,
+                        the SSM prefix the role can read, and the S3 prefix the
+                        role can read/write.
+                    serviceAccountName:
+                      type: string
+                      description: |
+                        Kubernetes ServiceAccount name in the agentfarm namespace
+                        that the IAM role's trust policy permits to assume it via
+                        IRSA. Defaults to agentfarm-daemon-<workspaceId>.
+                      default: ""
+                    s3UploadsBucket:
+                      type: string
+                      default: g2-agentfarm-tools-uploads
+                      description: |
+                        Bucket the daemon reads/writes for this workspace.
+                        Per-workspace S3 access is scoped to the
+                        workspaces/<workspaceId>/* prefix only.
+            status:
+              type: object
+              properties:
+                roleArn:
+                  type: string
+                  description: ARN of the AWS role created for this workspace.

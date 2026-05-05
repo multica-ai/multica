@@ -1,0 +1,125 @@
+# Controller-side AWS IAM. Deliberately narrow — see proposal §2.
+#
+# The controller does NOT have iam:* permissions. Per-workspace IAM
+# roles are created by Crossplane (workspaceiam-composition.yaml + xrd)
+# in response to WorkspaceIAM CRs the controller writes. The controller
+# only needs:
+#
+# 1. ssm:GetParameter on /agentfarm/tools/runtime-controller/* —
+#    its LiteLLM management key + proxy URL (see §7).
+# 2. ec2:DeleteVolume on volumes tagged
+#    Application=agentfarm, Owner=agentfarm-runtime-controller —
+#    purge-step EBS reclamation, the only AWS write the controller
+#    performs directly (see §9 step 6).
+
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Role
+metadata:
+  name: agentfarm-runtime-controller-role
+spec:
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+      - key: Purpose
+        value: "Per-workspace runtime controller (SSM read + scoped EBS delete)"
+    assumeRolePolicyDocument: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::637423279283:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:sub": "system:serviceaccount:agentfarm:agentfarm-runtime-controller",
+              "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:aud": "sts.amazonaws.com"
+            }
+          }
+        }]
+      }
+  providerConfigRef:
+    name: provider-aws-config
+
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: Policy
+metadata:
+  name: agentfarm-runtime-controller-policy
+spec:
+  deletionPolicy: Delete
+  forProvider:
+    tags:
+      - key: Owner
+        value: DevOps
+      - key: Production
+        value: "false"
+      - key: Application
+        value: agentfarm
+    description: "Runtime controller: SSM read + tag-scoped EBS delete"
+    document: |-
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowControllerSSMRead",
+            "Effect": "Allow",
+            "Action": [
+              "ssm:GetParameter",
+              "ssm:GetParameters",
+              "ssm:GetParametersByPath",
+              "ssm:DescribeParameters"
+            ],
+            "Resource": [
+              "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools/runtime-controller",
+              "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools/runtime-controller/*"
+            ]
+          },
+          {
+            "Sid": "AllowEBSDescribeForCleanup",
+            "Effect": "Allow",
+            "Action": [
+              "ec2:DescribeVolumes"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Sid": "AllowTagScopedEBSDelete",
+            "Effect": "Allow",
+            "Action": [
+              "ec2:DeleteVolume"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:ResourceTag/Application": "agentfarm",
+                "aws:ResourceTag/Owner": "agentfarm-runtime-controller"
+              }
+            }
+          }
+        ]
+      }
+    name: agentfarm-runtime-controller-policy-document
+  providerConfigRef:
+    name: provider-aws-config
+
+---
+apiVersion: iam.aws.crossplane.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: agentfarm-runtime-controller-policy-attachment
+spec:
+  forProvider:
+    policyArnRef:
+      name: agentfarm-runtime-controller-policy
+    roleNameRef:
+      name: agentfarm-runtime-controller-role
+  providerConfigRef:
+    name: provider-aws-config

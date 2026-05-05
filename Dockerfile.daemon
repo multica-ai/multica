@@ -1,0 +1,72 @@
+# Image for the per-workspace daemon runtime that runs in EKS, one pod
+# per workspace. See docs/proposals/per-workspace-daemon-runtimes.md.
+#
+# v1 ships only the `multica` binary plus the two agent CLIs we support
+# server-side: Claude Code (`claude`) and OpenAI Codex (`codex`).
+# Adding more CLIs is a Dockerfile bump plus a per-provider key in the
+# controller's reconciler — see proposal §3 and §10.
+#
+# Runtime authentication is via env vars, not ~/.multica/config.json
+# (controller mints MULTICA_TOKEN per workspace and injects it via the
+# per-workspace Secret — see proposal §8). The daemon entrypoint runs
+# in foreground; container lifecycle == daemon lifecycle.
+
+# --- Build stage ---
+# Builds only the `multica` binary. The full Dockerfile also builds
+# the server and migrate binaries; the daemon image doesn't need them.
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+
+COPY server/go.mod server/go.sum ./server/
+RUN cd server && go mod download
+
+COPY server/ ./server/
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+RUN cd server && CGO_ENABLED=0 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o bin/multica ./cmd/multica
+
+# --- Runtime stage ---
+# node:20-alpine because the agent CLIs are npm-distributed.
+FROM node:20-alpine
+
+# Pinned CLI versions. Update both together when bumping.
+ARG CLAUDE_CODE_VERSION=2.0.40
+ARG CODEX_VERSION=0.20.0
+
+RUN apk add --no-cache \
+        ca-certificates \
+        tzdata \
+        git \
+        bash \
+    && npm install -g --no-fund --no-audit \
+        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+        @openai/codex@${CODEX_VERSION} \
+    && npm cache clean --force
+
+# Non-root user for the daemon. UID 1001 matches the Deployment's
+# securityContext.runAsUser; HOME holds CLI state (~/.claude, ~/.codex)
+# and the workspaces root the controller PVC mounts over.
+RUN addgroup -g 1001 -S multica \
+    && adduser -u 1001 -S -G multica -h /home/multica -s /bin/bash multica \
+    && mkdir -p /home/multica/multica_workspaces /home/multica/.claude /home/multica/.codex \
+    && chown -R multica:multica /home/multica
+
+WORKDIR /app
+COPY --from=builder /src/server/bin/multica /app/multica
+
+USER multica
+ENV HOME=/home/multica \
+    MULTICA_WORKSPACES_ROOT=/home/multica/multica_workspaces \
+    PATH=/app:$PATH
+
+# `multica daemon start --foreground` is the only command the pod runs.
+# Auth + server URL come from env vars (MULTICA_TOKEN, MULTICA_SERVER_URL)
+# materialized into the per-workspace Secret by the controller.
+ENTRYPOINT ["/app/multica"]
+CMD ["daemon", "start", "--foreground"]

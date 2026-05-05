@@ -1,0 +1,172 @@
+# Composition for per-workspace IAM. Each WorkspaceIAM CR fans out
+# into a Role, Policy, and RolePolicyAttachment using the existing
+# iam.aws.crossplane.io provider — the same primitives backend already
+# uses (gitops/base/iam-backend.yaml) so reviewers can audit the shape
+# alongside the in-tree backend role. See proposal §4.
+#
+# Each per-workspace daemon gets:
+#   - s3:GetObject/PutObject on g2-agentfarm-tools-uploads/workspaces/<wsId>/*
+#   - ssm:GetParameter on /agentfarm/tools/daemons/<wsId>/*
+#   - Trust policy bound to system:serviceaccount:agentfarm:<serviceAccountName>
+#
+# Roles are created under IAM Path /agentfarm/daemon/ and tagged
+# Application=agentfarm, Owner=agentfarm-runtime-controller — same tag
+# pattern the controller's ec2:DeleteVolume condition uses for PVC
+# reclamation, so blast-radius scoping is consistent across resource
+# types.
+
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: workspaceiam.agentfarm.g2.com
+  labels:
+    crossplane.io/xrd: workspaceiams.agentfarm.g2.com
+spec:
+  compositeTypeRef:
+    apiVersion: agentfarm.g2.com/v1alpha1
+    kind: WorkspaceIAM
+  resources:
+    # ---- Role ----
+    - name: role
+      base:
+        apiVersion: iam.aws.crossplane.io/v1beta1
+        kind: Role
+        spec:
+          forProvider:
+            path: /agentfarm/daemon/
+            tags:
+              - key: Owner
+                value: agentfarm-runtime-controller
+              - key: Application
+                value: agentfarm
+              - key: Production
+                value: "false"
+          providerConfigRef:
+            name: provider-aws-config
+      patches:
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-role"
+        - fromFieldPath: spec.parameters.serviceAccountName
+          toFieldPath: spec.forProvider.assumeRolePolicyDocument
+          transforms:
+            - type: string
+              string:
+                fmt: |
+                  {
+                    "Version": "2012-10-17",
+                    "Statement": [{
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Federated": "arn:aws:iam::637423279283:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264"
+                      },
+                      "Action": "sts:AssumeRoleWithWebIdentity",
+                      "Condition": {
+                        "StringEquals": {
+                          "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:sub": "system:serviceaccount:agentfarm:%s",
+                          "oidc.eks.us-east-1.amazonaws.com/id/A91661D1C094FD09EF6DF908DE864264:aud": "sts.amazonaws.com"
+                        }
+                      }
+                    }]
+                  }
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.arn
+          toFieldPath: status.roleArn
+
+    # ---- Policy ----
+    - name: policy
+      base:
+        apiVersion: iam.aws.crossplane.io/v1beta1
+        kind: Policy
+        spec:
+          deletionPolicy: Delete
+          forProvider:
+            path: /agentfarm/daemon/
+            tags:
+              - key: Owner
+                value: agentfarm-runtime-controller
+              - key: Application
+                value: agentfarm
+              - key: Production
+                value: "false"
+            description: "Per-workspace daemon: scoped S3 + SSM access"
+          providerConfigRef:
+            name: provider-aws-config
+      patches:
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-policy"
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: spec.forProvider.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-policy"
+        # Inline both per-workspace fields into the policy document.
+        # combine + format gives "<bucket>/workspaces/<wsId>" without
+        # needing a templating engine.
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.s3UploadsBucket
+              - fromFieldPath: spec.parameters.workspaceId
+              - fromFieldPath: spec.parameters.workspaceId
+            strategy: string
+            string:
+              fmt: |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Sid": "AllowScopedS3",
+                      "Effect": "Allow",
+                      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+                      "Resource": "arn:aws:s3:::%s/workspaces/%s/*"
+                    },
+                    {
+                      "Sid": "AllowScopedSSM",
+                      "Effect": "Allow",
+                      "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+                      "Resource": [
+                        "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools/daemons/%s",
+                        "arn:aws:ssm:us-east-1:637423279283:parameter/agentfarm/tools/daemons/%s/*"
+                      ]
+                    }
+                  ]
+                }
+          toFieldPath: spec.forProvider.document
+
+    # ---- Role <-> Policy attachment ----
+    - name: rolePolicyAttachment
+      base:
+        apiVersion: iam.aws.crossplane.io/v1beta1
+        kind: RolePolicyAttachment
+        spec:
+          providerConfigRef:
+            name: provider-aws-config
+      patches:
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-policy-attachment"
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: spec.forProvider.roleNameRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-role"
+        - fromFieldPath: spec.parameters.workspaceId
+          toFieldPath: spec.forProvider.policyArnRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "agentfarm-daemon-%s-policy"

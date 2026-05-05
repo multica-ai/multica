@@ -27,3 +27,10 @@ images:
     newTag: "b4dc7ebc"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "b4dc7ebc"
+
+# The daemon image is intentionally NOT a kustomize images: entry —
+# no GitOps-managed resource references it (per-workspace daemon
+# Deployments are created by the controller at runtime, not by ArgoCD).
+# Instead, the publish workflow's commit-to-gitops-daemon job patches
+# the controller's DAEMON_IMAGE_TAG env directly via yq. See
+# .github/workflows/publish.yml.

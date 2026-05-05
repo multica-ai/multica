@@ -1,0 +1,32 @@
+# Dedicated StorageClass for per-workspace daemon workdirs.
+# See proposal §5.
+#
+# - reclaimPolicy: Retain — daemon PVCs hold cloned repos and in-progress
+#   work; accidental delete of the per-workspace Deployment must not lose
+#   the workdir. The controller has explicit ec2:DeleteVolume on
+#   tag-matched volumes for the purge path (see iam.yaml §"AllowTagScopedEBSDelete").
+# - volumeBindingMode: WaitForFirstConsumer — bind to the daemon pod's
+#   AZ so the volume isn't created in a zone the pod can't schedule into.
+# - tags propagated to the EBS volume so the controller's purge step
+#   can find and delete the right one.
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: agentfarm-daemon-workdir
+  labels:
+    app: agentfarm
+    component: runtime-controller
+provisioner: ebs.csi.aws.com
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  encrypted: "true"
+  fsType: ext4
+  # Tags applied to the underlying EBS volume. Must include the two
+  # keys the controller's IAM policy condition requires for ec2:DeleteVolume.
+  tagSpecification_1: "Application=agentfarm"
+  tagSpecification_2: "Owner=agentfarm-runtime-controller"
+  tagSpecification_3: "Component=daemon-workdir"

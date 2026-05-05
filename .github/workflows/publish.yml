@@ -42,24 +42,36 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
+  bake-build-daemon:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.daemon.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
   extract-tags:
-    needs: [bake-build-backend, bake-build-web]
+    needs: [bake-build-backend, bake-build-web, bake-build-daemon]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
+      daemon_tag: ${{ steps.extract.outputs.daemon_tag }}
     steps:
       - name: Extract tags from image_name
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+          DAEMON_IMAGE: ${{ needs.bake-build-daemon.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "daemon_tag=${DAEMON_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   commit-to-gitops-backend:
-    needs: [bake-build-backend, bake-build-web, extract-tags]
+    needs: [bake-build-backend, bake-build-web, bake-build-daemon, extract-tags]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
@@ -70,7 +82,7 @@ jobs:
       image_yq_matcher: .images[0].newTag
 
   commit-to-gitops-web:
-    needs: [bake-build-backend, bake-build-web, extract-tags, commit-to-gitops-backend]
+    needs: [bake-build-backend, bake-build-web, bake-build-daemon, extract-tags, commit-to-gitops-backend]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
@@ -79,3 +91,13 @@ jobs:
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[1].newTag
+
+  # NOTE: daemon image is NOT auto-committed to the GitOps kustomization.
+  # No GitOps-managed resource references the daemon image — per-workspace
+  # daemon Deployments are created by the runtime controller at runtime,
+  # using the DAEMON_IMAGE_TAG env in
+  # gitops/base/runtime-controller/deployment.yaml. CLI version bumps
+  # (claude-code, codex) happen on a slower cadence than backend/web
+  # commits, so an operator bumps DAEMON_IMAGE_TAG manually as part of
+  # the same PR that pins the new CLI versions in Dockerfile.daemon.
+  # See docs/proposals/per-workspace-daemon-runtimes.md §3.
