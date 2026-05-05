@@ -2408,6 +2408,69 @@ func TestInjectRuntimeConfigRendersAgentAndChannelAnchorHeadings(t *testing.T) {
 	}
 }
 
+// Pins the always-inject heading. Artifacts with anchor_type="always"
+// (synthetic — only the server stamps them on the wire when always_inject_at_runtime
+// is true on the underlying row) get their own dedicated heading,
+// distinct from anchored content. Renders AFTER all anchored artifacts
+// so the most-specific context still leads.
+func TestInjectRuntimeConfigRendersAlwaysInjectHeading(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "runbook",
+				Title:      "Issue runbook",
+				Content:    "Step 1",
+				AnchorType: "issue",
+				UpdatedAt:  "2026-05-01T12:00:00Z",
+			},
+			{
+				ID:         "22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "wiki_page",
+				Title:      "How we deploy",
+				Content:    "Always green-blue.",
+				AnchorType: "always",
+				UpdatedAt:  "2026-05-04T10:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	for _, want := range []string{
+		"### On this issue",
+		"### Workspace knowledge (always-on)",
+		"#### Wiki — How we deploy",
+		"Always green-blue.",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// "On this issue" must appear before "Workspace knowledge (always-on)"
+	// — the per-task anchor is more specific than workspace-wide context.
+	idxIssue := strings.Index(s, "### On this issue")
+	idxAlways := strings.Index(s, "### Workspace knowledge (always-on)")
+	if idxIssue == -1 || idxAlways == -1 {
+		t.Fatalf("expected both headings; issue=%d always=%d", idxIssue, idxAlways)
+	}
+	if idxIssue > idxAlways {
+		t.Errorf("issue heading should precede always heading; issue=%d always=%d", idxIssue, idxAlways)
+	}
+}
+
 // When no memory artifacts are attached, the Memory section must not render
 // at all — empty section headers in CLAUDE.md add token noise without
 // signal and can confuse smaller models into hallucinating "memory".

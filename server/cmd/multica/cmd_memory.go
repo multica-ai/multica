@@ -138,6 +138,7 @@ func init() {
 	memoryCreateCmd.Flags().StringSlice("tags", nil, "Comma-separated tags")
 	memoryCreateCmd.Flags().String("slug", "", "Optional URL-safe slug (lowercase letters, digits, hyphens)")
 	memoryCreateCmd.Flags().String("parent-id", "", "Parent artifact id for folder hierarchy")
+	memoryCreateCmd.Flags().Bool("always-inject", false, "Always inject this artifact into every agent task in this workspace (workspace-wide context like deploy guides, brand rules)")
 	memoryCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -148,6 +149,7 @@ func init() {
 	memoryUpdateCmd.Flags().StringSlice("tags", nil, "Replace tags (comma-separated)")
 	memoryUpdateCmd.Flags().String("slug", "", "New slug")
 	memoryUpdateCmd.Flags().String("parent-id", "", "New parent id (or empty string to clear)")
+	memoryUpdateCmd.Flags().Bool("always-inject", false, "Set always-inject flag to true (use --always-inject=false to clear; only takes effect when explicitly passed)")
 	memoryUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	memoryArchiveCmd.Flags().String("output", "json", "Output format: table or json")
@@ -481,6 +483,12 @@ func runMemoryCreate(cmd *cobra.Command, _ []string) error {
 	if parentID, _ := cmd.Flags().GetString("parent-id"); parentID != "" {
 		body["parent_id"] = parentID
 	}
+	if cmd.Flags().Changed("always-inject") {
+		// Only send the field when the user explicitly opted in/out so the
+		// server-side default (`false`) takes effect when the flag isn't passed.
+		v, _ := cmd.Flags().GetBool("always-inject")
+		body["always_inject_at_runtime"] = v
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -559,9 +567,13 @@ func runMemoryUpdate(cmd *cobra.Command, args []string) error {
 			return v
 		}()
 	}
+	if cmd.Flags().Changed("always-inject") {
+		v, _ := cmd.Flags().GetBool("always-inject")
+		body["always_inject_at_runtime"] = v
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("nothing to update — pass at least one of --title, --content, --content-file, --anchor, --tags, --slug, --parent-id")
+		return fmt.Errorf("nothing to update — pass at least one of --title, --content, --content-file, --anchor, --tags, --slug, --parent-id, --always-inject")
 	}
 
 	client, err := newAPIClient(cmd)

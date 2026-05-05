@@ -219,8 +219,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
 	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
-	b.WriteString("- `multica memory create --kind <kind> --title \"...\" --content-file - [--anchor type:id] [--tags a,b,c]` — Create a memory artifact. Use `--content-file -` to pipe markdown via stdin (HEREDOC pattern as for comments). Anchor it to the current issue/project/channel — or to your own agent id — so the next agent on a similar task picks it up via runtime injection. Recommended kinds: `agent_note` for findings during work; `runbook` for procedures; `decision` for architectural choices; `wiki_page` for general knowledge.\n")
-	b.WriteString("- `multica memory update <id> [--title X] [--content-file -] [--tags ...] [--anchor type:id|none]` — Partial update; only fields you pass are changed. Pass `--anchor none` to clear the anchor.\n")
+	b.WriteString("- `multica memory create --kind <kind> --title \"...\" --content-file - [--anchor type:id] [--tags a,b,c] [--always-inject]` — Create a memory artifact. Use `--content-file -` to pipe markdown via stdin (HEREDOC pattern as for comments). Anchor it to the current issue/project/channel — or to your own agent id — so the next agent on a similar task picks it up via runtime injection. Use `--always-inject` only for workspace-wide rules (e.g. \"How we deploy\", \"Brand voice\") that every agent should see; the runtime caps these to 5 per workspace. Recommended kinds: `agent_note` for findings during work; `runbook` for procedures; `decision` for architectural choices; `wiki_page` for general knowledge.\n")
+	b.WriteString("- `multica memory update <id> [--title X] [--content-file -] [--tags ...] [--anchor type:id|none] [--always-inject=true|false]` — Partial update; only fields you pass are changed. Pass `--anchor none` to clear the anchor; `--always-inject=false` to remove from always-on.\n")
 	b.WriteString("- `multica memory archive <id>` — Soft-delete (reversible via `restore`). Prefer over `delete` so the history isn't lost.\n")
 	b.WriteString("- `multica memory restore <id>` — Restore an archived artifact.\n")
 	b.WriteString("- `multica memory delete <id>` — Hard-delete (irreversible — prefer `archive`).\n\n")
@@ -318,14 +318,18 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Render in fixed order. Anchor types not in the known set get
 		// dropped into a generic "Other" bucket — better than silently
 		// hiding them when a future anchor type is added on the server.
+		// "always" is a synthetic anchor_type the server stamps on
+		// always_inject_at_runtime artifacts so they get their own
+		// heading rather than merging with anchored content.
 		writeArtifacts("On this issue", byAnchor["issue"])
 		writeArtifacts("On the project", byAnchor["project"])
 		writeArtifacts("On this channel", byAnchor["channel"])
 		writeArtifacts("Notes I've kept (agent-anchored)", byAnchor["agent"])
+		writeArtifacts("Workspace knowledge (always-on)", byAnchor["always"])
 		var unknown []MemoryArtifactForEnv
 		for kind, list := range byAnchor {
 			switch kind {
-			case "issue", "project", "channel", "agent":
+			case "issue", "project", "channel", "agent", "always":
 				continue
 			}
 			unknown = append(unknown, list...)

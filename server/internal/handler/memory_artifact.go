@@ -94,23 +94,24 @@ func validateMemorySlug(raw string) (string, error) {
 // ---------------------------------------------------------------------------
 
 type MemoryArtifactResponse struct {
-	ID          string          `json:"id"`
-	WorkspaceID string          `json:"workspace_id"`
-	Kind        string          `json:"kind"`
-	ParentID    *string         `json:"parent_id"`
-	Title       string          `json:"title"`
-	Content     string          `json:"content"`
-	Slug        *string         `json:"slug"`
-	AnchorType  *string         `json:"anchor_type"`
-	AnchorID    *string         `json:"anchor_id"`
-	AuthorType  string          `json:"author_type"`
-	AuthorID    string          `json:"author_id"`
-	Tags        []string        `json:"tags"`
-	Metadata    json.RawMessage `json:"metadata"`
-	ArchivedAt  *string         `json:"archived_at"`
-	ArchivedBy  *string         `json:"archived_by"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID                    string          `json:"id"`
+	WorkspaceID           string          `json:"workspace_id"`
+	Kind                  string          `json:"kind"`
+	ParentID              *string         `json:"parent_id"`
+	Title                 string          `json:"title"`
+	Content               string          `json:"content"`
+	Slug                  *string         `json:"slug"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	AuthorType            string          `json:"author_type"`
+	AuthorID              string          `json:"author_id"`
+	Tags                  []string        `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime bool            `json:"always_inject_at_runtime"`
+	ArchivedAt            *string         `json:"archived_at"`
+	ArchivedBy            *string         `json:"archived_by"`
+	CreatedAt             string          `json:"created_at"`
+	UpdatedAt             string          `json:"updated_at"`
 }
 
 func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
@@ -123,49 +124,52 @@ func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
 		metadata = json.RawMessage("{}")
 	}
 	return MemoryArtifactResponse{
-		ID:          uuidToString(a.ID),
-		WorkspaceID: uuidToString(a.WorkspaceID),
-		Kind:        a.Kind,
-		ParentID:    uuidToPtr(a.ParentID),
-		Title:       a.Title,
-		Content:     a.Content,
-		Slug:        textToPtr(a.Slug),
-		AnchorType:  textToPtr(a.AnchorType),
-		AnchorID:    uuidToPtr(a.AnchorID),
-		AuthorType:  a.AuthorType,
-		AuthorID:    uuidToString(a.AuthorID),
-		Tags:        tags,
-		Metadata:    metadata,
-		ArchivedAt:  timestampToPtr(a.ArchivedAt),
-		ArchivedBy:  uuidToPtr(a.ArchivedBy),
-		CreatedAt:   timestampToString(a.CreatedAt),
-		UpdatedAt:   timestampToString(a.UpdatedAt),
+		ID:                    uuidToString(a.ID),
+		WorkspaceID:           uuidToString(a.WorkspaceID),
+		Kind:                  a.Kind,
+		ParentID:              uuidToPtr(a.ParentID),
+		Title:                 a.Title,
+		Content:               a.Content,
+		Slug:                  textToPtr(a.Slug),
+		AnchorType:            textToPtr(a.AnchorType),
+		AnchorID:              uuidToPtr(a.AnchorID),
+		AuthorType:            a.AuthorType,
+		AuthorID:              uuidToString(a.AuthorID),
+		Tags:                  tags,
+		Metadata:              metadata,
+		AlwaysInjectAtRuntime: a.AlwaysInjectAtRuntime,
+		ArchivedAt:            timestampToPtr(a.ArchivedAt),
+		ArchivedBy:            uuidToPtr(a.ArchivedBy),
+		CreatedAt:             timestampToString(a.CreatedAt),
+		UpdatedAt:             timestampToString(a.UpdatedAt),
 	}
 }
 
 type CreateMemoryArtifactRequest struct {
-	Kind       string          `json:"kind"`
-	ParentID   *string         `json:"parent_id"`
-	Title      string          `json:"title"`
-	Content    string          `json:"content"`
-	Slug       *string         `json:"slug"`
-	AnchorType *string         `json:"anchor_type"`
-	AnchorID   *string         `json:"anchor_id"`
-	Tags       []string        `json:"tags"`
-	Metadata   json.RawMessage `json:"metadata"`
+	Kind                  string          `json:"kind"`
+	ParentID              *string         `json:"parent_id"`
+	Title                 string          `json:"title"`
+	Content               string          `json:"content"`
+	Slug                  *string         `json:"slug"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	Tags                  []string        `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime *bool           `json:"always_inject_at_runtime"`
 }
 
 type UpdateMemoryArtifactRequest struct {
 	// All fields nullable so PATCH-style partial updates work without
 	// callers re-sending the full document.
-	Title      *string         `json:"title"`
-	Content    *string         `json:"content"`
-	Slug       *string         `json:"slug"`
-	ParentID   *string         `json:"parent_id"`
-	AnchorType *string         `json:"anchor_type"`
-	AnchorID   *string         `json:"anchor_id"`
-	Tags       *[]string       `json:"tags"`
-	Metadata   json.RawMessage `json:"metadata"`
+	Title                 *string         `json:"title"`
+	Content               *string         `json:"content"`
+	Slug                  *string         `json:"slug"`
+	ParentID              *string         `json:"parent_id"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	Tags                  *[]string       `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime *bool           `json:"always_inject_at_runtime"`
 }
 
 // taskAnchor identifies one (anchor_type, anchor_id) pair to consult when
@@ -180,20 +184,32 @@ type taskAnchor struct {
 	ID   pgtype.UUID
 }
 
+// alwaysInjectArtifactsCap caps the per-claim count of artifacts pulled
+// from the always_inject_at_runtime flag. Workspace-wide notes flagged
+// for always-inject can accumulate (a year of "we deploy by..." entries),
+// and the agent's context budget isn't unlimited — this is the sane upper
+// bound. The expectation is that workspaces use the flag for a small set
+// of evergreen rules (≤5), not a parking lot for old wiki pages.
+const alwaysInjectArtifactsCap = 5
+
 // fetchMemoryArtifactsForTask pulls memory artifacts anchored to any of the
-// given (type, id) pairs, returning a flattened slice for injection into
-// the daemon claim response. Caller-side concerns:
+// given (type, id) pairs PLUS any artifacts flagged
+// `always_inject_at_runtime = true` in the workspace, returning a flattened
+// slice for injection into the daemon claim response. Caller-side concerns:
 //
 //   - Order is preserved by anchor: callers should pass the *most specific*
 //     anchor first (issue before project, channel before agent). The agent
 //     prompt uses this ordering when rendering the ## Memory section.
+//   - Always-inject artifacts come AFTER all anchored artifacts. They're
+//     workspace-wide context (deploy guides, brand rules) — useful but
+//     less specific than what's tied to the work at hand.
 //   - Errors are logged and swallowed — a failed memory lookup must not
 //     fail the task claim. The agent can still work without memory.
 //   - The limit applies *per anchor*, not globally. N anchors = up to
-//     N × limit artifacts in the worst case. Tune at the call site.
-//   - Artifacts that match multiple anchors (e.g. a runbook tagged to BOTH
-//     the issue and the project) appear only once, under their first-
-//     matched anchor.
+//     N × limit artifacts in the worst case, plus alwaysInjectArtifactsCap.
+//   - Artifacts matched by both an anchor and the always-inject flag
+//     appear only once, under their first-matched anchor (the more-
+//     specific surface wins).
 //
 // Lives in the memory_artifact handler file (rather than daemon.go) so the
 // pgtype + db.ListMemoryArtifactsByAnchorParams plumbing stays colocated
@@ -206,6 +222,45 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 ) []MemoryArtifactData {
 	var out []MemoryArtifactData
 	seen := make(map[string]bool)
+
+	appendRow := func(row db.MemoryArtifact, anchorOverride string) {
+		id := uuidToString(row.ID)
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		tags := row.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		anchorIDStr := ""
+		if row.AnchorID.Valid {
+			anchorIDStr = uuidToString(row.AnchorID)
+		}
+		anchorTypeStr := ""
+		if row.AnchorType.Valid {
+			anchorTypeStr = row.AnchorType.String
+		}
+		if anchorOverride != "" {
+			// Always-inject path: rendered under the "Always-on" heading,
+			// regardless of whether the underlying row also has an anchor
+			// (rare — but possible if a flagged artifact later got pinned
+			// to an issue). The override only kicks in when the artifact
+			// reaches the runtime via the always-inject query.
+			anchorTypeStr = anchorOverride
+			anchorIDStr = ""
+		}
+		out = append(out, MemoryArtifactData{
+			ID:         id,
+			Kind:       row.Kind,
+			Title:      row.Title,
+			Content:    row.Content,
+			Tags:       tags,
+			AnchorType: anchorTypeStr,
+			AnchorID:   anchorIDStr,
+			UpdatedAt:  timestampToString(row.UpdatedAt),
+		})
+	}
 
 	for _, anchor := range anchors {
 		if !anchor.ID.Valid || anchor.Type == "" {
@@ -223,35 +278,27 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 			continue
 		}
 		for _, row := range rows {
-			id := uuidToString(row.ID)
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			tags := row.Tags
-			if tags == nil {
-				tags = []string{}
-			}
-			anchorIDStr := ""
-			if row.AnchorID.Valid {
-				anchorIDStr = uuidToString(row.AnchorID)
-			}
-			anchorTypeStr := ""
-			if row.AnchorType.Valid {
-				anchorTypeStr = row.AnchorType.String
-			}
-			out = append(out, MemoryArtifactData{
-				ID:         id,
-				Kind:       row.Kind,
-				Title:      row.Title,
-				Content:    row.Content,
-				Tags:       tags,
-				AnchorType: anchorTypeStr,
-				AnchorID:   anchorIDStr,
-				UpdatedAt:  timestampToString(row.UpdatedAt),
-			})
+			appendRow(row, "")
 		}
 	}
+
+	// Always-inject artifacts ride along on every claim. The renderer
+	// surfaces them under a "Workspace knowledge (always-on)" heading.
+	alwaysRows, err := h.Queries.ListAlwaysInjectArtifacts(ctx, db.ListAlwaysInjectArtifactsParams{
+		WorkspaceID: workspaceID,
+		Limit:       alwaysInjectArtifactsCap,
+	})
+	if err != nil {
+		slog.Warn("fetchMemoryArtifactsForTask: list always-inject failed", "error", err)
+	} else {
+		for _, row := range alwaysRows {
+			// "always" is a synthetic anchor_type used only on the wire to
+			// the daemon; nothing else in the system writes/reads it. The
+			// renderer keys off this string for its dedicated heading.
+			appendRow(row, "always")
+		}
+	}
+
 	return out
 }
 
@@ -581,19 +628,25 @@ func (h *Handler) CreateMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 		metadata = json.RawMessage("{}")
 	}
 
+	var alwaysInjectParam pgtype.Bool
+	if req.AlwaysInjectAtRuntime != nil {
+		alwaysInjectParam = pgtype.Bool{Bool: *req.AlwaysInjectAtRuntime, Valid: true}
+	}
+
 	created, err := h.Queries.CreateMemoryArtifact(r.Context(), db.CreateMemoryArtifactParams{
-		WorkspaceID: wsUUID,
-		Kind:        req.Kind,
-		ParentID:    parentParam,
-		Title:       req.Title,
-		Content:     req.Content,
-		Slug:        slugParam,
-		AnchorType:  anchorTypeParam,
-		AnchorID:    anchorIDParam,
-		AuthorType:  authorType,
-		AuthorID:    authorUUID,
-		Tags:        tags,
-		Metadata:    metadata,
+		WorkspaceID:           wsUUID,
+		Kind:                  req.Kind,
+		ParentID:              parentParam,
+		Title:                 req.Title,
+		Content:               req.Content,
+		Slug:                  slugParam,
+		AnchorType:            anchorTypeParam,
+		AnchorID:              anchorIDParam,
+		AuthorType:            authorType,
+		AuthorID:              authorUUID,
+		Tags:                  tags,
+		Metadata:              metadata,
+		AlwaysInjectAtRuntime: alwaysInjectParam,
 	})
 	if err != nil {
 		// Slug uniqueness collision.
@@ -706,6 +759,9 @@ func (h *Handler) UpdateMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Metadata) > 0 {
 		params.Metadata = req.Metadata
+	}
+	if req.AlwaysInjectAtRuntime != nil {
+		params.AlwaysInjectAtRuntime = pgtype.Bool{Bool: *req.AlwaysInjectAtRuntime, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateMemoryArtifact(r.Context(), params)

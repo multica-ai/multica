@@ -17,7 +17,7 @@ SET archived_at = now(),
     archived_by = $3,
     updated_at  = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at
+RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime
 `
 
 type ArchiveMemoryArtifactParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) ArchiveMemoryArtifact(ctx context.Context, arg ArchiveMemoryAr
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
@@ -89,29 +90,32 @@ INSERT INTO memory_artifact (
     title, content, slug,
     anchor_type, anchor_id,
     author_type, author_id,
-    tags, metadata
+    tags, metadata,
+    always_inject_at_runtime
 ) VALUES (
     $1, $2, $9,
     $3, $4, $10,
     $11, $12,
     $5, $6,
-    $7, $8
-) RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at
+    $7, $8,
+    COALESCE($13::bool, false)
+) RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime
 `
 
 type CreateMemoryArtifactParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Kind        string      `json:"kind"`
-	Title       string      `json:"title"`
-	Content     string      `json:"content"`
-	AuthorType  string      `json:"author_type"`
-	AuthorID    pgtype.UUID `json:"author_id"`
-	Tags        []string    `json:"tags"`
-	Metadata    []byte      `json:"metadata"`
-	ParentID    pgtype.UUID `json:"parent_id"`
-	Slug        pgtype.Text `json:"slug"`
-	AnchorType  pgtype.Text `json:"anchor_type"`
-	AnchorID    pgtype.UUID `json:"anchor_id"`
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+	Kind                  string      `json:"kind"`
+	Title                 string      `json:"title"`
+	Content               string      `json:"content"`
+	AuthorType            string      `json:"author_type"`
+	AuthorID              pgtype.UUID `json:"author_id"`
+	Tags                  []string    `json:"tags"`
+	Metadata              []byte      `json:"metadata"`
+	ParentID              pgtype.UUID `json:"parent_id"`
+	Slug                  pgtype.Text `json:"slug"`
+	AnchorType            pgtype.Text `json:"anchor_type"`
+	AnchorID              pgtype.UUID `json:"anchor_id"`
+	AlwaysInjectAtRuntime pgtype.Bool `json:"always_inject_at_runtime"`
 }
 
 // Author validation (member vs agent existence) happens in the service
@@ -131,6 +135,7 @@ func (q *Queries) CreateMemoryArtifact(ctx context.Context, arg CreateMemoryArti
 		arg.Slug,
 		arg.AnchorType,
 		arg.AnchorID,
+		arg.AlwaysInjectAtRuntime,
 	)
 	var i MemoryArtifact
 	err := row.Scan(
@@ -152,6 +157,7 @@ func (q *Queries) CreateMemoryArtifact(ctx context.Context, arg CreateMemoryArti
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
@@ -174,7 +180,7 @@ func (q *Queries) DeleteMemoryArtifact(ctx context.Context, arg DeleteMemoryArti
 }
 
 const getMemoryArtifact = `-- name: GetMemoryArtifact :one
-SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at FROM memory_artifact
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime FROM memory_artifact
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -205,12 +211,13 @@ func (q *Queries) GetMemoryArtifact(ctx context.Context, arg GetMemoryArtifactPa
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
 
 const getMemoryArtifactBySlug = `-- name: GetMemoryArtifactBySlug :one
-SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at FROM memory_artifact
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime FROM memory_artifact
 WHERE workspace_id = $1 AND kind = $2 AND slug = $3
 `
 
@@ -244,12 +251,72 @@ func (q *Queries) GetMemoryArtifactBySlug(ctx context.Context, arg GetMemoryArti
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
 
+const listAlwaysInjectArtifacts = `-- name: ListAlwaysInjectArtifacts :many
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime FROM memory_artifact
+WHERE workspace_id              = $1
+  AND always_inject_at_runtime  = true
+  AND archived_at              IS NULL
+ORDER BY updated_at DESC
+LIMIT $2
+`
+
+type ListAlwaysInjectArtifactsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+// Workspace-wide artifacts the user has flagged for injection into every
+// agent task. Used by the runtime context path alongside the per-anchor
+// lookups. Active (non-archived) only; ordered most-recently-updated
+// first so a recently-edited "How we deploy" beats a stale entry of the
+// same kind.
+func (q *Queries) ListAlwaysInjectArtifacts(ctx context.Context, arg ListAlwaysInjectArtifactsParams) ([]MemoryArtifact, error) {
+	rows, err := q.db.Query(ctx, listAlwaysInjectArtifacts, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MemoryArtifact{}
+	for rows.Next() {
+		var i MemoryArtifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Kind,
+			&i.ParentID,
+			&i.Title,
+			&i.Content,
+			&i.Slug,
+			&i.AnchorType,
+			&i.AnchorID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Tags,
+			&i.Metadata,
+			&i.ContentTsv,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AlwaysInjectAtRuntime,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMemoryArtifacts = `-- name: ListMemoryArtifacts :many
-SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at FROM memory_artifact
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime FROM memory_artifact
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR kind = $2)
   AND ($3::uuid IS NULL OR parent_id = $3)
@@ -310,6 +377,7 @@ func (q *Queries) ListMemoryArtifacts(ctx context.Context, arg ListMemoryArtifac
 			&i.ArchivedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AlwaysInjectAtRuntime,
 		); err != nil {
 			return nil, err
 		}
@@ -322,7 +390,7 @@ func (q *Queries) ListMemoryArtifacts(ctx context.Context, arg ListMemoryArtifac
 }
 
 const listMemoryArtifactsByAnchor = `-- name: ListMemoryArtifactsByAnchor :many
-SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at FROM memory_artifact
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime FROM memory_artifact
 WHERE workspace_id  = $1
   AND anchor_type   = $2
   AND anchor_id     = $3
@@ -374,6 +442,7 @@ func (q *Queries) ListMemoryArtifactsByAnchor(ctx context.Context, arg ListMemor
 			&i.ArchivedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AlwaysInjectAtRuntime,
 		); err != nil {
 			return nil, err
 		}
@@ -391,7 +460,7 @@ SET archived_at = NULL,
     archived_by = NULL,
     updated_at  = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at
+RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime
 `
 
 type RestoreMemoryArtifactParams struct {
@@ -421,12 +490,13 @@ func (q *Queries) RestoreMemoryArtifact(ctx context.Context, arg RestoreMemoryAr
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
 
 const searchMemoryArtifacts = `-- name: SearchMemoryArtifacts :many
-SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at,
+SELECT id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime,
        ts_rank_cd(content_tsv, websearch_to_tsquery('english', $2)) AS rank
 FROM memory_artifact
 WHERE workspace_id = $1
@@ -447,25 +517,26 @@ type SearchMemoryArtifactsParams struct {
 }
 
 type SearchMemoryArtifactsRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Kind        string             `json:"kind"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	Title       string             `json:"title"`
-	Content     string             `json:"content"`
-	Slug        pgtype.Text        `json:"slug"`
-	AnchorType  pgtype.Text        `json:"anchor_type"`
-	AnchorID    pgtype.UUID        `json:"anchor_id"`
-	AuthorType  string             `json:"author_type"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-	Tags        []string           `json:"tags"`
-	Metadata    []byte             `json:"metadata"`
-	ContentTsv  interface{}        `json:"content_tsv"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	ArchivedBy  pgtype.UUID        `json:"archived_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Rank        float32            `json:"rank"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	Kind                  string             `json:"kind"`
+	ParentID              pgtype.UUID        `json:"parent_id"`
+	Title                 string             `json:"title"`
+	Content               string             `json:"content"`
+	Slug                  pgtype.Text        `json:"slug"`
+	AnchorType            pgtype.Text        `json:"anchor_type"`
+	AnchorID              pgtype.UUID        `json:"anchor_id"`
+	AuthorType            string             `json:"author_type"`
+	AuthorID              pgtype.UUID        `json:"author_id"`
+	Tags                  []string           `json:"tags"`
+	Metadata              []byte             `json:"metadata"`
+	ContentTsv            interface{}        `json:"content_tsv"`
+	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy            pgtype.UUID        `json:"archived_by"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
+	Rank                  float32            `json:"rank"`
 }
 
 // Full-text search via the generated tsvector + GIN index.
@@ -507,6 +578,7 @@ func (q *Queries) SearchMemoryArtifacts(ctx context.Context, arg SearchMemoryArt
 			&i.ArchivedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AlwaysInjectAtRuntime,
 			&i.Rank,
 		); err != nil {
 			return nil, err
@@ -521,30 +593,32 @@ func (q *Queries) SearchMemoryArtifacts(ctx context.Context, arg SearchMemoryArt
 
 const updateMemoryArtifact = `-- name: UpdateMemoryArtifact :one
 UPDATE memory_artifact SET
-    title       = COALESCE($3, title),
-    content     = COALESCE($4, content),
-    slug        = $5,
-    parent_id   = $6,
-    anchor_type = $7,
-    anchor_id   = $8,
-    tags        = COALESCE($9::text[], tags),
-    metadata    = COALESCE($10::jsonb, metadata),
-    updated_at  = now()
+    title                    = COALESCE($3, title),
+    content                  = COALESCE($4, content),
+    slug                     = $5,
+    parent_id                = $6,
+    anchor_type              = $7,
+    anchor_id                = $8,
+    tags                     = COALESCE($9::text[], tags),
+    metadata                 = COALESCE($10::jsonb, metadata),
+    always_inject_at_runtime = COALESCE($11::bool, always_inject_at_runtime),
+    updated_at               = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at
+RETURNING id, workspace_id, kind, parent_id, title, content, slug, anchor_type, anchor_id, author_type, author_id, tags, metadata, content_tsv, archived_at, archived_by, created_at, updated_at, always_inject_at_runtime
 `
 
 type UpdateMemoryArtifactParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       pgtype.Text `json:"title"`
-	Content     pgtype.Text `json:"content"`
-	Slug        pgtype.Text `json:"slug"`
-	ParentID    pgtype.UUID `json:"parent_id"`
-	AnchorType  pgtype.Text `json:"anchor_type"`
-	AnchorID    pgtype.UUID `json:"anchor_id"`
-	Tags        []string    `json:"tags"`
-	Metadata    []byte      `json:"metadata"`
+	ID                    pgtype.UUID `json:"id"`
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+	Title                 pgtype.Text `json:"title"`
+	Content               pgtype.Text `json:"content"`
+	Slug                  pgtype.Text `json:"slug"`
+	ParentID              pgtype.UUID `json:"parent_id"`
+	AnchorType            pgtype.Text `json:"anchor_type"`
+	AnchorID              pgtype.UUID `json:"anchor_id"`
+	Tags                  []string    `json:"tags"`
+	Metadata              []byte      `json:"metadata"`
+	AlwaysInjectAtRuntime pgtype.Bool `json:"always_inject_at_runtime"`
 }
 
 // Partial update via narg COALESCE. Only fields the caller passes get
@@ -562,6 +636,7 @@ func (q *Queries) UpdateMemoryArtifact(ctx context.Context, arg UpdateMemoryArti
 		arg.AnchorID,
 		arg.Tags,
 		arg.Metadata,
+		arg.AlwaysInjectAtRuntime,
 	)
 	var i MemoryArtifact
 	err := row.Scan(
@@ -583,6 +658,7 @@ func (q *Queries) UpdateMemoryArtifact(ctx context.Context, arg UpdateMemoryArti
 		&i.ArchivedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AlwaysInjectAtRuntime,
 	)
 	return i, err
 }
