@@ -75,6 +75,15 @@ const (
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// Memory artifact events — workspace-scoped knowledge primitives
+	// (wiki pages, agent notes, runbooks, decision logs).
+	// Archive / restore reuse the Updated event so clients can re-render
+	// based on the artifact's archived_at field instead of needing a
+	// dedicated wire signal.
+	EventMemoryArtifactCreated = "memory_artifact:created"
+	EventMemoryArtifactUpdated = "memory_artifact:updated"
+	EventMemoryArtifactDeleted = "memory_artifact:deleted"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
