@@ -88,9 +88,14 @@ in_upstream_zone() {
 }
 
 # Check if any commit in BASE..HEAD opts out via CEREBRO-ALLOW-NO-PATCH:.
+# Use a temp variable instead of `git log | grep -q` because `set -o pipefail`
+# combined with grep -q's early-exit can cause git log to receive SIGPIPE and
+# the pipeline to report failure even when the match was found.
 commit_range_opts_out() {
   local base="$1"
-  git log --format='%B' "$base..HEAD" 2>/dev/null | grep -q 'CEREBRO-ALLOW-NO-PATCH:'
+  local log
+  log="$(git log --format='%B' "$base..HEAD" 2>/dev/null)"
+  [[ "$log" == *'CEREBRO-ALLOW-NO-PATCH:'* ]]
 }
 
 run_validation() {

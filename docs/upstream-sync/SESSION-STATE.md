@@ -7,10 +7,10 @@
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
 current_phase: "Phase 1"     # which phase we're in
-current_task: "1a_rename"    # chunk 4 — rename 7 isolated packages
-last_iteration_at: "2026-05-05T21:30:00Z"
-total_iterations: 3
-total_tokens_estimate: 1450000
+current_task: "1b_move_features" # chunk 5 — cerebro-test, cerebro-users, cerebro-notifications content
+last_iteration_at: "2026-05-05T22:05:00Z"
+total_iterations: 4
+total_tokens_estimate: 2100000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -57,17 +57,18 @@ phase_0:
   chunk_3_eval: PASS                   # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt; first 2 caught migration idempotency + empty test set)
 
 phase_1:
-  status: pending
+  status: in_progress
   features:
-    rename_isolated_packages: pending  # 7 packages
-    cerebro_test: pending
-    cerebro_users: pending
-    cerebro_notifications: pending
-    cerebro_mcp: pending
-    cerebro_realtime: pending
-    cerebro_runtime: pending
-    cerebro_api_subclient: pending
+    rename_isolated_packages: completed  # chunk 4: 7 packages renamed (artifacts, attachments, notifications x core+views, members→cerebro-users)
+    cerebro_test: pending                # chunk 5
+    cerebro_users: in_progress           # chunk 4 created skeleton; chunk 5 fills
+    cerebro_notifications: in_progress   # chunk 4 renamed source; chunk 5 may add fork-only files
+    cerebro_mcp: pending                 # chunk 6
+    cerebro_realtime: pending            # chunk 6
+    cerebro_runtime: pending             # chunk 6
+    cerebro_api_subclient: pending       # chunk 6
   go_no_go: null
+  chunk_4_eval: PASS                     # see eval-reports/chunk-4-20260505T200512Z.md
 
 phase_2:
   status: pending
@@ -129,6 +130,7 @@ open_prs: []
 2026-05-05T21:11:00Z | Phase 0a | proceed_to_chunk_3 | Foundation skeleton complete; chunk 3 now adds feature flags + multi-dir migrate + 9NNN move + CLAUDE.md.
 2026-05-05T21:30:00Z | Phase 0b | chunk_3_GO | Feature flag system end-to-end (frontend Zustand + persist + TanStack Query, backend Go handler + sqlc + migration + WS event), CLAUDE.md "Cerebro Extension Discipline" section, eval green after 2 retries (fixed migration idempotency with IF NOT EXISTS, fixed empty-test-set with --passWithNoTests). esbuild arm64 binary required pnpm install --force to refresh.
 2026-05-05T21:30:00Z | Phase 0   | foundation_GO | All 7 Phase 0 components complete or deliberately deferred. Phase 1 (L1 extraction) may begin with chunk 4 (rename 7 isolated packages).
+2026-05-05T22:05:00Z | Phase 1a  | chunk_4_GO | 87 file-level renames via git mv (history preserved). Cycles broken by removing cerebro-* deps from core/views package.json. Required fixes during eval: (a) remove core/views→cerebro-* deps to break Turbo cycle, (b) add CEREBRO-PATCH markers to chunk-3 holdovers, (c) update cerebro-zones.txt to exclude 9NNN migrations + sqlc generated, (d) FIX BUG in validate-cerebro-patches.sh: `git log | grep -q` with set -o pipefail caused SIGPIPE-induced false negatives on opt-out check, (e) use CEREBRO-ALLOW-NO-PATCH for mechanical import-rename diffs.
 ```
 
 ## Eval results (most recent per phase)
@@ -137,6 +139,7 @@ open_prs: []
 phase_minus_1_evals: N/A  # docs-only chunk; see eval-reports/chunk-1-20260505T205000Z.md
 phase_0_chunk_2_evals: PASS  # see eval-reports/chunk-2-20260505T191025Z.md
 phase_0_chunk_3_evals: PASS  # see eval-reports/chunk-3-20260505T193016Z.md (3rd attempt)
+phase_1_chunk_4_evals: PASS  # see eval-reports/chunk-4-20260505T200512Z.md (3rd attempt — fixed cycle, markers, opt-out script bug)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -163,45 +166,32 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 1a — chunk 4 per 07-session-schedule.md row 4.
-  Scope: rename 7 isolated packages from upstream namespace into cerebro namespace. This is mechanical rename work — no new logic.
+  Phase 1b — chunk 5 per 07-session-schedule.md row 5.
+  Scope: move feature content INTO existing cerebro-* skeletons (chunk 2 created skeletons; chunk 4 renamed isolated packages; chunk 5 moves NEW cerebro-only feature content).
 
-  Renames (per docs/upstream-sync/01-audit.md and 03-decision.md Phase 1.1):
-  1. packages/core/artifacts/      → packages/cerebro-artifacts/core/
-  2. packages/views/artifacts/     → packages/cerebro-artifacts/views/
-  3. packages/core/attachments/    → packages/cerebro-attachments/core/
-  4. packages/views/attachments/   → packages/cerebro-attachments/views/
-  5. packages/core/notifications/  → packages/cerebro-notifications/core/
-  6. packages/views/notifications/ → packages/cerebro-notifications/views/
-  7. packages/views/members/       → packages/cerebro-users/
+  Per 03-decision.md Phase 1.2 + 01-audit.md L1 listings, chunk 5 covers (least-risk first):
+  1. cerebro-test additions — test-only files added by cerebro fork. Audit lists ~3 files. Move to packages/cerebro-test/.
+  2. cerebro-users content beyond the rename — any user/member-related fork additions not yet in cerebro-users/views/. Audit + grep for "CEREBRO" comments in user-related code.
+  3. cerebro-notifications fork-only files — e.g., notifications-tab.tsx (currently lives at packages/views/settings/components/notifications-tab.tsx per SA3 chunk-4 finding). Decision: move it into packages/cerebro-notifications/views/components/ as a settings-tab subdir.
 
-  IMPORTANT: the cerebro-* destination packages already exist as skeletons (chunk 2). Rename = move source files INTO existing skeleton, then update package.json + index.ts + tsconfig.json to point at the moved code. Delete the old paths.
+  Strategy (3 parallel subagents per protocol):
+   - SA1: cerebro-test — find test-only fork additions (likely under packages/views/__tests__ or root e2e/), move into cerebro-test
+   - SA2: cerebro-users fork additions — grep packages/views, packages/core for cerebro-users-relevant fork code
+   - SA3: cerebro-notifications fork additions — at minimum move notifications-tab.tsx; check audit for any other notifications-only files
 
-  Per-package operations:
-  - git mv all source files (preserve history)
-  - Update destination package.json to declare correct exports + add deps from source
-  - Update destination tsconfig.json to include the moved source
-  - Update destination index.ts (or index.tsx) to re-export from the moved code
-  - grep for old import paths across the entire monorepo (apps/web, apps/desktop, packages/*) and replace with new
-  - Verify pnpm-workspace.yaml glob still picks them up (it does — packages/*)
+  Each subagent:
+  - Identifies fork-only files via git log + grep for CEREBRO comments + audit doc
+  - git mv each into the appropriate cerebro-* destination
+  - Updates imports across consumers
+  - Adds CEREBRO-PATCH markers to upstream-zone files it had to modify (e.g., wiring imports), or notes that mechanical rename allow-no-patch applies
+  - Reports findings concisely
 
-  Strategy (per protocol "7 parallel"):
-  Dispatch 4 parallel subagents:
-   - SA1: artifacts (core + views into cerebro-artifacts)
-   - SA2: attachments (core + views into cerebro-attachments)
-   - SA3: notifications (core + views into cerebro-notifications)
-   - SA4: members → cerebro-users
-  Each handles own subtree end-to-end and reports import paths it updated.
+  Orchestrator:
+  - Runs pnpm install + eval after subagents complete
+  - If chunk 5 mostly mechanical, use CEREBRO-ALLOW-NO-PATCH again for import edits
+  - If chunk 5 adds new logic in upstream files, those need explicit markers
 
-  After all 4 complete, orchestrator:
-  - Runs `pnpm install` to refresh workspace links
-  - Runs `pnpm typecheck` + `pnpm test` + Go tests (no Go changes expected)
-  - Searches for stragglers: `grep -r "@multica/(core|views)/(artifacts|attachments|notifications|members)" apps/ packages/`
-  - Runs `scripts/per-session-eval.sh chunk-4`
-
-  Eval gate: same as chunks 2-3. All checks must PASS. Visual regression deferred per P5.
+  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS.
   Branches: stay on chore/upstream-sync-analysis.
-  Estimated tokens: ~250-400k (mechanical work; subagents share consistent rename pattern).
-
-  Risk: import path replacements scattered across many files. If subagent misses paths, typecheck catches it. If typecheck fails after retry → reduce scope to one package per iteration.
+  Estimated tokens: ~200-350k.
 ```
