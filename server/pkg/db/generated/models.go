@@ -420,6 +420,8 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy  pgtype.UUID        `json:"archived_by"`
 }
 
 type ProjectResource struct {

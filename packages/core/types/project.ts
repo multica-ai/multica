@@ -12,6 +12,13 @@ export interface Project {
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  /**
+   * Soft-delete marker. Non-null means the project is archived: it stays
+   * in the DB and keeps its issue + resource references, but is hidden
+   * from the default projects list. Restored by clearing back to null.
+   */
+  archived_at: string | null;
+  archived_by: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;

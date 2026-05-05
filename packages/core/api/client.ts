@@ -1205,9 +1205,12 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    // Default false: archived projects are hidden from the default list.
+    // The "Show archived" toggle on the projects page sets this true.
+    if (params?.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/projects?${search}`);
   }
 
@@ -1231,6 +1234,21 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Soft-delete the project: stamps archived_at + archived_by. Issue
+   * references and resources stay attached. Reversible via restoreProject.
+   */
+  async archiveProject(id: string): Promise<Project> {
+    return this.fetch(`/api/projects/${id}/archive`, { method: "POST" });
+  }
+
+  /**
+   * Reverse archiveProject — clear archived_at + archived_by.
+   */
+  async restoreProject(id: string): Promise<Project> {
+    return this.fetch(`/api/projects/${id}/restore`, { method: "POST" });
   }
 
   // Project resources
