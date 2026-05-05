@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // TestMemoryArtifactLifecycle: create → get → list → update → archive →
@@ -254,8 +257,16 @@ func TestMemoryArtifactByAnchor(t *testing.T) {
 	// Anchor lookup returns just the two notes for this issue.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/memory/by-anchor/issue/"+issue.ID+"?workspace_id="+testWorkspaceID, nil)
-	req = withURLParam(req, "anchorType", "issue")
-	req = withURLParam(req, "anchorId", issue.ID)
+	// Both URL params must live in the SAME chi.RouteContext — the
+	// withURLParam helper creates a fresh context on each call, so two
+	// chained calls would silently drop the first param. Inline the
+	// chi route context so both params are visible to the handler.
+	{
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("anchorType", "issue")
+		rctx.URLParams.Add("anchorId", issue.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
 	testHandler.ListMemoryArtifactsByAnchor(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("ListMemoryArtifactsByAnchor: %d %s", w.Code, w.Body.String())
