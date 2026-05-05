@@ -1,1 +1,5 @@
-export { RuntimesPage as default } from "@multica/views/runtimes";
+import { RuntimesPage } from "@multica/views/runtimes";
+
+export default function Page() {
+  return <RuntimesPage />;
+}

@@ -2,8 +2,19 @@ import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { createMDX } from "fumadocs-mdx/next";
+import withSerwistInit from "@serwist/next";
 
 const withMDX = createMDX();
+
+// Service worker for the installable PWA shell. Compiled from app/sw.ts to
+// public/sw.js by serwist's webpack plugin during `next build`. Disabled in
+// dev so HMR isn't intercepted.
+const withSerwist = withSerwistInit({
+  swSrc: "app/sw.ts",
+  swDest: "public/sw.js",
+  disable: process.env.NODE_ENV === "development",
+  reloadOnOnline: true,
+});
 
 // Load root .env so REMOTE_API_URL is available to next.config.ts
 config({ path: resolve(__dirname, "../../.env") });
@@ -63,4 +74,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withMDX(nextConfig);
+export default withSerwist(withMDX(nextConfig));
