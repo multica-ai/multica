@@ -255,6 +255,11 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerRepoApprovalWebhook(bus, RepoApprovalWebhookConfig{
+		URL:        os.Getenv("REPO_APPROVAL_WEBHOOK_URL"),
+		Secret:     os.Getenv("REPO_APPROVAL_WEBHOOK_SECRET"),
+		HeaderName: os.Getenv("REPO_APPROVAL_WEBHOOK_HEADER"),
+	}, nil)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
