@@ -714,7 +714,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       <ResizablePanel id="content" minSize="50%">
       <div className="flex h-full flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0">
+          <div className="flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
             {workspace && (
               <>
                 <AppLink
