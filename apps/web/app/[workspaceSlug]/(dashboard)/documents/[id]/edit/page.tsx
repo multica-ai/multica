@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { DocumentEditPage } from "@multica/views/artifacts/pages";
+import { DocumentEditPage } from "@multica/cerebro-artifacts/views/pages";
 
 export default function Page() {
   const params = useParams<{ id: string }>();

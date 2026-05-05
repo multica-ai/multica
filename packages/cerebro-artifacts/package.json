@@ -3,11 +3,40 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./core/queries": "./core/queries.ts",
+    "./core/mutations": "./core/mutations.ts",
+    "./views": "./views/index.ts",
+    "./views/components": "./views/components/index.ts",
+    "./views/pages": "./views/pages/index.ts"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "isomorphic-dompurify": "^3.11.0",
+    "lucide-react": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

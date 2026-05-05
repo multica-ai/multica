@@ -31,7 +31,7 @@ import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-rea
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/core/attachments/viewable";
+import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";

@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { inboxKeys } from "./queries";
-import { notificationsKeys } from "../notifications/queries";
+import { notificationsKeys } from "@multica/cerebro-notifications/core/queries";
 import type { InboxItem, IssueStatus } from "../types";
 
 export function onInboxNew(

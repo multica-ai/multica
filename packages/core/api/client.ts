@@ -276,7 +276,7 @@ export class ApiClient {
     });
   }
 
-  // Cerebro fork-specific: per-(workspace, user) feature flag overrides.
+  // CEREBRO-PATCH(feature-flags-client): per-(workspace, user) feature flag overrides.
   // Server returns ONLY the overrides — defaults are applied client-side
   // from the cerebro-feature-flags registry.
   async listFeatureFlags(wsId: string): Promise<{ overrides: Record<string, boolean> }> {

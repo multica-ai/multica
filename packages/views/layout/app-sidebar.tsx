@@ -73,8 +73,8 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
-import { notificationsListOptions } from "@multica/core/notifications/queries";
-import { useArchiveAllNotifications } from "@multica/core/notifications/mutations";
+import { notificationsListOptions } from "@multica/cerebro-notifications/core/queries";
+import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";

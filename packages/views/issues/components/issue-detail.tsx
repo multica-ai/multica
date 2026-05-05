@@ -52,7 +52,7 @@ import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { AttachmentList } from "./attachment-list";
-import { ArtifactList } from "../../artifacts/components/artifact-list";
+import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,

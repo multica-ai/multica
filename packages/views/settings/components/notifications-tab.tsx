@@ -16,7 +16,7 @@ import {
   type RouteChoice,
   getAutoSubscribe,
   type AutoSubscribeReason,
-} from "@multica/core/notifications";
+} from "@multica/cerebro-notifications/core";
 
 interface RowSpec {
   routingKey: RoutingKey;

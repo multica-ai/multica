@@ -258,7 +258,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					// above so agents can resolve mention targets.
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
-					// CEREBRO: per-user feature-flag overrides
+					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
 					r.Get("/feature-flags", featureFlagsHandler.List)
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
 				})

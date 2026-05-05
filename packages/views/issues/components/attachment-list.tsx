@@ -3,7 +3,7 @@
 import { Download, FileText, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/core/attachments/viewable";
+import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 

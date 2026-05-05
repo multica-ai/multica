@@ -24,7 +24,7 @@ import { useModalStore } from "@multica/core/modals";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
-import { ProjectDocuments } from "../../artifacts/components/project-documents";
+import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
