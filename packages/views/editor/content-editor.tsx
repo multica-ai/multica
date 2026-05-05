@@ -1,14 +1,19 @@
 "use client";
 
 /**
- * ContentEditor — the single rich-text editor for the entire application.
+ * ContentEditor — the rich-text editor used wherever the user TYPES content.
  *
  * Architecture decisions (April 2026 refactor):
  *
- * 1. ONE COMPONENT for both editing and readonly display. The `editable` prop
- *    controls the mode. Previously we had RichTextEditor + ReadonlyEditor as
- *    separate components with duplicated extension configs — this caused
- *    visual inconsistency between edit and display modes.
+ * 1. EDITING ONLY. Read-only display is handled by `ReadonlyContent` (a
+ *    react-markdown renderer), not this component. There used to be an
+ *    `editable` prop here that toggled between modes, but every readonly
+ *    callsite migrated to ReadonlyContent and the prop only invited
+ *    misuse — Tiptap's `useEditor` reads `editable` at mount, so toggling
+ *    the prop later silently failed (mounted-as-readonly editors stayed
+ *    unfocusable forever). To express "currently disabled", wrap this
+ *    component in a layout that sets `pointer-events-none` / `aria-disabled`
+ *    — don't reach into the editor.
  *
  * 2. ONE MARKDOWN PIPELINE via @tiptap/markdown. Content is loaded with
  *    `contentType: 'markdown'` and saved with `editor.getMarkdown()`.
@@ -43,6 +48,7 @@ import { preprocessMarkdown } from "./utils/preprocess";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -65,7 +71,6 @@ interface ContentEditorProps {
   defaultValue?: string;
   onUpdate?: (markdown: string) => void;
   placeholder?: string;
-  editable?: boolean;
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
@@ -81,12 +86,22 @@ interface ContentEditorProps {
    * under this ID and replaces the selection with a mention link.
    */
   currentIssueId?: string;
+  /**
+   * When true, the @mention extension is not registered. Use for editors
+   * where mentioning members/agents has no business meaning (e.g. agent
+   * system prompts, where the content is fed to an LLM as plain text).
+   */
+  disableMentions?: boolean;
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
+  /** Drop focus from the editor — used by chat after send so the caret
+   *  stops competing with the StatusPill / streaming reply for the user's
+   *  attention. */
+  blur: () => void;
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
@@ -102,7 +117,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       defaultValue = "",
       onUpdate,
       placeholder: placeholderText = "",
-      editable = true,
       className,
       debounceMs = 300,
       onSubmit,
@@ -111,6 +125,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       showBubbleMenu = true,
       submitOnEnter = false,
       currentIssueId,
+      disableMentions = false,
     },
     ref,
   ) {
@@ -119,7 +134,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
-    const prevContentRef = useRef(defaultValue);
     const lastEmittedRef = useRef<string | null>(null);
 
     // Current workspace slug kept in a ref so the click handler always sees the
@@ -142,25 +156,24 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
-      editable,
       onCreate: ({ editor: ed }) => {
-        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown());
+        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
       extensions: createEditorExtensions({
-        editable,
         placeholder: placeholderText,
         queryClient,
         onSubmitRef,
         onUploadFileRef,
         submitOnEnter,
+        disableMentions,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-          const md = stripBlobUrls(ed.getMarkdown());
+          const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
           onUpdateRef.current?.(md);
@@ -186,11 +199,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn(
-            "rich-text-editor text-sm outline-none",
-            !editable && "readonly",
-            className,
-          ),
+          class: cn("rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -202,20 +211,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
-    // Readonly content update: when defaultValue changes and editor is readonly,
-    // re-set the content (e.g. after editing a comment, the readonly view updates)
-    useEffect(() => {
-      if (!editor || editable) return;
-      if (defaultValue === prevContentRef.current) return;
-      prevContentRef.current = defaultValue;
-      const processed = defaultValue ? preprocessMarkdown(defaultValue) : "";
-      if (processed) {
-        editor.commands.setContent(processed, { contentType: "markdown" });
-      } else {
-        editor.commands.clearContent();
-      }
-    }, [editor, editable, defaultValue]);
-
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
       clearContent: () => {
@@ -223,6 +218,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
       focus: () => {
         editor?.commands.focus();
+      },
+      blur: () => {
+        editor?.commands.blur();
       },
       uploadFile: (file: File) => {
         if (!editor || !onUploadFileRef.current) return;
@@ -246,7 +244,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const hover = useLinkHover(wrapperRef, hoverDisabled);
 
     const handleContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!editable || !editor) return;
+      if (!editor) return;
 
       const target = event.target as HTMLElement;
       if (target.closest(".ProseMirror")) return;
@@ -265,7 +263,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {editable && showBubbleMenu && (
+        {showBubbleMenu && (
           <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
         )}
         <LinkHoverCard {...hover} />

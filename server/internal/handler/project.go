@@ -57,13 +57,24 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 }
 
 type CreateProjectRequest struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title       string                                `json:"title"`
+	Description *string                               `json:"description"`
+	Icon        *string                               `json:"icon"`
+	Status      string                                `json:"status"`
+	Priority    string                                `json:"priority"`
+	LeadType    *string                               `json:"lead_type"`
+	LeadID      *string                               `json:"lead_id"`
+	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+}
+
+// CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
+// is embedded inside the project create payload. Kept as a separate type so a
+// future change to the standalone request can't silently break this surface.
+type CreateProjectResourceRequestPayload struct {
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        *string         `json:"label"`
+	Position     *int32          `json:"position"`
 }
 
 type UpdateProjectRequest struct {
@@ -78,6 +89,10 @@ type UpdateProjectRequest struct {
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	var statusFilter pgtype.Text
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
@@ -87,7 +102,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 	})
@@ -125,8 +140,16 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
@@ -166,10 +189,36 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		leadType = pgtype.Text{String: *req.LeadType, Valid: true}
 	}
 	if req.LeadID != nil {
-		leadID = parseUUID(*req.LeadID)
+		id, ok := parseUUIDOrBadRequest(w, *req.LeadID, "lead_id")
+		if !ok {
+			return
+		}
+		leadID = id
 	}
-	project, err := h.Queries.CreateProject(r.Context(), db.CreateProjectParams{
-		WorkspaceID: parseUUID(workspaceID),
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	// Pre-validate every resource payload before opening a transaction so an
+	// invalid ref produces a clean 400 with no DB work.
+	normalizedRefs := make([]json.RawMessage, len(req.Resources))
+	for i, res := range req.Resources {
+		res.ResourceType = strings.TrimSpace(res.ResourceType)
+		if res.ResourceType == "" {
+			writeError(w, http.StatusBadRequest, "resources[].resource_type is required")
+			return
+		}
+		ref, err := validateAndNormalizeResourceRef(res.ResourceType, res.ResourceRef)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
+			return
+		}
+		normalizedRefs[i] = ref
+	}
+
+	createParams := db.CreateProjectParams{
+		WorkspaceID: wsUUID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
@@ -177,21 +226,114 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
-	})
+	}
+
+	// Without resources, keep the simple non-tx path.
+	if len(req.Resources) == 0 {
+		project, err := h.Queries.CreateProject(r.Context(), createParams)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create project")
+			return
+		}
+		resp := projectToResponse(project)
+		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+		writeJSON(w, http.StatusCreated, resp)
+		return
+	}
+
+	// Transactional path: project + all resources are atomic.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	project, err := qtx.CreateProject(r.Context(), createParams)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create project")
 		return
 	}
+
+	creator, _ := h.parseUserUUIDOrZero(userID)
+	resourceRows := make([]db.ProjectResource, 0, len(req.Resources))
+	for i, res := range req.Resources {
+		var label pgtype.Text
+		if res.Label != nil && strings.TrimSpace(*res.Label) != "" {
+			label = pgtype.Text{String: strings.TrimSpace(*res.Label), Valid: true}
+		}
+		var position int32 = int32(i)
+		if res.Position != nil {
+			position = *res.Position
+		}
+		row, err := qtx.CreateProjectResource(r.Context(), db.CreateProjectResourceParams{
+			ProjectID:    project.ID,
+			WorkspaceID:  project.WorkspaceID,
+			ResourceType: res.ResourceType,
+			ResourceRef:  normalizedRefs[i],
+			Label:        label,
+			Position:     position,
+			CreatedBy:    creator,
+		})
+		if err != nil {
+			if isUniqueViolation(err) {
+				writeError(w, http.StatusConflict, "resources["+strconv.Itoa(i)+"]: this resource is already attached")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to attach resource at index "+strconv.Itoa(i))
+			return
+		}
+		resourceRows = append(resourceRows, row)
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project create")
+		return
+	}
+
 	resp := projectToResponse(project)
+	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
+	for i, row := range resourceRows {
+		resourceResp[i] = projectResourceToResponse(row)
+	}
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
-	writeJSON(w, http.StatusCreated, resp)
+	for _, rr := range resourceResp {
+		h.publish(protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
+			"resource":   rr,
+			"project_id": resp.ID,
+		})
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":           resp.ID,
+		"workspace_id": resp.WorkspaceID,
+		"title":        resp.Title,
+		"description":  resp.Description,
+		"icon":         resp.Icon,
+		"status":       resp.Status,
+		"priority":     resp.Priority,
+		"lead_type":    resp.LeadType,
+		"lead_id":      resp.LeadID,
+		"created_at":   resp.CreatedAt,
+		"updated_at":   resp.UpdatedAt,
+		"issue_count":  resp.IssueCount,
+		"done_count":   resp.DoneCount,
+		"resources":    resourceResp,
+	})
 }
 
 func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	prevProject, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
@@ -253,7 +395,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["lead_id"]; ok {
 		if req.LeadID != nil {
-			params.LeadID = parseUUID(*req.LeadID)
+			leadUUID, ok := parseUUIDOrBadRequest(w, *req.LeadID, "lead_id")
+			if !ok {
+				return
+			}
+			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
@@ -271,9 +417,18 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
-	}); err != nil {
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
@@ -281,11 +436,11 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Queries.DeleteProject(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.DeleteProject(r.Context(), project.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": id})
+	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -453,7 +608,10 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
 
-	wsUUID := parseUUID(workspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	terms := splitSearchTerms(q)
 
 	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)

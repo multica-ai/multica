@@ -18,8 +18,16 @@ type Runtime struct {
 
 // RepoData holds repository information from the workspace.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description"`
+	URL string `json:"url"`
+}
+
+// ProjectResourceData mirrors handler.ProjectResourceData — a single project
+// resource as delivered to the daemon. resource_ref is type-specific JSON.
+type ProjectResourceData struct {
+	ID           string          `json:"id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        string          `json:"label,omitempty"`
 }
 
 // Task represents a claimed task from the server.
@@ -31,7 +39,10 @@ type Task struct {
 	IssueID                 string          `json:"issue_id"`
 	WorkspaceID             string          `json:"workspace_id"`
 	Agent                   *AgentData      `json:"agent,omitempty"`
-	Repos                   []RepoData      `json:"repos,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
@@ -46,6 +57,7 @@ type Task struct {
 	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 }
 
 // AgentData holds agent details returned by the claim endpoint.
@@ -92,6 +104,6 @@ type TaskResult struct {
 	SessionID     string           `json:"session_id,omitempty"` // Claude session ID for future resumption
 	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
 	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
-	FailureReason string           `json:"-"`                    // internal server failure classification
+	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
 	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
 }

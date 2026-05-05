@@ -9,6 +9,64 @@ import (
 	"time"
 )
 
+func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		handle func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name:   "usage",
+			method: "GET",
+			path:   "/api/runtimes/not-a-uuid/usage",
+			handle: testHandler.GetRuntimeUsage,
+		},
+		{
+			name:   "task activity",
+			method: "GET",
+			path:   "/api/runtimes/not-a-uuid/task-activity",
+			handle: testHandler.GetRuntimeTaskActivity,
+		},
+		{
+			name:   "delete",
+			method: "DELETE",
+			path:   "/api/runtimes/not-a-uuid",
+			handle: testHandler.DeleteAgentRuntime,
+		},
+		{
+			name:   "models",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/models",
+			handle: testHandler.InitiateListModels,
+		},
+		{
+			name:   "update",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/update",
+			handle: testHandler.InitiateUpdate,
+		},
+		{
+			name:   "local skills",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/local-skills",
+			handle: testHandler.InitiateListLocalSkills,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest(tt.method, tt.path, nil)
+			req = withURLParam(req, "runtimeId", "not-a-uuid")
+			tt.handle(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("%s: expected 400 for malformed runtimeId, got %d: %s", tt.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestGetRuntimeUsage_BucketsByUsageTime ensures a task that was enqueued on
 // one calendar day but whose tokens were reported the next day (e.g. execution
 // crossed midnight, or the task sat in the queue) is attributed to the day
@@ -78,7 +136,7 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 		return taskID
 	}
 
-	insertTaskWithUsage(yesterdayLate, todayEarly, 1000)     // cross-midnight
+	insertTaskWithUsage(yesterdayLate, todayEarly, 1000)          // cross-midnight
 	insertTaskWithUsage(yesterdayMorning, yesterdayMorning, 2000) // full-day yesterday
 
 	// Call the handler with ?days=1 at whatever "now" is. That should include

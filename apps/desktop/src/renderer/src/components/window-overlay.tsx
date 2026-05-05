@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { NewWorkspacePage } from "@multica/views/workspace/new-workspace-page";
 import { InvitePage } from "@multica/views/invite";
+import { InvitationsPage } from "@multica/views/invitations";
 import { OnboardingFlow } from "@multica/views/onboarding";
 import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
@@ -58,6 +59,7 @@ function WindowOverlayInner() {
           onBack={onBack}
         />
       )}
+      {overlay.type === "invitations" && <InvitationsPage />}
       {overlay.type === "onboarding" && (
         <OnboardingFlow
           onComplete={(ws) => {

@@ -1,27 +1,20 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
   BookOpen,
-  ChevronRight,
-  Download,
-  FileText,
-  HardDrive,
-  Lock,
-  Pencil,
   Plus,
   Search,
 } from "lucide-react";
 import type {
-  Agent,
   AgentRuntime,
   MemberWithUser,
   Skill,
 } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
-import { timeAgo } from "@multica/core/utils";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -32,8 +25,8 @@ import {
   skillListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
+import { DataTable } from "@multica/ui/components/ui/data-table";
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -41,191 +34,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { readOrigin, totalFileCount } from "../lib/origin";
+import { readOrigin } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
+import { type SkillRow, createSkillColumns } from "./skill-columns";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
-
-// ---------------------------------------------------------------------------
-// Source cell — "Source · Added by" column (order matches column header).
-// ---------------------------------------------------------------------------
-
-function SourceCell({
-  skill,
-  creator,
-  runtime,
-}: {
-  skill: Skill;
-  creator: MemberWithUser | null;
-  runtime: AgentRuntime | null;
-}) {
-  const origin = readOrigin(skill);
-
-  let icon = <Pencil className="h-3 w-3 shrink-0" />;
-  let label = "Created manually";
-  if (origin.type === "runtime_local") {
-    icon = <HardDrive className="h-3 w-3 shrink-0" />;
-    label = runtime
-      ? `From ${runtime.name}`
-      : origin.provider
-        ? `From ${origin.provider} runtime`
-        : "From a runtime";
-  } else if (origin.type === "clawhub") {
-    icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From ClawHub";
-  } else if (origin.type === "skills_sh") {
-    icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From Skills.sh";
-  }
-
-  return (
-    <div className="min-w-0">
-      {/* `flex min-w-0` (NOT inline-flex) so truncate on the inner span fires
-          when the label is longer than the grid cell. */}
-      <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        {icon}
-        <span className="min-w-0 truncate">{label}</span>
-      </div>
-      {creator && (
-        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <ActorAvatar
-            name={creator.name}
-            initials={creator.name.slice(0, 2).toUpperCase()}
-            avatarUrl={creator.avatar_url}
-            size={14}
-          />
-          <span className="min-w-0 truncate">by {creator.name}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Agent avatar stack
-// ---------------------------------------------------------------------------
-
-function AgentAssignees({ agents }: { agents: Agent[] }) {
-  if (agents.length === 0) {
-    return <span className="text-xs text-muted-foreground/70">— unused</span>;
-  }
-  const visible = agents.slice(0, 3);
-  const extra = agents.length - visible.length;
-  return (
-    <div className="flex items-center -space-x-1.5">
-      {visible.map((a) => (
-        <Tooltip key={a.id}>
-          <TooltipTrigger
-            render={
-              <span className="inline-flex rounded-full ring-2 ring-background">
-                <ActorAvatar
-                  name={a.name}
-                  initials={a.name.slice(0, 2).toUpperCase()}
-                  avatarUrl={a.avatar_url}
-                  isAgent
-                  size={22}
-                />
-              </span>
-            }
-          />
-          <TooltipContent>{a.name}</TooltipContent>
-        </Tooltip>
-      ))}
-      {extra > 0 && (
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background">
-          +{extra}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Row + header
-// ---------------------------------------------------------------------------
-
-const ROW_GRID =
-  "grid grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,6rem)_auto] items-center gap-4";
-
-function SkillRow({
-  skill,
-  agents,
-  creator,
-  runtime,
-  canEdit,
-  href,
-}: {
-  skill: Skill;
-  agents: Agent[];
-  creator: MemberWithUser | null;
-  runtime: AgentRuntime | null;
-  canEdit: boolean;
-  href: string;
-}) {
-  return (
-    <AppLink
-      href={href}
-      className={`group ${ROW_GRID} border-b px-4 py-3 text-sm transition-colors hover:bg-accent/60`}
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{skill.name}</span>
-          {!canEdit && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                }
-              />
-              <TooltipContent>
-                Read-only — only creator or admin can edit
-              </TooltipContent>
-            </Tooltip>
-          )}
-          <span className="inline-flex shrink-0 items-center gap-0.5 font-mono text-xs text-muted-foreground/70">
-            <FileText className="h-3 w-3" />
-            {totalFileCount(skill)}
-          </span>
-        </div>
-        <div
-          className={`mt-0.5 line-clamp-1 text-xs ${
-            skill.description
-              ? "text-muted-foreground"
-              : "italic text-muted-foreground/50"
-          }`}
-        >
-          {skill.description || "No description"}
-        </div>
-      </div>
-      <div className="min-w-0">
-        <AgentAssignees agents={agents} />
-      </div>
-      <SourceCell skill={skill} creator={creator} runtime={runtime} />
-      <div className="min-w-0 whitespace-nowrap text-xs text-muted-foreground">
-        {timeAgo(skill.updated_at)}
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
-    </AppLink>
-  );
-}
-
-function ListColumnHeader() {
-  return (
-    <div
-      className={`${ROW_GRID} shrink-0 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground`}
-    >
-      <span>Name</span>
-      <span>Used by</span>
-      <span>Source · Added by</span>
-      <span>Updated</span>
-      <span className="w-4" />
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Scope tab — matches Issues/MyIssues header pattern
@@ -260,6 +76,19 @@ function PageHeaderBar({
             {totalCount}
           </span>
         )}
+        {/* Tagline next to the title — single sentence + docs link. Hidden
+            below md so it never collides with the title on narrow screens. */}
+        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
+          Instructions any agent in this workspace can use.{" "}
+          <a
+            href="https://multica.ai/docs/skills"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
+          >
+            Learn more →
+          </a>
+        </p>
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
@@ -375,9 +204,6 @@ export default function SkillsPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [createOpen, setCreateOpen] = useState(false);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const fadeStyle = useScrollFade(scrollRef);
-
   // Derive assignments ONCE per agents-identity. Stable reference across
   // unrelated agent refetches — see selectSkillAssignments' doc.
   const assignments = useMemo(
@@ -423,6 +249,47 @@ export default function SkillsPage() {
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
   };
+
+  // Assemble per-row data once per render — skill + agents + creator +
+  // origin-runtime + permission flag. The table's column cells read off
+  // `row.original` and never pull their own queries.
+  const skillRows = useMemo<SkillRow[]>(() => {
+    return filtered.map((skill) => {
+      const origin = readOrigin(skill);
+      const runtime =
+        origin.type === "runtime_local" && origin.runtime_id
+          ? runtimesById.get(origin.runtime_id) ?? null
+          : null;
+      return {
+        skill,
+        agents: assignments.get(skill.id) ?? [],
+        creator: skill.created_by
+          ? membersById.get(skill.created_by) ?? null
+          : null,
+        runtime,
+        canEdit: canEditSkill(skill, {
+          userId: currentUserId,
+          role: myRole,
+        }),
+      };
+    });
+  }, [
+    filtered,
+    assignments,
+    membersById,
+    runtimesById,
+    currentUserId,
+    myRole,
+  ]);
+
+  const columns = useMemo(() => createSkillColumns(), []);
+
+  const table = useReactTable({
+    data: skillRows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
+  });
 
   // --- Loading ---
   if (isLoading) {
@@ -508,34 +375,24 @@ export default function SkillsPage() {
       )}
 
       {/* Page body — padding here keeps the card from touching the chrome,
-          and `gap-4` separates the intro block from the table card. */}
+          and `gap-4` separates the intro banner from the table card. */}
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
         {!showEmpty && (
-          <div className="space-y-3 pl-4">
-            <p className="text-base text-foreground">
-              Instructions any agent in this workspace can use.{" "}
-              <a
-                href="https://multica.ai/docs/skills"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
-              >
-                Learn more about Skills →
-              </a>
-            </p>
-            <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-              <span className="font-medium text-foreground">
-                Shared with your workspace.
-              </span>{" "}
-              Anyone can create a skill, import one from a URL, or copy one
-              from their local runtime — and every agent can use it.{" "}
-              <span className="font-semibold text-brand">
-                Local runtime skills stay private until you copy one here.
-              </span>
-            </div>
+          // Brand-coloured intro banner — explains the sharing model
+          // for skills (workspace-wide vs. local runtime). Pre-#1794
+          // this lived in the body; #1794 dropped it without a clear
+          // reason. Restored intentionally.
+          <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">
+              Shared with your workspace.
+            </span>{" "}
+            Anyone can create a skill, import one from a URL, or copy one
+            from their local runtime — and every agent can use it.{" "}
+            <span className="font-semibold text-brand">
+              Local runtime skills stay private until you copy one here.
+            </span>
           </div>
         )}
-
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState onCreate={() => setCreateOpen(true)} />
@@ -560,42 +417,12 @@ export default function SkillsPage() {
                 </p>
               </div>
             ) : (
-              <>
-                <ListColumnHeader />
-                <div
-                  ref={scrollRef}
-                  style={fadeStyle}
-                  className="flex-1 min-h-0 overflow-y-auto"
-                >
-                  <div>
-                    {filtered.map((skill) => {
-                      const origin = readOrigin(skill);
-                      const runtime =
-                        origin.type === "runtime_local" && origin.runtime_id
-                          ? runtimesById.get(origin.runtime_id) ?? null
-                          : null;
-                      return (
-                        <SkillRow
-                          key={skill.id}
-                          skill={skill}
-                          agents={assignments.get(skill.id) ?? []}
-                          creator={
-                            skill.created_by
-                              ? membersById.get(skill.created_by) ?? null
-                              : null
-                          }
-                          runtime={runtime}
-                          canEdit={canEditSkill(skill, {
-                            userId: currentUserId,
-                            role: myRole,
-                          })}
-                          href={paths.skillDetail(skill.id)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
+              <DataTable
+                table={table}
+                onRowClick={(row) =>
+                  navigation.push(paths.skillDetail(row.original.skill.id))
+                }
+              />
             )}
           </div>
         )}

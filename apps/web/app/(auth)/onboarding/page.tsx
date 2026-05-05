@@ -32,7 +32,7 @@ export default function OnboardingPage() {
   const hasOnboarded = useHasOnboarded();
   const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
     ...workspaceListOptions(),
-    enabled: !!user && hasOnboarded,
+    enabled: !!user,
   });
 
   useEffect(() => {
@@ -40,7 +40,15 @@ export default function OnboardingPage() {
       if (!isLoading && !user) router.replace(paths.login());
       return;
     }
-    if (hasOnboarded && workspacesFetched) {
+    if (!workspacesFetched) return;
+    // Bounce out only when onboarding genuinely doesn't apply: the user is
+    // already onboarded. We deliberately don't bounce on `workspaces.length`
+    // here — Step 3 of the flow creates a workspace mid-onboarding, and a
+    // hasWorkspaces bounce here would kick the user out before Steps 4–5
+    // (runtime / agent / first issue) can run. The new entry-point
+    // judgment in callback / login handles "where should this user go on
+    // login" so OnboardingPage no longer needs to second-guess it.
+    if (hasOnboarded) {
       router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
   }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);

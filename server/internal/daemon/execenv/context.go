@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 // Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Kiro:     skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
@@ -44,7 +46,74 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 		}
 	}
 
+	// Project resources are best-effort: a write failure logs but does not
+	// block task startup. Missing resources surface as the agent simply not
+	// seeing the file, which matches the "scoped, not dumped" design (the
+	// meta skill content always lists what the agent should expect).
+	if err := writeProjectResources(workDir, ctx); err != nil {
+		// Caller logs warnings; avoid noisy returns for non-fatal context.
+		return fmt.Errorf("write project resources: %w", err)
+	}
+
 	return nil
+}
+
+// projectResourceFile is the on-disk JSON written into the agent's working
+// directory. Schema is intentionally a thin pass-through of the API response
+// so consumers (skills, future tooling) don't need a separate parser.
+type projectResourceFile struct {
+	ProjectID    string                  `json:"project_id,omitempty"`
+	ProjectTitle string                  `json:"project_title,omitempty"`
+	Resources    []ProjectResourceForEnv `json:"resources"`
+}
+
+// MarshalJSON renders the resource_ref field as raw JSON instead of a base64
+// blob. The struct's other fields are simple strings.
+func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		ID           string          `json:"id"`
+		ResourceType string          `json:"resource_type"`
+		ResourceRef  json.RawMessage `json:"resource_ref"`
+		Label        string          `json:"label,omitempty"`
+	}
+	ref := p.ResourceRef
+	if len(ref) == 0 {
+		ref = json.RawMessage("{}")
+	}
+	return json.Marshal(alias{
+		ID:           p.ID,
+		ResourceType: p.ResourceType,
+		ResourceRef:  ref,
+		Label:        p.Label,
+	})
+}
+
+// writeProjectResources writes .multica/project/resources.json into the
+// working directory when the task carries project context. The file is
+// always written when a project is attached (even with zero resources) so
+// agents can rely on its presence as a signal that a project exists.
+func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
+	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+		return nil
+	}
+	dir := filepath.Join(workDir, ".multica", "project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	resources := ctx.ProjectResources
+	if resources == nil {
+		resources = []ProjectResourceForEnv{}
+	}
+	payload := projectResourceFile{
+		ProjectID:    ctx.ProjectID,
+		ProjectTitle: ctx.ProjectTitle,
+		Resources:    resources,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "resources.json"), data, 0o644)
 }
 
 // resolveSkillsDir returns the directory where skills should be written
@@ -74,6 +143,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
 		skillsDir = filepath.Join(workDir, ".kimi", "skills")
+	case "kiro":
+		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
+		// in the workdir.
+		skillsDir = filepath.Join(workDir, ".kiro", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
@@ -135,6 +208,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.AutopilotRunID != "" {
 		return renderAutopilotContext(ctx)
 	}
+	if ctx.QuickCreatePrompt != "" {
+		return renderQuickCreateContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -160,6 +236,28 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+// renderQuickCreateContext renders issue_context.md for quick-create tasks.
+// This file carries only task data (user input, skills). Behavioral rules
+// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
+// to avoid redundancy and conflicting instructions.
+func renderQuickCreateContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Quick Create\n\n")
+	b.WriteString("**Trigger:** Quick-create modal\n\n")
+	b.WriteString("## User input\n\n")
+	b.WriteString("> ")
+	b.WriteString(ctx.QuickCreatePrompt)
+	b.WriteString("\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

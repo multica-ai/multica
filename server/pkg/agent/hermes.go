@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -90,6 +91,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	var outputMu sync.Mutex
 	var output strings.Builder
+	// streamingCurrentTurn gates all session updates so that history
+	// replay (Hermes sends full prior-turn transcripts on session/resume,
+	// and may flush queued chunks before our session/prompt response
+	// streams) is dropped instead of duplicating the previous answer
+	// into output. We flip it to true only after session/prompt is sent.
+	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -98,7 +105,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
 				output.WriteString(msg.Content)
@@ -107,6 +120,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -233,7 +249,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 5. Send the prompt and wait for PromptResponse.
+		// 5. Send the prompt and wait for PromptResponse. Flip the gate
+		// just before the request so any history replay flushed during
+		// initialize / session setup stays dropped, but every notification
+		// belonging to this turn is processed.
+		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
@@ -343,6 +363,9 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// acceptNotification can drop ACP session updates before dispatching to
+	// handlers that mutate client state such as usage or pending tool calls.
+	acceptNotification func(updateType string) bool
 
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
@@ -587,7 +610,7 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
 
-	if method != "session/update" {
+	if method != "session/update" && method != "session/notification" {
 		return
 	}
 
@@ -602,23 +625,69 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 		return
 	}
 
-	// Parse the update discriminator.
+	updateType, updateData := normalizeACPUpdate(params.Update)
+	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
+		return
+	}
+
+	switch updateType {
+	case "agent_message_chunk":
+		c.handleAgentMessage(updateData)
+	case "agent_thought_chunk":
+		c.handleAgentThought(updateData)
+	case "tool_call":
+		c.handleToolCallStart(updateData)
+	case "tool_call_update":
+		c.handleToolCallUpdate(updateData)
+	case "usage_update":
+		c.handleUsageUpdate(updateData)
+	case "turn_end":
+		c.extractPromptResult(updateData)
+	}
+}
+
+func normalizeACPUpdate(data json.RawMessage) (string, json.RawMessage) {
 	var updateType struct {
 		SessionUpdate string `json:"sessionUpdate"`
+		Type          string `json:"type"`
 	}
-	_ = json.Unmarshal(params.Update, &updateType)
+	_ = json.Unmarshal(data, &updateType)
+	if updateType.SessionUpdate != "" {
+		return normalizeACPUpdateType(updateType.SessionUpdate), data
+	}
+	if updateType.Type != "" {
+		return normalizeACPUpdateType(updateType.Type), data
+	}
 
-	switch updateType.SessionUpdate {
-	case "agent_message_chunk":
-		c.handleAgentMessage(params.Update)
-	case "agent_thought_chunk":
-		c.handleAgentThought(params.Update)
-	case "tool_call":
-		c.handleToolCallStart(params.Update)
-	case "tool_call_update":
-		c.handleToolCallUpdate(params.Update)
-	case "usage_update":
-		c.handleUsageUpdate(params.Update)
+	// Some ACP implementations serialize enum variants as an externally
+	// tagged object: {"agentMessageChunk": {"content": ...}}.
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil && len(wrapper) == 1 {
+		for k, v := range wrapper {
+			return normalizeACPUpdateType(k), v
+		}
+	}
+
+	return "", data
+}
+
+func normalizeACPUpdateType(t string) string {
+	key := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(t), "_", ""), "-", ""))
+	switch key {
+	case "agentmessagechunk":
+		return "agent_message_chunk"
+	case "agentthoughtchunk":
+		return "agent_thought_chunk"
+	case "toolcall":
+		return "tool_call"
+	case "toolcallupdate":
+		return "tool_call_update"
+	case "usageupdate":
+		return "usage_update"
+	case "turnend", "endturn":
+		return "turn_end"
+	default:
+		return ""
 	}
 }
 
@@ -655,9 +724,12 @@ func (c *hermesClient) handleAgentThought(data json.RawMessage) {
 func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	var msg struct {
 		ToolCallID string            `json:"toolCallId"`
+		Name       string            `json:"name"`
 		Title      string            `json:"title"`
 		Kind       string            `json:"kind"`
 		RawInput   map[string]any    `json:"rawInput"`
+		Input      map[string]any    `json:"input"`
+		Parameters map[string]any    `json:"parameters"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -665,15 +737,25 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 	}
 
 	toolName := hermesToolNameFromTitle(msg.Title, msg.Kind)
+	if toolName == "" {
+		toolName = msg.Name
+	}
+	rawInput := msg.RawInput
+	if rawInput == nil {
+		rawInput = msg.Input
+	}
+	if rawInput == nil {
+		rawInput = msg.Parameters
+	}
 
 	// Hermes pre-populates rawInput on the initial tool_call — emit
 	// MessageToolUse immediately so the UI can show the tool invocation
 	// live. Record the emission so handleToolCallUpdate doesn't re-emit
 	// on completion.
-	if msg.RawInput != nil {
+	if rawInput != nil {
 		c.trackTool(msg.ToolCallID, &pendingToolCall{
 			toolName: toolName,
-			input:    msg.RawInput,
+			input:    rawInput,
 			emitted:  true,
 		})
 		if c.onMessage != nil {
@@ -681,7 +763,7 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 				Type:   MessageToolUse,
 				Tool:   toolName,
 				CallID: msg.ToolCallID,
-				Input:  msg.RawInput,
+				Input:  rawInput,
 			})
 		}
 		return
@@ -702,14 +784,30 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	var msg struct {
 		ToolCallID string            `json:"toolCallId"`
 		Status     string            `json:"status"`
+		Name       string            `json:"name"`
 		Title      string            `json:"title"`
 		Kind       string            `json:"kind"`
 		RawInput   map[string]any    `json:"rawInput"`
+		Input      map[string]any    `json:"input"`
+		Parameters map[string]any    `json:"parameters"`
 		RawOutput  string            `json:"rawOutput"`
+		Output     string            `json:"output"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
+	}
+
+	rawInput := msg.RawInput
+	if rawInput == nil {
+		rawInput = msg.Input
+	}
+	if rawInput == nil {
+		rawInput = msg.Parameters
+	}
+	title := msg.Title
+	if title == "" {
+		title = msg.Name
 	}
 
 	// Mid-stream: only buffer updates. Kimi emits many of these per
@@ -727,9 +825,12 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 
 	// Completion: emit any deferred MessageToolUse first, then the result.
 	pending := c.takePendingTool(msg.ToolCallID)
-	c.emitDeferredToolUse(pending, msg.ToolCallID, msg.Title, msg.Kind, msg.RawInput)
+	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
 	output := msg.RawOutput
+	if output == "" {
+		output = msg.Output
+	}
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
 	}
@@ -961,7 +1062,7 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 // ── Helpers ──
 
 // extractACPSessionID pulls `sessionId` out of a session/new or
-// session/resume response. Shared by all ACP backends (hermes, kimi,
+// session/resume response. Shared by all ACP backends (hermes, kimi, kiro,
 // and anything else that follows the standard ACP schema).
 func extractACPSessionID(result json.RawMessage) string {
 	var r struct {

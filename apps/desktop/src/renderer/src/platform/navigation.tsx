@@ -61,6 +61,13 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
     }
     return true;
   }
+  if (path === "/invitations") {
+    overlay.open({ type: "invitations" });
+    if (router && router.state.location.pathname !== "/") {
+      router.navigate("/", { replace: true });
+    }
+    return true;
+  }
   if (path.startsWith("/invite/")) {
     let id = "";
     try {
@@ -115,10 +122,10 @@ export function DesktopNavigationProvider({
   const { tabId: activeTabId } = useActiveTabIdentity();
   const router = useActiveTabRouter();
   // Mirror the active tab router's full location (pathname + search) so
-  // shell-level consumers of useNavigation() can read URL search params.
-  // Must stay in sync with TabNavigationProvider below; a partial shape
-  // here (just pathname) silently broke focus-mode anchor resolution on
-  // `/inbox?issue=…`.
+  // shell-level consumers of useNavigation() — ChatWindow in particular —
+  // can read URL search params. Must stay in sync with TabNavigationProvider
+  // below; a partial shape here (just pathname) silently broke focus-mode
+  // anchor resolution on `/inbox?issue=…`.
   const [location, setLocation] = useState<{ pathname: string; search: string }>(
     () => ({
       pathname: router?.state.location.pathname ?? "/",

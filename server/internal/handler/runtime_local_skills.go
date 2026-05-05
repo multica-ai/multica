@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -387,7 +388,12 @@ func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) boo
 }
 
 func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return runtimeIDAndWorkspace{}, false
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return runtimeIDAndWorkspace{}, false
@@ -401,7 +407,7 @@ func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.
 
 	if rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
 		return runtimeIDAndWorkspace{
-			runtimeID:   runtimeID,
+			runtimeID:   uuidToString(rt.ID),
 			workspaceID: wsID,
 			provider:    rt.Provider,
 			status:      rt.Status,
@@ -430,7 +436,7 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	req, err := h.LocalSkillListStore.Create(r.Context(), runtimeID)
+	req, err := h.LocalSkillListStore.Create(r.Context(), rt.runtimeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request: "+err.Error())
 		return
@@ -440,7 +446,8 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	if _, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID); !ok {
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
 
@@ -450,7 +457,7 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
 		return
 	}
-	if req == nil || req.RuntimeID != runtimeID {
+	if req == nil || req.RuntimeID != rt.runtimeID {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
@@ -486,7 +493,7 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 
 	importReq, err := h.LocalSkillImportStore.Create(
 		r.Context(),
-		runtimeID,
+		rt.runtimeID,
 		creatorID,
 		strings.TrimSpace(req.SkillKey),
 		cleanOptionalString(req.Name),
@@ -501,7 +508,8 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	if _, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID); !ok {
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
 
@@ -511,7 +519,7 @@ func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
 		return
 	}
-	if req == nil || req.RuntimeID != runtimeID {
+	if req == nil || req.RuntimeID != rt.runtimeID {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
@@ -629,6 +637,15 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
+	creatorUUID, err := util.ParseUUID(req.CreatorID)
+	if err != nil {
+		failMsg := "stored local skill import creator_id is invalid"
+		if ferr := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); ferr != nil {
+			slog.Error("local skill import Fail failed", "error", ferr, "request_id", requestID)
+		}
+		writeError(w, http.StatusInternalServerError, failMsg)
+		return
+	}
 
 	name := body.Skill.Name
 	if req.Name != nil {
@@ -648,8 +665,8 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: uuidToString(rt.WorkspaceID),
-		CreatorID:   req.CreatorID,
+		WorkspaceID: rt.WorkspaceID,
+		CreatorID:   creatorUUID,
 		Name:        name,
 		Description: description,
 		Content:     body.Skill.Content,

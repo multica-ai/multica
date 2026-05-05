@@ -38,7 +38,7 @@ In day-to-day use you'll only touch the first two directly. The **[daemon](/daem
 2. Enter the code; the server issues a JWT cookie (browser) or exchanges it for a PAT (CLI).
 
 <Callout type="warning">
-**Self-hosting operators, take note**: if `APP_ENV` is not set to `production`, the verification code is always `888888` — anyone can sign in as anyone. See [Self-host auth configuration](/auth-setup).
+**Self-hosting operators, take note**: keep `MULTICA_DEV_VERIFICATION_CODE` empty on public deployments. If you enable a fixed local test code, anyone who can request a code can sign in with that value while `APP_ENV` is non-production. See [Self-host auth configuration](/auth-setup).
 </Callout>
 
 ### Google OAuth

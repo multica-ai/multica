@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type skillCreateInput struct {
-	WorkspaceID string
-	CreatorID   string
+	WorkspaceID pgtype.UUID
+	CreatorID   pgtype.UUID
 	Name        string
 	Description string
 	Content     string
@@ -35,12 +36,12 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 	qtx := h.Queries.WithTx(tx)
 
 	skill, err := qtx.CreateSkill(ctx, db.CreateSkillParams{
-		WorkspaceID: parseUUID(input.WorkspaceID),
-		Name:        input.Name,
-		Description: input.Description,
-		Content:     input.Content,
+		WorkspaceID: input.WorkspaceID,
+		Name:        sanitizeNullBytes(input.Name),
+		Description: sanitizeNullBytes(input.Description),
+		Content:     sanitizeNullBytes(input.Content),
 		Config:      config,
-		CreatedBy:   parseUUID(input.CreatorID),
+		CreatedBy:   input.CreatorID,
 	})
 	if err != nil {
 		return SkillWithFilesResponse{}, err
@@ -50,8 +51,8 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 	for _, f := range input.Files {
 		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
 			SkillID: skill.ID,
-			Path:    f.Path,
-			Content: f.Content,
+			Path:    sanitizeNullBytes(f.Path),
+			Content: sanitizeNullBytes(f.Content),
 		})
 		if err != nil {
 			return SkillWithFilesResponse{}, err

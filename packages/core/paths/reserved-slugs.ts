@@ -20,6 +20,7 @@ export const RESERVED_SLUGS = new Set([
   "oauth",
   "callback",
   "invite",
+  "invitations",
   "verify",
   "reset",
   "password",

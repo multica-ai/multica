@@ -87,7 +87,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, memberErr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
 			UserID:      existingUser.ID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: requester.WorkspaceID,
 		})
 		if memberErr == nil {
 			writeError(w, http.StatusConflict, "user is already a member")
@@ -95,9 +95,21 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if there is already a pending invitation.
+	// Drop any past-due pending invitations to 'expired' first. The partial unique
+	// index idx_invitation_unique_pending only filters by status = 'pending', so a
+	// stale row would otherwise block CreateInvitation below — see issue #2055.
+	if err := h.Queries.ExpireStalePendingInvitations(r.Context(), db.ExpireStalePendingInvitationsParams{
+		WorkspaceID:  requester.WorkspaceID,
+		InviteeEmail: email,
+	}); err != nil {
+		slog.Warn("expire stale invitations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to create invitation")
+		return
+	}
+
+	// Check if there is still a live pending invitation.
 	_, err = h.Queries.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
-		WorkspaceID:  parseUUID(workspaceID),
+		WorkspaceID:  requester.WorkspaceID,
 		InviteeEmail: email,
 	})
 	if err == nil {
@@ -112,7 +124,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	inv, err := h.Queries.CreateInvitation(r.Context(), db.CreateInvitationParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   requester.WorkspaceID,
 		InviterID:     requester.UserID,
 		InviteeEmail:  email,
 		InviteeUserID: inviteeUserID,
@@ -136,15 +148,15 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"invitation": resp}
 	var workspaceName string
-	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
+	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		workspaceName = ws.Name
 		eventPayload["workspace_name"] = ws.Name
 	}
-	h.publish(protocol.EventInvitationCreated, workspaceID, "member", userID, eventPayload)
+	h.publish(protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
 	h.Analytics.Capture(analytics.TeamInviteSent(
 		uuidToString(requester.UserID),
-		workspaceID,
+		uuidToString(requester.WorkspaceID),
 		email,
 		"email",
 	))
@@ -173,8 +185,12 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
-	rows, err := h.Queries.ListPendingInvitationsByWorkspace(r.Context(), parseUUID(workspaceID))
+	rows, err := h.Queries.ListPendingInvitationsByWorkspace(r.Context(), workspaceUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list invitations")
 		return
@@ -209,9 +225,17 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 	invitationID := chi.URLParam(r, "invitationId")
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	invitationUUID, ok := parseUUIDOrBadRequest(w, invitationID, "invitation id")
+	if !ok {
+		return
+	}
 
-	inv, err := h.Queries.GetInvitation(r.Context(), parseUUID(invitationID))
-	if err != nil || uuidToString(inv.WorkspaceID) != workspaceID || inv.Status != "pending" {
+	inv, err := h.Queries.GetInvitation(r.Context(), invitationUUID)
+	if err != nil || uuidToString(inv.WorkspaceID) != uuidToString(workspaceUUID) || inv.Status != "pending" {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
 	}
@@ -224,8 +248,8 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation revoked", "invitation_id", invitationID, "workspace_id", workspaceID)
 
 	userID := requestUserID(r)
-	h.publish(protocol.EventInvitationRevoked, workspaceID, "member", userID, map[string]any{
-		"invitation_id":   invitationID,
+	h.publish(protocol.EventInvitationRevoked, uuidToString(workspaceUUID), "member", userID, map[string]any{
+		"invitation_id":   uuidToString(inv.ID),
 		"invitee_email":   inv.InviteeEmail,
 		"invitee_user_id": uuidToPtr(inv.InviteeUserID),
 	})
@@ -245,7 +269,11 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	invitationID := chi.URLParam(r, "id")
-	inv, err := h.Queries.GetInvitation(r.Context(), parseUUID(invitationID))
+	invitationUUID, ok := parseUUIDOrBadRequest(w, invitationID, "invitation id")
+	if !ok {
+		return
+	}
+	inv, err := h.Queries.GetInvitation(r.Context(), invitationUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
@@ -336,7 +364,11 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	invitationID := chi.URLParam(r, "id")
-	inv, err := h.Queries.GetInvitation(r.Context(), parseUUID(invitationID))
+	invitationUUID, ok := parseUUIDOrBadRequest(w, invitationID, "invitation id")
+	if !ok {
+		return
+	}
+	inv, err := h.Queries.GetInvitation(r.Context(), invitationUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
@@ -394,6 +426,16 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Accepting an invite is the physical event that "completes" onboarding for an
+	// invitee — atomic with CreateMember so the invariant
+	// "member row exists ↔ onboarded_at != null" cannot be violated.
+	// COALESCE in MarkUserOnboarded keeps this idempotent for users joining
+	// additional workspaces after their first.
+	if _, err := qtx.MarkUserOnboarded(r.Context(), user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
@@ -413,7 +455,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 
 	// Notify the workspace about the acceptance.
 	h.publish(protocol.EventInvitationAccepted, wsID, "member", userID, map[string]any{
-		"invitation_id": invitationID,
+		"invitation_id": uuidToString(accepted.ID),
 		"member":        memberResp,
 	})
 
@@ -445,7 +487,11 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	invitationID := chi.URLParam(r, "id")
-	inv, err := h.Queries.GetInvitation(r.Context(), parseUUID(invitationID))
+	invitationUUID, ok := parseUUIDOrBadRequest(w, invitationID, "invitation id")
+	if !ok {
+		return
+	}
+	inv, err := h.Queries.GetInvitation(r.Context(), invitationUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
@@ -477,7 +523,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(declined.WorkspaceID)
 	h.publish(protocol.EventInvitationDeclined, wsID, "member", userID, map[string]any{
-		"invitation_id": invitationID,
+		"invitation_id": uuidToString(declined.ID),
 		"invitee_email": declined.InviteeEmail,
 	})
 

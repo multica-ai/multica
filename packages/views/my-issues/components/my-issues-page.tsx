@@ -82,6 +82,7 @@ export function MyIssuesPage() {
         creatorFilters: [],
         projectFilters: [],
         includeNoProject: false,
+        labelFilters: [],
       }),
     [myIssues, statusFilters, priorityFilters],
   );
@@ -101,12 +102,6 @@ export function MyIssuesPage() {
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const viewState = myIssuesViewStore.getState();
-      if (viewState.sortBy !== "position") {
-        viewState.setSortBy("position");
-        viewState.setSortDirection("asc");
-      }
-
       const updates: Partial<{ status: IssueStatus; position: number }> = {
         status: newStatus,
       };

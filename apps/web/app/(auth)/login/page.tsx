@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -26,6 +26,32 @@ import { captureDownloadIntent } from "@multica/core/analytics";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
+
+/**
+ * Pick where a logged-in user with no explicit `?next=` should land.
+ * Un-onboarded users with pending invitations on their email get routed to
+ * the batch /invitations page; everyone else falls through to the standard
+ * resolver. A network blip on listMyInvitations is non-fatal — we fall
+ * through rather than trap the user on an error screen.
+ */
+async function resolveLoggedInDestination(
+  qc: QueryClient,
+  hasOnboarded: boolean,
+  workspaces: Workspace[],
+): Promise<string> {
+  if (!hasOnboarded) {
+    try {
+      const invites = await api.listMyInvitations();
+      if (invites.length > 0) {
+        qc.setQueryData(workspaceKeys.myInvitations(), invites);
+        return paths.invitations();
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return resolvePostAuthDestination(workspaces, hasOnboarded);
+}
 
 function LoginPageContent() {
   const router = useRouter();
@@ -72,33 +98,28 @@ function LoginPageContent() {
         });
       return;
     }
-    if (!hasOnboarded) {
-      router.replace(paths.onboarding());
-      return;
-    }
     if (nextUrl) {
       router.replace(nextUrl);
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.replace(resolvePostAuthDestination(list, hasOnboarded));
+    void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
+      router.replace(dest),
+    );
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
     // was captured before login completed and would be stale here.
     const currentUser = useAuthStore.getState().user;
     const onboarded = currentUser?.onboarded_at != null;
-    if (!onboarded) {
-      router.push(paths.onboarding());
-      return;
-    }
     if (nextUrl) {
       router.push(nextUrl);
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.push(resolvePostAuthDestination(list, onboarded));
+    const dest = await resolveLoggedInDestination(qc, onboarded, list);
+    router.push(dest);
   };
 
   // Build Google OAuth state: encode platform + next URL so the callback

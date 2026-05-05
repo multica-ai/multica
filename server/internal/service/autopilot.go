@@ -192,6 +192,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
+		// Snapshot the autopilot title so task rows self-describe later
+		// without joining back to autopilot. Truncated for the same
+		// transmission-cost reason as comment-driven summaries.
+		TriggerSummary: pgtype.Text{
+			String: truncateForSummary(ap.Title, triggerSummaryMaxLen),
+			Valid:  ap.Title != "",
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)
@@ -207,6 +214,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	} else {
 		*run = updatedRun
 	}
+
+	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
+	// inserts the task row directly via Queries.CreateAutopilotTask
+	// (bypassing TaskService.Enqueue*), so without this the runtime
+	// would not get a wakeup and any cached "empty" verdict would
+	// stall the task until the TTL expired.
+	s.TaskSvc.NotifyTaskEnqueued(task)
 
 	slog.Info("autopilot dispatched (run_only)",
 		"autopilot_id", util.UUIDToString(ap.ID),

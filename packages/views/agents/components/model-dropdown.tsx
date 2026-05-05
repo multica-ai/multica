@@ -42,7 +42,6 @@ export function ModelDropdown({
 
   const supported = modelsQuery.data?.supported ?? true;
   const models = modelsQuery.data?.models ?? [];
-  const defaultModel = useMemo(() => models.find((m) => m.default), [models]);
   const grouped = useMemo(() => groupByProvider(models), [models]);
 
   // When the selected runtime reports it doesn't support per-agent
@@ -86,9 +85,7 @@ export function ModelDropdown({
     (disabled
       ? "Select a runtime first"
       : runtimeOnline
-        ? defaultModel
-          ? `Default — ${defaultModel.label}`
-          : "Default (provider)"
+        ? "Default (provider)"
         : "Runtime offline — enter manually");
 
   if (!supported && !modelsQuery.isLoading) {

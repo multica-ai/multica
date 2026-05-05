@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -215,6 +216,53 @@ func TestIsReplyToMemberThread(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// shouldInheritParentMentions
+// -------------------------------------------------------------------
+
+func TestShouldInheritParentMentions(t *testing.T) {
+	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "thread starter"}
+	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	someMention := []util.Mention{{Type: "agent", ID: otherAgentID}}
+
+	tests := []struct {
+		name            string
+		parent          *db.Comment
+		replyMentions   []util.Mention
+		replyAuthorType string
+		want            bool
+	}{
+		{"nil parent → false", nil, nil, "member", false},
+		{"reply has explicit mentions → false", memberParent, someMention, "member", false},
+		{"agent-authored reply, member parent → false (loop guard)", memberParent, nil, "agent", false},
+		{"member reply, agent parent → false (parent author guard)", agentParent, nil, "member", false},
+		{"member reply, member parent, no mentions → true (intended use)", memberParent, nil, "member", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldInheritParentMentions(tt.parent, tt.replyMentions, tt.replyAuthorType)
+			if got != tt.want {
+				t.Errorf("shouldInheritParentMentions() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Regression for the case from MUL-1535: J posts a PR completion comment
+// that @mentions GPT-Boy for review; later a member posts a plain follow-up
+// reply asking the assignee a question. GPT-Boy must NOT be re-triggered.
+func TestShouldInheritParentMentions_AgentReviewDelegationDoesNotLeak(t *testing.T) {
+	jPRCompletion := &db.Comment{
+		AuthorType: "agent",
+		AuthorID:   testUUID(agentAssigneeID),
+		Content:    fmt.Sprintf("PR ready. [@GPT-Boy](mention://agent/%s) please review this.", otherAgentID),
+	}
+	if got := shouldInheritParentMentions(jPRCompletion, nil, "member"); got {
+		t.Fatal("member follow-up to an agent's PR-review delegation must not inherit the @reviewer mention")
+	}
+}
+
+// -------------------------------------------------------------------
 // Combined trigger decision (simulates the full on_comment check)
 // -------------------------------------------------------------------
 
@@ -267,4 +315,3 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 		})
 	}
 }
-

@@ -17,6 +17,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// sanitizeNullBytes removes null bytes (0x00) from strings.
+// PostgreSQL rejects null bytes in text columns with
+// "invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)".
+func sanitizeNullBytes(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
+}
+
 // --- Response structs ---
 
 type SkillResponse struct {
@@ -190,6 +197,11 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID := parseUUID(creatorID)
 
 	var req CreateSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -210,8 +222,8 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: workspaceID,
-		CreatorID:   creatorID,
+		WorkspaceID: workspaceUUID,
+		CreatorID:   creatorUUID,
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
@@ -284,13 +296,13 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		ID: parseUUID(id),
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = pgtype.Text{String: sanitizeNullBytes(*req.Description), Valid: true}
 	}
 	if req.Content != nil {
-		params.Content = pgtype.Text{String: *req.Content, Valid: true}
+		params.Content = pgtype.Text{String: sanitizeNullBytes(*req.Content), Valid: true}
 	}
 	if req.Config != nil {
 		config, _ := json.Marshal(req.Config)
@@ -318,8 +330,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		for _, f := range req.Files {
 			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 				SkillID: skill.ID,
-				Path:    f.Path,
-				Content: f.Content,
+				Path:    sanitizeNullBytes(f.Path),
+				Content: sanitizeNullBytes(f.Content),
 			})
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
@@ -360,12 +372,12 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteSkill(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.DeleteSkill(r.Context(), skill.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(skill.WorkspaceID))
-	h.publish(protocol.EventSkillDeleted, uuidToString(skill.WorkspaceID), actorType, actorID, map[string]any{"skill_id": id})
+	h.publish(protocol.EventSkillDeleted, uuidToString(skill.WorkspaceID), actorType, actorID, map[string]any{"skill_id": uuidToString(skill.ID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1073,6 +1085,11 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID := parseUUID(creatorID)
 
 	var req ImportSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1112,8 +1129,8 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: workspaceID,
-		CreatorID:   creatorID,
+		WorkspaceID: workspaceUUID,
+		CreatorID:   creatorUUID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
@@ -1178,8 +1195,8 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 
 	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
-		Path:    req.Path,
-		Content: req.Content,
+		Path:    sanitizeNullBytes(req.Path),
+		Content: sanitizeNullBytes(req.Content),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
@@ -1200,7 +1217,18 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileID := chi.URLParam(r, "fileId")
-	if err := h.Queries.DeleteSkillFile(r.Context(), parseUUID(fileID)); err != nil {
+	fileUUID, ok := parseUUIDOrBadRequest(w, fileID, "file id")
+	if !ok {
+		return
+	}
+	// Verify the file belongs to the parent skill we just authorized — guards
+	// against deleting a file owned by a different skill via the URL param.
+	file, err := h.Queries.GetSkillFile(r.Context(), fileUUID)
+	if err != nil || uuidToString(file.SkillID) != uuidToString(skill.ID) {
+		writeError(w, http.StatusNotFound, "skill file not found")
+		return
+	}
+	if err := h.Queries.DeleteSkillFile(r.Context(), file.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
@@ -1244,6 +1272,10 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
+	if !ok {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -1259,10 +1291,10 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, skillID := range req.SkillIDs {
+	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: agent.ID,
-			SkillID: parseUUID(skillID),
+			SkillID: skillID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
 			return

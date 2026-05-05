@@ -44,6 +44,65 @@ func TestGitEnv(t *testing.T) {
 	if !foundHome {
 		t.Error("gitEnv() must include HOME from os.Environ()")
 	}
+
+	// Must set safe.directory=* via GIT_CONFIG env vars.
+	envHas := func(env []string, want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !envHas(env, "GIT_CONFIG_KEY_0=safe.directory") {
+		t.Error("gitEnv() must include GIT_CONFIG_KEY_0=safe.directory (no pre-existing config)")
+	}
+	if !envHas(env, "GIT_CONFIG_VALUE_0=*") {
+		t.Error("gitEnv() must include GIT_CONFIG_VALUE_0=*")
+	}
+}
+
+func TestGitEnvPreservesExistingConfig(t *testing.T) {
+	// GIT_CONFIG_COUNT env vars are process-wide; cannot use t.Setenv in
+	// parallel tests, so run sequentially.
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.https://github.com/.insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "gh:")
+	t.Setenv("GIT_CONFIG_KEY_1", "http.extraHeader")
+	t.Setenv("GIT_CONFIG_VALUE_1", "Authorization: Bearer tok")
+
+	env := gitEnv()
+
+	envHas := func(want string) bool {
+		for _, e := range env {
+			if e == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	// safe.directory must be appended at index 2 (next available).
+	if !envHas("GIT_CONFIG_COUNT=3") {
+		t.Error("expected GIT_CONFIG_COUNT=3")
+	}
+	if !envHas("GIT_CONFIG_KEY_2=safe.directory") {
+		t.Error("expected GIT_CONFIG_KEY_2=safe.directory")
+	}
+	if !envHas("GIT_CONFIG_VALUE_2=*") {
+		t.Error("expected GIT_CONFIG_VALUE_2=*")
+	}
+
+	// Original entries must still be present.
+	if !envHas("GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf") {
+		t.Error("existing GIT_CONFIG_KEY_0 was lost")
+	}
+	if !envHas("GIT_CONFIG_VALUE_0=gh:") {
+		t.Error("existing GIT_CONFIG_VALUE_0 was lost")
+	}
+	if !envHas("GIT_CONFIG_KEY_1=http.extraHeader") {
+		t.Error("existing GIT_CONFIG_KEY_1 was lost")
+	}
 }
 
 func TestBareDirName(t *testing.T) {
@@ -185,7 +244,7 @@ func TestSyncAndLookup(t *testing.T) {
 
 	// Sync should clone the repo.
 	err := cache.Sync("ws-123", []RepoInfo{
-		{URL: sourceRepo, Description: "test repo"},
+		{URL: sourceRepo},
 	})
 	if err != nil {
 		t.Fatalf("Sync failed: %v", err)
@@ -460,6 +519,131 @@ func TestCreateWorktreeNotCached(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found in cache") {
 		t.Errorf("expected 'not found in cache' error, got: %v", err)
+	}
+}
+
+func TestCreateWorktreeWithRequestedBranchRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	defaultHead := gitHead(t, sourceRepo)
+
+	runGitAuthored(t, sourceRepo, "checkout", "-b", "review-branch")
+	if err := os.WriteFile(filepath.Join(sourceRepo, "review.txt"), []byte("review\n"), 0o644); err != nil {
+		t.Fatalf("write review file: %v", err)
+	}
+	runGitAuthored(t, sourceRepo, "add", ".")
+	runGitAuthored(t, sourceRepo, "commit", "-m", "review branch commit")
+	reviewHead := gitHead(t, sourceRepo)
+	if reviewHead == defaultHead {
+		t.Fatal("test setup failed: review branch did not advance")
+	}
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "review-branch",
+		AgentName:   "Reviewer",
+		TaskID:      "review-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != reviewHead {
+		t.Fatalf("worktree HEAD = %s, want requested branch head %s", got, reviewHead)
+	}
+	if _, err := os.Stat(filepath.Join(result.Path, "review.txt")); err != nil {
+		t.Fatalf("requested branch file missing: %v", err)
+	}
+}
+
+func TestCreateWorktreeWithRequestedCommitRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	firstCommit := gitHead(t, sourceRepo)
+	addEmptyCommit(t, sourceRepo, "second commit")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         firstCommit,
+		AgentName:   "Reviewer",
+		TaskID:      "commit-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != firstCommit {
+		t.Fatalf("worktree HEAD = %s, want requested commit %s", got, firstCommit)
+	}
+}
+
+func TestCreateWorktreeWithRequestedTagRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	taggedCommit := gitHead(t, sourceRepo)
+	runGitAuthored(t, sourceRepo, "tag", "v1")
+	// Advance the default branch past the tag so worktree HEAD == taggedCommit
+	// can only be true if the tag was actually resolved (vs falling back to
+	// the default branch tip).
+	addEmptyCommit(t, sourceRepo, "post-tag commit")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "v1",
+		AgentName:   "Reviewer",
+		TaskID:      "tag-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != taggedCommit {
+		t.Fatalf("worktree HEAD = %s, want tagged commit %s", got, taggedCommit)
+	}
+}
+
+func TestCreateWorktreeWithUnknownRequestedRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "missing-ref",
+		AgentName:   "Reviewer",
+		TaskID:      "missing-ref-task-id",
+	})
+	if err == nil {
+		t.Fatal("expected unknown ref error")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve requested ref") {
+		t.Fatalf("expected requested ref error, got: %v", err)
 	}
 }
 
@@ -880,6 +1064,301 @@ func TestGetRemoteDefaultBranchUsesBareHeadHintForCustomDefault(t *testing.T) {
 	got := getRemoteDefaultBranch(barePath)
 	if got != "refs/remotes/origin/trunk" {
 		t.Fatalf("getRemoteDefaultBranch = %q, want refs/remotes/origin/trunk (via bare-HEAD hint)", got)
+	}
+}
+
+// TestCreateWorktreeInstallsCoAuthoredByHook verifies that CreateWorktree
+// installs a prepare-commit-msg hook that appends a Co-authored-by trailer
+// for the Multica Agent to every commit made in the worktree.
+func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "a1b2c3d4-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// Make a commit in the worktree and verify the hook appends the trailer.
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	// Read the commit message.
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	expectedTrailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	if !strings.Contains(commitMsg, expectedTrailer) {
+		t.Errorf("commit message missing Co-authored-by trailer.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestCoAuthoredByHookIdempotent verifies that the hook does not add a
+// duplicate Co-authored-by trailer if one is already present in the message.
+func TestCoAuthoredByHookIdempotent(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "b2c3d4e5-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// Commit with the trailer already in the message.
+	trailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit\n\n"+trailer)
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+
+	// Count occurrences — should appear exactly once.
+	count := strings.Count(commitMsg, trailer)
+	if count != 1 {
+		t.Errorf("expected exactly 1 Co-authored-by trailer, found %d.\ngot:\n%s", count, commitMsg)
+	}
+}
+
+// TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled verifies the toggle-off
+// path: a bare cache that already carries the Multica prepare-commit-msg hook
+// (e.g. from a prior worktree created with the setting on) must drop the hook
+// when the next CreateWorktree call passes CoAuthoredByEnabled=false.
+// Otherwise commits keep getting the trailer even after the user disables the
+// workspace setting.
+func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// First worktree: setting enabled → hook installed in the bare cache's
+	// shared hooks dir.
+	workDir1 := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir1,
+		AgentName:           "Test Agent",
+		TaskID:              "11111111-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (enabled) failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hookPath := filepath.Join(barePath, "hooks", "prepare-commit-msg")
+	if _, err := os.Stat(hookPath); err != nil {
+		t.Fatalf("precondition: expected hook to be installed at %s: %v", hookPath, err)
+	}
+
+	// Second worktree on the same bare cache: setting disabled → hook must
+	// be removed and a commit in the new worktree must NOT carry the
+	// trailer.
+	workDir2 := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir2,
+		AgentName:           "Test Agent",
+		TaskID:              "22222222-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	if strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer with setting disabled.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestCreateWorktreeRemovesLegacyCoAuthoredByHook verifies the migration
+// path: bare clones already on disk from previous daemon versions carry a
+// prepare-commit-msg hook that does NOT include the multicaHookMarker
+// sentinel — only the older `# Installed by the Multica daemon.` comment.
+// Toggling the workspace setting off must still remove those legacy hooks,
+// otherwise users who flip the toggle in production keep seeing the trailer
+// indefinitely (the exact bug reported in MUL-1704).
+func TestCreateWorktreeRemovesLegacyCoAuthoredByHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Seed the bare cache with the exact hook content shipped by the
+	// previous daemon release (no multicaHookMarker line). Keeping a
+	// verbatim copy here means the test fails if recognition logic ever
+	// drifts away from what production hosts actually have on disk.
+	const legacyHook = `#!/bin/sh
+# Multica: add Co-authored-by trailer for the Multica Agent.
+# Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Skip merge and squash commits.
+case "$COMMIT_SOURCE" in
+  merge|squash) exit 0 ;;
+esac
+
+TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+
+# Don't add if already present.
+if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+# Use git interpret-trailers for proper formatting.
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
+`
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(hookPath, []byte(legacyHook), 0o755); err != nil {
+		t.Fatalf("seed legacy hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "44444444-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected legacy hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if commitMsg := string(out); strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer after legacy hook removal.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestRemoveCoAuthoredByHookPreservesUserHook verifies that the disable path
+// only deletes hooks installed by the daemon. A prepare-commit-msg hook
+// without the Multica marker (e.g. one a user added manually) must be left
+// untouched even when CoAuthoredByEnabled=false.
+func TestRemoveCoAuthoredByHookPreservesUserHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	userHook := "#!/bin/sh\n# user hook, not Multica\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(userHook), 0o755); err != nil {
+		t.Fatalf("seed user hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "33333333-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("user hook unexpectedly removed: %v", err)
+	}
+	if string(got) != userHook {
+		t.Errorf("user hook contents changed.\nwant:\n%s\ngot:\n%s", userHook, string(got))
 	}
 }
 

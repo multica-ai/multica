@@ -137,6 +137,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                       actorType={issue.assignee_type!}
                       actorId={issue.assignee_id!}
                       size={22}
+                      enableHoverCard
                     />
                   }
                 />
@@ -146,6 +147,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 actorType={issue.assignee_type!}
                 actorId={issue.assignee_id!}
                 size={22}
+                enableHoverCard
               />
             ))}
           {showPriority &&

@@ -168,6 +168,68 @@ func TestCodexHandleServerRequestFileChangeApproval(t *testing.T) {
 	}
 }
 
+func TestCodexHandleServerRequestMCPElicitation(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":12,"method":"mcpServer/elicitation/request","params":{}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(12) {
+		t.Fatalf("expected id=12, got %v", resp["id"])
+	}
+	result := resp["result"].(map[string]any)
+	if result["action"] != "accept" {
+		t.Fatalf("expected action=accept, got %v", result["action"])
+	}
+	if _, ok := result["content"]; !ok {
+		t.Fatal("expected content key in response")
+	}
+	if _, ok := result["_meta"]; !ok {
+		t.Fatal("expected _meta key in response")
+	}
+}
+
+func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":13,"method":"some/unknown/method","params":{}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(13) {
+		t.Fatalf("expected id=13, got %v", resp["id"])
+	}
+	if resp["result"] != nil {
+		t.Fatalf("expected no result for error response, got %v", resp["result"])
+	}
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object in response")
+	}
+	if errObj["code"] != float64(-32601) {
+		t.Fatalf("expected error code -32601, got %v", errObj["code"])
+	}
+}
+
 func TestCodexLegacyEventTaskStarted(t *testing.T) {
 	t.Parallel()
 
@@ -1190,5 +1252,28 @@ func TestWithAgentStderrAppendsHint(t *testing.T) {
 	want := "codex initialize failed: process exited; codex stderr: unexpected argument '-m' found"
 	if msg != want {
 		t.Errorf("got %q, want %q", msg, want)
+	}
+}
+
+func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		ExtraArgs:  []string{"--listen", "tcp://evil", "--sandbox", "read-only"},
+		CustomArgs: []string{"--sandbox", "workspace-write", "--listen=bad"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "tcp://evil") || strings.Contains(joined, "--listen=bad") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--sandbox" && args[i+1] == "read-only" {
+			extraIdx = i
+		}
+		if args[i] == "--sandbox" && args[i+1] == "workspace-write" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
 }

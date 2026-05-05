@@ -32,7 +32,7 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-> **Note:** The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled), which protects publicly reachable instances. For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` — never do this on a public instance.
+> **Note:** If Resend is not configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
 
 ### Google OAuth (Optional)
 
@@ -79,6 +79,7 @@ The `Secure` flag on session cookies is derived automatically from the scheme of
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
+| `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
 | `FRONTEND_PORT` | `3000` | Frontend port |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -102,6 +103,8 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
+| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
@@ -307,6 +310,28 @@ Use `/health` for basic liveness / reachability checks. Use `/readyz` for
 dependency-aware readiness probes and external monitoring that should fail when
 the database is unavailable or migrations are not fully applied. `/healthz` is
 kept as an alias for operator familiarity.
+
+## Prometheus Metrics
+
+The backend can expose Prometheus metrics on a separate management listener:
+
+```bash
+METRICS_ADDR=127.0.0.1:9090 ./server/bin/server
+curl http://127.0.0.1:9090/metrics
+```
+
+`METRICS_ADDR` is empty by default, so no metrics listener is started. The
+public API port does not serve `/metrics`; keep it that way for internet-facing
+deployments. HTTP request metrics start accumulating only after the metrics
+listener is enabled. Metrics can reveal internal routes, traffic volume,
+dependency state, and runtime health.
+
+For Docker or Kubernetes deployments, prefer a private scrape path: bind the
+metrics listener to an internal interface and protect it with private
+networking, allowlists, NetworkPolicy, or proxy authentication. If you bind
+`METRICS_ADDR=0.0.0.0:9090` inside a container, only publish that port to a
+trusted network, for example a host-local mapping such as
+`127.0.0.1:9090:9090`.
 
 ## Upgrading
 

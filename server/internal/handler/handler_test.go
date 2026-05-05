@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var testHandler *Handler
@@ -327,6 +329,92 @@ func TestIssueCRUD(t *testing.T) {
 	testHandler.GetIssue(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssue after delete: expected 404, got %d", w.Code)
+	}
+}
+
+// TestDeleteIssueByIdentifier guards against #1661 — DELETE /api/issues/{id}
+// must actually delete the row when the path segment is a human-readable
+// identifier ("HAN-42") rather than a UUID. Before the PR #1680 + MUL-1410
+// refactor, parseUUID(rawString) silently produced a zero UUID, the SQL
+// DELETE matched nothing, and the handler still returned 204.
+//
+// Also asserts the issue:deleted WS event payload carries the resolved UUID,
+// not the raw identifier — frontend caches key by UUID and would otherwise
+// leave stale entries on other clients after an identifier-path delete.
+func TestDeleteIssueByIdentifier(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "Issue to delete by identifier",
+		"status":   "todo",
+		"priority": "medium",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.Identifier == "" {
+		t.Fatalf("CreateIssue: expected identifier to be populated, got empty")
+	}
+
+	// Capture the issue:deleted event payload via the bus.
+	gotPayload := make(chan map[string]any, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueDeleted, func(e events.Event) {
+		if payload, ok := e.Payload.(map[string]any); ok {
+			select {
+			case gotPayload <- payload:
+			default:
+			}
+		}
+	})
+
+	// Delete using the human-readable identifier (e.g. "HAN-1") rather than the UUID.
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+created.Identifier, nil)
+	req = withURLParam(req, "id", created.Identifier)
+	testHandler.DeleteIssue(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteIssue by identifier: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the row is actually gone — the silent-data-loss bug would have
+	// returned 204 here too, but the row would still exist.
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM issue WHERE id = $1`, created.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("DeleteIssue by identifier returned 204 but row still exists (count=%d) — silent-data-loss regression", count)
+	}
+
+	// Event payload must carry the resolved UUID, not the identifier string.
+	select {
+	case payload := <-gotPayload:
+		issueID, _ := payload["issue_id"].(string)
+		if issueID != created.ID {
+			t.Fatalf("issue:deleted event payload issue_id = %q; want resolved UUID %q (must not leak identifier %q)", issueID, created.ID, created.Identifier)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive issue:deleted event within timeout")
+	}
+}
+
+// TestDeleteIssueRejectsInvalidUUID verifies that a path segment that is
+// neither a valid UUID nor a valid identifier returns 404 (not 204) — the
+// handler must never silently succeed on malformed input.
+func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/issues/not-a-uuid-or-identifier", nil)
+	req = withURLParam(req, "id", "not-a-uuid-or-identifier")
+	testHandler.DeleteIssue(w, req)
+	if w.Code == http.StatusNoContent {
+		t.Fatalf("DeleteIssue with invalid id: must not return 204; got %d", w.Code)
+	}
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("DeleteIssue with invalid id: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -641,6 +729,31 @@ func TestCreateIssueRejectsMalformedAssigneeID(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Malformed attachment issue",
+		"attachment_ids": []string{"not-a-uuid"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for malformed attachment_ids, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue: malformed attachment_ids should not create issue, count before=%d after=%d", before, after)
+	}
+}
+
 // TestUpdateIssueRejectsMalformedAssigneeID is the equivalent for the update
 // path, where the same parseUUID-shaped gap existed on a previously-unassigned
 // issue.
@@ -787,6 +900,283 @@ func TestCommentCRUD(t *testing.T) {
 	req = newRequest("DELETE", "/api/issues/"+issueID, nil)
 	req = withURLParam(req, "id", issueID)
 	testHandler.DeleteIssue(w, req)
+}
+
+func TestCreateCommentRejectsMalformedParentID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Comment malformed parent issue",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+		"content":   "bad parent",
+		"parent_id": "not-a-uuid",
+	})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateComment: expected 400 for malformed parent_id, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+issue.ID, nil)
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.DeleteIssue(w, req)
+}
+
+func TestGetChatSessionRejectsMalformedSessionID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/chat/sessions/not-a-uuid", nil)
+	req = withURLParam(req, "sessionId", "not-a-uuid")
+	testHandler.GetChatSession(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GetChatSession: expected 400 for malformed sessionId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots", map[string]any{
+		"title":          "Malformed assignee autopilot",
+		"assignee_id":    "not-a-uuid",
+		"execution_mode": "run_only",
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAutopilot: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAutopilotRejectsMalformedID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/autopilots/not-a-uuid", map[string]any{
+		"title": "Malformed autopilot id",
+	})
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateAutopilot: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAgentRejectsMalformedAgentID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/not-a-uuid", map[string]any{
+		"name": "Malformed agent id",
+	})
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateAgent: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateAgentRejectsMalformedRuntimeID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":       "Malformed runtime agent",
+		"runtime_id": "not-a-uuid",
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAgent: expected 400 for malformed runtime_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAgentRejectsMalformedRuntimeID(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Malformed Runtime Update", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"runtime_id": "not-a-uuid",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateAgent: expected 400 for malformed runtime_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreatePinRejectsMalformedItemID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/pins", map[string]any{
+		"item_type": "issue",
+		"item_id":   "not-a-uuid",
+	})
+	testHandler.CreatePin(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreatePin: expected 400 for malformed item_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/workspaces/not-a-uuid", map[string]any{
+		"name": "Malformed workspace id",
+	})
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateWorkspace: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateMemberRejectsMalformedMemberID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/members/not-a-uuid", map[string]any{
+		"role": "member",
+	})
+	req = withURLParams(req, "id", testWorkspaceID, "memberId", "not-a-uuid")
+	testHandler.UpdateMember(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateMember: expected 400 for malformed memberId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRevokeInvitationRejectsMalformedInvitationID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/invitations/not-a-uuid", nil)
+	req = withURLParams(req, "id", testWorkspaceID, "invitationId", "not-a-uuid")
+	testHandler.RevokeInvitation(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("RevokeInvitation: expected 400 for malformed invitationId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetMyInvitationRejectsMalformedID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/invitations/not-a-uuid", nil)
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.GetMyInvitation(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GetMyInvitation: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddReactionRejectsMalformedCommentID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/comments/not-a-uuid/reactions", map[string]any{
+		"emoji": "thumbs_up",
+	})
+	req = withURLParam(req, "commentId", "not-a-uuid")
+	testHandler.AddReaction(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("AddReaction: expected 400 for malformed commentId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCommentRejectsMalformedCommentID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/comments/not-a-uuid", map[string]any{
+		"content": "updated",
+	})
+	req = withURLParam(req, "commentId", "not-a-uuid")
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateComment: expected 400 for malformed commentId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMarkInboxReadRejectsMalformedItemID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/inbox/not-a-uuid/read", nil)
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.MarkInboxRead(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("MarkInboxRead: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRevokePersonalAccessTokenRejectsMalformedID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/tokens/not-a-uuid", nil)
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.RevokePersonalAccessToken(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("RevokePersonalAccessToken: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
+	tests := []struct {
+		name   string
+		req    *http.Request
+		handle func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "daemon register workspace_id",
+			req: newRequest("POST", "/api/daemon/register", map[string]any{
+				"workspace_id": "not-a-uuid",
+				"daemon_id":    "daemon-malformed-workspace",
+				"runtimes": []map[string]any{
+					{"name": "codex", "type": "codex", "status": "online"},
+				},
+			}),
+			handle: testHandler.DaemonRegister,
+		},
+		{
+			name: "import starter content workspace_id",
+			req: newRequest("POST", "/api/onboarding/starter-content/import", map[string]any{
+				"workspace_id": "not-a-uuid",
+				"project": map[string]any{
+					"title": "Getting Started",
+				},
+			}),
+			handle: testHandler.ImportStarterContent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			tt.handle(w, tt.req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("%s: expected 400 for malformed body UUID, got %d: %s", tt.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestDaemonDeregisterRejectsMalformedRuntimeID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/deregister", map[string]any{
+		"runtime_ids": []string{"not-a-uuid"},
+	})
+	testHandler.DaemonDeregister(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("DaemonDeregister: expected 400 for malformed runtime_ids, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetIssueGCCheckRejectsMalformedIssueID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/daemon/issues/not-a-uuid/gc-check", nil)
+	req = withURLParam(req, "issueId", "not-a-uuid")
+	testHandler.GetIssueGCCheck(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GetIssueGCCheck: expected 400 for malformed issueId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSetAgentSkillsRejectsMalformedSkillID(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Malformed Skill Assignment", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID+"/skills", map[string]any{
+		"skill_ids": []string{"not-a-uuid"},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.SetAgentSkills(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("SetAgentSkills: expected 400 for malformed skill_ids, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestAgentCRUD(t *testing.T) {
@@ -1038,7 +1428,7 @@ func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or
 	// using a cancelled context if the query respects it.
-	
+
 	// Create a handler with a "broken" queries object is hard because it's a struct.
 	// Instead, let's use a context that is already cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1053,13 +1443,13 @@ func TestSendCodeDbError(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	testHandler.SendCode(w, req)
-	
+
 	// If the DB query respects the cancelled context, it should return an error.
 	// pgx usually returns context.Canceled which is not what isNotFound checks for.
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-	
+
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] != "failed to lookup user" {
@@ -1153,7 +1543,94 @@ func TestVerifyCode(t *testing.T) {
 	}
 }
 
+func createVerificationCodeForTest(t *testing.T, email, code string) {
+	t.Helper()
+
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO verification_code (email, code, expires_at)
+		VALUES ($1, $2, now() + interval '10 minutes')
+	`, email, code)
+	if err != nil {
+		t.Fatalf("create verification code: %v", err)
+	}
+}
+
+func TestVerifyCodeRejectsDevCodeUnlessExplicitlyConfigured(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "")
+	t.Setenv("APP_ENV", "")
+
+	const email = "dev-code-disabled-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+	})
+
+	createVerificationCodeForTest(t, email, "123456")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "888888"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("VerifyCode (disabled dev code): expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestVerifyCodeAcceptsConfiguredDevCodeOutsideProduction(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "888888")
+	t.Setenv("APP_ENV", "development")
+
+	const email = "dev-code-enabled-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	createVerificationCodeForTest(t, email, "123456")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "888888"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("VerifyCode (enabled dev code): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestVerifyCodeRejectsConfiguredDevCodeInProduction(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "888888")
+	t.Setenv("APP_ENV", "production")
+
+	const email = "dev-code-production-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+	})
+
+	createVerificationCodeForTest(t, email, "123456")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "888888"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("VerifyCode (production dev code): expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestVerifyCodeWrongCode(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "")
+
 	const email = "wrong-code-test@multica.ai"
 	ctx := context.Background()
 
@@ -1182,6 +1659,8 @@ func TestVerifyCodeWrongCode(t *testing.T) {
 }
 
 func TestVerifyCodeBruteForceProtection(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "")
+
 	const email = "bruteforce-test@multica.ai"
 	ctx := context.Background()
 
@@ -1517,5 +1996,281 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "workspace not found") {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
+	}
+}
+
+// TestAgentReplyDoesNotInheritParentMentions verifies that agent-authored
+// replies do NOT inherit parent-comment mentions, preventing agent-to-agent
+// re-trigger loops (e.g. "No reply needed" chains). Member-authored replies
+// still inherit parent mentions as expected.
+func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Create two agents.
+	agentA := createHandlerTestAgent(t, "Loop Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Loop Agent B", nil)
+
+	// Create an unassigned issue so on_comment doesn't fire.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Agent mention inheritance test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Helper: count queued tasks for a given agent on this issue.
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// Helper: cancel all tasks for an agent on this issue.
+	cancelTasks := func(agentID string) {
+		_, err := testPool.Exec(ctx,
+			`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+			issueID, agentID,
+		)
+		if err != nil {
+			t.Fatalf("failed to cancel tasks: %v", err)
+		}
+	}
+
+	postComment := func(issueID string, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		testHandler.CreateComment(w, r)
+		return w
+	}
+
+	// 1. Member posts top-level comment mentioning Agent B.
+	mentionB := fmt.Sprintf("[@Agent B](mention://agent/%s) please review", agentB)
+	w = postComment(issueID, map[string]any{"content": mentionB}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member mention comment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var parentComment CommentResponse
+	json.NewDecoder(w.Body).Decode(&parentComment)
+	if countTasks(agentB) != 1 {
+		t.Fatalf("expected 1 task for Agent B after member mention, got %d", countTasks(agentB))
+	}
+
+	// 2. Cancel Agent B's task so it's free to be re-triggered.
+	cancelTasks(agentB)
+	if countTasks(agentB) != 0 {
+		t.Fatalf("expected 0 tasks for Agent B after cancel, got %d", countTasks(agentB))
+	}
+
+	// 3. Agent A posts a reply in the same thread with NO mentions.
+	// With the fix, this must NOT inherit the parent mention of Agent B.
+	w = postComment(issueID, map[string]any{
+		"content":   "No reply needed — just an acknowledgment.",
+		"parent_id": parentComment.ID,
+	}, map[string]string{"X-Agent-ID": agentA})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A reply: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if countTasks(agentB) != 0 {
+		t.Fatalf("expected 0 tasks for Agent B after agent reply (no parent inheritance), got %d", countTasks(agentB))
+	}
+
+	// 4. Cancel any stray tasks.
+	cancelTasks(agentB)
+
+	// 5. Member posts a reply in the same thread with NO mentions.
+	// This SHOULD inherit the parent mention and re-trigger Agent B.
+	w = postComment(issueID, map[string]any{
+		"content":   "Thanks for the review.",
+		"parent_id": parentComment.ID,
+	}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member reply: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if countTasks(agentB) != 1 {
+		t.Fatalf("expected 1 task for Agent B after member reply (parent inheritance allowed), got %d", countTasks(agentB))
+	}
+}
+
+// TestMemberReplyToAgentRootDoesNotInheritParentMentions is the regression
+// for MUL-1535. When an agent posts a comment that @mentions another agent
+// (e.g. J posting a PR completion that @mentions a reviewer agent), a later
+// member reply in the same thread with no explicit mentions must NOT inherit
+// the @reviewer mention. The reviewer was a one-shot delegation; subsequent
+// member follow-ups are directed at the assignee, not the reviewer.
+func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	jAgent := createHandlerTestAgent(t, "J", nil)
+	reviewerAgent := createHandlerTestAgent(t, "Reviewer", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "PR review delegation no-leak test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// 1. Agent J posts a PR-completion comment that @mentions Reviewer for review.
+	// This is a deliberate handoff and must enqueue a task for Reviewer.
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", jAgent)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("J PR completion: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var rootComment CommentResponse
+	json.NewDecoder(w.Body).Decode(&rootComment)
+	if got := countTasks(reviewerAgent); got != 1 {
+		t.Fatalf("expected 1 task for Reviewer after explicit mention, got %d", got)
+	}
+
+	// Cancel reviewer's task so it's free to be re-triggered if the bug returns.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+		issueID, reviewerAgent,
+	); err != nil {
+		t.Fatalf("cancel reviewer task: %v", err)
+	}
+
+	// 2. Member posts a plain follow-up reply under J's PR comment, with no
+	// explicit mentions. The pre-fix code path inherited mentions from the
+	// parent regardless of the parent author, which re-triggered Reviewer.
+	// With the fix, the reply must NOT inherit because the parent was
+	// authored by an agent.
+	w = httptest.NewRecorder()
+	r = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content":   "How do I test this after merging?",
+		"parent_id": rootComment.ID,
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member follow-up: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTasks(reviewerAgent); got != 0 {
+		t.Fatalf("expected 0 tasks for Reviewer after plain member reply (no inheritance from agent root), got %d", got)
+	}
+}
+
+// TestAgentExplicitMentionStillTriggers documents the boundary the structural
+// fix preserves: suppressing implicit parent-mention inheritance for agent
+// authors does NOT block deliberate handoffs. An agent that explicitly
+// @mentions another agent in its own comment content still enqueues a task
+// for that mentioned agent.
+func TestAgentExplicitMentionStillTriggers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Handoff Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Handoff Agent B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Agent explicit handoff test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countTasks := func(agentID string) int {
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("failed to count tasks: %v", err)
+		}
+		return n
+	}
+
+	// Agent A posts a top-level comment that explicitly @mentions Agent B —
+	// a deliberate handoff. This must enqueue a task for Agent B, and must
+	// not enqueue a self-trigger for Agent A.
+	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": explicitMention,
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", agentA)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTasks(agentB); got != 1 {
+		t.Fatalf("expected 1 task for Agent B after explicit mention by Agent A, got %d", got)
+	}
+	if got := countTasks(agentA); got != 0 {
+		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
 	}
 }

@@ -11,10 +11,10 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
-	EventReactionAdded          = "reaction:added"
-	EventReactionRemoved        = "reaction:removed"
-	EventIssueReactionAdded     = "issue_reaction:added"
-	EventIssueReactionRemoved   = "issue_reaction:removed"
+	EventReactionAdded        = "reaction:added"
+	EventReactionRemoved      = "reaction:removed"
+	EventIssueReactionAdded   = "issue_reaction:added"
+	EventIssueReactionRemoved = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"
@@ -22,13 +22,18 @@ const (
 	EventAgentArchived = "agent:archived"
 	EventAgentRestored = "agent:restored"
 
-	// Task events (server <-> daemon)
-	EventTaskDispatch  = "task:dispatch"
+	// Task events (server <-> daemon).
+	// Each event maps to a status transition on agent_task_queue. Front-end
+	// subscribes by `task:` prefix and invalidates the workspace task
+	// snapshot, so the granularity here is "what does the user want to see
+	// change" — not "every internal status flip".
+	EventTaskQueued    = "task:queued"    // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch  = "task:dispatch"  // queued → dispatched (daemon claim)
 	EventTaskProgress  = "task:progress"
-	EventTaskCompleted = "task:completed"
-	EventTaskFailed    = "task:failed"
+	EventTaskCompleted = "task:completed" // running → completed
+	EventTaskFailed    = "task:failed"    // running → failed
 	EventTaskMessage   = "task:message"
-	EventTaskCancelled = "task:cancelled"
+	EventTaskCancelled = "task:cancelled" // * → cancelled
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
@@ -64,9 +69,11 @@ const (
 	EventChatSessionRead = "chat:session_read"
 
 	// Project events
-	EventProjectCreated = "project:created"
-	EventProjectUpdated = "project:updated"
-	EventProjectDeleted = "project:deleted"
+	EventProjectCreated         = "project:created"
+	EventProjectUpdated         = "project:updated"
+	EventProjectDeleted         = "project:deleted"
+	EventProjectResourceCreated = "project_resource:created"
+	EventProjectResourceDeleted = "project_resource:deleted"
 
 	// Label events
 	EventLabelCreated       = "label:created"
@@ -93,6 +100,8 @@ const (
 	EventAutopilotRunDone  = "autopilot:run_done"
 
 	// Daemon events
-	EventDaemonHeartbeat = "daemon:heartbeat"
-	EventDaemonRegister  = "daemon:register"
+	EventDaemonHeartbeat     = "daemon:heartbeat"
+	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
+	EventDaemonRegister      = "daemon:register"
+	EventDaemonTaskAvailable = "daemon:task_available"
 )

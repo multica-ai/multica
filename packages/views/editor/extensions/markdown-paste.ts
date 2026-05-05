@@ -46,6 +46,16 @@ export function createMarkdownPasteExtension() {
               const text = clipboard.getData("text/plain");
               if (!text) return false;
 
+              // If the caret is inside a code block, insert the text as-is.
+              // Code blocks must keep newlines literal; running Markdown
+              // parsing here would split a blank line (\n\n) into two
+              // paragraphs and tear the code block open. (#1982)
+              const { $from } = view.state.selection;
+              if ($from.parent.type.name === "codeBlock") {
+                view.dispatch(view.state.tr.insertText(text));
+                return true;
+              }
+
               const html = clipboard.getData("text/html");
 
               // If HTML contains data-pm-slice, the source is another

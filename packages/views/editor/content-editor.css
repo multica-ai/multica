@@ -1,5 +1,3 @@
-@import "katex/dist/katex.min.css";
-
 /*
  * ContentEditor typography — ProseMirror styles using shadcn design tokens.
  *
@@ -200,6 +198,91 @@
   padding: 0;
   font-size: 0.8125rem;
   line-height: 1.6;
+}
+
+/* Mermaid diagrams */
+.rich-text-editor .mermaid-diagram {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  padding: 1rem;
+  position: relative;
+}
+
+.rich-text-editor .mermaid-diagram-frame {
+  border: 0;
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.rich-text-editor .mermaid-diagram-loading,
+.rich-text-editor .mermaid-diagram-error p {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.rich-text-editor .mermaid-diagram-error pre {
+  margin-bottom: 0;
+}
+
+/* Mermaid toolbar — dark pill, top-right corner, appears on hover */
+.rich-text-editor .mermaid-diagram-toolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 1px;
+  padding: 0.25rem;
+  background: color-mix(in srgb, black 75%, transparent);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+.rich-text-editor .mermaid-diagram:hover .mermaid-diagram-toolbar,
+.rich-text-editor .mermaid-diagram-toolbar:focus-within {
+  opacity: 1;
+}
+
+.rich-text-editor .mermaid-diagram-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  color: white;
+  transition: background 0.15s;
+}
+
+.rich-text-editor .mermaid-diagram-toolbar button:hover {
+  background: color-mix(in srgb, white 15%, transparent);
+}
+
+/* Mermaid lightbox — full-screen preview (ESC or click backdrop to close) */
+.mermaid-diagram-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, black 80%, transparent);
+  cursor: zoom-out;
+}
+
+.mermaid-diagram-lightbox-frame {
+  border: 0;
+  width: 90vw;
+  height: 90vh;
+  background: transparent;
+  cursor: default;
 }
 
 /* Syntax highlighting — lowlight (hljs) */
@@ -531,4 +614,3 @@
   max-width: min(360px, calc(100vw - 2rem));
   white-space: nowrap;
 }
-

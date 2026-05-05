@@ -75,6 +75,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKimiModels(ctx, executablePath)
 		})
+	case "kiro":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKiroModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -146,7 +150,9 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Default: true},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
+		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
@@ -341,10 +347,10 @@ func parsePiModels(output string) []Model {
 // creatable manual-entry input instead of blocking the form.
 func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:      "hermes",
-		clientName:      "multica-model-discovery",
-		extraEnv:        []string{"HERMES_YOLO_MODE=1"},
-		tmpdirPrefix:    "multica-hermes-discovery-",
+		defaultBin:   "hermes",
+		clientName:   "multica-model-discovery",
+		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix: "multica-hermes-discovery-",
 	})
 }
 
@@ -361,6 +367,16 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+	})
+}
+
+// discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses
+// the models block Kiro returns from session/new.
+func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kiro-cli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kiro-discovery-",
 	})
 }
 
