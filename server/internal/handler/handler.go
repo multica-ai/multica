@@ -47,6 +47,7 @@ type Handler struct {
 	AutopilotService *service.AutopilotService
 	BudgetService    *service.BudgetService
 	EmailService     *service.EmailService
+	PushService      *service.PushService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
@@ -54,7 +55,7 @@ type Handler struct {
 	cfg              Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, cfg Config) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, pushService *service.PushService, store storage.Storage, cfSigner *auth.CloudFrontSigner, cfg Config) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
@@ -71,6 +72,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		BudgetService:    service.NewBudgetService(queries),
 		EmailService:     emailService,
+		PushService:      pushService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
 		Storage:          store,

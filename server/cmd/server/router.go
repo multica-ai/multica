@@ -53,7 +53,7 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *service.PushService) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -76,7 +76,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 	}
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, signupConfig)
+	h := handler.New(queries, pool, hub, bus, emailSvc, pushSvc, store, cfSigner, signupConfig)
 
 	r := chi.NewRouter()
 
@@ -236,6 +236,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Delete("/api/me/profile", h.DeleteMyProfile)
 		r.Patch("/api/me/preferences", h.UpdateMyPreferences)
 		r.Post("/api/cli-token", h.IssueCliToken)
+
+		// Web Push subscriptions (per-device, per-user). The frontend reads
+		// the public key on load to decide whether to show the subscribe UI.
+		r.Get("/api/push/public-key", h.GetPushPublicKey)
+		r.Get("/api/push/subscriptions", h.ListPushSubscriptions)
+		r.Post("/api/push/subscribe", h.SubscribePush)
+		r.Post("/api/push/unsubscribe", h.UnsubscribePush)
 		// /api/upload-file is registered in the task-allowlist group above
 		// so agents can upload attachments while running a task.
 

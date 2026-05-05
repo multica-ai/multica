@@ -83,6 +83,7 @@ import type {
   WorkSession,
   UserProfileResponse,
   UserProfileRequest,
+  PushSubscriptionResponse,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -273,6 +274,35 @@ export class ApiClient {
     return this.fetch("/api/me/preferences", {
       method: "PATCH",
       body: JSON.stringify(patch),
+    });
+  }
+
+  // Web Push (per-device subscriptions). The server returns enabled=false
+  // when VAPID keys aren't configured — callers should hide the subscribe UI
+  // in that case.
+  async getPushPublicKey(): Promise<{ enabled: boolean; publicKey?: string }> {
+    return this.fetch("/api/push/public-key");
+  }
+
+  async listPushSubscriptions(): Promise<PushSubscriptionResponse[]> {
+    return this.fetch("/api/push/subscriptions");
+  }
+
+  async subscribePush(subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    userAgent?: string;
+  }): Promise<PushSubscriptionResponse> {
+    return this.fetch("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify(subscription),
+    });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    await this.fetch("/api/push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ endpoint }),
     });
   }
 

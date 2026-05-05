@@ -27,3 +27,82 @@ const serwist = new Serwist({
 });
 
 serwist.addEventListeners();
+
+// --- Web Push ---------------------------------------------------------------
+// Handlers for incoming push messages and notification clicks. The payload
+// shape is decided server-side in service.PushService.Payload — keep field
+// names in sync.
+
+interface PushPayload {
+  title: string;
+  body?: string;
+  url?: string;
+  tag?: string;
+  issueId?: string;
+  type?: string;
+}
+
+self.addEventListener("push", (event) => {
+  // No payload at all means the browser woke us up with no data attached;
+  // show a generic placeholder rather than nothing so the user knows
+  // something happened.
+  let payload: PushPayload = { title: "Multica", body: "You have a new notification" };
+  if (event.data) {
+    try {
+      payload = event.data.json() as PushPayload;
+    } catch {
+      const text = event.data.text();
+      if (text) {
+        payload = { title: "Multica", body: text };
+      }
+    }
+  }
+
+  const url = payload.url ?? "/";
+  const title = payload.title || "Multica";
+
+  // renotify=true plays the sound/vibrate even when a same-tag notification
+  // is already on screen, so a follow-up comment still grabs attention on
+  // iOS. Cast through NotificationOptions because lib.webworker.d.ts in this
+  // TS version doesn't include renotify yet, even though browsers support it.
+  const opts: NotificationOptions = {
+    body: payload.body,
+    // tag collapses bursts on the same issue into one visible notification.
+    tag: payload.tag,
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: { url, issueId: payload.issueId, type: payload.type },
+  };
+  if (payload.tag) {
+    (opts as NotificationOptions & { renotify?: boolean }).renotify = true;
+  }
+  event.waitUntil(self.registration.showNotification(title, opts));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = (event.notification.data ?? {}) as { url?: string };
+  const targetUrl = data.url || "/";
+
+  event.waitUntil(
+    (async () => {
+      // Focus an existing client if the app is already open; otherwise launch.
+      const all = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      const target = new URL(targetUrl, self.location.origin);
+      for (const client of all) {
+        const clientUrl = new URL(client.url);
+        if (clientUrl.origin === target.origin) {
+          await client.focus();
+          if ("navigate" in client) {
+            await client.navigate(target.href).catch(() => undefined);
+          }
+          return;
+        }
+      }
+      await self.clients.openWindow(target.href);
+    })(),
+  );
+});

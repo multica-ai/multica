@@ -7,10 +7,37 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// pushNotifier is set once at register time. Used by notify* helpers to fan
+// inbox items out to the recipient's web-push subscriptions in addition to
+// the existing in-app inbox/realtime delivery. Nil-safe — Web Push is opt-in
+// per device, and not every deployment has VAPID keys configured.
+var pushNotifier *service.PushService
+
+// pushItemToMember sends a Web Push to recipientID's subscribed devices
+// describing the just-created inbox item. Only members get pushes — agents
+// don't have devices.
+func pushItemToMember(ctx context.Context, recipientType, recipientID, issueID, notifType, title, body string) {
+	if pushNotifier == nil || !pushNotifier.Enabled() {
+		return
+	}
+	if recipientType != "member" || recipientID == "" {
+		return
+	}
+	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
+		Title:   title,
+		Body:    body,
+		URL:     "/?issue=" + issueID,
+		Tag:     "issue:" + issueID,
+		IssueID: issueID,
+		Type:    notifType,
+	})
+}
 
 // mention represents a parsed @mention from markdown content (local alias).
 type mention struct {
@@ -210,6 +237,7 @@ func notifyIssueSubscribers(
 			ActorID:     e.ActorID,
 			Payload:     map[string]any{"item": resp},
 		})
+		pushItemToMember(ctx, "member", subID, targetIssueID, notifType, title, body)
 	}
 
 	return notified
@@ -278,6 +306,7 @@ func notifyDirect(
 		ActorID:     e.ActorID,
 		Payload:     map[string]any{"item": resp},
 	})
+	pushItemToMember(ctx, recipientType, recipientID, issueID, notifType, title, body)
 }
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
@@ -357,6 +386,7 @@ func notifyMentionedMembers(
 			ActorID:     e.ActorID,
 			Payload:     map[string]any{"item": resp},
 		})
+		pushItemToMember(ctx, "member", id, issueID, "mentioned", title, "")
 	}
 }
 
@@ -367,7 +397,8 @@ func notifyMentionedMembers(
 // NOTE: uses context.Background() because the event bus dispatches synchronously
 // within the HTTP request goroutine. Adding per-handler timeouts is a bus-level
 // concern — see events.Bus for future improvements.
-func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
+func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc *service.PushService) {
+	pushNotifier = pushSvc
 	ctx := context.Background()
 
 	// issue:created — Direct notification to assignee if assignee != actor

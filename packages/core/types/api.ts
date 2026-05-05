@@ -104,6 +104,14 @@ export interface UpdateMemberRequest {
   role: MemberRole;
 }
 
+// Web Push (per-device subscription)
+export interface PushSubscriptionResponse {
+  id: string;
+  endpoint: string;
+  user_agent?: string | null;
+  created_at: string;
+}
+
 // Personal Access Tokens
 export interface PersonalAccessToken {
   id: string;

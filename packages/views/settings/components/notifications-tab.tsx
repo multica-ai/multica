@@ -17,6 +17,7 @@ import {
   getAutoSubscribe,
   type AutoSubscribeReason,
 } from "@multica/core/notifications";
+import { PushNotificationsSection } from "./push-notifications-section";
 
 interface RowSpec {
   routingKey: RoutingKey;
@@ -228,6 +229,8 @@ export function NotificationsTab() {
         savingReason={savingAutoSub}
         onChange={handleAutoSubscribeChange}
       />
+
+      <PushNotificationsSection />
     </div>
   );
 }
