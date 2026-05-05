@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(chat-status-line): cerebro modification of upstream file
+
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { taskMessagesOptions } from "@multica/core/chat/queries";

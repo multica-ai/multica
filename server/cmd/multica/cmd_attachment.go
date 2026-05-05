@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(attachment-cli): cerebro modification of upstream file
+
 import (
 	"context"
 	"fmt"

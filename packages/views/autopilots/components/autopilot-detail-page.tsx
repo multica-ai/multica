@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(autopilots-autopilot-detail-page): cerebro modification of upstream file
+
 import { useState, useEffect } from "react";
 import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-workspace-pause): cerebro modification of upstream file
 -- Fork-specific: workspace-level kill switch for agent tasks.
 -- Kept in a dedicated file so upstream-merges don't conflict on the canonical workspace.sql / agent.sql.
 

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-issue): cerebro modification of upstream file
 import type { Attachment } from "./attachment";
 
 export type IssueStatus =

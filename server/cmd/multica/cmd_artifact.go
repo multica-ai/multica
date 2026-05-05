@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(artifact-cli-cmd-artifact): cerebro modification of upstream file
+
 import (
 	"context"
 	"fmt"

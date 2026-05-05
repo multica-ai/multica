@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(privacy-toggle): cerebro modification of upstream file
+
 import { Lock, Globe } from "lucide-react";
 import {
   Tooltip,

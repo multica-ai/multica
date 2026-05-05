@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(agent-handler): cerebro modification of upstream file
+
 import (
 	"bytes"
 	"encoding/json"

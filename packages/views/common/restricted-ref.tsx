@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(restricted-ref): cerebro modification of upstream file
+
 import { Lock } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {

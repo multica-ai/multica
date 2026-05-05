@@ -1,5 +1,7 @@
 package agent
 
+// CEREBRO-PATCH(agent-gemini-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"

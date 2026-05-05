@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(board-view-cerebro): cerebro modification of upstream file
+
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,

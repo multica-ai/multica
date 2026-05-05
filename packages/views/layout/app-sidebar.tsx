@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(app-sidebar-cerebro): cerebro modification of upstream file
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../navigation";

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-pin): cerebro modification of upstream file
 export type PinnedItemType = "issue" | "project" | "chat_session";
 
 export interface PinnedItem {

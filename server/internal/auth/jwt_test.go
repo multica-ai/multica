@@ -1,5 +1,7 @@
 package auth
 
+// CEREBRO-PATCH(auth-jwt-test): cerebro modification of upstream file
+
 import (
 	"strings"
 	"testing"

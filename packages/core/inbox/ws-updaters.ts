@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-inbox-ws-updaters): cerebro modification of upstream file
 import type { QueryClient } from "@tanstack/react-query";
 import { inboxKeys } from "./queries";
 import { notificationsKeys } from "@multica/cerebro-notifications/core/queries";

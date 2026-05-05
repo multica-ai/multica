@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(multica-cli-cerebro-cmds): cerebro modification of upstream file
+
 import (
 	"fmt"
 	"os"

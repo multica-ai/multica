@@ -1,5 +1,7 @@
 package mcp
 
+// CEREBRO-PATCH(mcp-server): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"

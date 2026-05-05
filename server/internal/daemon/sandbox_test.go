@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-sandbox-test): cerebro modification of upstream file
+
 import (
 	"log/slog"
 	"slices"

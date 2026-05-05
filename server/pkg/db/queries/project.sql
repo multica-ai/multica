@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-project): cerebro modification of upstream file
 -- name: ListProjects :many
 SELECT * FROM project
 WHERE workspace_id = $1

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-projects-config): cerebro modification of upstream file
 import type { ProjectStatus, ProjectPriority } from "../types";
 
 export const PROJECT_COLORS: { value: string; label: string; bg: string; text: string; dot: string }[] = [

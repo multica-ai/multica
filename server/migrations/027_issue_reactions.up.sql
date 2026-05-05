@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-027-issue-reactions): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS issue_reaction (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     issue_id UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,

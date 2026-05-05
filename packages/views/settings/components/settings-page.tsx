@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(settings-page-cerebro): cerebro modification of upstream file
+
 import React from "react";
 import { User, Palette, Key, Settings, Users, FolderGit2, Sparkles, Bell, BookText } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";

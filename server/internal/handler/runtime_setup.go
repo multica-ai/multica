@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(runtime-setup-handler): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"fmt"

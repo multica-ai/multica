@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(workspace-reserved-slugs-cerebro): cerebro modification of upstream file
+
 // reservedSlugs are workspace slugs that would collide with frontend top-level
 // routes, platform features, or web standards. The frontend URL shape is
 // /{workspaceSlug}/... so any slug that matches a top-level route or a

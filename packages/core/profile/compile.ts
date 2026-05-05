@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-compile): cerebro modification of upstream file
 import { PERSONA_PRESETS } from "./presets";
 import type { Language, Profile } from "./schema";
 

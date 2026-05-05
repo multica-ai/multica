@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(readonly-content-cerebro): cerebro modification of upstream file
+
 /**
  * ReadonlyContent — lightweight markdown renderer for readonly content display.
  *

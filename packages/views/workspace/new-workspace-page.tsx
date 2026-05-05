@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(new-workspace-page-cerebro): cerebro modification of upstream file
+
 import { ArrowLeft, LogOut } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Workspace } from "@multica/core/types";

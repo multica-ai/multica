@@ -1,5 +1,7 @@
 package profile
 
+// CEREBRO-PATCH(profile-compile): cerebro modification of upstream file
+
 import (
 	"strings"
 	"testing"

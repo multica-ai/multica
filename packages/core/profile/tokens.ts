@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-tokens): cerebro modification of upstream file
 // Token estimation for the live preview panel.
 //
 // Anthropic does not expose their tokenizer publicly, and pulling the OpenAI

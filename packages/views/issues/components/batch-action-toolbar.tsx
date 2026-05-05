@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(batch-action-toolbar-cerebro): cerebro modification of upstream file
+
 import { useState } from "react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";

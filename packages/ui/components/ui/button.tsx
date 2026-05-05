@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(ui-button-cerebro): cerebro modification of upstream file
 "use client"
 
 import { Button as ButtonPrimitive } from "@base-ui/react/button"

@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-integration-test): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"

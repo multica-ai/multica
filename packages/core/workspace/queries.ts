@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-workspace-queries): cerebro modification of upstream file
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { Workspace } from "../types";

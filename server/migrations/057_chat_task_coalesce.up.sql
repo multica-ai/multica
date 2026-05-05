@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-057-chat-task-coalesce): cerebro modification of upstream file
 -- Enforce at most one queued chat task per chat_session.
 -- Backs the coalesce logic in EnqueueChatTask: when the user sends multiple
 -- messages while an agent is already mid-turn, we keep one running task plus

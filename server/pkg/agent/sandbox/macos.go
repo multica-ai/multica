@@ -20,6 +20,8 @@
 // a bug or is bypassed: the seatbelt is the failsafe.
 package sandbox
 
+// CEREBRO-PATCH(agent-sandbox-macos): cerebro modification of upstream file
+
 import (
 	"fmt"
 	"net"

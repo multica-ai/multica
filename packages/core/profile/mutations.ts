@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-mutations): cerebro modification of upstream file
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { UserProfileRequest, UserProfileResponse } from "../types";

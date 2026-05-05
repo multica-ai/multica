@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-runtime): cerebro modification of upstream file
 -- name: ListAgentRuntimes :many
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-reserved-slugs-cerebro): cerebro modification of upstream file
 /**
  * Slugs reserved because they collide with frontend top-level routes,
  * platform features, or web standards.

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-009-verification-code): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS verification_code (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT NOT NULL,

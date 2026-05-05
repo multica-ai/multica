@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(project-access-tab): cerebro modification of upstream file
+
 import { useState, useMemo } from "react";
 import { Lock, Check } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";

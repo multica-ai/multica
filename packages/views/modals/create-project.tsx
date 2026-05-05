@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(create-project-modal-cerebro): cerebro modification of upstream file
+
 import { useState, useRef } from "react";
 import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

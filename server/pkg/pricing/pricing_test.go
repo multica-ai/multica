@@ -1,5 +1,7 @@
 package pricing
 
+// CEREBRO-PATCH(pricing-pricing-test): cerebro modification of upstream file
+
 import "testing"
 
 func TestComputeCents_KnownModels(t *testing.T) {

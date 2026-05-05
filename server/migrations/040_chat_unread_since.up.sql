@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-040-chat-unread-since): cerebro modification of upstream file
 -- Event-driven unread tracking for chat sessions.
 --
 -- Semantics: unread_since is the timestamp of the first unread assistant

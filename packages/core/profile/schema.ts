@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-schema): cerebro modification of upstream file
 // User communication profile (JEH-304). Mirrors the user_profile table.
 
 export const PERSONAS = ["utalmodig", "ekspert", "grundig", "larling"] as const;

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-003-task-context): cerebro modification of upstream file
 -- Add context snapshot to agent tasks so daemons have everything needed to execute
 ALTER TABLE agent_task_queue
     ADD COLUMN IF NOT EXISTS context JSONB;

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-index): cerebro modification of upstream file
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
 export type {
   Agent,

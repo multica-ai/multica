@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(inbox-list-item-cerebro): cerebro modification of upstream file
+
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive } from "lucide-react";

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-artifact-folder): cerebro modification of upstream file
 -- name: CreateArtifactFolder :one
 INSERT INTO artifact_folder (id, workspace_id, parent_id, name)
 VALUES ($1, $2, sqlc.narg(parent_id), $3)

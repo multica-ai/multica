@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
 import { api } from "@multica/core/api";

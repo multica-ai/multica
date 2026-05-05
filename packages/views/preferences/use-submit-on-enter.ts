@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(use-submit-on-enter): cerebro modification of upstream file
 import { useAuthStore } from "@multica/core/auth";
 
 /**

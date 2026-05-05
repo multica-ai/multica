@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(runtime-handler-runtime): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"log/slog"

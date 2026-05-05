@@ -1,4 +1,5 @@
 {
+  "_comment": "CEREBRO-PATCH(core-package-cerebro-deps): adds inbox/folders + profile/* exports for cerebro features",
   "name": "@multica/core",
   "version": "0.0.0",
   "private": true,

@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(restricted-lock): cerebro modification of upstream file
+
 import { Lock } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";

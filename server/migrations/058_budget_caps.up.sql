@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-058-budget-caps): cerebro modification of upstream file
 -- Budget cap kill-switch (JEH-327).
 --
 -- Two independent axes (per-user, per-agent) plus a workspace-level safety

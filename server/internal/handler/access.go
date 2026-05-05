@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(access-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"net/http"

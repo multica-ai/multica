@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-workspace): cerebro modification of upstream file
 export type MemberRole = "owner" | "admin" | "member";
 
 export interface WorkspaceRepo {

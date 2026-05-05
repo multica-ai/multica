@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(chat-tool-summary): cerebro modification of upstream file
 import type { ChatTimelineItem } from "@multica/core/chat";
 
 function shortenPath(p: string): string {

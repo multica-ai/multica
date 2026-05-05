@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(runtimes-utils-cerebro): cerebro modification of upstream file
 import type { RuntimeUsage } from "@multica/core/types";
 
 // ---------------------------------------------------------------------------

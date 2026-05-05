@@ -1,5 +1,7 @@
 package events
 
+// CEREBRO-PATCH(events-bus-cerebro): cerebro modification of upstream file
+
 import (
 	"log/slog"
 	"sync"

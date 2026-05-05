@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-chat): cerebro modification of upstream file
 -- name: CreateChatSession :one
 INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
 VALUES ($1, $2, $3, $4)

@@ -7,6 +7,8 @@
 // task-claim time. If you change one, change the other.
 package profile
 
+// CEREBRO-PATCH(profile-compile): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"fmt"

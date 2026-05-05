@@ -1,5 +1,7 @@
 package mcp
 
+// CEREBRO-PATCH(mcp-repo-config): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"errors"

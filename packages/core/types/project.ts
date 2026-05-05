@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-project): cerebro modification of upstream file
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";

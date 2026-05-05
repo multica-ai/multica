@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(chat-input-mcp-onboarding): cerebro modification of upstream file
+
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
 import {

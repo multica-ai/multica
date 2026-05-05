@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-008-structured-skills): cerebro modification of upstream file
 -- Structured Skills: workspace-level skill entities with supporting files
 -- and many-to-many agent-skill associations.
 

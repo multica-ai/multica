@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-types): cerebro modification of upstream file
+
 import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.

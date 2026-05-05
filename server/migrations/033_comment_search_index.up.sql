@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-033-comment-search-index): cerebro modification of upstream file
 -- GIN index on comment content for LIKE '%keyword%' queries (pg_bigm).
 -- Only created when pg_bigm is installed.
 DO $$

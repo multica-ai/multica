@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-paths-cerebro): cerebro modification of upstream file
 /**
  * Centralized URL path builder. All navigation in shared packages (packages/views)
  * MUST go through this module — no hardcoded string paths.

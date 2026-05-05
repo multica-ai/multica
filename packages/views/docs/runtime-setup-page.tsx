@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(runtime-setup-page): cerebro modification of upstream file
+
 import { ArrowLeft, Server, Terminal, Apple } from "lucide-react";
 import { useNavigation } from "../navigation";
 import { useWorkspaceId } from "@multica/core/hooks";

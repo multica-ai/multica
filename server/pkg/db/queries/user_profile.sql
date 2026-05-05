@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-user-profile): cerebro modification of upstream file
 -- name: GetUserProfile :one
 SELECT * FROM user_profile
 WHERE user_id = $1;

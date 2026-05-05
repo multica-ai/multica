@@ -3,6 +3,8 @@
 // checked out on demand by the agent via `multica repo checkout`.
 package execenv
 
+// CEREBRO-PATCH(daemon-execenv): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"fmt"

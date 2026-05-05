@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(auth-master-code-handler): cerebro modification of upstream file
+
 import (
 	"bytes"
 	"context"

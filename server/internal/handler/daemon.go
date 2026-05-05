@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(daemon-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"crypto/sha256"

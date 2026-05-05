@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(inbox-folder-handler): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"net/http"

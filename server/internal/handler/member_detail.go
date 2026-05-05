@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(member-detail-handler): cerebro modification of upstream file
+
 // member_detail.go: admin endpoints behind the click-into-member detail
 // page reachable from Settings → Members. Each handler is a small,
 // self-contained PATCH/GET that defaults to the safe behavior on any

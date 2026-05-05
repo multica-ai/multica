@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(projects-page-cerebro): cerebro modification of upstream file
+
 import { useState, useCallback } from "react";
 import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(chat-handler-chat-coalesce-test): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"

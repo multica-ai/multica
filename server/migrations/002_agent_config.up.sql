@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-002-agent-config): cerebro modification of upstream file
 -- Add agent configuration columns: skills, tools, triggers
 ALTER TABLE agent
     ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',

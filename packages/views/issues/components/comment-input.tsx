@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(comment-input-cerebro): cerebro modification of upstream file
+
 import { useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";

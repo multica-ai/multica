@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-agent): cerebro modification of upstream file
 -- name: ListAgents :many
 SELECT * FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL

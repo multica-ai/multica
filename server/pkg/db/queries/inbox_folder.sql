@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-inbox-folder): cerebro modification of upstream file
 -- name: ListInboxFolders :many
 SELECT * FROM inbox_folder
 WHERE workspace_id = $1 AND user_id = $2

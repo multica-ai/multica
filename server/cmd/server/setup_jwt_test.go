@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(server-setup-jwt-test): cerebro modification of upstream file
+
 import "os"
 
 func init() {

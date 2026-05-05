@@ -1,5 +1,7 @@
 package realtime
 
+// CEREBRO-PATCH(realtime-setup-jwt-test): cerebro modification of upstream file
+
 import "os"
 
 func init() {

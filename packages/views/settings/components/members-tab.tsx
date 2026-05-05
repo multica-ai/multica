@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(members-tab-cerebro): cerebro modification of upstream file
+
 import { useState } from "react";
 import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-039-project-search-index): cerebro modification of upstream file
 -- Add GIN bigram indexes on project title and description for search.
 DO $$
 BEGIN

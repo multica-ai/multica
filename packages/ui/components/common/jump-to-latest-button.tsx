@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(ui-jump-to-latest-button): cerebro modification of upstream file
+
 import { ChevronDown } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";

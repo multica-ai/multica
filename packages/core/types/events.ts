@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-events): cerebro modification of upstream file
 import type { Issue, IssueReaction } from "./issue";
 import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";

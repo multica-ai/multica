@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-api): cerebro modification of upstream file
 import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";

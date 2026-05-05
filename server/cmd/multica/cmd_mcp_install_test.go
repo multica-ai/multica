@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-install-test): cerebro modification of upstream file
+
 import (
 	"os"
 	"path/filepath"

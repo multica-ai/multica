@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(reply-input-cerebro): cerebro modification of upstream file
+
 import { useRef, useState, useEffect, useCallback } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";

@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(board-column-cerebro): cerebro modification of upstream file
+
 import { useMemo, type ReactNode } from "react";
 import { EyeOff, MoreHorizontal, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";

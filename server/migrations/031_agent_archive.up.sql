@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-031-agent-archive): cerebro modification of upstream file
 -- Add archive support to agents (soft-delete replacement).
 -- archived_at IS NOT NULL means the agent is archived.
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL;

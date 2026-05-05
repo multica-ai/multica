@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-054-inbox-folder-parent): cerebro modification of upstream file
 -- Subfolder support: each folder may have a parent folder belonging to the
 -- same user. Top-level folders have parent_id NULL. Cycle prevention is
 -- enforced in application code.

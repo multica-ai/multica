@@ -1,6 +1,6 @@
 "use client";
 
-// CEREBRO-PATCH: SA3 — L3-marked (cannot wrap cleanly).
+// CEREBRO-PATCH(SA3-project-picker): L3-marked (cannot wrap cleanly).
 // Two intertwined deviations from upstream:
 //   1) Replaces ProjectIcon with inline icon/color-dot rendering
 //   2) Adds RestrictedLock indicator after icon, in both trigger and items

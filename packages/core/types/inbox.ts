@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-inbox): cerebro modification of upstream file
 import type { IssueStatus } from "./issue";
 
 export type InboxSeverity = "action_required" | "attention" | "info";

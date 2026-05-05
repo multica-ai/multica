@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-presets): cerebro modification of upstream file
 import type { Language, Persona, Profile } from "./schema";
 
 // Persona presets seed sliders + curate a small starter set of anti-patterns.

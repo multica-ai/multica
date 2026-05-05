@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-058-budget-caps): cerebro modification of upstream file
 DROP TABLE IF EXISTS budget_change_log;
 DROP TABLE IF EXISTS budget_state;
 DROP TABLE IF EXISTS agent_budget_override;

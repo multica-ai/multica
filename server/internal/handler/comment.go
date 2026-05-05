@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(comment-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"

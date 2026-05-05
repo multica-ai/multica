@@ -1,5 +1,7 @@
 package service
 
+// CEREBRO-PATCH(service-workspace-pause): cerebro modification of upstream file
+
 import (
 	"context"
 	"fmt"

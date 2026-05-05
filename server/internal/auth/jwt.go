@@ -1,5 +1,7 @@
 package auth
 
+// CEREBRO-PATCH(auth-jwt): cerebro modification of upstream file
+
 import (
 	"crypto/rand"
 	"crypto/sha256"

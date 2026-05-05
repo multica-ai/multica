@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-053-inbox-folders): cerebro modification of upstream file
 -- Per-user inbox folders (labels) for organizing chat sessions and notifications.
 -- Replaces chat-session pinning in the inbox UI. Items with at least one folder
 -- membership disappear from the default inbox view and appear in their folder(s).

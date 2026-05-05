@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(chat-handler-chat): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"log/slog"

@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
+
 import { useEffect, useState } from "react";
 import { Save, LogOut } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";

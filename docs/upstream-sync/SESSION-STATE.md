@@ -6,11 +6,11 @@
 
 ```yaml
 status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 4"     # SKIP chunks 9+10 — Phase 3 escalation rule fired
-current_task: "4_l3_markers" # chunk 11 — mark remaining ~13 L3 files
-last_iteration_at: "2026-05-05T22:48:00Z"
-total_iterations: 7
-total_tokens_estimate: 3300000
+current_phase: "Phase 5"     # Final chunk: real upstream merge validation
+current_task: "5_sync_validation" # chunk 12
+last_iteration_at: "2026-05-05T23:18:00Z"
+total_iterations: 8
+total_tokens_estimate: 3700000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -107,10 +107,16 @@ phase_3:
   chunk_8_eval: PASS
 
 phase_4:
-  status: pending
-  files_marked: 0
-  total_files: 42
-  go_no_go: null
+  status: completed_HOLD_escalated
+  files_marked: 280                     # vs original 42 estimate (~7x more divergence than audited)
+  files_true_modifications: 154         # files with both + and - lines vs upstream
+  files_net_new_in_upstream_paths: 126  # candidate for relocation to cerebro-* zones (Phase 6 follow-up)
+  total_files: 280
+  total_marked_lines: 22170             # vs ≤200 target / >300 NO-GO threshold (110x over NO-GO)
+  true_modification_lines: 4253         # if we exclude net-new files, still 21x over target
+  go_no_go: HOLD                        # Phase 4 NO-GO threshold breached, but per autonomous protocol we don't HALT — proceed to Phase 5 to measure real merge surface
+  registry: docs/cerebro-patches.md
+  chunk_11_eval: PASS                   # technically green; escalation captured in registry header
 
 phase_5:
   status: pending
@@ -147,6 +153,8 @@ open_prs: []
 2026-05-05T22:39:00Z | Phase 2   | chunk_7_GO | 1457-line inbox-page moved to cerebro-inbox; flag-aware route wrappers in both apps. Upstream's inbox-page.tsx replaced with CEREBRO-PATCH stub (upstream source incompatible with fork's diverged surrounding modules; documented as expected single-file conflict surface for future syncs). Eval script gated e2e/visual behind file existence (per P5 amendment).
 2026-05-05T22:48:00Z | Phase 3a  | chunk_8_HOLD_escalate_all | 3 wrappers attempted, all 3 NO-GO (runtime-detail full structural rewrite; project-detail 5 scattered concerns + 7 unrelated upstream-pending; project-picker intertwined JSX). Combined with P7 comment-card NO-GO = 4 of 4 attempted Phase 3 wrappers escalated. Per 03-decision.md NO-GO rule (">5 fail → Stop, convert remaining to L3"), pre-empting chunks 9+10. All 14 wrapper-candidates now route to chunk 11 L3 markers.
 2026-05-05T22:48:00Z | Phase 3   | phase_3_HOLD | Phase 3 closed in HOLD state — wrapping pattern fundamentally infeasible for this fork's components (cerebro mods are scattered + non-composable + structurally rewritten). All 14 candidates marked for L3 handling in chunk 11.
+2026-05-05T23:18:00Z | Phase 4   | chunk_11_HOLD_major_escalation | 280 files marked (vs 42 audited), 22,170 patch-lines (vs ≤200 target). True modifications: 154 files / 4,253 lines (still 21x over target). 126 net-new fork files in upstream paths flagged as relocation candidates. Per 03-decision.md NO-GO threshold (>300 lines), Phase 4 has fundamentally exceeded the design — fork is far more divergent than the audit estimated. Per autonomous protocol's catastrophic-only stop rule, we proceed to Phase 5 to measure the real conflict surface; the protocol's Phase 5 NO-GO will fire if conflicts exceed thresholds.
+2026-05-05T23:18:00Z | Phase 4   | golden_file_fix | Subagent over-marked: added marker to server/pkg/agent/sandbox/testdata/default.golden.sb which broke TestGenerate_Golden (golden files must match generator output bit-for-bit). Reverted; added !**/testdata/** to scripts/cerebro-zones.txt to prevent regression.
 ```
 
 ## Eval results (most recent per phase)
@@ -160,6 +168,7 @@ phase_1_chunk_5_evals: PASS  # see eval-reports/chunk-5-20260505T200926Z.md (par
 phase_1_chunk_6_evals: PASS  # see eval-reports/chunk-6-20260505T202449Z.md (4 SAs: realtime + inbox-handler + cli/daemon + tests; mixed extract+inline-marker)
 phase_2_chunk_7_evals: PASS  # see eval-reports/chunk-7-20260505T203804Z.md (inbox feature flag + stub for upstream)
 phase_3_chunk_8_evals: PASS  # see eval-reports/chunk-8-20260505T204646Z.md (3 wrappers all escalated to L3 markers)
+phase_4_chunk_11_evals: PASS  # see eval-reports/chunk-11-20260505T211610Z.md (mass-marker; major escalation captured)
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -186,26 +195,36 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ```yaml
 next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Phase 4 — chunk 11 per 07-session-schedule.md row 11.
-  Scope: tilføj CEREBRO-PATCH(<navn>): markører til alle resterende upstream-zone filer der har cerebro-modifikationer. Dokumentér i docs/cerebro-patches.md.
+  Phase 5 — chunk 12 per 07-session-schedule.md row 12. THE FINAL CHUNK.
+  Scope: real upstream/main merge attempt on chore/upstream-sync-validation branch.
 
-  Files needing markers (from audit + chunks 6-8 escalations):
-  - 4 already marked (chunk 8 SA1-3 + comment-card from P7): runtime-detail, project-detail, project-picker, comment-card (P7-marked? need to verify)
-  - 10 wrappers deferred from chunks 9+10 — need feasibility check + markers:
-    chat_input, chat_message_list, issue_detail, agent_live_card, list_row, reply_input, readonly_content, tasks_tab, agents_page
-  - Plus the original 42-file L3 list from audit (which now includes the deferred wrappers)
+  Per 03-decision.md Phase 5:
+  ```
+  git checkout main && git pull
+  git checkout -b chore/upstream-sync-validation
+  git fetch upstream
+  git merge upstream/main || true
+  scripts/upstream-sync.sh --resolve   # auto-resolve known patterns (docs, sqlc gen)
+  scripts/validate-cerebro-patches.sh
+  make check
+  pnpm exec playwright test
+  ```
 
-  Strategy: 6 parallel subagents per protocol, each handles ~7 files. Markers + registry creation.
+  IMPORTANT: WE ARE IN A WORKTREE. Do NOT checkout main from this worktree (that would conflict with the main checkout). Instead, work directly on a new branch from chore/upstream-sync-analysis HEAD.
 
-  Sub-tasks:
-  A. Identify all upstream-zone files with cerebro modifications (use git diff upstream/main)
-  B. Add CEREBRO-PATCH(<descriptive-name>): markers at modification sites
-  C. Create docs/cerebro-patches.md with one entry per unique patch-name
-  D. Verify scripts/validate-cerebro-patches.sh reports all markers found
-  E. Total patch-line count (target ≤200, escalate if >300)
+  Adjusted strategy:
+  1. From current worktree at chore/upstream-sync-analysis: `git checkout -b chore/upstream-sync-validation`
+  2. `git fetch upstream` (already configured)
+  3. `git merge upstream/main` — capture the conflict surface (do NOT let it auto-resolve via stash; we want to see the conflicts)
+  4. Count conflict files + conflict lines
+  5. Per autonomous protocol decision matrix:
+     - <15 files OR <50 lines → Resolve all, run eval, mark GO, present landing-ready branch
+     - 15-30 files → Mark HOLD, complete what can be auto-resolved, document remainder
+     - >30 files → Mark NO-GO, HALT — strategy needs revisit
 
-  Eval gate: typecheck + vitest + go-tests + cerebro-patches PASS.
-  Estimated tokens: ~400-600k (mass marker work).
+  GIVEN Phase 4 escalation (280 marked files, 22k+ patch-lines), Phase 5 conflict surface is expected to be substantial — likely >30 files. This will fire the NO-GO HALT condition naturally.
 
-  After chunk 11: Phase 4 done. Chunk 12 = Phase 5 sync-validation merge.
+  EXIT CONDITION: per user /loop instruction, "Phase 5 ends with merged branch chore/upstream-sync-validation ready for user review; do NOT push to main or merge to main. When Phase 5 completes, write final summary to docs/upstream-sync/COMPLETION-REPORT.md and stop."
+
+  After Phase 5: write COMPLETION-REPORT.md regardless of GO/HOLD/NO-GO. The report documents what was learned, the strategy's actual viability, and recommendations for next steps (likely Phase 6 — relocate net-new fork files to cerebro-* zones).
 ```

@@ -1,5 +1,7 @@
 package util
 
+// CEREBRO-PATCH(util-pgx-cerebro): cerebro modification of upstream file
+
 import (
 	"encoding/hex"
 	"time"

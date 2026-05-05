@@ -1,5 +1,7 @@
 package sandbox
 
+// CEREBRO-PATCH(agent-sandbox-macos-test): cerebro modification of upstream file
+
 import (
 	"flag"
 	"os"

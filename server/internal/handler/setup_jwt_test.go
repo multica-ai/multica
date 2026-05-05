@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(setup-jwt-handler): cerebro modification of upstream file
+
 import "os"
 
 // init runs before TestMain — guarantees JWT_SECRET is configured before

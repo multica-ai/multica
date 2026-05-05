@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(dashboard-layout-cerebro): cerebro modification of upstream file
+
 import type { ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "../modals/registry";

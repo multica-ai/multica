@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-agent): cerebro modification of upstream file
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
 export type AgentRuntimeMode = "local" | "cloud";

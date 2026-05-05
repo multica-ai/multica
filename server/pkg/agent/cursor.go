@@ -1,5 +1,7 @@
 package agent
 
+// CEREBRO-PATCH(agent-cursor-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"

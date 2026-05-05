@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-work-session): cerebro modification of upstream file
 -- name: CreateWorkSession :one
 INSERT INTO work_session (workspace_id, issue_id, user_id, session_type, work_dir, branch)
 VALUES ($1, $2, $3, $4, $5, $6)

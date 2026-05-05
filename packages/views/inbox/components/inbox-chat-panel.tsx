@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(inbox-chat-panel): cerebro modification of upstream file
+
 import { useCallback, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";

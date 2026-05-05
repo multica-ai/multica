@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(issue-detail-cerebro-extras): cerebro modification of upstream file
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";

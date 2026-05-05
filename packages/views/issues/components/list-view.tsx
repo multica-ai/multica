@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(list-view-cerebro): cerebro modification of upstream file
+
 import { useMemo } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";

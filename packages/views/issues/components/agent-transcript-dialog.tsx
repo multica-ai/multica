@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(agent-transcript-dialog): cerebro modification of upstream file
+
 import { useState, useRef, useCallback, useEffect } from "react";
 import {
   Bot,

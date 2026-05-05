@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(workspace-handler-cerebro): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"log/slog"

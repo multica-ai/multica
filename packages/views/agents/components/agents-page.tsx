@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(agents-page-cerebro-extras): cerebro modification of upstream file
+
 import { useState, useEffect, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, Bot, Plus, Archive } from "lucide-react";

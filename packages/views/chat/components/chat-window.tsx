@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(chat-window-cerebro): cerebro modification of upstream file
+
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Minus, Maximize2, Minimize2, ChevronDown, Bot, Plus, Check } from "lucide-react";

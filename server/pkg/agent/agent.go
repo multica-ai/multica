@@ -3,6 +3,8 @@
 // pattern, translated to idiomatic Go.
 package agent
 
+// CEREBRO-PATCH(agent-cerebro): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"

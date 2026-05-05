@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(kill-switch-section): cerebro modification of upstream file
+
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Switch } from "@multica/ui/components/ui/switch";

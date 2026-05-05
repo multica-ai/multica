@@ -1,5 +1,7 @@
 package middleware
 
+// CEREBRO-PATCH(middleware-scope-test): cerebro modification of upstream file
+
 import (
 	"net/http"
 	"net/http/httptest"

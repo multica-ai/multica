@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(ui-hook-use-sticky-bottom): cerebro modification of upstream file
 import {
   type RefObject,
   useCallback,

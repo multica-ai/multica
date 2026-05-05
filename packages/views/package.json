@@ -1,4 +1,5 @@
 {
+  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps + new exports for cerebro views",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,

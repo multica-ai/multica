@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-profile-queries): cerebro modification of upstream file
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 

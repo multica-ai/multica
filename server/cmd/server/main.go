@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(server-main-cerebro): cerebro modification of upstream file
+
 import (
 	"context"
 	"log/slog"

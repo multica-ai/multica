@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(server-integration-test-cerebro): cerebro modification of upstream file
+
 import (
 	"bytes"
 	"context"

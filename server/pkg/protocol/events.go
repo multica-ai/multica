@@ -1,5 +1,7 @@
 package protocol
 
+// CEREBRO-PATCH(protocol-events): cerebro modification of upstream file
+
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events

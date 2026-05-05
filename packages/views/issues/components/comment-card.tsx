@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
+
 import { useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";

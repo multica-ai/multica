@@ -1,5 +1,7 @@
 package middleware
 
+// CEREBRO-PATCH(middleware-setup-jwt-test): cerebro modification of upstream file
+
 import "os"
 
 func init() {

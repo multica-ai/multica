@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(install-runtime-script): cerebro modification of upstream file
+
 import (
 	_ "embed"
 	"strings"

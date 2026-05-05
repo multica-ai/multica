@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(attachment-list-cerebro): cerebro modification of upstream file
+
 import { Download, FileText, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";

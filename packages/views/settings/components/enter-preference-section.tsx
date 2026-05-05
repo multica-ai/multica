@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(enter-preference-section): cerebro modification of upstream file
+
 import { useState } from "react";
 import { Keyboard } from "lucide-react";
 import { Switch } from "@multica/ui/components/ui/switch";

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-041-workspace-invitation): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS workspace_invitation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-chat-store): cerebro modification of upstream file
 import { create } from "zustand";
 import type { StorageAdapter } from "../types";
 import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";

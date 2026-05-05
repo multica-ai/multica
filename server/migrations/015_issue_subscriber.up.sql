@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-015-issue-subscriber): cerebro modification of upstream file
 -- Issue subscribers: tracks who is subscribed to notifications for an issue
 CREATE TABLE IF NOT EXISTS issue_subscriber (
     issue_id   UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,

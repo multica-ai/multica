@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-task-token): cerebro modification of upstream file
 -- name: CreateTaskToken :exec
 INSERT INTO task_token (token_hash, task_id, issue_id, agent_id, workspace_id, scope, expires_at)
 VALUES ($1, $2, sqlc.narg(issue_id), $3, $4, $5, $6);

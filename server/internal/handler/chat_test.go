@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(chat-handler-chat-test): cerebro modification of upstream file
+
 import (
 	"bytes"
 	"context"

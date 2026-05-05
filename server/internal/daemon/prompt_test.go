@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-prompt-test): cerebro modification of upstream file
+
 import (
 	"strings"
 	"testing"

@@ -1,5 +1,7 @@
 package middleware
 
+// CEREBRO-PATCH(middleware-auth): cerebro modification of upstream file
+
 import (
 	"context"
 	"log/slog"

@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(list-row-cerebro): cerebro modification of upstream file
+
 import { memo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";

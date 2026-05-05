@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(subscriber-listeners): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"

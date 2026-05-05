@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(chat-message-list-cerebro): cerebro modification of upstream file
+
 import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";

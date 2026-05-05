@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# CEREBRO-PATCH(install-runtime-script): cerebro modification of upstream file
 # Multica runtime installer — fetches the multica CLI, configures the daemon,
 # and starts it as a background service. Triggered by the one-line command
 # shown in the "Add runtime" dialog:

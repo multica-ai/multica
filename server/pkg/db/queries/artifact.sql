@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-artifact): cerebro modification of upstream file
 -- name: CreateArtifact :one
 INSERT INTO artifact (
     id, workspace_id, project_id, issue_id, folder_id, origin_issue_id,

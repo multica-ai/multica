@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(ui-markdown-file-cards): cerebro modification of upstream file
 /**
  * File card preprocessing for markdown content.
  *
