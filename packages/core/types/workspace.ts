@@ -13,8 +13,22 @@ export interface Workspace {
   settings: Record<string, unknown>;
   repos: WorkspaceRepo[];
   issue_prefix: string;
+  /**
+   * Optional pointer to the workspace's orchestrator agent. When set, the
+   * server enqueues a task for this agent on every agent-authored issue
+   * comment (skipping self-loops and the case where the orchestrator is
+   * already the assignee). The orchestrator's persona decides what to do —
+   * typically acknowledge, reassign, change status, or notify a human.
+   */
+  orchestrator_agent_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Whether the multi-participant Channels feature is exposed in this workspace.
+   * Defaults to false until an admin opts in via Settings. */
+  channels_enabled: boolean;
+  /** Workspace-level retention default for channel messages, in days.
+   * null = retain forever; per-channel overrides take precedence. */
+  channel_retention_days: number | null;
 }
 
 export interface Member {

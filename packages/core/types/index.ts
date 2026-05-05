@@ -47,6 +47,26 @@ export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export type {
+  Channel,
+  ChannelKind,
+  ChannelVisibility,
+  ChannelActorType,
+  ChannelMemberRole,
+  ChannelNotificationLevel,
+  ChannelMembership,
+  ChannelMessage,
+  ChannelMessageAttachment,
+  ChannelReaction,
+  ChannelMessageThread,
+  ChannelSearchHit,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  AddChannelMemberRequest,
+  CreateChannelMessageRequest,
+  MarkChannelReadRequest,
+  CreateOrFetchDMRequest,
+} from "./channel";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
@@ -79,3 +99,14 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  MemoryArtifact,
+  MemoryArtifactKind,
+  MemoryArtifactAnchorType,
+  MemoryArtifactAuthorType,
+  CreateMemoryArtifactRequest,
+  UpdateMemoryArtifactRequest,
+  ListMemoryArtifactsParams,
+  ListMemoryArtifactsResponse,
+  SearchMemoryArtifactsParams,
+} from "./memory";

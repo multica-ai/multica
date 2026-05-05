@@ -80,6 +80,25 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  Channel,
+  ChannelMembership,
+  ChannelMessage,
+  ChannelReaction,
+  ChannelMessageThread,
+  ChannelSearchHit,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  AddChannelMemberRequest,
+  CreateChannelMessageRequest,
+  MarkChannelReadRequest,
+  CreateOrFetchDMRequest,
+  MemoryArtifact,
+  CreateMemoryArtifactRequest,
+  UpdateMemoryArtifactRequest,
+  ListMemoryArtifactsParams,
+  ListMemoryArtifactsResponse,
+  SearchMemoryArtifactsParams,
+  MemoryArtifactAnchorType,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -827,7 +846,29 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      context?: string;
+      settings?: Record<string, unknown>;
+      repos?: WorkspaceRepo[];
+      // Channels feature flag — see migration 065 and the channels spec.
+      // Pair with channels_enabled_set=true to actually mutate; otherwise
+      // a missing field would leave the value untouched (handler convention).
+      channels_enabled?: boolean;
+      channels_enabled_set?: boolean;
+      channel_retention_days?: number | null;
+      channel_retention_days_set?: boolean;
+      // Paired-bool pattern so callers can distinguish "don't touch" from
+      // "explicitly clear to null". Pass orchestrator_agent_id_set=true and
+      // orchestrator_agent_id=null to clear; orchestrator_agent_id="<uuid>"
+      // to set; both fields omitted to leave the value untouched.
+      orchestrator_agent_id?: string | null;
+      orchestrator_agent_id_set?: boolean;
+    },
+  ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -1040,6 +1081,128 @@ export class ApiClient {
     await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }
 
+  // Channels (multi-participant chat). The handler responds 404 to every
+  // endpoint when workspace.channels_enabled is FALSE — callers should gate
+  // on that flag before invoking these.
+
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch(`/api/channels`);
+  }
+
+  async getChannel(id: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: UpdateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMembership[]> {
+    return this.fetch(`/api/channels/${channelId}/members`);
+  }
+
+  async addChannelMember(channelId: string, data: AddChannelMemberRequest): Promise<ChannelMembership> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeChannelMember(channelId: string, memberType: string, memberId: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/members/${memberType}/${memberId}`, { method: "DELETE" });
+  }
+
+  async listChannelMessages(channelId: string, params?: { before?: string; limit?: number; includeThreaded?: boolean }): Promise<ChannelMessage[]> {
+    const search = new URLSearchParams();
+    if (params?.before) search.set("before", params.before);
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.includeThreaded) search.set("include_threaded", "true");
+    const qs = search.toString();
+    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+  }
+
+  async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async markChannelRead(channelId: string, data: MarkChannelReadRequest): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/read`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createOrFetchDM(data: CreateOrFetchDMRequest): Promise<Channel> {
+    return this.fetch(`/api/dms`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Phase 4: threads + reactions
+
+  async updateChannelMessage(channelId: string, messageId: string, content: string): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async deleteChannelMessage(channelId: string, messageId: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async searchChannelMessages(params: {
+    q: string;
+    channelId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ChannelSearchHit[]> {
+    const search = new URLSearchParams();
+    search.set("q", params.q);
+    if (params.channelId) search.set("channel_id", params.channelId);
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.offset) search.set("offset", String(params.offset));
+    return this.fetch(`/api/channels/search?${search}`);
+  }
+
+  async getChannelMessageThread(channelId: string, messageId: string): Promise<ChannelMessageThread> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
+  }
+
+  async addChannelReaction(channelId: string, messageId: string, emoji: string): Promise<ChannelReaction> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  async removeChannelReaction(channelId: string, messageId: string, emoji: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/messages/${messageId}/reactions`, {
+      method: "DELETE",
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
   async listAttachments(issueId: string): Promise<Attachment[]> {
     return this.fetch(`/api/issues/${issueId}/attachments`);
   }
@@ -1049,9 +1212,12 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    // Default false: archived projects are hidden from the default list.
+    // The "Show archived" toggle on the projects page sets this true.
+    if (params?.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/projects?${search}`);
   }
 
@@ -1075,6 +1241,21 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Soft-delete the project: stamps archived_at + archived_by. Issue
+   * references and resources stay attached. Reversible via restoreProject.
+   */
+  async archiveProject(id: string): Promise<Project> {
+    return this.fetch(`/api/projects/${id}/archive`, { method: "POST" });
+  }
+
+  /**
+   * Reverse archiveProject — clear archived_at + archived_by.
+   */
+  async restoreProject(id: string): Promise<Project> {
+    return this.fetch(`/api/projects/${id}/restore`, { method: "POST" });
   }
 
   // Project resources
@@ -1226,5 +1407,82 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Memory artifacts — workspace-scoped, kind-discriminated markdown
+  // primitives (wiki pages, agent notes, runbooks, decision records).
+  // Server contract lives in server/internal/handler/memory_artifact.go.
+  async listMemoryArtifacts(
+    params?: ListMemoryArtifactsParams,
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.parent_id) search.set("parent_id", params.parent_id);
+    if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/memory${qs ? `?${qs}` : ""}`);
+  }
+
+  async getMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}`);
+  }
+
+  // "Show me everything anchored to issue X" — used by the daemon's
+  // runtime context injection and by issue/project detail pages.
+  async listMemoryArtifactsByAnchor(
+    anchorType: MemoryArtifactAnchorType,
+    anchorId: string,
+    params?: { limit?: number },
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.fetch(
+      `/api/memory/by-anchor/${anchorType}/${anchorId}${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async searchMemoryArtifacts(
+    params: SearchMemoryArtifactsParams,
+  ): Promise<ListMemoryArtifactsResponse> {
+    const search = new URLSearchParams();
+    search.set("q", params.q);
+    if (params.kind) search.set("kind", params.kind);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    return this.fetch(`/api/memory/search?${search.toString()}`);
+  }
+
+  async createMemoryArtifact(
+    data: CreateMemoryArtifactRequest,
+  ): Promise<MemoryArtifact> {
+    return this.fetch("/api/memory", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMemoryArtifact(
+    id: string,
+    data: UpdateMemoryArtifactRequest,
+  ): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}/archive`, { method: "POST" });
+  }
+
+  async restoreMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}/restore`, { method: "POST" });
+  }
+
+  async deleteMemoryArtifact(id: string): Promise<void> {
+    await this.fetch(`/api/memory/${id}`, { method: "DELETE" });
   }
 }

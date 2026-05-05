@@ -134,6 +134,7 @@ describe("CallbackPage", () => {
         settings: {},
         repos: [],
         issue_prefix: "ACME",
+        orchestrator_agent_id: null,
         created_at: "",
         updated_at: "",
       },

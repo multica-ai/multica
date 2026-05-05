@@ -30,6 +30,7 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueD
 import { inboxKeys } from "../inbox/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
+import { channelKeys } from "../channels/queries";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
@@ -153,6 +154,26 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
       },
+      // Channels: any channel:* event invalidates the workspace-wide channel
+      // tree. The per-channel message cache is keyed independently of wsId
+      // (channelKeys.messages(channelId)) and is invalidated by the explicit
+      // `channel:message` handler below — invalidating the whole "channels"
+      // root would also flush messages in unrelated channels and waste
+      // refetches. We deliberately keep the prefix invalidation scoped.
+      channel: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      // Phase 4 reactions: the prefix is `channel_reaction` (with an
+      // underscore) to distinguish from regular channel:* events. Payload
+      // carries channel_id + message_id; the explicit handler below does
+      // the granular cache update.
+      channel_reaction: () => {
+        // Prefix-level invalidation is unhelpful here because reactions
+        // are stored inside ChannelMessage rows and the messages cache is
+        // keyed by channel_id (not in workspaceKeys). Defer to the
+        // specific handler below.
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence
@@ -207,6 +228,16 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read",
+      // Channel message events are handled explicitly below to invalidate
+      // the per-channel message cache (the prefix handler only touches the
+      // workspace-wide channels tree, not individual message caches).
+      "channel:message",
+      "channel:message_updated",
+      "channel:message_deleted",
+      // Same reasoning for reactions: the per-message reaction list lives
+      // inside the channel-messages cache, not under the channels tree.
+      "channel_reaction:added",
+      "channel_reaction:removed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -512,6 +543,63 @@ export function useRealtimeSync(
       invalidatePendingAggregate();
     });
 
+    // Channel messages: invalidate the per-channel message list when a new
+    // message arrives. The list query key is independent of wsId so we don't
+    // need workspace context here. Also refresh the workspace channels list
+    // so the sidebar's unread count and "last_read_message_id" cursor
+    // recompute against the new latest-message timestamp.
+    const unsubChannelMessage = ws.on("channel:message", (p) => {
+      const payload = p as { channel_id: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    });
+    // Phase 4 reactions: invalidate both the channel timeline (for the
+    // reaction chip under the parent message) AND the thread cache (in case
+    // the reacted-to message is a thread reply currently displayed in the
+    // side panel).
+    const unsubChannelReactionAdded = ws.on("channel_reaction:added", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
+    const unsubChannelReactionRemoved = ws.on("channel_reaction:removed", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
+    // Phase 5 — author edits / soft-deletes. Same dual invalidation
+    // (timeline + thread) as reactions, since an edit/delete on a
+    // thread reply needs to reflect inside an open ThreadPanel.
+    const unsubChannelMessageUpdated = ws.on("channel:message_updated", (p) => {
+      const payload = p as { channel_id?: string; message?: { id?: string } };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message?.id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message.id) });
+      }
+    });
+    const unsubChannelMessageDeleted = ws.on("channel:message_deleted", (p) => {
+      const payload = p as { channel_id?: string; message_id?: string };
+      if (payload?.channel_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      if (payload?.message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+    });
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -651,6 +739,11 @@ export function useRealtimeSync(
       unsubInvitationRevoked();
       unsubTaskMessage();
       unsubChatMessage();
+      unsubChannelMessage();
+      unsubChannelReactionAdded();
+      unsubChannelReactionRemoved();
+      unsubChannelMessageUpdated();
+      unsubChannelMessageDeleted();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

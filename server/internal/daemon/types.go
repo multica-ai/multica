@@ -30,6 +30,16 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// PeerAgentData mirrors handler.PeerAgentData — a non-archived peer agent
+// in the same workspace as the claiming agent. Sent so orchestrator agents
+// can route work by name instead of self-assigning because they don't know
+// what other agents exist.
+type PeerAgentData struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -43,6 +53,8 @@ type Task struct {
 	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
+	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`       // other non-archived agents in the same workspace, for orchestrator routing
+	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // server set this true when the claiming agent IS the workspace's orchestrator AND the trigger was agent-authored — adapts the prompt
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
@@ -58,6 +70,32 @@ type Task struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	// Channels Phase 3b — populated when the task was enqueued by an
+	// @-mention in a channel message. Mutually exclusive with
+	// IssueID / ChatSessionID / QuickCreatePrompt: the daemon detects
+	// channel-mention tasks via ChannelID != "" and routes through
+	// buildChannelMentionPrompt + renderChannelContext. The agent's
+	// reply is posted back as a `channel_message` by the server's
+	// CompleteTask handler (no separate daemon call needed).
+	ChannelID             string `json:"channel_id,omitempty"`
+	ChannelName           string `json:"channel_name,omitempty"`
+	ChannelKind           string `json:"channel_kind,omitempty"`
+	ChannelMessageID      string `json:"channel_message_id,omitempty"`
+	ChannelMessageContent string `json:"channel_message_content,omitempty"`
+	// ChannelHistory carries recent channel messages older than the
+	// triggering one, oldest first. Server-side default is the last 50
+	// (configurable via CHANNEL_AGENT_CONTEXT_MESSAGES). renderChannelMentionContext
+	// embeds these into issue_context.md so the agent has a transcript.
+	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
+}
+
+// ChannelHistoryMessage mirrors handler.ChannelHistoryMessage on the wire.
+type ChannelHistoryMessage struct {
+	ID         string `json:"id"`
+	CreatedAt  string `json:"created_at"`
+	AuthorType string `json:"author_type"`
+	AuthorName string `json:"author_name"`
+	Content    string `json:"content"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

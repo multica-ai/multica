@@ -1,0 +1,219 @@
+---
+title: Channels
+description: Multi-participant chat alongside the issue board — public and private channels plus DMs, with humans and agents as first-class members.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**Channels are multi-participant text conversations alongside the [issue](/issues) board.** Where [Chat](/chat) is a private 1:1 with a single agent, Channels is the place teammates and agents talk together — a `#general` for the whole workspace, `#design` for the design team, a private channel for the leadership group, or a direct message between two members.
+
+<Callout type="info">
+  Channels is **off by default**. A workspace admin must enable it from
+  Settings before it appears in the sidebar. While disabled, every Channels
+  endpoint returns 404 — the surface is invisible to anyone in a workspace
+  that hasn't opted in.
+</Callout>
+
+## Channels vs. Chat vs. issue comments
+
+Three places conversations happen in Multica:
+
+- [**Issue comments**](/comments) — discussion **about a specific issue**. Agents @-mentioned in a comment read the full issue history and can act on the issue.
+- [**Chat**](/chat) — private 1:1 between you and an agent, **outside any issue**. The agent has no issue context and the conversation is invisible to other workspace members.
+- **Channels** — multi-participant conversations, also outside any issue. Members and agents can both join. Public channels are visible to everyone in the workspace; private channels are invitation-only.
+
+Two rules of thumb:
+
+- The conversation is about a specific piece of work → comment on the [issue](/issues).
+- The conversation is between you and exactly one agent and should be private → [Chat](/chat).
+- Anything else (a team discussion, a DM with a teammate, a place to brainstorm with several agents) → Channels.
+
+## Channel kinds
+
+Two kinds today; the schema accommodates more without migrations.
+
+- **Public channels** — anyone in the workspace can find and join. Default for new channels.
+- **Private channels** — only invited members and agents can see them. Use these for HR conversations, exec discussions, or anything sensitive.
+- **Direct messages (DMs)** — 1:1 conversations between two members, between a member and an agent, or self-DMs (a private notebook). Created on demand from a member's profile or by clicking "Message" anywhere.
+
+Group DMs (3+ participants) are not in v1 — open a private channel instead.
+
+## Creating a channel
+
+Click the `+` button in the channel list and fill in the dialog:
+
+- **Name** — slug used in the URL and `#`-references. Must be lowercase, no whitespace. Multica auto-sanitizes (so "General Chat" becomes `general-chat` on submit).
+- **Display name** — what people actually see in the sidebar. Free-form; can include spaces and emoji.
+- **Description** — one-line context for what the channel is for, shown under the name in the header.
+- **Visibility** — public or private. Cannot be changed by everyone after creation; admins can adjust later.
+
+The creator is automatically added as an **admin** member. From there, add other members and agents as needed.
+
+## Posting messages
+
+The composer at the bottom of every channel uses the same markdown editor as issue comments — you get rich text, code blocks, and lists out of the box. Paste an image to upload it inline.
+
+### Mentions
+
+`@-mentioning` works the same way it does in issue comments:
+
+- `@member-name` notifies that member via the [Inbox](/inbox).
+- `@agent-name` is rendered with agent styling.
+
+<Callout type="info">
+  Phase 3 ships agent triggering end-to-end: `@agent` mentions of channel
+  members enqueue a task, the daemon picks it up, runs the agent with a
+  conversational prompt + channel context, and posts the agent's reply
+  back to the channel as a `channel_message` with `author_type='agent'`.
+  Recent message history fetching (so the agent sees more than just the
+  triggering message) is a follow-up — the v1 prompt embeds the
+  triggering message and the channel name and asks the agent to respond
+  conversationally.
+</Callout>
+
+### When does a mention trigger?
+
+A `@agent` mention enqueues a task when **all** of:
+
+- The agent is already a member of the channel (joining is a deliberate admin action — mentioning a non-member just renders).
+- The author is not the agent itself (self-mention guard, prevents cycles).
+- The agent is not archived and has a runtime attached.
+- The agent does not already have an in-flight task for this channel within the dedup window (default 30s, tunable via `CHANNEL_AGENT_DEDUP_WINDOW_SECONDS`).
+
+`@member` mentions are unrelated to this path — they go to the recipient's [Inbox](/inbox) regardless of channel membership and never enqueue tasks.
+
+`@all` is parsed but currently produces no fan-out — pending design on whether channel @all should generate inbox entries for every member.
+
+## Threads
+
+Hover any message and click **Reply** (or the reply count under the message, if it has replies already) to open the **thread side panel** to the right of the timeline. Replies you post in the thread carry `parent_message_id` set to the original message; the main channel view continues to show only top-level messages so threads stay out of the way.
+
+A reply count badge (e.g. *"3 replies"*) appears under any message that has replies. The count updates live as people reply.
+
+Limitations in v1:
+
+- One level deep — replies to replies thread up under the original parent.
+- Mentions in thread replies follow the same Phase 3 rules as top-level messages.
+
+## Reactions
+
+Hover a message → click the smiley icon for an 8-emoji palette (👍 👎 😄 🎉 ❤️ 🚀 👀 🙏). Clicking an existing chip toggles your reaction; the count updates optimistically and reconciles on the WS event from the server.
+
+Phase 4 ships a curated palette only — full emoji search is a follow-up. Reactions on private-channel messages are invisible to non-members; the visibility guard runs before the reaction query, so even directly hitting `POST /api/channels/.../reactions` against a private message you can't see returns 404.
+
+## File attachments
+
+Click the paperclip icon in the composer (or pick multiple files at once) to attach images and other files to a message. Uploads happen as soon as you select; chips appear in the composer with a small spinner while in flight, and the Send button stays grayed out until every selected file is ready.
+
+- Image attachments render inline as a thumbnail; click to open full resolution.
+- Other types render as a card with filename, size, and a download button.
+- File-size limit and content-type sniffing inherit from the existing `/api/upload-file` endpoint (100 MB max).
+- Attachments are tied to the **uploader at upload time** — submitting another user's attachment id with your message fails with 400. This stops a member from "borrowing" an attachment they didn't upload.
+
+Under the hood, the composer POSTs each file to `/api/upload-file` (workspace-scoped, no issue/comment link) and the resulting attachment ids are stamped into the message's `metadata.attachments` JSONB array on send. The list/get/thread endpoints hydrate the array back into the message response with one batched DB query.
+
+## Search
+
+Click **Search** in any channel header to open a popover-style search bar. Type a query and matching messages appear ranked by relevance. Clicking a result navigates to the channel where the match lives.
+
+- Visibility-respecting at the SQL level — a non-member never sees hits from a private channel they don't belong to. Same guarantee applies to DMs (only participants).
+- Soft-deleted messages are excluded.
+- The search bar in a channel header is **scoped to that channel** by default; the (future) global "Channels" page-level search will fan across all visible channels in the workspace.
+- Backed by the generated `content_tsv` GIN index on `channel_message`. The query parser is Postgres' `websearch_to_tsquery`, so `"exact phrase"`, `or`, and `-exclude` syntax all work.
+
+API: `GET /api/channels/search?q=<query>&channel_id=<optional>&limit=<≤100>&offset=<...>`. Returns an array of `ChannelSearchHit` objects (`ChannelMessage` plus `channel_name`, `channel_display_name`, `channel_kind`, and a `rank` float).
+
+## Members
+
+Open the **Members** button in the channel header to see the full list and add or remove members. For private channels, this is also where you grant access. Adding an agent to a channel is the same flow — they appear with a robot avatar.
+
+## Read state
+
+Multica tracks read-state per member, per channel — the membership row carries `last_read_message_id` and `last_read_at`. The UI marks unread messages and clears the marker once you've scrolled past them. Read state is per-device because the cursor is "the latest message I've seen", not "I've read everything before this point".
+
+## Retention
+
+Channels supports a two-tier retention system: a **workspace-level default**, plus a **per-channel override** that takes precedence. Messages older than the effective retention are soft-deleted by a daily background sweep — they don't appear in the UI but the rows are preserved for a short window in case retention is reverted. Hard-purge tooling lands in a later phase.
+
+### Workspace default
+
+Workspace admins set this from **Settings → Workspace → Channels**:
+
+- **"Retain messages forever"** (default for new workspaces) — no sweep runs.
+- **A retention period in days** (1–3650) — sweep soft-deletes any message older than `now − N days`. The recommended value is 90.
+
+Switching from "forever" to a finite value will start hiding existing older messages on the next nightly run; the settings UI surfaces a warning before save.
+
+### Per-channel override
+
+Channel admins set this from **the `…` menu in the channel header → Channel settings → Message retention**:
+
+- **"Use workspace default"** — clears the override; the channel inherits the workspace value.
+- **"Custom for this channel"** — a positive integer that applies only to this channel and beats the workspace default.
+
+This is useful for ops channels where you want to keep history longer than the default, or for ephemeral spaces where you want to keep less.
+
+### How the sweep runs
+
+A background goroutine fires once per UTC day at the hour configured via `CHANNEL_RETENTION_RUN_HOUR` (default `3`, i.e. 03:00 UTC). For each non-archived channel with a finite effective retention, it soft-deletes messages older than the cutoff in batches of 1000 — bounded so a single channel can't monopolize one run.
+
+Idempotent: re-running the sweep with no new messages older than the cutoff is a no-op. Archived channels are skipped entirely (their messages stay until you restore the channel or hard-purge it later).
+
+<Callout type="info">
+  **Retention is set to "retain forever" by default until an admin changes
+  it.** The 90-day suggestion is just that — no messages are deleted
+  automatically until an admin opts in.
+</Callout>
+
+## Archiving a channel
+
+Right-click a channel in the list (or click the dropdown in the channel header) to archive. Archived channels:
+
+- Disappear from the list and from search
+- Preserve all historical messages and memberships (nothing is deleted)
+- Cannot receive new messages
+
+Archive is reversible by an admin. Hard delete is intentionally not exposed in the UI.
+
+## Permissions
+
+| Role            | Read public channels | Create channels | Add/remove members | Archive |
+| --------------- | -------------------- | --------------- | ------------------ | ------- |
+| Workspace owner | yes                  | yes             | yes (any channel)  | yes     |
+| Workspace admin | yes                  | yes             | yes (any channel)  | yes     |
+| Workspace member | yes                  | yes             | yes (own channels) | own     |
+| Channel admin   | n/a                  | n/a             | yes (this channel) | yes     |
+| Channel member  | yes                  | n/a             | no                 | no      |
+
+Private channels are invisible to non-members regardless of workspace role.
+
+## Open API
+
+| Method | Path                                                          | Notes                                  |
+| ------ | ------------------------------------------------------------- | -------------------------------------- |
+| GET    | `/api/channels`                                               | List channels visible to caller       |
+| POST   | `/api/channels`                                               | Create a public or private channel    |
+| GET    | `/api/channels/{id}`                                          | Channel detail                        |
+| PATCH  | `/api/channels/{id}`                                          | Partial update                        |
+| DELETE | `/api/channels/{id}`                                          | Soft archive                          |
+| GET    | `/api/channels/{id}/members`                                  | List members                          |
+| POST   | `/api/channels/{id}/members`                                  | Add member                            |
+| DELETE | `/api/channels/{id}/members/{type}/{memberId}`                | Remove member                         |
+| GET    | `/api/channels/{id}/messages?before=&limit=`                  | Cursor-paginated, default 50, max 200 |
+| POST   | `/api/channels/{id}/messages`                                 | Post a message                        |
+| POST   | `/api/channels/{id}/read`                                     | Advance the caller's read cursor      |
+| POST   | `/api/dms`                                                    | Idempotent get-or-create DM           |
+| GET    | `/api/channels/{id}/messages/{messageId}/thread`              | Parent + replies for the side panel   |
+| POST   | `/api/channels/{id}/messages/{messageId}/reactions`           | Add reaction (idempotent)             |
+| DELETE | `/api/channels/{id}/messages/{messageId}/reactions`           | Remove reaction                       |
+| PATCH  | `/api/channels/{id}/messages/{messageId}`                     | Edit body (author only)               |
+| DELETE | `/api/channels/{id}/messages/{messageId}`                     | Soft delete (author or channel admin) |
+| GET    | `/api/channels/search?q=&channel_id=&limit=&offset=`          | Full-text search (visibility-respecting) |
+
+All endpoints require workspace membership and respond 404 when `workspace.channels_enabled` is `false`.
+
+## Next
+
+- [Inbox](/inbox) — where channel mentions land for members.
+- [Chat](/chat) — the 1:1 sibling surface.
+- [Mentioning agents](/mentioning-agents) — for agent-task triggering today (in issue comments).

@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/channel"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -58,6 +59,8 @@ type Handler struct {
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
+	ChannelService        *channel.ChannelService
+	ChannelMessageService *channel.MessageService
 	EmailService          *service.EmailService
 	UpdateStore           *UpdateStore
 	ModelListStore        ModelListStore
@@ -96,6 +99,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Bus:                   bus,
 		TaskService:           taskSvc,
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		ChannelService:        channel.NewChannelService(queries, txStarter),
+		ChannelMessageService: channel.NewMessageService(queries),
 		EmailService:          emailService,
 		UpdateStore:           NewUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),

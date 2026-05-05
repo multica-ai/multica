@@ -13,8 +13,11 @@ function makeWs(slug: string): Workspace {
     settings: {},
     repos: [],
     issue_prefix: slug.toUpperCase(),
+    orchestrator_agent_id: null,
     created_at: "",
     updated_at: "",
+    channels_enabled: false,
+    channel_retention_days: null,
   };
 }
 
