@@ -70,7 +70,13 @@ func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 		t.Fatalf("update workspace repos: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
+		// Restore the fixture's seeded repos (a single approved entry) rather
+		// than wiping to []: project_resource tests rely on this URL being on
+		// the approved list, and they can run in the same go-test invocation.
+		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`,
+			[]byte(`[{"url":"https://github.com/multica-ai/multica","status":"approved"}]`),
+			testWorkspaceID,
+		); err != nil {
 			t.Fatalf("reset workspace repos: %v", err)
 		}
 	})

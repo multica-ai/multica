@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -75,6 +74,32 @@ type githubRepoRef struct {
 	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
 }
 
+// requireApprovedRepoRef rejects github_repo refs whose URL is not in the
+// workspace's approved-repo set. Empty set means the workspace has no
+// approved repos at all and any github_repo attachment must be refused.
+func requireApprovedRepoRef(ref json.RawMessage, approved map[string]struct{}) error {
+	var payload githubRepoRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return fmt.Errorf("invalid github_repo payload: %w", err)
+	}
+	u := strings.TrimSpace(payload.URL)
+	if _, ok := approved[u]; !ok {
+		return errors.New("repo is not in the workspace's approved list")
+	}
+	return nil
+}
+
+// requireApprovedWorkspaceRepo loads the approved set for the workspace and
+// validates that ref points at one of its URLs. Used by the per-project
+// resource create path (the single-create endpoint, not project create).
+func (h *Handler) requireApprovedWorkspaceRepo(ctx context.Context, wsID string, ref json.RawMessage) error {
+	approved, err := h.loadApprovedWorkspaceRepoURLs(ctx, wsID)
+	if err != nil {
+		return errors.New("failed to load workspace repos")
+	}
+	return requireApprovedRepoRef(ref, approved)
+}
+
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	var payload githubRepoRef
 	if err := json.Unmarshal(ref, &payload); err != nil {
@@ -84,8 +109,8 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.URL == "" {
 		return nil, errors.New("github_repo: url is required")
 	}
-	if u, err := url.Parse(payload.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("github_repo: url must be a valid http(s) URL")
+	if _, err := extractRepoHost(payload.URL); err != nil {
+		return nil, fmt.Errorf("github_repo: %w", err)
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	out, err := json.Marshal(payload)
@@ -158,6 +183,16 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Project repos must be picked from the workspace's approved list. This
+	// is what makes the workspace settings page the single source of truth
+	// for which repos can ever flow into agents.
+	if req.ResourceType == "github_repo" {
+		if err := h.requireApprovedWorkspaceRepo(r.Context(), uuidToString(project.WorkspaceID), normalizedRef); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	var label pgtype.Text

@@ -44,9 +44,11 @@ type dbExecutor interface {
 }
 
 type Config struct {
-	AllowSignup         bool
-	AllowedEmails       []string
-	AllowedEmailDomains []string
+	AllowSignup          bool
+	AllowedEmails        []string
+	AllowedEmailDomains  []string
+	RepoApprovalRequired bool
+	AllowedRepoDomains   []string
 }
 
 type Handler struct {

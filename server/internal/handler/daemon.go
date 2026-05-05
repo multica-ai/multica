@@ -183,12 +183,8 @@ func workspaceReposVersion(repos []RepoData) string {
 }
 
 func parseWorkspaceRepos(raw []byte) []RepoData {
-	if len(raw) == 0 {
-		return []RepoData{}
-	}
-
-	var repos []RepoData
-	if err := json.Unmarshal(raw, &repos); err != nil {
+	repos := approvedWorkspaceRepoData(raw)
+	if repos == nil {
 		return []RepoData{}
 	}
 	return normalizeWorkspaceRepos(repos)
@@ -1061,8 +1057,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
 			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}
@@ -1125,8 +1120,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}
@@ -1185,8 +1179,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(resp.Repos) == 0 {
 					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						var repos []RepoData
-						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 							resp.Repos = repos
 						}
 					}
@@ -1206,8 +1199,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}

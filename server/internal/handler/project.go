@@ -225,6 +225,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work.
 	normalizedRefs := make([]json.RawMessage, len(req.Resources))
+	var approvedRepoSet map[string]struct{}
 	for i, res := range req.Resources {
 		res.ResourceType = strings.TrimSpace(res.ResourceType)
 		if res.ResourceType == "" {
@@ -235,6 +236,19 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
 			return
+		}
+		if res.ResourceType == "github_repo" {
+			if approvedRepoSet == nil {
+				approvedRepoSet, err = h.loadApprovedWorkspaceRepoURLs(r.Context(), workspaceID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to load workspace repos")
+					return
+				}
+			}
+			if err := requireApprovedRepoRef(ref, approvedRepoSet); err != nil {
+				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
+				return
+			}
 		}
 		normalizedRefs[i] = ref
 	}
