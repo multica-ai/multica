@@ -71,8 +71,9 @@
     "repos_pill": "Repos",
     "repos_pill_count_one": "{{count}} repo",
     "repos_pill_count_other": "{{count}} repos",
-    "repos_heading": "Attach GitHub repos to this project",
+    "repos_heading": "Attach git repos to this project",
     "repos_empty": "No workspace-level repos yet. Paste a URL below to attach one ad-hoc.",
+    "repos_empty_approval": "No approved repos in this workspace. Add one in workspace settings first.",
     "repos_url_placeholder": "https://github.com/owner/repo",
     "repos_add": "Add",
     "repos_selected": "Selected"

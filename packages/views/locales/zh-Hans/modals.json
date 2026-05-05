@@ -71,8 +71,9 @@
     "repos_pill": "代码仓库",
     "repos_pill_count_one": "{{count}} 个仓库",
     "repos_pill_count_other": "{{count}} 个仓库",
-    "repos_heading": "为此项目关联 GitHub 仓库",
+    "repos_heading": "为此项目关联代码仓库",
     "repos_empty": "还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。",
+    "repos_empty_approval": "工作区中暂无已批准的仓库。请先在工作区设置中添加。",
     "repos_url_placeholder": "https://github.com/owner/repo",
     "repos_add": "添加",
     "repos_selected": "已选"

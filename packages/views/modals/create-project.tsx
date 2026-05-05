@@ -135,8 +135,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // persisted until handleSubmit fires the createProjectResource calls.
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
-  const [customRepoUrl, setCustomRepoUrl] = useState("");
-  const workspaceRepos = workspace?.repos ?? [];
+  // Only approved workspace repos are pickable here — pending repos must be
+  // approved through the workspace settings flow first.
+  const approvedWorkspaceRepos = (workspace?.repos ?? []).filter(
+    (r) => r.status === "approved",
+  );
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -198,13 +201,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setSelectedRepos((prev) =>
       prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url],
     );
-  };
-
-  const addCustomRepo = () => {
-    const url = customRepoUrl.trim();
-    if (!url) return;
-    setSelectedRepos((prev) => (prev.includes(url) ? prev : [...prev, url]));
-    setCustomRepoUrl("");
   };
 
   return (
@@ -463,9 +459,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <div className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.create_project.repos_heading)}
               </div>
-              {workspaceRepos.length > 0 ? (
+              {approvedWorkspaceRepos.length > 0 ? (
                 <div className="space-y-1">
-                  {workspaceRepos.map((repo) => {
+                  {approvedWorkspaceRepos.map((repo) => {
                     const checked = selectedRepos.includes(repo.url);
                     return (
                       <button
@@ -491,33 +487,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {t(($) => $.create_project.repos_empty)}
+                  {t(($) => $.create_project.repos_empty_approval)}
                 </p>
               )}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addCustomRepo();
-                }}
-                className="flex items-center gap-1.5 pt-1 border-t"
-              >
-                <input
-                  type="url"
-                  value={customRepoUrl}
-                  onChange={(e) => setCustomRepoUrl(e.target.value)}
-                  placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                  className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  disabled={!customRepoUrl.trim()}
-                >
-                  {t(($) => $.create_project.repos_add)}
-                </Button>
-              </form>
               {selectedRepos.length > 0 && (
                 <div className="space-y-1 pt-1 border-t">
                   <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">

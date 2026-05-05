@@ -5,15 +5,21 @@ import { Save, Plus, Trash2 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { Workspace, WorkspaceRepo } from "@multica/core/types";
+import type { Workspace, WorkspaceRepoStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
+
+// Local repo shape: status is optional so unsaved rows can be edited before
+// the server stamps an initial status. Persisted rows always carry one.
+type RepoDraft = { url: string; status?: WorkspaceRepoStatus };
 
 export function RepositoriesTab() {
   const { t } = useT("settings");
@@ -22,8 +28,9 @@ export function RepositoriesTab() {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const repoApprovalRequired = useConfigStore((s) => s.repoApprovalRequired);
 
-  const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
+  const [repos, setRepos] = useState<RepoDraft[]>(workspace?.repos ?? []);
   const [saving, setSaving] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
@@ -37,7 +44,9 @@ export function RepositoriesTab() {
     if (!workspace) return;
     setSaving(true);
     try {
-      const updated = await api.updateWorkspace(workspace.id, { repos });
+      const updated = await api.updateWorkspace(workspace.id, {
+        repos: repos.map((r) => ({ url: r.url, status: r.status })),
+      });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
@@ -75,20 +84,27 @@ export function RepositoriesTab() {
             </p>
 
             {repos.map((repo, index) => (
-              <div key={index} className="flex items-start gap-2">
-                <Input
-                  type="url"
-                  value={repo.url}
-                  onChange={(e) => handleRepoChange(index, e.target.value)}
-                  disabled={!canManageWorkspace}
-                  placeholder={t(($) => $.repositories.url_placeholder)}
-                  className="flex-1 min-w-0 text-sm"
-                />
+              <div key={index} className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Input
+                    type="text"
+                    value={repo.url}
+                    onChange={(e) => handleRepoChange(index, e.target.value)}
+                    disabled={!canManageWorkspace}
+                    placeholder={t(($) => $.repositories.url_placeholder)}
+                    className={repoApprovalRequired && repo.status ? "pr-24 text-sm" : "text-sm"}
+                  />
+                  {repoApprovalRequired && repo.status && (
+                    <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center">
+                      <RepoStatusBadge status={repo.status} />
+                    </div>
+                  )}
+                </div>
                 {canManageWorkspace && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
                     onClick={() => handleRemoveRepo(index)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -123,5 +139,21 @@ export function RepositoriesTab() {
         </Card>
       </section>
     </div>
+  );
+}
+
+function RepoStatusBadge({ status }: { status?: WorkspaceRepoStatus }) {
+  const { t } = useT("settings");
+  if (status === "approved") {
+    return (
+      <Badge variant="secondary" className="h-5 shrink-0 bg-success/10 text-success">
+        {t(($) => $.repositories.status_approved)}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="h-5 shrink-0 bg-warning/10 text-warning">
+      {t(($) => $.repositories.status_pending)}
+    </Badge>
   );
 }

@@ -39,7 +39,7 @@ vi.mock("@multica/core/paths", () => ({
     id: "workspace-1",
     name: "Test Workspace",
     slug: "test-workspace",
-    repos: [{ url: longRepoUrl }],
+    repos: [{ url: longRepoUrl, status: "approved" }],
   }),
   useWorkspacePaths: () => ({
     projectDetail: (id: string) => `/test-workspace/projects/${id}`,
