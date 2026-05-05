@@ -203,6 +203,21 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					// Time entries linked to this issue.
+					r.Post("/time-entries", h.CreateTimeEntry)
+					r.Get("/time-entries", h.ListIssueTimeEntries)
+				})
+			})
+
+			// Time entries (standalone, current user)
+			r.Route("/api/time-entries", func(r chi.Router) {
+				r.Post("/", h.CreateTimeEntry)
+				r.Get("/", h.ListTimeEntries)
+				r.Get("/current", h.GetCurrentTimeEntry)
+				r.Route("/{entry_id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateTimeEntry)
+					r.Delete("/", h.DeleteTimeEntry)
+					r.Patch("/stop", h.StopTimeEntry)
 				})
 			})
 
