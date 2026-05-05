@@ -5,12 +5,12 @@
 ## Current state
 
 ```yaml
-status: NOT_STARTED          # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase -1"    # which phase we're in
-current_task: "P1"           # which sub-task within phase
-last_iteration_at: null      # ISO timestamp
-total_iterations: 0
-total_tokens_estimate: 0
+status: RUNNING              # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
+current_phase: "Phase 0"     # which phase we're in
+current_task: "0a_skeleton"  # which sub-task within phase
+last_iteration_at: "2026-05-05T20:50:00Z"
+total_iterations: 1
+total_tokens_estimate: 515000
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -25,17 +25,22 @@ awaiting: null               # what user input is needed
 
 ```yaml
 phase_minus_1:
-  status: pending             # pending | in_progress | completed | failed
+  status: completed           # pending | in_progress | completed | failed
   preflight_checks:
-    P1_module_augmentation: pending
-    P2_path_alias_shadowing: pending
-    P3_sqlc_multi_source: pending
-    P4_migrations_multi_dir: pending
-    P5_visual_regression: pending
-    P6_lint_rule: pending
-    P7_wrap_pattern_proof: pending
-    P8_feature_flag: pending
-  go_no_go: null
+    P1_module_augmentation: PASS
+    P2_path_alias_shadowing: HOLD  # mitigation: barrel-shadow not literal subpath
+    P3_sqlc_multi_source: PASS
+    P4_migrations_multi_dir: PASS  # 9NNN files already exist; split is the work
+    P5_visual_regression: HOLD     # mitigation: masks + Linux-CI baselines
+    P6_lint_rule: PASS
+    P7_wrap_pattern_proof: NO-GO   # comment-card → L3 (handled by escalation rule)
+    P8_feature_flag: PASS
+  go_no_go: HOLD
+  amendments_required:
+    - "P2: replace fictional @multica/views/issues/comment-card specifier with barrel @multica/views/issues/components"
+    - "P5: Phase 0.6 budgets masks + Linux-CI baseline gen + deterministic data via TestApiClient"
+    - "P7: drop comment-card from Phase 3 wrappers (14→13); add to Phase 4 markers (42→43)"
+    - "P4: include git mv server/migrations/9*.sql server/migrations/cerebro/ as part of implementation"
 
 phase_0:
   status: pending
@@ -115,12 +120,14 @@ open_prs: []
 
 ```
 # Format: ISO_TIMESTAMP | PHASE | DECISION | RATIONALE
+2026-05-05T20:50:00Z | Phase -1 | HOLD | 5 PASS, 2 HOLD with mitigations, 1 NO-GO (P7) handled by existing escalation rule. Strategy sound; plan amendments required before Phase 0.
+2026-05-05T20:50:00Z | Phase -1 | proceed_to_phase_0 | Per autonomous protocol: 7 of 8 effective passes → HOLD → proceed with caveat documented in preflight/SUMMARY.md
 ```
 
 ## Eval results (most recent per phase)
 
 ```yaml
-phase_minus_1_evals: null
+phase_minus_1_evals: pending  # baseline: trivial pass expected since no code changed
 phase_0_evals: null
 phase_1_evals: null
 phase_2_evals: null
@@ -145,11 +152,20 @@ The loop must STOP and set status=HALTED ONLY when ANY of these triggers (catast
 ## Next action (autonomous loop reads this to decide what to do)
 
 ```yaml
-next_action: bootstrap        # bootstrap | execute_task | run_phase_eval | pause | halt
+next_action: execute_task     # bootstrap | execute_task | run_phase_eval | pause | halt
 next_task_brief: |
-  Initial state. The autonomous loop should:
-  1. Read 03-decision.md "Phase -1 — Preflight" section
-  2. Identify all 8 verification tasks
-  3. Begin executing P1 (TypeScript module augmentation)
-  4. Update this file to status=RUNNING, current_task=P1
+  Phase 0a — chunk 2 per 07-session-schedule.md.
+  Goal: build the cerebro-zone skeleton + lint-rule + sync-scripts foundation.
+  Sub-tasks (1-2 parallel subagents, mostly sequential per protocol):
+  1. Create empty package skeletons (12 packages/cerebro-*/ + their READMEs).
+  2. Create server/internal/cerebro/* skeleton subdirs.
+  3. Create server/migrations/cerebro/ directory + README documenting 9NNN reservation.
+  4. Implement scripts/validate-cerebro-patches.sh + scripts/cerebro-zones.txt.
+  5. Implement scripts/upstream-sync.sh skeleton (the merge automation).
+  6. Wire scripts/validate-cerebro-patches.sh into .github/workflows/ci.yml as third job.
+  7. Move 20 existing 9NNN_*.sql files from server/migrations/ into server/migrations/cerebro/ (per P4 note).
+  8. Add `multi-dir scan` patch to server/cmd/migrate/main.go + idempotent_test.go (per P4 recommendation).
+  9. Update CLAUDE.md with "Cerebro extension discipline" section.
+  Eval: pnpm typecheck + make test + the new validate-cerebro-patches.sh must all pass.
+  Branches: stay on chore/upstream-sync-analysis for now (no separate phase branch yet).
 ```
