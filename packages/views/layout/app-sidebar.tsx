@@ -137,7 +137,7 @@ function DraftDot() {
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
 }
 
-function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; href: string; pathname: string; onUnpin: () => void }) {
+function SortablePinItem({ pin, href, pathname, onUnpin, onNavigate }: { pin: PinnedItem; href: string; pathname: string; onUnpin: () => void; onNavigate: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
   const wasDragged = useRef(false);
 
@@ -167,6 +167,7 @@ function SortablePinItem({ pin, href, pathname, onUnpin }: { pin: PinnedItem; hr
             event.preventDefault();
             return;
           }
+          onNavigate();
         }}
         className={cn(
           "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
@@ -229,6 +230,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isMobile) setOpenMobile(false);
     }
   }, [pathname, isMobile, setOpenMobile]);
+  // Pathname-based close above misses two cases: clicking a nav link while
+  // already on that pathname, and route changes that only update query params
+  // (Next.js usePathname strips the search string). Wire this onto every
+  // nav-link click so mobile always closes regardless.
+  const handleNavClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [isMobile, setOpenMobile]);
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const logout = useLogout();
@@ -499,6 +507,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
+                        onClick={handleNavClick}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
@@ -539,6 +548,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                               href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : pin.item_type === "chat_session" ? `${p.inbox()}?chat=${pin.item_id}` : p.projectDetail(pin.item_id)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
+                              onNavigate={handleNavClick}
                             />
                           ))}
                         </SidebarMenu>
@@ -562,6 +572,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
+                        onClick={handleNavClick}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
@@ -581,7 +592,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       )}
                     >
                       <FolderKanban className="size-4 shrink-0" />
-                      <AppLink href={p.projects()} onClick={(e: React.MouseEvent) => e.stopPropagation()} className="flex-1 text-left hover:underline">
+                      <AppLink href={p.projects()} onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleNavClick(); }} className="flex-1 text-left hover:underline">
                         Projects
                       </AppLink>
                       <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[panel-open]:rotate-90" />
@@ -605,6 +616,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                               <SidebarMenuButton
                                 isActive={isActive}
                                 render={<AppLink href={href} />}
+                                onClick={handleNavClick}
                                 className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground pl-8 h-7"
                               >
                                 {project.icon ? (
@@ -642,6 +654,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
+                        onClick={handleNavClick}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
@@ -663,6 +676,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <AppLink
               href={p.notifications()}
               data-testid="sidebar-notifications-link"
+              onClick={handleNavClick}
               className={cn(
                 "group/notif flex items-center justify-between gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors",
                 pathname === p.notifications()
