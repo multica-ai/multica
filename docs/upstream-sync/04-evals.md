@@ -2,6 +2,23 @@
 
 Eval-strategi for at sikre at refactoren ikke ændrer adfærd eller udseende. Hver fase i `03-decision.md` har en eval-gate der skal passere før vi går videre.
 
+## Phase -1 — Preflight evals
+
+Før hovedplanen begynder verificerer vi 8 tekniske antagelser. Hver har sin egen eval i `docs/upstream-sync/preflight/<P-N>.md`:
+
+| # | Test | Pass-kriterium |
+|---|---|---|
+| P1 | Module augmentation virker | `pnpm typecheck` grøn med extended Project-type tilgængelig fra `apps/web/` |
+| P2 | Path-alias-shadowing | Begge apps bygger; ingen runtime-fejl; cerebro-komponent rendres |
+| P3 | Sqlc multi-source | Generated kode produceret fra både upstream og cerebro queries |
+| P4 | Migrations multi-mappe | Begge migrationer kører i deterministisk rækkefølge |
+| P5 | Visual regression stabilitet | <0.1% pixel-diff over 5 runs |
+| P6 | Lint-regel håndhævelse | PR uden CEREBRO-PATCH-markør fejler korrekt |
+| P7 | Wrap-pattern (single proof) | E2E-tests for comments grønne; visual diff = 0 |
+| P8 | Feature flag virker | Toggle skifter routing uden reload i begge apps |
+
+**Phase -1 eval er en GO/NO-GO gate.** Hvis 3+ punkter fejler standses hovedplanen.
+
 ## Princip
 
 > "Refactor er fuldført når brugeren ikke kan se forskel — i adfærd, udseende eller respons-tid."
@@ -46,7 +63,8 @@ Tilføj specs der dækker hver cerebro-feature, så de kan re-køres efter hver 
 |---|---|---|
 | `e2e/inbox.spec.ts` | Folders, archive, multi-select, mark-read, real-time updates | ~12 tests |
 | `e2e/members.spec.ts` | Members-list, member-detail, role toggle, enforcement toggle, remove member | ~10 tests |
-| `e2e/sandbox.spec.ts` | Per-runtime sandbox toggle, status-indicator, opt-out | ~5 tests |
+| `e2e/sandbox.spec.ts` | Per-runtime sandbox toggle, status-indicator, opt-out (markeret `test.skip(process.platform !== 'darwin')` per F9-discovery) | ~5 tests |
+| `e2e/feature-flags.spec.ts` | Settings → Feature Flags tab, toggle alle cerebro-flags, verificér feature respekterer flag | ~6 tests |
 | `e2e/mcp.spec.ts` | MCP install guide flow, onboarding hook trigger | ~4 tests |
 | `e2e/notifications-tab.spec.ts` | Per-channel toggles, route-choice, auto-subscribe rules | ~8 tests |
 | `e2e/sidebar-mobile.spec.ts` | Mobile auto-close on navigation, pin-icons by type | ~5 tests |

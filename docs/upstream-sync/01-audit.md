@@ -61,9 +61,25 @@ Alle håndteres af `scripts/upstream-sync.sh` uden manuel tankegang.
 | `apps/web/.gitignore` | 3-way merge |
 | 94 × MDX/MD content + SELF_HOSTING + CONTRIBUTING | `git checkout --theirs` |
 
-## Bucket B — Layer 1 Additive (14 filer → flyttes)
+## Bucket B — Layer 1 Additive (14 + 7 filer/pakker → flyttes/renames)
 
 Filer med rene tilføjelser der kan leve i cerebro-zonen.
+
+**Discovery-tilføjelse (F2):** 7 pakker er allerede isoleret i fork'en og findes ikke i upstream — de skal **rename til cerebro-prefiks**, ikke flyttes:
+
+| Eksisterende sti | → Renamed |
+|---|---|
+| `packages/core/artifacts/` | `packages/cerebro-artifacts-core/` (eller flyt til `packages/cerebro-artifacts/core/`) |
+| `packages/core/attachments/` | `packages/cerebro-attachments/core/` |
+| `packages/core/notifications/` | `packages/cerebro-notifications/core/` |
+| `packages/views/artifacts/` | `packages/cerebro-artifacts/views/` |
+| `packages/views/attachments/` | `packages/cerebro-attachments/views/` |
+| `packages/views/notifications/` | `packages/cerebro-notifications/views/` |
+| `packages/views/members/` | `packages/cerebro-users/` |
+
+Renamearbejdet er trivielt: imports updates + tsconfig-stier. Alle disse pakker er allerede uden conflict (de er i 100% vores territory) — rename er kun for klarhed og fremtidig disciplin.
+
+**Plus disse 14 filer flyttes som oprindelig L1:**
 
 | Nuværende sti | → Cerebro-mål | Indhold |
 |---|---|---|
@@ -103,7 +119,7 @@ For hver: hold upstream-fil urørt; placér wrapper/override i cerebro-zone og b
 | `packages/views/chat/components/chat-input.tsx` | Wrapper med MCP-onboarding hook | `packages/cerebro-mcp/chat-input.tsx` |
 | `packages/views/chat/components/chat-message-list.tsx` | Wrapper for mid-stream UX | `packages/cerebro-mcp/chat-message-list.tsx` |
 | `packages/views/editor/readonly-content.tsx` | CSS override + wrapper for mobil-tweaks | `packages/cerebro-ui/readonly-content.tsx` |
-| `packages/views/settings/components/settings-page.tsx` | Tab-registration via context (vi tilføjer Notifications-tab) | `packages/cerebro-notifications/register-settings-tab.tsx` |
+<!-- removed: settings-page.tsx er rykket til L1 efter discovery (F3 — bruger eksisterende extraAccountTabs prop) -->
 | `packages/views/layout/app-sidebar.tsx` | Slot-pattern + sidebar-registry (vores nav-items) | `packages/cerebro-ui/sidebar-extras.tsx` med Layer 3 hook |
 
 **Net-effekt:** 15 filer fjernes fra fremtidig konfliktflade. Hvis upstream ændrer komponentens props/API → vores wrapper fejler ved compile (fanges af `make check`), ikke ved merge.
@@ -173,9 +189,11 @@ Hver patch ≤5 linjer. Total budget: <150 linjer kode på tværs af alle 42 fil
 | Lag | Antal filer | Andel af 107 |
 |---|---|---|
 | L0 — Auto-resolve | 36 | 34% |
-| L1 — Additive (flyt) | 14 | 13% |
-| L2 — Composition (wrap) | 15 | 14% |
+| L1 — Additive (flyt + rename) | 15 | 14% |
+| L2 — Composition (wrap) | 14 | 13% |
 | L3 — Marked patch | 42 | 39% |
+
+**Plus 7 allerede-isolerede pakker** der renames til cerebro-prefiks (ikke i 107-tællingen — ingen konflikt).
 
 **Centralt tal:** efter refactor er kun L3's 42 filer i upstream-konfliktflade, og hver enkelt har <5 linjer cerebro-kode. Det betyder en typisk upstream-merge rammer 3-8 af de 42 (afhængigt af hvor upstream rørte) med trivielle resolutioner.
 
