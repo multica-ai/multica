@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -63,6 +64,9 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	CodexAppVisibleTasks           bool
+	CodexAppPortalRoot             string
+	CodexAppVisibleCwd             string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -104,8 +108,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
 		}
 	}
-	codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
-	if _, err := exec.LookPath(codexPath); err == nil {
+	if codexPath, ok := resolveAgentExecutable("MULTICA_CODEX_PATH", "codex", codexDesktopFallbackPaths()); ok {
 		agents["codex"] = AgentEntry{
 			Path:  codexPath,
 			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
@@ -303,6 +306,27 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, fmt.Errorf("resolve absolute workspaces root: %w", err)
 	}
 
+	codexAppVisibleTasks, err := boolFromEnv("MULTICA_CODEX_APP_VISIBLE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	codexAppPortalRoot := strings.TrimSpace(os.Getenv("MULTICA_CODEX_APP_PORTAL_ROOT"))
+	if codexAppPortalRoot == "" {
+		codexAppPortalRoot = defaultCodexAppPortalRoot()
+	}
+	codexAppPortalRoot, err = filepath.Abs(codexAppPortalRoot)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve absolute Codex App portal root: %w", err)
+	}
+	codexAppVisibleCwd := strings.TrimSpace(os.Getenv("MULTICA_CODEX_APP_VISIBLE_CWD"))
+	if codexAppVisibleCwd == "" {
+		codexAppVisibleCwd = codexAppPortalRoot
+	}
+	codexAppVisibleCwd, err = filepath.Abs(codexAppVisibleCwd)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve absolute Codex App visible cwd: %w", err)
+	}
+
 	// Health port: override > default
 	healthPort := DefaultHealthPort
 	if overrides.HealthPort > 0 {
@@ -359,7 +383,45 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		CodexAppVisibleTasks:           codexAppVisibleTasks,
+		CodexAppPortalRoot:             codexAppPortalRoot,
+		CodexAppVisibleCwd:             codexAppVisibleCwd,
 	}, nil
+}
+
+func resolveAgentExecutable(envKey, defaultName string, fallbacks []string) (string, bool) {
+	if explicit := strings.TrimSpace(os.Getenv(envKey)); explicit != "" {
+		if _, err := exec.LookPath(explicit); err == nil {
+			return explicit, true
+		}
+		return "", false
+	}
+
+	candidates := append([]string{defaultName}, fallbacks...)
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		if _, err := exec.LookPath(candidate); err == nil {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func codexDesktopFallbackPaths() []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return []string{"/Applications/Codex.app/Contents/Resources/codex"}
+}
+
+func defaultCodexAppPortalRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return filepath.Join(os.TempDir(), "multica-codex-app-visible")
+	}
+	return filepath.Join(home, "Documents", "Codex", "Multica")
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.
