@@ -950,7 +950,7 @@ export function InboxPage() {
       );
     }
 
-    if (selected) {
+    if (detailContent) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center border-b px-2 gap-1">
