@@ -15,22 +15,13 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
-import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { sortIssues } from "../utils/sort";
-import { StatusIcon } from "./status-icon";
 import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
@@ -100,7 +91,6 @@ const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 export function BoardView({
   issues,
   visibleStatuses,
-  hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
@@ -108,7 +98,6 @@ export function BoardView({
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
   onMoveIssue: (
     issueId: string,
     newStatus: IssueStatus,
@@ -290,13 +279,6 @@ export function BoardView({
             myIssuesOpts={myIssuesOpts}
           />
         ))}
-
-        {hiddenStatuses.length > 0 && (
-          <HiddenColumnsPanel
-            hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
-          />
-        )}
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -340,76 +322,5 @@ function PaginatedBoardColumn({
         ) : undefined
       }
     />
-  );
-}
-
-function HiddenColumnsPanel({
-  hiddenStatuses,
-  myIssuesOpts,
-}: {
-  hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-}) {
-  return (
-    <div className="flex w-[240px] shrink-0 flex-col">
-      <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="text-sm font-medium text-muted-foreground">
-          Hidden columns
-        </span>
-      </div>
-      <div className="flex-1 space-y-0.5">
-        {hiddenStatuses.map((status) => (
-          <HiddenColumnRow
-            key={status}
-            status={status}
-            myIssuesOpts={myIssuesOpts}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HiddenColumnRow({
-  status,
-  myIssuesOpts,
-}: {
-  status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-}) {
-  const cfg = STATUS_CONFIG[status];
-  const viewStoreApi = useViewStoreApi();
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
-  return (
-    <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
-      <div className="flex items-center gap-2">
-        <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-sm">{cfg.label}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">{total}</span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-full text-muted-foreground"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => viewStoreApi.getState().showStatus(status)}
-            >
-              <Eye className="size-3.5" />
-              Show column
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
   );
 }

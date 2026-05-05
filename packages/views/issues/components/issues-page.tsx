@@ -70,10 +70,6 @@ export function IssuesPage() {
     return BOARD_STATUSES;
   }, [statusFilters]);
 
-  const hiddenStatuses = useMemo(() => {
-    return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
-  }, [visibleStatuses]);
-
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
@@ -159,7 +155,6 @@ export function IssuesPage() {
               <BoardView
                 issues={issues}
                 visibleStatuses={visibleStatuses}
-                hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
