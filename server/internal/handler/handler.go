@@ -60,7 +60,7 @@ type Handler struct {
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
 	UpdateStore           *UpdateStore
-	ModelListStore        *ModelListStore
+	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	Storage               storage.Storage
@@ -98,7 +98,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
 		UpdateStore:           NewUpdateStore(),
-		ModelListStore:        NewModelListStore(),
+		ModelListStore:        NewInMemoryModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		Storage:               store,

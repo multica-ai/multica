@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -230,6 +231,135 @@ func TestDownloadFile(t *testing.T) {
 		_, err := client.DownloadFile(context.Background(), "/uploads/missing")
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestUploadFileWithURL(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "multipart/form-data") {
+				t.Errorf("expected multipart content-type, got %s", ct)
+			}
+
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Fatalf("missing file field: %v", err)
+			}
+			defer file.Close()
+
+			data, _ := io.ReadAll(file)
+			if string(data) != "hello" {
+				t.Errorf("unexpected file data: %q", string(data))
+			}
+			if header.Filename != "test.txt" {
+				t.Errorf("unexpected filename: %q", header.Filename)
+			}
+
+			// Verify no issue_id or comment_id fields are sent.
+			if r.FormValue("issue_id") != "" {
+				t.Errorf("unexpected issue_id field")
+			}
+			if r.FormValue("comment_id") != "" {
+				t.Errorf("unexpected comment_id field")
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AttachmentResponse{
+				ID:        "att-123",
+				URL:       "https://cdn.example.com/file.txt",
+				Filename:  "test.txt",
+				SizeBytes: 5,
+			})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "ws-1", "test-token")
+		id, url, err := client.UploadFileWithURL(context.Background(), []byte("hello"), "test.txt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "att-123" {
+			t.Errorf("expected id att-123, got %s", id)
+		}
+		if url != "https://cdn.example.com/file.txt" {
+			t.Errorf("expected url https://cdn.example.com/file.txt, got %s", url)
+		}
+	})
+
+	t.Run("error status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, "bad request")
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		_, _, err := client.UploadFileWithURL(context.Background(), []byte("x"), "x.txt")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "upload file returned 400") {
+			t.Errorf("unexpected error message: %s", err.Error())
+		}
+	})
+
+	t.Run("missing id in response succeeds (fallback path)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"url": "https://example.com"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		id, url, err := client.UploadFileWithURL(context.Background(), []byte("x"), "x.txt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "" {
+			t.Errorf("expected empty id, got %s", id)
+		}
+		if url != "https://example.com" {
+			t.Errorf("expected url https://example.com, got %s", url)
+		}
+	})
+
+	t.Run("workspace header sent", func(t *testing.T) {
+		var gotWorkspace string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotWorkspace = r.Header.Get("X-Workspace-ID")
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AttachmentResponse{ID: "att-1", URL: "https://example.com"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
+		_, _, err := client.UploadFileWithURL(context.Background(), []byte("x"), "x.txt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotWorkspace != "ws-abc" {
+			t.Errorf("expected X-Workspace-ID ws-abc, got %s", gotWorkspace)
+		}
+	})
+
+	t.Run("missing url in response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AttachmentResponse{ID: "att-123"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "")
+		_, _, err := client.UploadFileWithURL(context.Background(), []byte("x"), "x.txt")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "missing attachment url") {
+			t.Errorf("unexpected error message: %s", err.Error())
 		}
 	})
 }

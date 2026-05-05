@@ -225,7 +225,7 @@ RETURNING *;
 -- a rerun does not inherit the bad session. The daemon classifies these
 -- failures (iteration_limit, agent_fallback_message) when it detects the
 -- agent emitted a fallback marker instead of a real result.
-SELECT session_id, work_dir FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'
