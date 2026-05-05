@@ -400,6 +400,25 @@ type MemoryArtifact struct {
 	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
 }
 
+type MemoryArtifactRevision struct {
+	ID                    pgtype.UUID        `json:"id"`
+	MemoryArtifactID      pgtype.UUID        `json:"memory_artifact_id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	RevisionNumber        int32              `json:"revision_number"`
+	Title                 string             `json:"title"`
+	Content               string             `json:"content"`
+	Slug                  pgtype.Text        `json:"slug"`
+	ParentID              pgtype.UUID        `json:"parent_id"`
+	AnchorType            pgtype.Text        `json:"anchor_type"`
+	AnchorID              pgtype.UUID        `json:"anchor_id"`
+	Tags                  []string           `json:"tags"`
+	Metadata              []byte             `json:"metadata"`
+	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
+	EditorType            pgtype.Text        `json:"editor_type"`
+	EditorID              pgtype.UUID        `json:"editor_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

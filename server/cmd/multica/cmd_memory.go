@@ -97,6 +97,27 @@ var memoryDeleteCmd = &cobra.Command{
 	RunE:  runMemoryDelete,
 }
 
+var memoryHistoryCmd = &cobra.Command{
+	Use:   "history <id>",
+	Short: "List prior revisions of a memory artifact (newest first)",
+	Args:  exactArgs(1),
+	RunE:  runMemoryHistory,
+}
+
+var memoryShowRevisionCmd = &cobra.Command{
+	Use:   "show-revision <id> <revision>",
+	Short: "Show the full content of a specific revision",
+	Args:  exactArgs(2),
+	RunE:  runMemoryShowRevision,
+}
+
+var memoryRestoreRevisionCmd = &cobra.Command{
+	Use:   "restore-revision <id> <revision>",
+	Short: "Restore an artifact to a prior revision (creates a new edit; doesn't rewrite history)",
+	Args:  exactArgs(2),
+	RunE:  runMemoryRestoreRevision,
+}
+
 func init() {
 	memoryCmd.AddCommand(memoryListCmd)
 	memoryCmd.AddCommand(memoryGetCmd)
@@ -107,6 +128,9 @@ func init() {
 	memoryCmd.AddCommand(memoryArchiveCmd)
 	memoryCmd.AddCommand(memoryRestoreCmd)
 	memoryCmd.AddCommand(memoryDeleteCmd)
+	memoryCmd.AddCommand(memoryHistoryCmd)
+	memoryCmd.AddCommand(memoryShowRevisionCmd)
+	memoryCmd.AddCommand(memoryRestoreRevisionCmd)
 
 	// list
 	memoryListCmd.Flags().String("kind", "", "Filter by kind: wiki_page | agent_note | runbook | decision")
@@ -155,6 +179,12 @@ func init() {
 	memoryArchiveCmd.Flags().String("output", "json", "Output format: table or json")
 	memoryRestoreCmd.Flags().String("output", "json", "Output format: table or json")
 	memoryDeleteCmd.Flags().String("output", "json", "Output format: table or json")
+
+	memoryHistoryCmd.Flags().Int("limit", 50, "Max revisions to return (cap: 200)")
+	memoryHistoryCmd.Flags().Int("offset", 0, "Offset for pagination")
+	memoryHistoryCmd.Flags().String("output", "table", "Output format: table or json")
+	memoryShowRevisionCmd.Flags().String("output", "json", "Output format: table or json (default: full JSON)")
+	memoryRestoreRevisionCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -663,4 +693,106 @@ func runMemoryDelete(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "Memory artifact %s deleted.\n", args[0])
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Revision history
+// ---------------------------------------------------------------------------
+
+func runMemoryHistory(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	params := url.Values{}
+	if l, _ := cmd.Flags().GetInt("limit"); l > 0 {
+		params.Set("limit", fmt.Sprintf("%d", l))
+	}
+	if o, _ := cmd.Flags().GetInt("offset"); o > 0 {
+		params.Set("offset", fmt.Sprintf("%d", o))
+	}
+	path := "/api/memory/" + args[0] + "/history"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, path, &result); err != nil {
+		return fmt.Errorf("list memory artifact revisions: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	listRaw, _ := result["revisions"].([]any)
+	headers := []string{"REV", "TITLE", "EDITOR", "CREATED"}
+	rows := make([][]string, 0, len(listRaw))
+	for _, raw := range listRaw {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		// revision_number is a JSON number, surfaces as float64 after
+		// json.Unmarshal into map[string]any.
+		var revStr string
+		if n, ok := m["revision_number"].(float64); ok {
+			revStr = fmt.Sprintf("%d", int(n))
+		}
+		editor := strVal(m, "editor_type")
+		if editor == "" {
+			editor = "—"
+		}
+		created := strVal(m, "created_at")
+		if len(created) >= 19 {
+			created = created[:19]
+		}
+		rows = append(rows, []string{
+			revStr,
+			strVal(m, "title"),
+			editor,
+			created,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runMemoryShowRevision(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var rev map[string]any
+	if err := client.GetJSON(ctx, "/api/memory/"+args[0]+"/history/"+args[1], &rev); err != nil {
+		return fmt.Errorf("get revision: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, rev)
+}
+
+func runMemoryRestoreRevision(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/memory/"+args[0]+"/restore-revision/"+args[1], map[string]any{}, &result); err != nil {
+		return fmt.Errorf("restore revision: %w", err)
+	}
+
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		// Brief summary; the full payload is in JSON.
+		fmt.Fprintf(os.Stdout, "Memory artifact %s restored to revision %s.\n", args[0], args[1])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
