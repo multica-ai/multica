@@ -438,7 +438,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     value={leadFilter}
                     onChange={(e) => setLeadFilter(e.target.value)}
                     placeholder="Assign lead..."
-                    className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                    className="w-full bg-transparent text-base md:text-sm placeholder:text-muted-foreground outline-none"
                   />
                 </div>
                 <div className="p-1 max-h-60 overflow-y-auto">
@@ -494,7 +494,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               type="text"
               defaultValue={project.repo_url ?? ""}
               placeholder="github.com/org/repo"
-              className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-base md:text-xs outline-none placeholder:text-muted-foreground"
               onBlur={(e) => {
                 const val = e.target.value.trim();
                 if (val !== (project.repo_url ?? "")) {

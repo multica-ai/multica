@@ -1292,7 +1292,7 @@ function FolderCreateRow({
       <Folder className="size-4 shrink-0 text-muted-foreground" />
       <input
         autoFocus
-        className="flex-1 bg-transparent text-sm outline-none"
+        className="flex-1 bg-transparent text-base md:text-sm outline-none"
         placeholder="Folder name"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -1393,7 +1393,7 @@ function FolderRow({
       {isRenaming ? (
         <input
           autoFocus
-          className="flex-1 bg-transparent outline-none"
+          className="flex-1 bg-transparent text-base md:text-sm outline-none"
           value={renameValue}
           onChange={(e) => onChangeRename(e.target.value)}
           onClick={(e) => e.stopPropagation()}

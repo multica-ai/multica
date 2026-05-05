@@ -186,8 +186,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
+          // text-base on mobile keeps font-size at 16px so iOS Safari doesn't
+          // auto-zoom on focus (zoom persists on back-nav).
           class: cn(
-            "rich-text-editor text-sm outline-none",
+            "rich-text-editor text-base md:text-sm outline-none",
             !editable && "readonly",
             className,
           ),

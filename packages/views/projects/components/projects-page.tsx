@@ -172,7 +172,7 @@ function ProjectRow({ project }: { project: Project }) {
               value={leadFilter}
               onChange={(e) => setLeadFilter(e.target.value)}
               placeholder="Assign lead..."
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+              className="w-full bg-transparent text-base md:text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
           <div className="p-1 max-h-60 overflow-y-auto">
