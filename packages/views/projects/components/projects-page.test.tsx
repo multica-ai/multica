@@ -73,6 +73,14 @@ vi.mock("@multica/core/projects/queries", () => ({
     queryKey: ["projects", "ws-1"],
     queryFn: () => Promise.resolve(mockProjects),
   }),
+  // ProjectsPage reads archivedProjectListOptions when "Show archived"
+  // is toggled. The mock factory replaces the entire module, so any
+  // export consumed by the component must be declared here — otherwise
+  // vitest throws "No <name> export is defined on the … mock".
+  archivedProjectListOptions: () => ({
+    queryKey: ["projects", "ws-1", "archived"],
+    queryFn: () => Promise.resolve([]),
+  }),
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({
