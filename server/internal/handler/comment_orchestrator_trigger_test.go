@@ -320,9 +320,13 @@ func TestUpdateWorkspaceRejectsCrossWorkspaceOrchestratorAgent(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, siblingWorkspaceID)
 	})
+	// agent_runtime has no max_concurrent_tasks column; status is checked
+	// to be 'online' | 'offline'; runtime_mode is 'local' | 'cloud'. The
+	// fixture exists only to give the sibling agent a runtime FK so the
+	// cross-workspace pointer attempt has something to point at.
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, name, provider, status, max_concurrent_tasks)
-		VALUES ($1, 'sibling-rt', 'cloud', 'connected', 1) RETURNING id
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		VALUES ($1, 'sibling-rt', 'cloud', 'claude', 'online') RETURNING id
 	`, siblingWorkspaceID).Scan(&siblingRuntimeID); err != nil {
 		t.Fatalf("create sibling runtime: %v", err)
 	}
