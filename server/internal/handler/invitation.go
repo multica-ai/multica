@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -135,8 +136,36 @@ func inviteLinkRowToResponse(row db.GetInviteLinkByTokenHashRow) InviteLinkRespo
 	}
 }
 
+func inviteLinkIDRowToResponse(row db.GetInviteLinkByIDRow) InviteLinkResponse {
+	status, reason := inviteLinkStatus(row.Status, row.ExpiresAt, row.RevokedAt, row.UsedCount, row.MaxUses)
+	return InviteLinkResponse{
+		ID:            uuidToString(row.ID),
+		WorkspaceID:   uuidToString(row.WorkspaceID),
+		WorkspaceName: row.WorkspaceName,
+		InviterID:     uuidToString(row.InviterID),
+		InviterName:   row.InviterName,
+		InviterEmail:  row.InviterEmail,
+		Role:          row.Role,
+		Status:        status,
+		Error:         reason,
+		CreatedAt:     timestampToString(row.CreatedAt),
+		UpdatedAt:     timestampToString(row.UpdatedAt),
+		ExpiresAt:     timestampToString(row.ExpiresAt),
+		MaxUses:       row.MaxUses,
+		UsedCount:     row.UsedCount,
+		RevokedAt:     timestampToPtr(row.RevokedAt),
+		LastUsedAt:    timestampToPtr(row.LastUsedAt),
+		InviteURL:     "/invite/" + uuidToString(row.ID),
+	}
+}
+
 func inviteLinkListRowToResponse(row db.ListInviteLinksByWorkspaceRow) InviteLinkResponse {
 	status, reason := inviteLinkStatus(row.Status, row.ExpiresAt, row.RevokedAt, row.UsedCount, row.MaxUses)
+	token := textValue(row.TokenHash)
+	inviteURL := "/invite/" + uuidToString(row.ID)
+	if token != "" {
+		inviteURL = "/invite/" + token
+	}
 	return InviteLinkResponse{
 		ID:           uuidToString(row.ID),
 		WorkspaceID:  uuidToString(row.WorkspaceID),
@@ -153,6 +182,8 @@ func inviteLinkListRowToResponse(row db.ListInviteLinksByWorkspaceRow) InviteLin
 		UsedCount:    row.UsedCount,
 		RevokedAt:    timestampToPtr(row.RevokedAt),
 		LastUsedAt:   timestampToPtr(row.LastUsedAt),
+		Token:        token,
+		InviteURL:    inviteURL,
 	}
 }
 
@@ -176,6 +207,14 @@ func generateInviteToken() (string, string, error) {
 func hashInviteToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func inviteTokenLookupValues(token string) []pgtype.Text {
+	hashed := hashInviteToken(token)
+	if token == hashed {
+		return []pgtype.Text{strToText(token)}
+	}
+	return []pgtype.Text{strToText(hashed), strToText(token)}
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +418,7 @@ func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 	if maxUses == 0 {
 		maxUses = 1
 	}
-	if maxUses < 0 || maxUses > 100 {
+	if maxUses < 1 || maxUses > 100 {
 		writeError(w, http.StatusBadRequest, "max_uses must be between 1 and 100")
 		return
 	}
@@ -432,17 +471,61 @@ func (h *Handler) RevokeInviteLink(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 	invitationID := chi.URLParam(r, "invitationId")
 
-	inv, err := h.Queries.RevokeInviteLink(r.Context(), db.RevokeInviteLinkParams{
+	if err := h.Queries.DeleteInviteLink(r.Context(), db.DeleteInviteLinkParams{
 		ID:          parseUUID(invitationID),
 		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "invite link not found")
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete invite link")
 		return
 	}
 
-	slog.Info("invite link revoked", "invitation_id", invitationID, "workspace_id", workspaceID)
-	writeJSON(w, http.StatusOK, inviteLinkToResponse(inv, ""))
+	slog.Info("invite link deleted", "invitation_id", invitationID, "workspace_id", workspaceID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) getInviteLinkByToken(r *http.Request, token string) (db.GetInviteLinkByTokenHashRow, error) {
+	var lastErr error
+	for _, lookupValue := range inviteTokenLookupValues(token) {
+		row, err := h.Queries.GetInviteLinkByTokenHash(r.Context(), lookupValue)
+		if err == nil {
+			return row, nil
+		}
+		lastErr = err
+		if !isNotFound(err) {
+			break
+		}
+	}
+	return db.GetInviteLinkByTokenHashRow{}, lastErr
+}
+
+func (h *Handler) getInviteLinkByID(r *http.Request, token string) (db.GetInviteLinkByIDRow, error) {
+	id := parseUUID(token)
+	if !id.Valid {
+		return db.GetInviteLinkByIDRow{}, errors.New("invalid invite link id")
+	}
+	return h.Queries.GetInviteLinkByID(r.Context(), id)
+}
+
+func (h *Handler) getInviteLinkByTokenForUpdate(qtx *db.Queries, r *http.Request, token string) (db.WorkspaceInvitation, error) {
+	var lastErr error
+	for _, lookupValue := range inviteTokenLookupValues(token) {
+		inv, err := qtx.GetInviteLinkByTokenHashForUpdate(r.Context(), lookupValue)
+		if err == nil {
+			return inv, nil
+		}
+		lastErr = err
+		if !isNotFound(err) {
+			break
+		}
+	}
+	if id := parseUUID(token); id.Valid {
+		inv, err := qtx.GetInviteLinkByIDForUpdate(r.Context(), id)
+		if err == nil {
+			return inv, nil
+		}
+		lastErr = err
+	}
+	return db.WorkspaceInvitation{}, lastErr
 }
 
 func (h *Handler) ValidateInviteLink(w http.ResponseWriter, r *http.Request) {
@@ -452,9 +535,14 @@ func (h *Handler) ValidateInviteLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.Queries.GetInviteLinkByTokenHash(r.Context(), strToText(hashInviteToken(token)))
+	row, err := h.getInviteLinkByToken(r, token)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "invite link not found")
+		idRow, idErr := h.getInviteLinkByID(r, token)
+		if idErr != nil {
+			writeError(w, http.StatusNotFound, "invite link not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, inviteLinkIDRowToResponse(idRow))
 		return
 	}
 
@@ -487,7 +575,7 @@ func (h *Handler) AcceptInviteLink(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
-	inv, err := qtx.GetInviteLinkByTokenHashForUpdate(r.Context(), strToText(hashInviteToken(token)))
+	inv, err := h.getInviteLinkByTokenForUpdate(qtx, r, token)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "invite link not found")
 		return

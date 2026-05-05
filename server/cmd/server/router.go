@@ -218,10 +218,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
-					r.Delete("/invite-links/{invitationId}", h.RevokeInviteLink)
 				})
 				// Owner-only access
-				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"))
+					r.Delete("/", h.DeleteWorkspace)
+					r.Delete("/invite-links/{invitationId}", h.RevokeInviteLink)
+				})
 			})
 		})
 

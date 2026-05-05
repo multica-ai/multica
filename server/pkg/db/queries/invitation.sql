@@ -32,9 +32,24 @@ JOIN workspace w ON w.id = wi.workspace_id
 JOIN "user" u ON u.id = wi.inviter_id
 WHERE wi.invite_type = 'link' AND wi.token_hash = $1;
 
+-- name: GetInviteLinkByID :one
+SELECT wi.*,
+       w.name AS workspace_name,
+       u.name AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.invite_type = 'link' AND wi.id = $1;
+
 -- name: GetInviteLinkByTokenHashForUpdate :one
 SELECT * FROM workspace_invitation
 WHERE invite_type = 'link' AND token_hash = $1
+FOR UPDATE;
+
+-- name: GetInviteLinkByIDForUpdate :one
+SELECT * FROM workspace_invitation
+WHERE invite_type = 'link' AND id = $1
 FOR UPDATE;
 
 -- name: ListPendingInvitationsByWorkspace :many
@@ -89,6 +104,10 @@ UPDATE workspace_invitation
 SET status = 'expired', revoked_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link' AND revoked_at IS NULL
 RETURNING *;
+
+-- name: DeleteInviteLink :exec
+DELETE FROM workspace_invitation
+WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link';
 
 -- name: ConsumeInviteLink :one
 UPDATE workspace_invitation

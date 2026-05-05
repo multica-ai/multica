@@ -185,17 +185,20 @@ function InvitationRow({
 
 function InviteLinkRow({
   inviteLink,
-  canManage,
-  onRevoke,
+  inviteURL,
+  canDelete,
+  onDelete,
+  onCopy,
   busy,
 }: {
   inviteLink: InviteLink;
-  canManage: boolean;
-  onRevoke: () => void;
+  inviteURL: string;
+  canDelete: boolean;
+  onDelete: () => void;
+  onCopy: () => void;
   busy: boolean;
 }) {
   const rc = roleConfig[inviteLink.role];
-  const isRevocable = inviteLink.status === "valid";
   const statusLabel: Record<InviteLink["status"], string> = {
     valid: "Active",
     expired: "Expired",
@@ -210,19 +213,33 @@ function InviteLinkRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">Invite link</div>
+        <div className="text-xs text-muted-foreground truncate">
+          {inviteURL || "Link unavailable"}
+        </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span>{statusLabel[inviteLink.status]}</span>
           <span>{inviteLink.used_count}/{inviteLink.max_uses} used</span>
           {inviteLink.expires_at && <span>Expires {new Date(inviteLink.expires_at).toLocaleDateString()}</span>}
         </div>
       </div>
-      {canManage && isRevocable && (
+      {inviteURL && (
         <Button
           variant="ghost"
           size="icon-sm"
           disabled={busy}
-          onClick={onRevoke}
-          title="Revoke invite link"
+          onClick={onCopy}
+          title="Copy invite link"
+        >
+          <Copy className="h-4 w-4 text-muted-foreground" />
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={busy}
+          onClick={onDelete}
+          title="Delete invite link"
         >
           <X className="h-4 w-4 text-muted-foreground" />
         </Button>
@@ -261,6 +278,14 @@ export function MembersTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  const maxUsesValue = Number(linkMaxUses.trim());
+  const linkMaxUsesValid = /^\d+$/.test(linkMaxUses.trim()) && maxUsesValue >= 1 && maxUsesValue <= 100;
+
+  const inviteURLFor = (inviteLink: InviteLink) => {
+    const value = inviteLink.invite_url || (inviteLink.token ? `/invite/${encodeURIComponent(inviteLink.token)}` : `/invite/${encodeURIComponent(inviteLink.id)}`);
+    if (!value) return "";
+    return value.startsWith("http") ? value : `${window.location.origin}${value}`;
+  };
 
   const handleCopyLink = async (value: string) => {
     try {
@@ -278,11 +303,10 @@ export function MembersTab() {
       const inviteLink = await api.createInviteLink(workspace.id, {
         role: linkRole,
         ttl_hours: Number(linkTTLHours),
-        max_uses: Number(linkMaxUses),
+        max_uses: maxUsesValue,
       });
-      const token = inviteLink.token;
-      if (token) {
-        const url = `${window.location.origin}/invite/${encodeURIComponent(token)}`;
+      const url = inviteURLFor(inviteLink);
+      if (url) {
         setGeneratedLink(url);
         await handleCopyLink(url);
       }
@@ -314,20 +338,20 @@ export function MembersTab() {
     }
   };
 
-  const handleRevokeInviteLink = (inviteLink: InviteLink) => {
+  const handleDeleteInviteLink = (inviteLink: InviteLink) => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Revoke invite link",
-      description: "Revoke this invite link? Anyone with the link will no longer be able to join this workspace.",
+      title: "Delete invite link",
+      description: "Delete this invite link? Anyone with the link will no longer be able to join this workspace.",
       variant: "destructive",
       onConfirm: async () => {
         setInvitationActionId(inviteLink.id);
         try {
           await api.revokeInviteLink(workspace.id, inviteLink.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.inviteLinks(wsId) });
-          toast.success("Invite link revoked");
+          toast.success("Invite link deleted");
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to revoke invite link");
+          toast.error(e instanceof Error ? e.message : "Failed to delete invite link");
         } finally {
           setInvitationActionId(null);
         }
@@ -409,7 +433,7 @@ export function MembersTab() {
                   <Link className="h-4 w-4 text-muted-foreground" />
                   <h3 className="text-sm font-medium">Generate invite link</h3>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-[120px_120px_120px_auto]">
+                <div className="grid gap-3 sm:grid-cols-[120px_120px_140px_auto]">
                   <Select value={linkRole} onValueChange={(value) => setLinkRole(value as Exclude<MemberRole, "owner">)}>
                     <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -426,18 +450,22 @@ export function MembersTab() {
                       <SelectItem value="720">30 days</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={linkMaxUses} onValueChange={(value) => { if (value) setLinkMaxUses(value); }}>
-                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">1 use</SelectItem>
-                      <SelectItem value="5">5 uses</SelectItem>
-                      <SelectItem value="10">10 uses</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleCreateInviteLink} disabled={linkLoading}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={linkMaxUses}
+                    onChange={(e) => setLinkMaxUses(e.target.value)}
+                    placeholder="Uses"
+                  />
+                  <Button onClick={handleCreateInviteLink} disabled={linkLoading || !linkMaxUsesValid}>
                     {linkLoading ? "Generating..." : "Generate"}
                   </Button>
                 </div>
+                {!linkMaxUsesValid && (
+                  <p className="text-xs text-destructive">Uses must be a whole number from 1 to 100.</p>
+                )}
                 {generatedLink && (
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                     <Input value={generatedLink} readOnly />
@@ -517,8 +545,10 @@ export function MembersTab() {
               <div key={link.id} className={i > 0 ? "border-t border-border/50" : ""}>
                 <InviteLinkRow
                   inviteLink={link}
-                  canManage={canManageWorkspace}
-                  onRevoke={() => handleRevokeInviteLink(link)}
+                  inviteURL={inviteURLFor(link)}
+                  canDelete={isOwner}
+                  onDelete={() => handleDeleteInviteLink(link)}
+                  onCopy={() => handleCopyLink(inviteURLFor(link))}
                   busy={invitationActionId === link.id}
                 />
               </div>

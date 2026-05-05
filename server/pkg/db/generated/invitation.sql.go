@@ -226,6 +226,21 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 	return i, err
 }
 
+const deleteInviteLink = `-- name: DeleteInviteLink :exec
+DELETE FROM workspace_invitation
+WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link'
+`
+
+type DeleteInviteLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkParams) error {
+	_, err := q.db.Exec(ctx, deleteInviteLink, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const getInvitation = `-- name: GetInvitation :one
 SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
 WHERE id = $1
@@ -233,6 +248,102 @@ WHERE id = $1
 
 func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, getInvitation, id)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
+}
+
+const getInviteLinkByID = `-- name: GetInviteLinkByID :one
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
+       w.name AS workspace_name,
+       u.name AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.invite_type = 'link' AND wi.id = $1
+`
+
+type GetInviteLinkByIDRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	WorkspaceName      string             `json:"workspace_name"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
+}
+
+func (q *Queries) GetInviteLinkByID(ctx context.Context, id pgtype.UUID) (GetInviteLinkByIDRow, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByID, id)
+	var i GetInviteLinkByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+		&i.WorkspaceName,
+		&i.InviterName,
+		&i.InviterEmail,
+	)
+	return i, err
+}
+
+const getInviteLinkByIDForUpdate = `-- name: GetInviteLinkByIDForUpdate :one
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
+WHERE invite_type = 'link' AND id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetInviteLinkByIDForUpdate(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByIDForUpdate, id)
 	var i WorkspaceInvitation
 	err := row.Scan(
 		&i.ID,

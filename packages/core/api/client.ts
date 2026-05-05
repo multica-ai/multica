@@ -854,8 +854,8 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/invite-links`);
   }
 
-  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<InviteLink> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
+  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
       method: "DELETE",
     });
   }
