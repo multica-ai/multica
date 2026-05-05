@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,11 +27,62 @@ var repoCheckoutCmd = &cobra.Command{
 	RunE:  runRepoCheckout,
 }
 
-var repoCheckoutRef string
+var repoApproveCmd = &cobra.Command{
+	Use:   "approve <url>[,<url>...]",
+	Short: "Mark workspace repos as approved so projects can attach them",
+	Long:  "Promotes workspace-level repositories from 'pending' to 'approved'. Accepts a comma-separated list of URLs. Defaults to the active workspace (see `multica config workspace_id`); pass --workspace-id to target a different workspace.",
+	Args:  exactArgs(1),
+	RunE:  runRepoApprove,
+}
+
+var (
+	repoCheckoutRef      string
+	repoApproveWorkspace string
+)
 
 func init() {
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoApproveCmd.Flags().StringVar(&repoApproveWorkspace, "workspace-id", "", "workspace UUID to approve the repo in (defaults to the active workspace)")
 	repoCmd.AddCommand(repoCheckoutCmd)
+	repoCmd.AddCommand(repoApproveCmd)
+}
+
+func runRepoApprove(cmd *cobra.Command, args []string) error {
+	repoURLs := make([]string, 0)
+	for _, raw := range strings.Split(args[0], ",") {
+		if u := strings.TrimSpace(raw); u != "" {
+			repoURLs = append(repoURLs, u)
+		}
+	}
+	if len(repoURLs) == 0 {
+		return fmt.Errorf("at least one repo url is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	workspaceID := repoApproveWorkspace
+	if workspaceID == "" {
+		workspaceID = client.WorkspaceID
+	}
+	if workspaceID == "" {
+		return fmt.Errorf("no active workspace; set one with `multica config workspace_id <uuid>` or pass --workspace-id")
+	}
+
+	for _, repoURL := range repoURLs {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		body := map[string]string{"url": repoURL}
+		var result map[string]any
+		err := client.PostJSON(ctx, "/api/workspaces/"+workspaceID+"/repos/approve", body, &result)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("approve repo %s: %w", repoURL, err)
+		}
+		fmt.Fprintf(os.Stderr, "Approved %s in workspace %s.\n", repoURL, truncateID(workspaceID))
+	}
+	return nil
 }
 
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
