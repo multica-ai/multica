@@ -197,6 +197,7 @@ export function MyIssuesPage() {
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
+                onMoveIssue={handleMoveIssue}
               />
             )}
           </div>

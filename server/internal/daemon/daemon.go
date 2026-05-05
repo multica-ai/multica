@@ -911,6 +911,20 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
 func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *PendingUpdate) {
+	// Operator-managed daemons (custom builds, distro packages, anything where
+	// the upgrade is expected to flow through the package manager rather than
+	// a server push) opt out by setting MULTICA_DISABLE_AUTO_UPDATE=1. The
+	// daemon refuses cleanly so the server-side prompt records "failed" with
+	// a human reason instead of silently getting downgraded the next heartbeat.
+	if v := os.Getenv("MULTICA_DISABLE_AUTO_UPDATE"); v == "1" || strings.EqualFold(v, "true") {
+		d.logger.Info("refusing CLI self-update: MULTICA_DISABLE_AUTO_UPDATE is set", "runtime_id", runtimeID, "update_id", update.ID)
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "CLI auto-update disabled (MULTICA_DISABLE_AUTO_UPDATE=1). Update the binary out-of-band.",
+		})
+		return
+	}
+
 	// Desktop-managed daemons share their CLI binary with the Electron app,
 	// which is responsible for shipping and replacing it. Letting the daemon
 	// self-update would just get overwritten on the next Desktop launch and
@@ -1332,6 +1346,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectID:               task.ProjectID,
 		ProjectTitle:            task.ProjectTitle,
 		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
+		PeerAgents:              convertPeerAgentsForEnv(task.PeerAgents),
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1340,6 +1355,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:         task.AutopilotSource,
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
+		// Channels Phase 3b — populated by the server claim path when the
+		// task's JSONB context.type == "channel_mention". Propagated into
+		// the env so renderChannelMentionContext can build issue_context.md.
+		// ChannelAuthorType + ChannelAuthorName re-use the existing wire
+		// fields (TriggerAuthorType / TriggerAuthorName) rather than
+		// adding parallel ones; the hydrator on the server populates those.
+		ChannelID:             task.ChannelID,
+		ChannelName:           task.ChannelName,
+		ChannelKind:           task.ChannelKind,
+		ChannelMessageID:      task.ChannelMessageID,
+		ChannelMessageContent: task.ChannelMessageContent,
+		ChannelAuthorType:     task.TriggerAuthorType,
+		ChannelAuthorName:     task.TriggerAuthorName,
+		ChannelHistory:        convertChannelHistoryForEnv(task.ChannelHistory),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -1894,6 +1923,23 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	return result
 }
 
+func convertChannelHistoryForEnv(msgs []ChannelHistoryMessage) []execenv.ChannelHistoryEntry {
+	if len(msgs) == 0 {
+		return nil
+	}
+	out := make([]execenv.ChannelHistoryEntry, len(msgs))
+	for i, m := range msgs {
+		out[i] = execenv.ChannelHistoryEntry{
+			ID:         m.ID,
+			CreatedAt:  m.CreatedAt,
+			AuthorType: m.AuthorType,
+			AuthorName: m.AuthorName,
+			Content:    m.Content,
+		}
+	}
+	return out
+}
+
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {
 	if len(resources) == 0 {
 		return nil
@@ -1905,6 +1951,21 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertPeerAgentsForEnv(peers []PeerAgentData) []execenv.PeerAgentForEnv {
+	if len(peers) == 0 {
+		return nil
+	}
+	result := make([]execenv.PeerAgentForEnv, len(peers))
+	for i, p := range peers {
+		result[i] = execenv.PeerAgentForEnv{
+			ID:           p.ID,
+			Name:         p.Name,
+			Instructions: p.Instructions,
 		}
 	}
 	return result

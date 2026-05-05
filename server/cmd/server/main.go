@@ -18,6 +18,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
@@ -298,6 +299,11 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, taskSvc, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runDBStatsLogger(sweepCtx, pool)
+	// Phase 2 channels feature: daily soft-delete of channel_message rows
+	// past their effective retention. Idempotent and skips workspaces with
+	// no configured retention.
+	channelMsgSvc := channel.NewMessageService(queries)
+	go runChannelRetentionSweeper(sweepCtx, channelMsgSvc)
 
 	if metricsServer != nil {
 		go func() {

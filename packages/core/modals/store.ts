@@ -7,6 +7,7 @@ type ModalType =
   | "create-issue"
   | "quick-create-issue"
   | "create-project"
+  | "create-memory-artifact"
   | "feedback"
   | "issue-set-parent"
   | "issue-add-child"

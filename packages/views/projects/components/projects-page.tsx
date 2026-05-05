@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { projectListOptions, archivedProjectListOptions } from "@multica/core/projects/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import {
   PROJECT_STATUS_CONFIG,
@@ -71,16 +71,114 @@ function ProjectRow({ project }: { project: Project }) {
     [project.id, updateProject],
   );
 
+  // Inline-rename state. Single-click on the title still navigates via the
+  // AppLink (default browser behavior); double-click flips into edit mode.
+  // Enter / blur commits; Escape cancels and reverts.
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(project.title);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep the draft in sync if the project is renamed elsewhere (e.g. detail
+  // page or a real-time event from another client) while we're not actively
+  // editing.
+  useEffect(() => {
+    if (!isEditingTitle) setTitleDraft(project.title);
+  }, [project.title, isEditingTitle]);
+
+  // Auto-focus + select-all when entering edit mode so the user can type
+  // immediately or extend the existing name without an extra click.
+  useEffect(() => {
+    if (isEditingTitle) {
+      const el = titleInputRef.current;
+      el?.focus();
+      el?.select();
+    }
+  }, [isEditingTitle]);
+
+  const commitTitle = useCallback(() => {
+    const trimmed = titleDraft.trim();
+    setIsEditingTitle(false);
+    if (!trimmed) {
+      // Empty input — revert silently rather than wiping the project name.
+      setTitleDraft(project.title);
+      return;
+    }
+    if (trimmed !== project.title) {
+      handleUpdate({ title: trimmed });
+    }
+  }, [titleDraft, project.title, handleUpdate]);
+
+  const cancelTitleEdit = useCallback(() => {
+    setTitleDraft(project.title);
+    setIsEditingTitle(false);
+  }, [project.title]);
+
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
-      {/* Icon + Name (navigates to detail) */}
-      <AppLink
-        href={wsPaths.projectDetail(project.id)}
-        className="flex min-w-0 flex-1 items-center gap-2"
-      >
-        <ProjectIcon project={project} size="md" />
-        <span className="min-w-0 flex-1 truncate font-medium">{project.title}</span>
-      </AppLink>
+      {/* Icon + Name. Single-click navigates (AppLink). Double-click flips
+          into inline rename mode. While editing, the AppLink is replaced
+          with an <input> so clicks don't navigate. */}
+      {isEditingTitle ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <ProjectIcon project={project} size="md" />
+          <input
+            ref={titleInputRef}
+            type="text"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitTitle();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelTitleEdit();
+              }
+            }}
+            aria-label="Project name"
+            className="min-w-0 flex-1 bg-transparent border-b border-primary/40 font-medium outline-none focus:border-primary"
+          />
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <AppLink
+            href={wsPaths.projectDetail(project.id)}
+            className="flex min-w-0 flex-1 items-center gap-2"
+          >
+            <ProjectIcon project={project} size="md" />
+            <span
+              className="min-w-0 flex-1 truncate font-medium"
+              // Double-click also flips into edit mode for power users —
+              // the visible pencil button is the discoverable affordance,
+              // but dblclick is the muscle-memory shortcut.
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsEditingTitle(true);
+              }}
+            >
+              {project.title}
+            </span>
+          </AppLink>
+          {/* Hover-revealed rename button. Sibling of AppLink so a click
+              doesn't trigger navigation. Visible on row hover (and always
+              visible to keyboard focus). */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditingTitle(true);
+            }}
+            className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-60 hover:opacity-100"
+            aria-label={`Rename ${project.title}`}
+            title="Rename project"
+          >
+            <Pencil className="size-3" />
+          </button>
+        </div>
+      )}
 
       {/* Priority — dropdown */}
       <DropdownMenu>
@@ -230,7 +328,20 @@ function ProjectRow({ project }: { project: Project }) {
 
 export function ProjectsPage() {
   const wsId = useWorkspaceId();
-  const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  // Two parallel cached lists — active (default) and archived. We always
+  // load the active list and conditionally swap to the archived list when
+  // the user toggles "Show archived." Cached separately so toggling
+  // doesn't refetch the active set.
+  const [showArchived, setShowArchived] = useState(false);
+  const activeQuery = useQuery(projectListOptions(wsId));
+  const archivedQuery = useQuery({
+    ...archivedProjectListOptions(wsId),
+    enabled: showArchived,
+  });
+  const projects = showArchived
+    ? (archivedQuery.data ?? []).filter((p) => !!p.archived_at)
+    : activeQuery.data ?? [];
+  const isLoading = showArchived ? archivedQuery.isLoading : activeQuery.isLoading;
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
   return (
@@ -243,11 +354,26 @@ export function ProjectsPage() {
           {!isLoading && projects.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{projects.length}</span>
           )}
+          {showArchived && (
+            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+              Archived
+            </span>
+          )}
         </div>
-        <Button size="sm" variant="outline" onClick={openCreateProject}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          New project
-        </Button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title={showArchived ? "Show active projects" : "Show archived projects"}
+          >
+            {showArchived ? "Show active" : "Show archived"}
+          </button>
+          <Button size="sm" variant="outline" onClick={openCreateProject}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            New project
+          </Button>
+        </div>
       </PageHeader>
 
       {/* Table */}
@@ -272,10 +398,14 @@ export function ProjectsPage() {
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <FolderKanban className="h-10 w-10 mb-3 opacity-30" />
-            <p className="text-sm">No projects yet</p>
-            <Button size="sm" variant="outline" className="mt-3" onClick={openCreateProject}>
-              Create your first project
-            </Button>
+            <p className="text-sm">
+              {showArchived ? "No archived projects" : "No projects yet"}
+            </p>
+            {!showArchived && (
+              <Button size="sm" variant="outline" className="mt-3" onClick={openCreateProject}>
+                Create your first project
+              </Button>
+            )}
           </div>
         ) : (
           <>

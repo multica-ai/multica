@@ -315,6 +315,43 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 
+	// Workspace orchestrator wake-up: when an agent posts a comment on an
+	// issue and the workspace has a configured orchestrator agent, enqueue
+	// a task for the orchestrator so it can react (acknowledge, reassign,
+	// change status, ping a human). The orchestrator's persona — set via
+	// agent.instructions — decides what to actually do; this layer just
+	// makes sure it's woken up on every relevant comment.
+	//
+	// Skip when:
+	// - Comment author is a member (humans drive their own workflows; we
+	//   don't want every reply on an issue to wake an LLM).
+	// - Issue is in a terminal status (done / cancelled): the workflow is
+	//   over; waking the orchestrator would just generate noise.
+	// - No orchestrator configured for the workspace (zero behavior change
+	//   for installs that haven't opted in).
+	// - Comment author IS the orchestrator (no self-loops).
+	// - Orchestrator IS the issue's current assignee (the on_comment path
+	//   above already woke them; double-firing would create two tasks for
+	//   the same comment).
+	if authorType == "agent" && issue.Status != "done" && issue.Status != "cancelled" {
+		ws, wsErr := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID)
+		if wsErr == nil && ws.OrchestratorAgentID.Valid {
+			orchID := ws.OrchestratorAgentID
+			isSelfLoop := uuidToString(orchID) == authorID
+			isAssignee := issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == uuidToString(orchID)
+			if !isSelfLoop && !isAssignee {
+				if _, err := h.TaskService.EnqueueOrchestratorTask(r.Context(), issue, orchID, comment.ID); err != nil {
+					slog.Warn("orchestrator wake-up failed",
+						"issue_id", issueID,
+						"orchestrator_agent_id", uuidToString(orchID),
+						"comment_id", uuidToString(comment.ID),
+						"error", err,
+					)
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

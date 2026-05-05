@@ -8,6 +8,29 @@ import (
 	"strings"
 )
 
+// primaryProjectRepoURL returns the URL of the first `github_repo` resource
+// in the list — by convention, the project's primary / default repo. The
+// daemon receives resources already ordered by the server's `position ASC,
+// created_at ASC`, so "first" is deterministic. Returns "" when the project
+// has no github_repo resources (e.g. it only attaches docs or notion pages).
+func primaryProjectRepoURL(resources []ProjectResourceForEnv) string {
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(r.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if payload.URL != "" {
+			return payload.URL
+		}
+	}
+	return ""
+}
+
 // formatProjectResource renders a single resource as a human-readable bullet.
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
@@ -101,6 +124,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject peer agents — every other non-archived agent in the workspace.
+	// Orchestrator-style agents (the picker, Hermes, etc.) need to know who
+	// the other agents are so they can route work by name (`multica issue
+	// assign --to <name>` or `--assignee <name>` on create) instead of self-
+	// assigning because they don't realise other agents exist. The block is
+	// agent-name-agnostic — it lists peers as data, never hardcodes which
+	// peer to pick; the agent's own instructions decide the routing policy.
+	if len(ctx.PeerAgents) > 0 {
+		b.WriteString("## Peer Agents in this Workspace\n\n")
+		b.WriteString("Other agents are available in this workspace. When delegating work (creating issues for others, reassigning, picking an assignee), refer to them by name. Do not assume you are the only agent — if a task is outside your role, route it to a peer instead of self-assigning.\n\n")
+		for _, p := range ctx.PeerAgents {
+			fmt.Fprintf(&b, "- **%s** (id: `%s`)", p.Name, p.ID)
+			if trimmed := strings.TrimSpace(p.Instructions); trimmed != "" {
+				// First non-empty line of the peer's instructions —
+				// usually their role/persona one-liner.
+				if idx := strings.IndexByte(trimmed, '\n'); idx > 0 {
+					trimmed = trimmed[:idx]
+				}
+				fmt.Fprintf(&b, " — %s", trimmed)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nUse `multica issue assign <issue-id> --to <name>` to reassign, or `--assignee <name>` on `multica issue create` to dispatch a new issue to a peer.\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
@@ -176,6 +224,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
 		if len(ctx.ProjectResources) > 0 {
+			// The first `github_repo` resource (lowest position) is the project's
+			// primary / default repo. Surface it explicitly so the agent has a
+			// deterministic answer to "which repo do I work in?" instead of having
+			// to guess from the issue description. Falls back to no callout when
+			// the project has no github_repo resources at all (e.g. only docs or
+			// notion pages attached).
+			if primaryRepo := primaryProjectRepoURL(ctx.ProjectResources); primaryRepo != "" {
+				fmt.Fprintf(&b, "**Primary repo:** %s — when an issue under this project doesn't say otherwise, work in this repo. Use `multica repo checkout %s` to fetch it.\n\n", primaryRepo, primaryRepo)
+			}
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))

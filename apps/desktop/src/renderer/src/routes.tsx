@@ -8,12 +8,14 @@ import {
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { MemoryDetailPage } from "./pages/memory-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
+import { MemoryPage } from "@multica/views/memory/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
@@ -98,6 +100,16 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "memory",
+            element: <MemoryPage />,
+            handle: { title: "Memory" },
+          },
+          {
+            path: "memory/:id",
+            element: <MemoryDetailPage />,
+            handle: { title: "Memory" },
           },
           {
             path: "autopilots",

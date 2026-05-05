@@ -363,9 +363,64 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Post("/archive", h.ArchiveProject)
+					r.Post("/restore", h.RestoreProject)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+				})
+			})
+
+			// Channels (multi-participant chat + DMs).
+			// Endpoints respond 404 when workspace.channels_enabled is FALSE
+			// — the gate lives inside each handler so the surface is invisible
+			// to anyone in a workspace that hasn't opted in.
+			r.Route("/api/channels", func(r chi.Router) {
+				// Phase 5c — full-text search. Mounted ahead of /{channelId}
+				// so chi doesn't try to interpret "search" as a UUID.
+				r.Get("/search", h.SearchChannelMessages)
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/{channelId}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Patch("/", h.UpdateChannel)
+					r.Delete("/", h.ArchiveChannel)
+					r.Post("/read", h.MarkChannelRead)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{memberType}/{memberId}", h.RemoveChannelMember)
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.CreateChannelMessage)
+					// Phase 4 — per-message endpoints (threads + reactions).
+					// Nested so the channel-access gate covers them via
+					// requireChannelAccess inside each handler. The
+					// {messageId} URL param is shared across all three.
+					r.Route("/messages/{messageId}", func(r chi.Router) {
+						// Phase 5 — author / admin edits + soft delete.
+						r.Patch("/", h.UpdateChannelMessage)
+						r.Delete("/", h.DeleteChannelMessage)
+						r.Get("/thread", h.ListChannelMessageThread)
+						r.Post("/reactions", h.AddChannelReaction)
+						r.Delete("/reactions", h.RemoveChannelReaction)
+					})
+				})
+			})
+			r.Post("/api/dms", h.CreateOrFetchDM)
+
+			// Memory artifacts — workspace-scoped knowledge primitives
+			// (wiki pages, agent notes, runbooks, decision logs). Single
+			// polymorphic table; `kind` query param filters per surface.
+			r.Route("/api/memory", func(r chi.Router) {
+				r.Get("/", h.ListMemoryArtifacts)
+				r.Post("/", h.CreateMemoryArtifact)
+				r.Get("/search", h.SearchMemoryArtifacts)
+				r.Get("/by-anchor/{anchorType}/{anchorId}", h.ListMemoryArtifactsByAnchor)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetMemoryArtifact)
+					r.Put("/", h.UpdateMemoryArtifact)
+					r.Delete("/", h.DeleteMemoryArtifact)
+					r.Post("/archive", h.ArchiveMemoryArtifact)
+					r.Post("/restore", h.RestoreMemoryArtifact)
 				})
 			})
 

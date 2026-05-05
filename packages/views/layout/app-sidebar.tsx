@@ -18,6 +18,7 @@ import {
   Inbox,
   ListTodo,
   Bot,
+  MessageCircle,
   Monitor,
   ChevronDown,
   ChevronRight,
@@ -26,6 +27,7 @@ import {
   Plus,
   Check,
   BookOpenText,
+  BookOpen,
   SquarePen,
   CircleUser,
   FolderKanban,
@@ -103,7 +105,9 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "memory"
   | "autopilots"
+  | "channels"
   | "agents"
   | "runtimes"
   | "skills"
@@ -114,12 +118,23 @@ const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "myIssues", label: "My Issues", icon: CircleUser },
 ];
 
-const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
+type NavItem = { key: NavKey; label: string; icon: typeof Inbox };
+
+const workspaceNav: NavItem[] = [
   { key: "issues", label: "Issues", icon: ListTodo },
   { key: "projects", label: "Projects", icon: FolderKanban },
+  { key: "memory", label: "Memory", icon: BookOpen },
   { key: "autopilots", label: "Autopilot", icon: Zap },
+  { key: "channels", label: "Channels", icon: MessageCircle },
   { key: "agents", label: "Agents", icon: Bot },
 ];
+
+// Items in workspaceNav that are gated on a workspace flag and hidden when
+// the flag is off. Render-time filter; the static array stays a complete
+// list for type-checking.
+const FLAG_GATED: Partial<Record<NavKey, (ws: { channels_enabled: boolean }) => boolean>> = {
+  channels: (ws) => ws.channels_enabled,
+};
 
 const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "runtimes", label: "Runtimes", icon: Monitor },
@@ -642,22 +657,28 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {workspaceNav
+                  .filter((item) => {
+                    const gate = FLAG_GATED[item.key];
+                    if (!gate) return true;
+                    return workspace ? gate(workspace) : false;
+                  })
+                  .map((item) => {
+                    const href = p[item.key]();
+                    const isActive = isNavActive(pathname, href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        >
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

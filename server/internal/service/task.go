@@ -203,6 +203,47 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return task, nil
 }
 
+// EnqueueOrchestratorTask wakes a workspace's configured orchestrator agent
+// in response to an agent-authored comment. Mechanically identical to
+// EnqueueTaskForMention — same DB row shape, same broadcast — but kept as
+// a separate entry point so logs and metrics can distinguish orchestrator
+// wakes from explicit @mentions, and so future divergence (e.g. a separate
+// dedup window or a different trigger summary template) is a localized
+// change.
+func (s *TaskService) EnqueueOrchestratorTask(ctx context.Context, issue db.Issue, orchestratorAgentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, orchestratorAgentID)
+	if err != nil {
+		slog.Error("orchestrator task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load orchestrator agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		slog.Debug("orchestrator task enqueue skipped: agent archived", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("orchestrator agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Error("orchestrator task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("orchestrator agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:          orchestratorAgentID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: triggerCommentID,
+		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+	})
+	if err != nil {
+		slog.Error("orchestrator task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create orchestrator task: %w", err)
+	}
+
+	slog.Info("orchestrator task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "orchestrator_agent_id", util.UUIDToString(orchestratorAgentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
+
 // QuickCreateContext is the JSON payload stored on a quick-create task's
 // context column. The daemon detects this variant via Type == "quick_create"
 // and switches to the quick-create prompt template; the completion path
@@ -216,6 +257,111 @@ type QuickCreateContext struct {
 
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
+
+// ChannelMentionContext is the JSON payload stored on a channel-mention
+// task's context column. The daemon detects this variant via
+// Type == "channel_mention" and renders a conversational prompt; on
+// completion the daemon POSTs the agent's reply back to the channel via
+// the existing /api/channels/{channelId}/messages endpoint authenticated
+// with X-Agent-ID + the task token.
+//
+// Recent message history is intentionally NOT embedded here — the daemon
+// fetches it from the channels API at execution time so the window stays
+// fresh (more messages may have arrived between enqueue and claim).
+type ChannelMentionContext struct {
+	Type           string `json:"type"`
+	WorkspaceID    string `json:"workspace_id"`
+	ChannelID      string `json:"channel_id"`
+	ChannelName    string `json:"channel_name"`
+	ChannelKind    string `json:"channel_kind"`
+	MessageID      string `json:"message_id"`
+	MessageContent string `json:"message_content"`
+	// AuthorType + AuthorID identify who triggered the mention so the
+	// daemon can address them by name in the agent's prompt.
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id"`
+}
+
+// ChannelMentionContextType marks a task as a channel-mention job.
+const ChannelMentionContextType = "channel_mention"
+
+// EnqueueTaskForChannelMentionParams is the input shape for
+// EnqueueTaskForChannelMention. Pulled into a struct because the caller
+// (handler) already has these values to hand and packing them into an
+// argument list four-deep would invite mismatch bugs.
+type EnqueueTaskForChannelMentionParams struct {
+	WorkspaceID    pgtype.UUID
+	AgentID        pgtype.UUID
+	ChannelID      pgtype.UUID
+	ChannelName    string
+	ChannelKind    string
+	MessageID      pgtype.UUID
+	MessageContent string
+	AuthorType     string
+	AuthorID       string
+}
+
+// EnqueueTaskForChannelMention creates a queued task for an agent
+// @-mentioned in a channel. The task carries the channel + triggering
+// message in its JSONB context (no issue_id, no chat_session_id) — the
+// daemon's channel-mention dispatcher (Phase 3b) recognizes the variant
+// via context.type == "channel_mention" and fetches recent message
+// history from the channels API at execution time.
+//
+// Pre-validates that the agent is reachable (not archived, has a runtime)
+// so the handler can fail fast instead of queueing a task that will never
+// claim. Self-mention and dedup guards live in the channel service —
+// this method assumes its caller has already filtered.
+func (s *TaskService) EnqueueTaskForChannelMention(ctx context.Context, p EnqueueTaskForChannelMentionParams) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, p.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := ChannelMentionContext{
+		Type:           ChannelMentionContextType,
+		WorkspaceID:    util.UUIDToString(p.WorkspaceID),
+		ChannelID:      util.UUIDToString(p.ChannelID),
+		ChannelName:    p.ChannelName,
+		ChannelKind:    p.ChannelKind,
+		MessageID:      util.UUIDToString(p.MessageID),
+		MessageContent: p.MessageContent,
+		AuthorType:     p.AuthorType,
+		AuthorID:       p.AuthorID,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal channel-mention context: %w", err)
+	}
+
+	task, err := s.Queries.CreateChannelMentionTask(ctx, db.CreateChannelMentionTaskParams{
+		AgentID:   p.AgentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create channel-mention task: %w", err)
+	}
+
+	slog.Info("channel-mention task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(p.AgentID),
+		"channel_id", util.UUIDToString(p.ChannelID),
+		"message_id", util.UUIDToString(p.MessageID),
+	)
+	// Match every other Enqueue* path: kick the daemon WS so the task
+	// gets claimed promptly instead of waiting for the next poll.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
 
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
@@ -725,6 +871,77 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 		}
 		s.broadcastChatDone(ctx, task)
+	}
+
+	// Channels Phase 3b: when a channel-mention task completes, post the
+	// agent's output back to the channel as a `channel_message` from the
+	// agent. Detection is by JSONB context.type — the task row itself has
+	// no channel_id column. The reply goes through the same INSERT path
+	// the user-facing handler uses, so it inherits all of channel_message's
+	// invariants (timeline index, fts trigger, etc.) for free.
+	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(task.Context, &probe) == nil && probe.Type == ChannelMentionContextType {
+			var cm ChannelMentionContext
+			if err := json.Unmarshal(task.Context, &cm); err == nil && cm.ChannelID != "" {
+				var payload protocol.TaskCompletedPayload
+				if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
+					body := util.UnescapeBackslashEscapes(payload.Output)
+					channelUUID, perr := util.ParseUUID(cm.ChannelID)
+					if perr != nil {
+						slog.Warn("channel-mention completion: invalid channel id",
+							"task_id", util.UUIDToString(task.ID),
+							"channel_id", cm.ChannelID,
+							"error", perr,
+						)
+					} else {
+						// metadata carries the originating task id so the
+						// frontend can show "this reply was triggered by
+						// the @-mention task and surface a link to the
+						// task transcript / cancel button if desired.
+						metaJSON, _ := json.Marshal(map[string]any{
+							"task_id":              util.UUIDToString(task.ID),
+							"trigger_message_id":   cm.MessageID,
+							"trigger_author_type":  cm.AuthorType,
+						})
+						if _, err := s.Queries.CreateChannelMessage(ctx, db.CreateChannelMessageParams{
+							ChannelID:  channelUUID,
+							AuthorType: "agent",
+							AuthorID:   task.AgentID,
+							Content:    redact.Text(body),
+							Metadata:   metaJSON,
+						}); err != nil {
+							slog.Error("channel-mention completion: failed to post reply",
+								"task_id", util.UUIDToString(task.ID),
+								"channel_id", cm.ChannelID,
+								"error", err,
+							)
+						} else {
+							slog.Info("channel-mention reply posted",
+								"task_id", util.UUIDToString(task.ID),
+								"channel_id", cm.ChannelID,
+								"agent_id", util.UUIDToString(task.AgentID),
+							)
+							// Notify all channel subscribers — same event
+							// the user-facing CreateChannelMessage handler
+							// publishes.
+							s.Bus.Publish(events.Event{
+								Type:        protocol.EventChannelMessage,
+								WorkspaceID: cm.WorkspaceID,
+								ActorType:   "agent",
+								ActorID:     util.UUIDToString(task.AgentID),
+								Payload: map[string]any{
+									"channel_id": cm.ChannelID,
+									"message_triggered_by_task_id": util.UUIDToString(task.ID),
+								},
+							})
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Reconcile agent status
@@ -1332,6 +1549,13 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
 	}
+	// Channel-mention tasks (Phase 3) also lack an issue / chat / autopilot
+	// link — workspace_id lives in the context JSONB. Same failure mode as
+	// quick-create: without this, the daemon's /start /progress /complete
+	// /fail calls all 404 and the agent reply silently fails.
+	if cm, ok := s.parseChannelMentionContext(task); ok {
+		return cm.WorkspaceID
+	}
 	return ""
 }
 
@@ -1466,6 +1690,26 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+// parseChannelMentionContext mirrors parseQuickCreateContext for Phase 3
+// channel-mention tasks. Same constraints — no issue / chat / autopilot
+// link — and the workspace lives in the context JSONB.
+func (s *TaskService) parseChannelMentionContext(task db.AgentTaskQueue) (ChannelMentionContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return ChannelMentionContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return ChannelMentionContext{}, false
+	}
+	var cm ChannelMentionContext
+	if err := json.Unmarshal(task.Context, &cm); err != nil {
+		return ChannelMentionContext{}, false
+	}
+	if cm.Type != ChannelMentionContextType {
+		return ChannelMentionContext{}, false
+	}
+	return cm, true
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

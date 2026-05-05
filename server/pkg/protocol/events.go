@@ -68,12 +68,47 @@ const (
 	EventChatDone        = "chat:done"
 	EventChatSessionRead = "chat:session_read"
 
+	// Channel events. Channels is the multi-participant chat surface (distinct
+	// from the 1:1 agent Chat above) — see migration 065 and the channels
+	// feature spec. Frontend subscribes by `channel:` prefix and invalidates
+	// the per-channel message cache.
+	EventChannelCreated       = "channel:created"
+	EventChannelUpdated       = "channel:updated"
+	EventChannelArchived      = "channel:archived"
+	EventChannelMessage       = "channel:message"
+	EventChannelMemberAdded   = "channel:member_added"
+	EventChannelMemberRemoved = "channel:member_removed"
+	EventChannelRead          = "channel:read"
+	// Phase 5 — author-driven edits / soft-deletes propagate via these
+	// per-message events. Distinct from channel:message (the new-message
+	// signal) so the frontend can patch the cache surgically rather than
+	// invalidate the whole timeline.
+	EventChannelMessageUpdated = "channel:message_updated"
+	EventChannelMessageDeleted = "channel:message_deleted"
+	// Channel-message reactions (Phase 4). Separate from EventReactionAdded
+	// (which targets issue comments) and EventIssueReactionAdded (issues)
+	// because the payload shape differs — channel reactions carry channel_id
+	// + channel_message_id rather than issue_id + comment_id, and grouping
+	// the three under one event would force the frontend to discriminate
+	// on payload keys.
+	EventChannelReactionAdded   = "channel_reaction:added"
+	EventChannelReactionRemoved = "channel_reaction:removed"
+
 	// Project events
 	EventProjectCreated         = "project:created"
 	EventProjectUpdated         = "project:updated"
 	EventProjectDeleted         = "project:deleted"
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceDeleted = "project_resource:deleted"
+
+	// Memory artifact events — workspace-scoped knowledge primitives
+	// (wiki pages, agent notes, runbooks, decision logs).
+	// Archive / restore reuse the Updated event so clients can re-render
+	// based on the artifact's archived_at field instead of needing a
+	// dedicated wire signal.
+	EventMemoryArtifactCreated = "memory_artifact:created"
+	EventMemoryArtifactUpdated = "memory_artifact:updated"
+	EventMemoryArtifactDeleted = "memory_artifact:deleted"
 
 	// Label events
 	EventLabelCreated       = "label:created"
