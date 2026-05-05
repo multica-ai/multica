@@ -87,6 +87,13 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@multica/i18n/react", () => ({
+  useT: () => (key: string, params?: Record<string, string | number>) => {
+    if (params) return `${key} ${JSON.stringify(params)}`;
+    return key;
+  },
+}));
+
 // Import AFTER mocks are registered.
 import { useIssueActions } from "../use-issue-actions";
 

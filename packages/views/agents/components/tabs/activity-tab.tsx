@@ -10,6 +10,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -38,7 +39,7 @@ import { timeAgo } from "@multica/core/utils";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "./task-failure";
+import { getFailureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -68,6 +69,8 @@ interface ActivityTabProps {
  */
 export function ActivityTab({ agent }: ActivityTabProps) {
   const wsId = useWorkspaceId();
+  const t = useT("agents");
+  const c = useT("common");
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: agentTasks = [] } = useQuery(agentTasksOptions(wsId, agent.id));
@@ -152,8 +155,8 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
-      <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
+      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} t={t} />
+      <Last30dSection activity={activity} avgDurationMs={avgDurationMs} t={t} />
       <RecentWorkSection
         tasks={recentTasks}
         totalCount={recentTasksAll.length}
@@ -163,6 +166,8 @@ export function ActivityTab({ agent }: ActivityTabProps) {
         }
         issueMap={issueMap}
         agent={agent}
+        t={t}
+        c={c}
       />
     </div>
   );
@@ -172,28 +177,33 @@ function NowSection({
   tasks,
   issueMap,
   agent,
+  t,
 }: {
   tasks: AgentTask[];
   issueMap: Map<string, Issue>;
   agent: Agent;
+  t: ReturnType<typeof useT>;
 }) {
+  const c = useT("common");
   return (
     <Section
-      title="Now"
+      title={t("activity_now")}
       subtitle={
         tasks.length === 0
-          ? "No active work"
-          : `${tasks.length} active task${tasks.length === 1 ? "" : "s"}`
+          ? t("activity_no_active")
+          : t("activity_no_active_desc", { count: tasks.length })
       }
     >
       {tasks.length === 0 ? (
-        <EmptyText>This agent isn&apos;t running anything right now.</EmptyText>
+        <EmptyText>{t("activity_no_active_desc", { count: 0 })}</EmptyText>
       ) : (
         <TaskList
           tasks={tasks}
           issueMap={issueMap}
           timeMode="active"
           agent={agent}
+          t={t}
+          c={c}
         />
       )}
     </Section>
@@ -203,9 +213,11 @@ function NowSection({
 function Last30dSection({
   activity,
   avgDurationMs,
+  t,
 }: {
   activity: AgentActivity | undefined;
   avgDurationMs: number;
+  t: ReturnType<typeof useT>;
 }) {
   const summary = summarizeActivityWindow(activity, 30);
   const { totalRuns, totalFailed } = summary;
@@ -215,9 +227,9 @@ function Last30dSection({
       : 100;
 
   return (
-    <Section title="Last 30 days" subtitle="Performance">
+    <Section title={t("activity_last_30d")} subtitle={t("activity_performance")}>
       {totalRuns === 0 ? (
-        <EmptyText>No completions in the last 30 days.</EmptyText>
+        <EmptyText>{t("activity_no_completions")}</EmptyText>
       ) : (
         // Layout: number is the hero, sparkline is a garnish on the
         // right. Reversed from "chart hero + tiny number" because at
@@ -233,22 +245,22 @@ function Last30dSection({
                 {totalRuns}
               </span>
               <span className="text-sm text-muted-foreground">
-                run{totalRuns === 1 ? "" : "s"}
+                {t("activity_runs", { count: totalRuns })}
               </span>
             </div>
             <div className="text-xs text-muted-foreground">
-              {successPct}% success
+              {successPct}% {t("activity_success")}
               {avgDurationMs > 0 && (
                 <>
                   <Sep />
-                  <span>avg {formatDurationMs(avgDurationMs)}</span>
+                  <span>{t("activity_avg")} {formatDurationMs(avgDurationMs)}</span>
                 </>
               )}
               {totalFailed > 0 && (
                 <>
                   <Sep />
                   <span className="text-destructive">
-                    {totalFailed} failed
+                    {totalFailed} {t("activity_failed")}
                   </span>
                 </>
               )}
@@ -277,6 +289,8 @@ function RecentWorkSection({
   onShowMore,
   issueMap,
   agent,
+  t,
+  c,
 }: {
   tasks: AgentTask[];
   totalCount: number;
@@ -284,6 +298,8 @@ function RecentWorkSection({
   onShowMore: () => void;
   issueMap: Map<string, Issue>;
   agent: Agent;
+  t: ReturnType<typeof useT>;
+  c: ReturnType<typeof useT>;
 }) {
   // Subtitle phrasing: "5 of 47" once we know the total is bigger than
   // what we're rendering, otherwise "5 latest". Total comes from
@@ -292,14 +308,14 @@ function RecentWorkSection({
   // "Show more" — not the raw on-the-wire row count.
   const subtitle =
     tasks.length === 0
-      ? "Nothing finished yet"
+      ? t("activity_nothing_finished")
       : totalCount > tasks.length
-        ? `${tasks.length} of ${totalCount}`
-        : `${tasks.length} latest`;
+        ? t("activity_recent_of", { count: tasks.length, total: totalCount })
+        : t("activity_recent_latest", { count: tasks.length });
   return (
-    <Section title="Recent work" subtitle={subtitle}>
+    <Section title={t("activity_recent_work")} subtitle={subtitle}>
       {tasks.length === 0 ? (
-        <EmptyText>This agent hasn&apos;t completed anything yet.</EmptyText>
+        <EmptyText>{t("activity_nothing_finished_desc")}</EmptyText>
       ) : (
         <>
           <TaskList
@@ -307,6 +323,8 @@ function RecentWorkSection({
             issueMap={issueMap}
             timeMode="completed"
             agent={agent}
+            t={t}
+            c={c}
           />
           {hasMore && (
             <button
@@ -314,7 +332,7 @@ function RecentWorkSection({
               onClick={onShowMore}
               className="mt-2 self-start rounded text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              Show more →
+              {t("activity_show_more")} →
             </button>
           )}
         </>
@@ -328,11 +346,15 @@ function TaskList({
   issueMap,
   timeMode,
   agent,
+  t,
+  c,
 }: {
   tasks: AgentTask[];
   issueMap: Map<string, Issue>;
   timeMode: "active" | "completed";
   agent: Agent;
+  t: ReturnType<typeof useT>;
+  c: ReturnType<typeof useT>;
 }) {
   return (
     <div className="space-y-1.5">
@@ -343,6 +365,8 @@ function TaskList({
           issueMap={issueMap}
           timeMode={timeMode}
           agent={agent}
+          t={t}
+          c={c}
         />
       ))}
     </div>
@@ -354,11 +378,15 @@ function TaskRow({
   issueMap,
   timeMode,
   agent,
+  t,
+  c,
 }: {
   task: AgentTask;
   issueMap: Map<string, Issue>;
   timeMode: "active" | "completed";
   agent: Agent;
+  t: ReturnType<typeof useT>;
+  c: ReturnType<typeof useT>;
 }) {
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
@@ -387,7 +415,7 @@ function TaskRow({
       // through useRealtimeSync's `task:` prefix path which already
       // invalidates snapshot + per-agent + per-issue task lists.
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : t("toast_failed_cancel_tasks"));
       setCancelling(false);
     }
   };
@@ -404,13 +432,13 @@ function TaskRow({
   const sourceFallback = !hasIssue
     ? task.kind === "quick_create"
       ? isTerminalStatus
-        ? "Quick create"
-        : "Creating issue"
+        ? t("activity_quick_create")
+        : t("activity_creating_issue")
       : task.chat_session_id
-        ? "Chat session"
+        ? t("activity_chat_session")
         : task.autopilot_run_id
-          ? "Autopilot run"
-          : "Untracked"
+          ? t("activity_autopilot_run")
+          : t("activity_untracked")
     : null;
 
   // Origin marker — issue / chat / autopilot / untracked. The issue
@@ -425,16 +453,16 @@ function TaskRow({
         ? Workflow
         : CircleHelp;
   const sourceLabel = hasIssue
-    ? "Issue"
+    ? t("activity_issue")
     : task.chat_session_id
-      ? "Chat"
+      ? t("activity_chat")
       : task.autopilot_run_id
-        ? "Autopilot"
-        : "Untracked";
+        ? t("activity_autopilot")
+        : t("activity_untracked");
 
   const timeText =
     timeMode === "active"
-      ? activeTaskTimeText(task)
+      ? activeTaskTimeText(task, t)
       : task.completed_at
         ? timeAgo(task.completed_at)
         : "—";
@@ -444,7 +472,7 @@ function TaskRow({
   // cast is safe because the back-end only emits one of the enum values.
   const failureLabel =
     task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
+      ? getFailureReasonLabel(t, task.failure_reason as TaskFailureReason)
       : null;
 
   // Only show duration for terminal rows. An active row's duration is
@@ -492,14 +520,14 @@ function TaskRow({
                   <span className="truncate text-sm">
                     {issue?.title ??
                       (hasIssue
-                        ? `Issue ${task.issue_id.slice(0, 8)}…`
-                        : (sourceFallback ?? "Untracked"))}
+                        ? t("activity_issue_fallback", { id: task.issue_id.slice(0, 8) })
+                        : (sourceFallback ?? t("untracked")))}
                   </span>
                 }
               />
               <TooltipContent className="max-w-md">
                 <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
-                  Triggered by
+                  {c("triggered_by")}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap text-xs">
                   {task.trigger_summary}
@@ -510,8 +538,8 @@ function TaskRow({
             <span className="truncate text-sm">
               {issue?.title ??
                 (hasIssue
-                  ? `Issue ${task.issue_id.slice(0, 8)}…`
-                  : (sourceFallback ?? "Untracked"))}
+                  ? t("activity_issue_fallback", { id: task.issue_id.slice(0, 8) })
+                  : (sourceFallback ?? t("untracked")))}
             </span>
           )}
         </div>
@@ -541,12 +569,12 @@ function TaskRow({
           <Tooltip>
             <TooltipTrigger
               render={<AppLink href={paths.issueDetail(task.issue_id)} />}
-              aria-label="Open issue"
+              aria-label={t("activity_open_issue")}
               className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
             >
               <ArrowUpRight className="h-3.5 w-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Open issue</TooltipContent>
+            <TooltipContent>{t("activity_open_issue")}</TooltipContent>
           </Tooltip>
         )}
         {showTranscript && (
@@ -554,7 +582,7 @@ function TaskRow({
             task={task}
             agentName={agent.name}
             isLive={isRunning}
-            title="View transcript"
+            title={t("aria_view_transcript")}
           />
         )}
         {showCancel && (
@@ -565,7 +593,7 @@ function TaskRow({
                   type="button"
                   onClick={handleCancel}
                   disabled={cancelling}
-                  aria-label="Cancel task"
+                  aria-label={t("activity_cancel_task")}
                 />
               }
               className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
@@ -573,7 +601,7 @@ function TaskRow({
               <X className="h-3.5 w-3.5" />
             </TooltipTrigger>
             <TooltipContent>
-              {cancelling ? "Cancelling…" : "Cancel task"}
+              {cancelling ? t("activity_cancelling") : t("activity_cancel_task")}
             </TooltipContent>
           </Tooltip>
         )}
@@ -615,14 +643,14 @@ function Sep() {
   return <span className="mx-1 text-muted-foreground/40">·</span>;
 }
 
-function activeTaskTimeText(task: AgentTask): string {
+function activeTaskTimeText(task: AgentTask, t: ReturnType<typeof useT>): string {
   if (task.status === "running" && task.started_at) {
-    return `Started ${timeAgo(task.started_at)}`;
+    return `${t("started")}${timeAgo(task.started_at)}`;
   }
   if (task.status === "dispatched" && task.dispatched_at) {
-    return `Dispatched ${timeAgo(task.dispatched_at)}`;
+    return `${t("dispatched")}${timeAgo(task.dispatched_at)}`;
   }
-  return `Queued ${timeAgo(task.created_at)}`;
+  return `${t("queued_label")}${timeAgo(task.created_at)}`;
 }
 
 /**

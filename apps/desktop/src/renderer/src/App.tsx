@@ -6,6 +6,11 @@ import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/que
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
+import { I18nProvider } from "@multica/i18n/react";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
+import type { Locale } from "@multica/i18n/types";
+import { localeStore } from "@multica/core/i18n";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
@@ -224,16 +229,22 @@ export default function App() {
   );
   return (
     <ThemeProvider>
-      <CoreProvider
-        apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
-        wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
-        onLogout={handleDaemonLogout}
-        identity={identity}
+      <I18nProvider
+        initialLocale={localeStore.getState().locale}
+        dictionaries={{ en, zh }}
+        onLocaleChange={(l: Locale) => localeStore.getState().setLocale(l)}
       >
-        <AppContent />
-      </CoreProvider>
+        <CoreProvider
+          apiBaseUrl={import.meta.env.VITE_API_URL || "http://localhost:8080"}
+          wsUrl={import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws"}
+          onLogout={handleDaemonLogout}
+          identity={identity}
+        >
+          <AppContent />
+        </CoreProvider>
+        <UpdateNotification />
+      </I18nProvider>
       <Toaster />
-      <UpdateNotification />
     </ThemeProvider>
   );
 }

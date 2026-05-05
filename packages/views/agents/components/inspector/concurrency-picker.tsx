@@ -5,6 +5,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { PropertyPicker } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
+import { useT } from "@multica/i18n/react";
 
 const MIN = 1;
 const MAX = 50;
@@ -16,6 +17,7 @@ export function ConcurrencyPicker({
   value: number;
   onChange: (next: number) => Promise<void> | void;
 }) {
+  const t = useT("agents");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(String(value));
 
@@ -33,7 +35,7 @@ export function ConcurrencyPicker({
     if (n !== value) await onChange(n);
   };
 
-  const tooltip = `Concurrency · ${value} max concurrent tasks`;
+  const tooltip = `${t("inspector_concurrency")} · ${value} ${t("concurrency_max_tasks").toLowerCase()}`;
 
   return (
     <PropertyPicker
@@ -51,7 +53,7 @@ export function ConcurrencyPicker({
     >
       <div className="space-y-2 p-2">
         <p className="text-xs text-muted-foreground">
-          Max concurrent tasks ({MIN}–{MAX})
+          {t("concurrency_max_tasks")} ({MIN}–{MAX})
         </p>
         <div className="flex items-center gap-2">
           <Input
@@ -70,7 +72,7 @@ export function ConcurrencyPicker({
             className="h-8 w-20 font-mono text-xs"
           />
           <Button size="sm" onClick={() => void commit()}>
-            Save
+            {t("overview_save")}
           </Button>
         </div>
       </div>

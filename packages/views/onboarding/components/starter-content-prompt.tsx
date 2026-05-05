@@ -4,9 +4,11 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { useT } from "@multica/i18n/react";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "@multica/views/navigation";
+import { publicAppUrl } from "@multica/views/platform";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { pinKeys } from "@multica/core/pins";
@@ -44,6 +46,7 @@ export function StarterContentPrompt() {
   const refreshMe = useAuthStore((s) => s.refreshMe);
   const { push } = useNavigation();
   const qc = useQueryClient();
+  const t = useT("onboarding");
 
   const [submitting, setSubmitting] = useState<"import" | "dismiss" | null>(
     null,
@@ -66,6 +69,8 @@ export function StarterContentPrompt() {
         workspaceId: workspace.id,
         userName: user.name || user.email,
         questionnaire,
+        t,
+        docsUrl: publicAppUrl("/docs"),
       });
       const result = await api.importStarterContent(payload);
 
@@ -84,7 +89,7 @@ export function StarterContentPrompt() {
       // component unmounts cleanly on the next render.
       await refreshMe();
 
-      toast.success("Starter tasks added — check your sidebar");
+      toast.success(t("toast_starter_added"));
 
       // If the server took the agent-guided branch, a welcome issue
       // exists and we jump to it. Otherwise, stay on the issues list —
@@ -96,7 +101,7 @@ export function StarterContentPrompt() {
       }
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Import failed — please retry",
+        err instanceof Error ? err.message : t("scp_import_failed"),
       );
       setSubmitting(null);
     }
@@ -112,7 +117,7 @@ export function StarterContentPrompt() {
       toast.error(
         err instanceof Error
           ? err.message
-          : "Could not dismiss — please retry",
+          : t("scp_dismiss_failed"),
       );
       setSubmitting(null);
     }
@@ -132,15 +137,14 @@ export function StarterContentPrompt() {
       <DialogContent showCloseButton={false} className="sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle className="text-balance font-serif text-[22px] leading-[1.2] font-medium tracking-tight">
-            Welcome — add starter tasks?
+            {t("scp_dialog_title")}
           </DialogTitle>
           <DialogDescription className="pt-2 text-[14px] leading-[1.55]">
             A{" "}
             <span className="font-medium text-foreground">
-              Getting Started
+              {t("scp_getting_started")}
             </span>{" "}
-            project with short tasks that walk through how agents, issues,
-            and context work in Multica.
+            {t("scp_dialog_desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -153,13 +157,13 @@ export function StarterContentPrompt() {
             {submitting === "dismiss" && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            Start blank workspace
+            {t("scp_start_blank")}
           </Button>
           <Button onClick={onImport} disabled={submitting !== null}>
             {submitting === "import" && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            Add starter tasks
+            {t("scp_add_starter")}
           </Button>
         </DialogFooter>
       </DialogContent>

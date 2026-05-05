@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, memo } from "react";
+import { useT, useLocale } from "@multica/i18n/react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -24,13 +25,6 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 /** Stops event from bubbling to Link/drag handlers */
 function PickerWrapper({ children }: { children: React.ReactNode }) {
   const stop = (e: React.SyntheticEvent) => {
@@ -53,7 +47,10 @@ export const BoardCardContent = memo(function BoardCardContent({
   editable?: boolean;
   childProgress?: ChildProgress;
 }) {
+  const t = useT("issues");
+  const { locale } = useLocale();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const tPriority = useT("priority");
   const priorityCfg = PRIORITY_CONFIG[issue.priority];
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -68,7 +65,7 @@ export const BoardCardContent = memo(function BoardCardContent({
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssueMutation.mutate(
         { id: issue.id, ...updates },
-        { onError: () => toast.error("Failed to update issue") },
+        { onError: () => toast.error(t("toast_failed_update")) },
       );
     },
     [issue.id, updateIssueMutation],
@@ -159,7 +156,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                   trigger={
                     <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}>
                       <PriorityIcon priority={issue.priority} className="h-3 w-3" inheritColor />
-                      {priorityCfg.label}
+                      {tPriority(issue.priority)}
                     </span>
                   }
                 />
@@ -167,7 +164,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             ) : (
               <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${priorityCfg.badgeBg} ${priorityCfg.badgeText}`}>
                 <PriorityIcon priority={issue.priority} className="h-3 w-3" inheritColor />
-                {priorityCfg.label}
+                {tPriority(issue.priority)}
               </span>
             ))}
           {showDueDate && (
@@ -186,7 +183,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                         }`}
                       >
                         <CalendarDays className="size-3" />
-                        {formatDate(issue.due_date!)}
+                        {new Date(issue.due_date!).toLocaleDateString(locale, { month: "short", day: "numeric" })}
                       </span>
                     }
                   />
@@ -200,7 +197,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                   }`}
                 >
                   <CalendarDays className="size-3" />
-                  {formatDate(issue.due_date!)}
+                  {new Date(issue.due_date!).toLocaleDateString(locale, { month: "short", day: "numeric" })}
                 </span>
               )}
             </div>

@@ -8,6 +8,7 @@ import {
   KeyRound,
   Terminal,
 } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   AlertDialog,
@@ -31,18 +32,6 @@ type DetailTab =
   | "skills"
   | "env"
   | "custom_args";
-
-const detailTabs: {
-  id: DetailTab;
-  label: string;
-  icon: typeof FileText;
-}[] = [
-  { id: "activity", label: "Activity", icon: Activity },
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "env", label: "Environment", icon: KeyRound },
-  { id: "custom_args", label: "Custom Args", icon: Terminal },
-];
 
 interface AgentOverviewPaneProps {
   agent: Agent;
@@ -77,6 +66,20 @@ export function AgentOverviewPane({
   runtimes,
   onUpdate,
 }: AgentOverviewPaneProps) {
+  const t = useT("agents");
+
+  const detailTabs: {
+    id: DetailTab;
+    label: string;
+    icon: typeof FileText;
+  }[] = [
+    { id: "activity", label: t("overview_activity"), icon: Activity },
+    { id: "instructions", label: t("overview_instructions"), icon: FileText },
+    { id: "skills", label: t("overview_skills"), icon: BookOpenText },
+    { id: "env", label: t("overview_environment"), icon: KeyRound },
+    { id: "custom_args", label: t("overview_custom_args"), icon: Terminal },
+  ];
+
   const [activeTab, setActiveTab] = useState<DetailTab>("activity");
   const [activeDirty, setActiveDirty] = useState(false);
   // Holds the destination when a tab change is intercepted by the dirty
@@ -174,19 +177,18 @@ export function AgentOverviewPane({
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+              <AlertDialogTitle>{t("overview_discard_title")}</AlertDialogTitle>
               <AlertDialogDescription>
-                You have unsaved changes in this tab. Leaving now will discard
-                them.
+                {t("overview_discard_desc")}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogCancel>{t("overview_keep_editing")}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 onClick={commitTabChange}
               >
-                Discard changes
+                {t("overview_discard_changes")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { NoAccessPage } from "./no-access-page";
 
 const navigate = vi.fn();
 const logout = vi.fn();
@@ -12,6 +11,19 @@ vi.mock("../navigation", () => ({
 vi.mock("../auth", () => ({
   useLogout: () => logout,
 }));
+
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
+import { NoAccessPage } from "./no-access-page";
 
 describe("NoAccessPage", () => {
   beforeEach(() => {

@@ -33,6 +33,7 @@ import type { Editor } from "@tiptap/core";
 import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { useCreateIssue } from "@multica/core/issues/mutations";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
@@ -181,6 +182,7 @@ function LinkEditBar({
   editor: Editor;
   onClose: () => void;
 }) {
+  const t = useT("editor");
   const existingHref = editor.getAttributes("link").href as string | undefined;
   const [url, setUrl] = useState(existingHref ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -212,7 +214,7 @@ function LinkEditBar({
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://..."
-        aria-label="URL"
+        aria-label={t("link")}
         className="h-7 flex-1 text-xs"
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); apply(); }
@@ -240,12 +242,13 @@ function LinkEditBar({
 
 function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor; onOpenChange: (open: boolean) => void; activeLevel: number | undefined }) {
   const [open, setOpen] = useState(false);
-  const label = activeLevel ? `H${activeLevel}` : "Text";
+  const t = useT("editor");
+  const label = activeLevel ? `H${activeLevel}` : t("text");
   const items = [
-    { label: "Normal Text", icon: Type, active: !activeLevel, action: () => editor.chain().focus().setParagraph().run() },
-    { label: "Heading 1", icon: Heading1, active: activeLevel === 1, action: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
-    { label: "Heading 2", icon: Heading2, active: activeLevel === 2, action: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
-    { label: "Heading 3", icon: Heading3, active: activeLevel === 3, action: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
+    { label: t("normal_text"), icon: Type, active: !activeLevel, action: () => editor.chain().focus().setParagraph().run() },
+    { label: t("heading_1"), icon: Heading1, active: activeLevel === 1, action: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
+    { label: t("heading_2"), icon: Heading2, active: activeLevel === 2, action: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
+    { label: t("heading_3"), icon: Heading3, active: activeLevel === 3, action: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
   ];
 
   const handleOpenChange = useCallback((next: boolean) => {
@@ -296,6 +299,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
 
 function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean }) {
   const [open, setOpen] = useState(false);
+  const t = useT("editor");
 
   const handleOpenChange = useCallback((next: boolean) => {
     setOpen(next);
@@ -311,7 +315,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
         </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={8}>List</TooltipContent>
+        <TooltipContent side="top" sideOffset={8}>{t("list")}</TooltipContent>
       </Tooltip>
       <PopoverContent
         side="bottom"
@@ -329,7 +333,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
             handleOpenChange(false);
           }}
         >
-          <List className="size-3.5" /> Bullet List
+          <List className="size-3.5" /> {t("bullet_list")}
           {isBullet && <Check className="ml-auto size-3.5" />}
         </button>
         <button
@@ -340,7 +344,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
             handleOpenChange(false);
           }}
         >
-          <ListOrdered className="size-3.5" /> Ordered List
+          <ListOrdered className="size-3.5" /> {t("ordered_list")}
           {isOrdered && <Check className="ml-auto size-3.5" />}
         </button>
       </PopoverContent>
@@ -366,6 +370,7 @@ function CreateSubIssueButton({
   parentIssueId: string;
 }) {
   const createIssue = useCreateIssue();
+  const t = useT("editor");
   const [pending, setPending] = useState(false);
 
   const handleClick = useCallback(async () => {
@@ -403,9 +408,9 @@ function CreateSubIssueButton({
           ],
         )
         .run();
-      toast.success(`Created ${newIssue.identifier}`);
+      toast.success(t("created_issue", { identifier: newIssue.identifier }));
     } catch {
-      toast.error("Failed to create sub-issue");
+      toast.error(t("failed_create_sub_issue"));
     } finally {
       setPending(false);
     }
@@ -431,7 +436,7 @@ function CreateSubIssueButton({
         )}
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8}>
-        Create sub-issue from selection
+        {t("create_sub_issue")}
       </TooltipContent>
     </Tooltip>
   );
@@ -448,6 +453,7 @@ function EditorBubbleMenu({
   editor: Editor;
   currentIssueId?: string;
 }) {
+  const t = useT("editor");
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
   const floatingRef = useRef<HTMLDivElement>(null);
@@ -577,10 +583,10 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${mod}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${mod}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${mod}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${mod}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="bold" icon={Bold} label={t("bold")} shortcut={`${mod}+B`} isActive={fmt.bold} />
+            <MarkButton editor={editor} mark="italic" icon={Italic} label={t("italic")} shortcut={`${mod}+I`} isActive={fmt.italic} />
+            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t("strikethrough")} shortcut={`${mod}+Shift+S`} isActive={fmt.strike} />
+            <MarkButton editor={editor} mark="code" icon={Code} label={t("code")} shortcut={`${mod}+E`} isActive={fmt.code} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
@@ -588,7 +594,7 @@ function EditorBubbleMenu({
               }>
                 <Link2 className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>Link</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t("link")}</TooltipContent>
             </Tooltip>
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
@@ -599,7 +605,7 @@ function EditorBubbleMenu({
               }>
                 <Quote className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>Quote</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t("quote")}</TooltipContent>
             </Tooltip>
             {currentIssueId && (
               <>

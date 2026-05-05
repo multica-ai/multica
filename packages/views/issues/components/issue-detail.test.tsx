@@ -265,6 +265,19 @@ vi.mock("@multica/core/realtime", () => ({
   useRealtimeSync: () => {},
 }));
 
+// Mock i18n
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+    useLocale: () => ({ locale: "en-US", setLocale: vi.fn() }),
+  };
+});
+
 // Mock sonner
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },

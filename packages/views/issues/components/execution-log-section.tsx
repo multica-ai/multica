@@ -6,7 +6,7 @@ import { ChevronRight, Loader2, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types";
 import { timeAgo } from "@multica/core/utils";
 import {
   Tooltip,
@@ -15,7 +15,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { useT } from "@multica/i18n/react";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
@@ -65,6 +65,7 @@ const PAST_STATUS_RANK: Record<string, number> = {
 };
 
 export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+  const t = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
 
@@ -122,7 +123,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
         }`}
         onClick={() => setOpen(!open)}
       >
-        Execution log
+        {t("execution_log")}
         <ChevronRight
           className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
             open ? "rotate-90" : ""
@@ -156,7 +157,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
                     showPast ? "rotate-90" : ""
                   }`}
                 />
-                {showPast ? "Hide" : "Show"} past runs ({pastTasks.length})
+                {showPast ? t("execution_hide") : t("execution_show")} {t("execution_past_runs")} ({pastTasks.length})
               </button>
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
@@ -189,36 +190,36 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
 // shipped, OR for sources we don't snapshot (direct assignment / chat):
 // degrade to a short structural label by trigger source. New tasks
 // (post-061 migration) almost always hit the snapshot path.
-function buildTriggerText(task: AgentTask): string {
+function buildTriggerText(task: AgentTask, t: ReturnType<typeof useT>): string {
   const isRetry = !!task.parent_task_id;
   const retryPrefix = isRetry
     ? task.attempt && task.attempt > 1
-      ? `Retry #${task.attempt} · `
-      : "Retry · "
+      ? `${t("execution_retry")} #${task.attempt} · `
+      : `${t("execution_retry")} · `
     : "";
 
   if (task.trigger_summary) return retryPrefix + task.trigger_summary;
   if (isRetry) {
-    return task.attempt && task.attempt > 1 ? `Retry #${task.attempt}` : "Retry";
+    return task.attempt && task.attempt > 1 ? `${t("execution_retry")} #${task.attempt}` : t("execution_retry");
   }
-  if (task.autopilot_run_id) return "Autopilot run";
-  if (task.trigger_comment_id) return "Comment trigger";
-  return "Initial run";
+  if (task.autopilot_run_id) return t("execution_autopilot_run");
+  if (task.trigger_comment_id) return t("execution_comment_trigger");
+  return t("execution_initial_run");
 }
 
 // ─── Row visual config ─────────────────────────────────────────────────────
 
-const STATUS_VISUAL: Record<
-  AgentTask["status"],
-  { label: string; tone: string }
-> = {
-  queued: { label: "Queued", tone: "text-warning" },
-  dispatched: { label: "Starting", tone: "text-warning" },
-  running: { label: "Working", tone: "text-info" },
-  completed: { label: "Completed", tone: "text-success" },
-  failed: { label: "Failed", tone: "text-destructive" },
-  cancelled: { label: "Cancelled", tone: "text-muted-foreground" },
-};
+function getStatusVisual(status: AgentTask["status"], t: ReturnType<typeof useT>): { label: string; tone: string } {
+  const map: Record<AgentTask["status"], { label: string; tone: string }> = {
+    queued: { label: t("execution_queued"), tone: "text-warning" },
+    dispatched: { label: t("execution_starting"), tone: "text-warning" },
+    running: { label: t("execution_working"), tone: "text-info" },
+    completed: { label: t("execution_completed"), tone: "text-success" },
+    failed: { label: t("execution_failed"), tone: "text-destructive" },
+    cancelled: { label: t("execution_cancelled"), tone: "text-muted-foreground" },
+  };
+  return map[status];
+}
 
 // Time anchor depends on status. Active rows want "Started 2m ago" /
 // "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
@@ -236,9 +237,10 @@ function activeTimeText(task: AgentTask): string {
 // ─── Active row ────────────────────────────────────────────────────────────
 
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+  const t = useT("issues");
   const [cancelling, setCancelling] = useState(false);
-  const cfg = STATUS_VISUAL[task.status];
-  const trigger = buildTriggerText(task);
+  const cfg = getStatusVisual(task.status, t);
+  const trigger = buildTriggerText(task, t);
   const time = activeTimeText(task);
 
   // Transcript only meaningful once messages exist — pure-queued tasks
@@ -251,7 +253,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     try {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : t("toast_failed_cancel_task"));
       setCancelling(false);
     }
   };
@@ -271,7 +273,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             task={task}
             agentName=""
             isLive
-            title="View transcript"
+            title={t("execution_view_transcript")}
           />
         )}
         <Tooltip>
@@ -281,7 +283,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
                 type="button"
                 onClick={handleCancel}
                 disabled={cancelling}
-                aria-label="Cancel task"
+                aria-label={t("execution_cancel_task")}
               />
             }
             className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
@@ -292,7 +294,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
               <Square className="h-3.5 w-3.5" />
             )}
           </TooltipTrigger>
-          <TooltipContent>Cancel task</TooltipContent>
+          <TooltipContent>{t("execution_cancel_task")}</TooltipContent>
         </Tooltip>
       </RowActions>
     </RowShell>
@@ -302,12 +304,13 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 // ─── Past row ──────────────────────────────────────────────────────────────
 
 function PastRow({ task }: { task: AgentTask }) {
-  const cfg = STATUS_VISUAL[task.status];
-  const trigger = buildTriggerText(task);
+  const t = useT("issues");
+  const cfg = getStatusVisual(task.status, t);
+  const trigger = buildTriggerText(task, t);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   const failureLabel =
     task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
+      ? t(`task_failure_${task.failure_reason}`)
       : null;
 
   return (
@@ -318,7 +321,7 @@ function PastRow({ task }: { task: AgentTask }) {
         <span className="text-muted-foreground"> · {time}</span>
       </span>
       <RowActions>
-        <TranscriptButton task={task} agentName="" title="View transcript" />
+        <TranscriptButton task={task} agentName="" title={t("execution_view_transcript")} />
       </RowActions>
     </RowShell>
   );

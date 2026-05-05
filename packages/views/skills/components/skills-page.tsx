@@ -25,6 +25,8 @@ import {
   skillListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
+import { useT } from "@multica/i18n/react";
+import { openExternal, publicAppUrl } from "../../platform";
 import { Button } from "@multica/ui/components/ui/button";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { Input } from "@multica/ui/components/ui/input";
@@ -47,12 +49,15 @@ type FilterKey = "all" | "used" | "unused" | "mine";
 // Scope tab — matches Issues/MyIssues header pattern
 // ---------------------------------------------------------------------------
 
-const SCOPES: { value: FilterKey; label: string; description: string }[] = [
-  { value: "all", label: "All", description: "All skills in this workspace" },
-  { value: "used", label: "In use", description: "Skills assigned to at least one agent" },
-  { value: "unused", label: "Unused", description: "Skills not assigned to any agent" },
-  { value: "mine", label: "Created by me", description: "Skills you created" },
-];
+function useScopes() {
+  const t = useT("skills");
+  return [
+    { value: "all" as FilterKey, label: t("scope_all"), description: t("scope_all_desc") },
+    { value: "used" as FilterKey, label: t("scope_in_use"), description: t("scope_in_use_desc") },
+    { value: "unused" as FilterKey, label: t("scope_unused"), description: t("scope_unused_desc") },
+    { value: "mine" as FilterKey, label: t("scope_mine"), description: t("scope_mine_desc") },
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Page header bar — uses shared PageHeader so the mobile sidebar trigger and
@@ -66,11 +71,14 @@ function PageHeaderBar({
   totalCount: number;
   onCreate: () => void;
 }) {
+  const t = useT("skills");
+  const c = useT("common");
+
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">Skills</h1>
+        <h1 className="text-sm font-medium">{t("page_title")}</h1>
         {totalCount > 0 && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
             {totalCount}
@@ -79,20 +87,22 @@ function PageHeaderBar({
         {/* Tagline next to the title — single sentence + docs link. Hidden
             below md so it never collides with the title on narrow screens. */}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
-          Instructions any agent in this workspace can use.{" "}
+          {t("tagline")}{" "}
           <a
-            href="https://multica.ai/docs/skills"
-            target="_blank"
-            rel="noopener noreferrer"
+            href={publicAppUrl("/docs/skills")}
+            onClick={(event) => {
+              event.preventDefault();
+              openExternal(publicAppUrl("/docs/skills"));
+            }}
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Learn more →
+            {t("learn_more")}
           </a>
         </p>
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
-        New skill
+        {c("create")}
       </Button>
     </PageHeader>
   );
@@ -115,6 +125,9 @@ function CardToolbar({
   filter: FilterKey;
   setFilter: (v: FilterKey) => void;
 }) {
+  const t = useT("skills");
+  const SCOPES = useScopes();
+
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
       <div className="relative">
@@ -122,7 +135,7 @@ function CardToolbar({
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search skills…"
+          placeholder={t("search_placeholder")}
           className="h-8 w-64 pl-8 text-sm"
         />
       </div>
@@ -156,19 +169,21 @@ function CardToolbar({
 // ---------------------------------------------------------------------------
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const t = useT("skills");
+  const c = useT("common");
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <BookOpen className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h2 className="mt-4 text-base font-semibold">No skills yet</h2>
+      <h2 className="mt-4 text-base font-semibold">{t("empty_title")}</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Create your first skill, import one from a URL, or copy one from a
-        connected runtime — and every agent in the workspace can use it.
+        {t("empty_desc")}
       </p>
       <Button type="button" onClick={onCreate} size="sm" className="mt-5">
         <Plus className="h-3 w-3" />
-        New skill
+        {c("create")}
       </Button>
     </div>
   );
@@ -183,6 +198,8 @@ export default function SkillsPage() {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const t = useT("skills");
+  const c = useT("common");
 
   const {
     data: skills = [],
@@ -282,7 +299,7 @@ export default function SkillsPage() {
     myRole,
   ]);
 
-  const columns = useMemo(() => createSkillColumns(), []);
+  const columns = useMemo(() => createSkillColumns(t), [t]);
 
   const table = useReactTable({
     data: skillRows,
@@ -327,11 +344,11 @@ export default function SkillsPage() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-sm font-medium">Couldn&rsquo;t load skills</p>
+            <p className="text-sm font-medium">{t("error_title")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {listError instanceof Error
                 ? listError.message
-                : "Something went wrong fetching the skill list."}
+                : t("error_fetch")}
             </p>
           </div>
           <Button
@@ -340,7 +357,7 @@ export default function SkillsPage() {
             size="sm"
             onClick={() => refetchList()}
           >
-            Try again
+            {c("retry")}
           </Button>
         </div>
       </div>
@@ -368,8 +385,7 @@ export default function SkillsPage() {
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>
-            Some workspace data failed to load. Creator attribution, runtime
-            names, or edit permissions may appear incomplete.
+            {t("warning_partial")}
           </span>
         </div>
       )}
@@ -384,12 +400,11 @@ export default function SkillsPage() {
           // reason. Restored intentionally.
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">
-              Shared with your workspace.
+              {t("intro_heading")}
             </span>{" "}
-            Anyone can create a skill, import one from a URL, or copy one
-            from their local runtime — and every agent can use it.{" "}
+            {t("intro_desc")}{" "}
             <span className="font-semibold text-brand">
-              Local runtime skills stay private until you copy one here.
+              {t("intro_local")}
             </span>
           </div>
         )}
@@ -408,12 +423,12 @@ export default function SkillsPage() {
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
                 <Search className="h-8 w-8 text-muted-foreground/40" />
-                <p className="text-sm">No matches</p>
+                <p className="text-sm">{t("no_matches")}</p>
                 <p className="max-w-xs text-xs">
                   {search
-                    ? `No skills match "${search}"${filter !== "all" ? " in this filter" : ""}.`
-                    : "No skills match this filter."}{" "}
-                  Try a different query.
+                    ? `${t("no_matches")} "${search}"${filter !== "all" ? ` — ${t("no_matches_filter")}` : ""}.`
+                    : t("no_matches_filter")}{" "}
+                  {t("no_matches_hint")}
                 </p>
               </div>
             ) : (

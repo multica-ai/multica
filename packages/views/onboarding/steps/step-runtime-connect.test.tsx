@@ -27,6 +27,17 @@ vi.mock("../components/use-runtime-picker", () => ({
   useRuntimePicker: () => mocks.pickerState,
 }));
 
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
 import { StepRuntimeConnect } from "./step-runtime-connect";
 
 function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {

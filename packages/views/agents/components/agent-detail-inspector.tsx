@@ -20,6 +20,7 @@ import {
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { timeAgo } from "@multica/core/utils";
+import { useT } from "@multica/i18n/react";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -36,7 +37,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { PropRow } from "../../common/prop-row";
-import { availabilityConfig } from "../presence";
+import { availabilityConfig, availabilityLabel } from "../presence";
 import { CharCounter } from "./char-counter";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
@@ -81,6 +82,7 @@ export function AgentDetailInspector({
 }: InspectorProps) {
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
+  const t = useT("agents");
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-lg border bg-background">
@@ -88,7 +90,7 @@ export function AgentDetailInspector({
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
         <AvatarEditor agent={agent} onUpdate={update} />
         <NameAndDescription agent={agent} onUpdate={update} />
-        <PresenceBadge presence={presence} />
+        <PresenceBadge presence={presence} t={t} />
       </div>
 
       {/* Properties — editable. Row hover is OFF here on purpose: each chip
@@ -96,8 +98,8 @@ export function AgentDetailInspector({
           treatment that already telegraphs "this is a button". A second
           row-wide hover layer on top would just smudge the chip boundary
           and make it harder, not easier, to see what's clickable. */}
-      <Section label="Properties">
-        <PropRow label="Runtime" interactive={false}>
+      <Section label={t("inspector_properties")}>
+        <PropRow label={t("inspector_runtime")} interactive={false}>
           <RuntimePicker
             value={agent.runtime_id}
             runtimes={runtimes}
@@ -106,7 +108,7 @@ export function AgentDetailInspector({
             onChange={(id) => update({ runtime_id: id })}
           />
         </PropRow>
-        <PropRow label="Model" interactive={false}>
+        <PropRow label={t("inspector_model")} interactive={false}>
           <ModelPicker
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
@@ -114,13 +116,13 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
-        <PropRow label="Visibility" interactive={false}>
+        <PropRow label={t("inspector_visibility")} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}
             onChange={(v) => update({ visibility: v })}
           />
         </PropRow>
-        <PropRow label="Concurrency" interactive={false}>
+        <PropRow label={t("inspector_concurrency")} interactive={false}>
           <ConcurrencyPicker
             value={agent.max_concurrent_tasks}
             onChange={(n) => update({ max_concurrent_tasks: n })}
@@ -129,9 +131,9 @@ export function AgentDetailInspector({
       </Section>
 
       {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
-      <Section label="Details">
+      <Section label={t("inspector_details")}>
         {owner && (
-          <PropRow label="Owner" interactive={false}>
+          <PropRow label={t("inspector_owner")} interactive={false}>
             <span className="flex min-w-0 items-center gap-1.5">
               <ActorAvatar
                 actorType="member"
@@ -142,12 +144,12 @@ export function AgentDetailInspector({
             </span>
           </PropRow>
         )}
-        <PropRow label="Created" interactive={false}>
+        <PropRow label={t("inspector_created")} interactive={false}>
           <span className="text-muted-foreground">
             {timeAgo(agent.created_at)}
           </span>
         </PropRow>
-        <PropRow label="Updated" interactive={false}>
+        <PropRow label={t("inspector_updated")} interactive={false}>
           <span className="text-muted-foreground">
             {timeAgo(agent.updated_at)}
           </span>
@@ -158,7 +160,7 @@ export function AgentDetailInspector({
       <div className="flex flex-col border-b px-5 py-4">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Skills
+            {t("inspector_skills")}
           </span>
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {agent.skills.length}
@@ -212,6 +214,7 @@ function AvatarEditor({
   agent: Agent;
   onUpdate: (data: Record<string, unknown>) => Promise<void>;
 }) {
+  const t = useT("agents");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading } = useFileUpload(api);
 
@@ -223,9 +226,9 @@ function AvatarEditor({
       const result = await upload(file);
       if (!result) return;
       await onUpdate({ avatar_url: result.link });
-      toast.success("Avatar updated");
+      toast.success(t("toast_updated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(err instanceof Error ? err.message : t("toast_failed_update"));
     }
   };
 
@@ -238,7 +241,7 @@ function AvatarEditor({
         className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        aria-label="Change avatar"
+        aria-label={t("aria_change_avatar")}
       >
         <ActorAvatar
           actorType="agent"
@@ -272,15 +275,16 @@ function NameAndDescription({
   agent: Agent;
   onUpdate: (data: Record<string, unknown>) => Promise<void>;
 }) {
+  const t = useT("agents");
   return (
     <div className="flex flex-col gap-1">
       <InlineEditPopover
         value={agent.name}
         onSave={(v) => onUpdate({ name: v.trim() })}
         kind="input"
-        title="Rename agent"
-        placeholder="Agent name"
-        validate={(v) => (v.trim().length > 0 ? null : "Name is required")}
+        title={t("inspector_rename")}
+        placeholder={t("inspector_name_placeholder")}
+        validate={(v) => (v.trim().length > 0 ? null : t("inspector_name_required"))}
       >
         {(triggerProps) => (
           <button
@@ -322,6 +326,7 @@ function DescriptionEditor({
   onSave: (next: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT("agents");
 
   return (
     <>
@@ -333,7 +338,7 @@ function DescriptionEditor({
         {value ? (
           <span className="text-muted-foreground">{value}</span>
         ) : (
-          <span className="italic text-muted-foreground/50">No description</span>
+          <span className="italic text-muted-foreground/50">{t("inspector_no_description")}</span>
         )}
         <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
       </button>
@@ -362,6 +367,8 @@ function DescriptionEditorBody({
   onSave: (next: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const t = useT("agents");
+  const c = useT("common");
   const [draft, setDraft] = useState(initialValue);
   const [saving, setSaving] = useState(false);
 
@@ -385,14 +392,14 @@ function DescriptionEditorBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Edit description</DialogTitle>
+        <DialogTitle>{t("inspector_edit_description")}</DialogTitle>
       </DialogHeader>
       <div className="flex flex-col gap-2">
         <textarea
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="What does this agent do?"
+          placeholder={t("inspector_description_placeholder")}
           rows={6}
           onKeyDown={(e) => {
             if (e.key === "Escape") onClose();
@@ -412,14 +419,14 @@ function DescriptionEditorBody({
           onClick={onClose}
           disabled={saving}
         >
-          Cancel
+          {c("cancel")}
         </Button>
         <Button
           size="sm"
           onClick={() => void commit()}
           disabled={saving || overLimit || !dirty}
         >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : c("save")}
         </Button>
       </DialogFooter>
     </>
@@ -448,6 +455,7 @@ function InlineEditPopover({
     onClick: (e: React.MouseEvent) => void;
   }) => ReactNode;
 }) {
+  const c = useT("common");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -537,7 +545,7 @@ function InlineEditPopover({
               onClick={() => setOpen(false)}
               disabled={saving}
             >
-              Cancel
+              {c("cancel")}
             </Button>
             <Button
               size="sm"
@@ -547,7 +555,7 @@ function InlineEditPopover({
               {saving ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                "Save"
+                c("save")
               )}
             </Button>
           </div>
@@ -563,8 +571,10 @@ function InlineEditPopover({
 
 function PresenceBadge({
   presence,
+  t,
 }: {
   presence: AgentPresenceDetail | null | undefined;
+  t: ReturnType<typeof useT>;
 }) {
   if (!presence) {
     return (
@@ -581,7 +591,7 @@ function PresenceBadge({
         className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
       >
         <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-        {av.label}
+        {availabilityLabel(t, presence.availability)}
       </span>
     </div>
   );

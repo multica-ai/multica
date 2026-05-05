@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useRef, useState } from "react";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { useT } from "@multica/i18n/react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 
@@ -36,6 +37,7 @@ export function ChatInput({
   topSlot,
 }: ChatInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
+  const t = useT("chat");
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Scope the new-chat draft by agent:
@@ -82,10 +84,10 @@ export function ChatInput({
   };
 
   const placeholder = disabled
-    ? "This session is archived"
+    ? t("input_archived")
     : agentName
-      ? `Tell ${agentName} what to do…`
-      : "Tell me what to do…";
+      ? t("input_tell_agent", { name: agentName })
+      : t("input_tell_me");
 
   return (
     <div className="px-5 pb-3 pt-0">

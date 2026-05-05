@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "@multica/i18n/react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -20,6 +21,8 @@ import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 
 export function BatchActionToolbar() {
+  const t = useT("issues");
+  const c = useT("common");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
   const count = selectedIds.size;
@@ -39,9 +42,9 @@ export function BatchActionToolbar() {
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
       await batchUpdate.mutateAsync({ ids, updates });
-      toast.success(`Updated ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t("toast_updated_issues", { count }));
     } catch {
-      toast.error("Failed to update issues");
+      toast.error(t("toast_failed_update_issues"));
     }
   };
 
@@ -49,9 +52,9 @@ export function BatchActionToolbar() {
     try {
       await batchDelete.mutateAsync(ids);
       clear();
-      toast.success(`Deleted ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t("toast_deleted_issues", { count }));
     } catch {
-      toast.error("Failed to delete issues");
+      toast.error(t("toast_failed_delete_issues"));
     } finally {
       setDeleteOpen(false);
     }
@@ -61,7 +64,7 @@ export function BatchActionToolbar() {
     <>
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
-          <span className="text-sm font-medium">{count} selected</span>
+          <span className="text-sm font-medium">{t("batch_selected", { count })}</span>
           <button
             type="button"
             onClick={clear}
@@ -78,7 +81,7 @@ export function BatchActionToolbar() {
           open={statusOpen}
           onOpenChange={setStatusOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Status"
+          trigger={t("filter_status")}
           align="center"
         />
 
@@ -89,7 +92,7 @@ export function BatchActionToolbar() {
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Priority"
+          trigger={t("filter_priority")}
           align="center"
         />
 
@@ -101,7 +104,7 @@ export function BatchActionToolbar() {
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Assignee"
+          trigger={t("filter_assignee")}
           align="center"
         />
 
@@ -114,7 +117,7 @@ export function BatchActionToolbar() {
           className="text-destructive hover:text-destructive"
         >
           <Trash2 className="size-3.5 mr-1" />
-          Delete
+          {t("batch_delete")}
         </Button>
       </div>
 
@@ -122,20 +125,19 @@ export function BatchActionToolbar() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {count} issue{count > 1 ? "s" : ""}?
+              {t("batch_delete_confirm_title", { count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the
-              selected issue{count > 1 ? "s" : ""} and all associated data.
+              {t("batch_delete_confirm_desc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{c("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleBatchDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {c("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

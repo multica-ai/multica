@@ -38,8 +38,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { workloadConfig } from "../../agents/presence";
+import { workloadConfig, workloadLabel } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, healthLabel } from "./shared";
 import {
@@ -83,6 +84,7 @@ interface CreateColumnsArgs {
   latestCliVersion: string | null;
   wsId: string;
   now: number;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 export function createRuntimeColumns({
@@ -90,18 +92,19 @@ export function createRuntimeColumns({
   latestCliVersion,
   wsId,
   now,
+  t,
 }: CreateColumnsArgs): ColumnDef<RuntimeRow>[] {
   const cols: ColumnDef<RuntimeRow>[] = [
     {
       id: "runtime",
-      header: "Runtime",
+      header: t("column_runtime"),
       size: COL_WIDTHS.runtime,
       meta: { grow: true },
       cell: ({ row }) => <RuntimeNameCell runtime={row.original.runtime} />,
     },
     {
       id: "health",
-      header: "Health",
+      header: t("column_health"),
       size: COL_WIDTHS.health,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -113,7 +116,7 @@ export function createRuntimeColumns({
   if (showOwner) {
     cols.push({
       id: "owner",
-      header: "Owner",
+      header: t("column_owner"),
       size: COL_WIDTHS.owner,
       cell: ({ row }) =>
         row.original.ownerMember ? (
@@ -131,7 +134,7 @@ export function createRuntimeColumns({
   cols.push(
     {
       id: "agents",
-      header: "Agents",
+      header: t("column_agents"),
       size: COL_WIDTHS.agents,
       cell: ({ row }) => (
         <AgentStack agentIds={row.original.workload.agentIds} />
@@ -139,7 +142,7 @@ export function createRuntimeColumns({
     },
     {
       id: "workload",
-      header: "Workload",
+      header: t("column_workload"),
       size: COL_WIDTHS.workload,
       cell: ({ row }) => {
         const health = deriveRuntimeHealth(row.original.runtime, now);
@@ -155,13 +158,13 @@ export function createRuntimeColumns({
     },
     {
       id: "cost",
-      header: () => <div className="text-right">Cost · 7d</div>,
+      header: () => <div className="text-right">{t("column_cost_7d")}</div>,
       size: COL_WIDTHS.cost,
       cell: ({ row }) => <CostCell runtimeId={row.original.runtime.id} />,
     },
     {
       id: "cli",
-      header: "CLI",
+      header: t("column_cli"),
       size: COL_WIDTHS.cli,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -250,13 +253,14 @@ function HealthCell({
   runtime: AgentRuntime;
   now: number;
 }) {
+  const t = useT("runtimes");
   const health = deriveRuntimeHealth(runtime, now);
-  const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const lastSeen = formatLastSeen(t, runtime.last_seen_at);
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <HealthIcon health={health} />
       <span className="block min-w-0 truncate text-sm">
-        {healthLabel(health)}
+        {healthLabel(health, t)}
         {health !== "online" && runtime.last_seen_at && (
           <span className="text-muted-foreground"> · {lastSeen}</span>
         )}
@@ -279,6 +283,8 @@ function WorkloadCell({
   queued: number;
   offline: boolean;
 }) {
+  const ta = useT("agents");
+  const t = useT("runtimes");
   if (offline) {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
@@ -289,10 +295,11 @@ function WorkloadCell({
   const wl = workloadConfig[workload];
   // Working: running count, with +Nq overflow tail. Queued: bare queued
   // count. Idle: no counts at all — the label is the whole signal.
+  const qSuffix = t("workload_queued_suffix");
   const counts =
     workload === "working"
       ? queued > 0
-        ? `${running} +${queued}q`
+        ? `${running} +${queued}${qSuffix}`
         : `${running}`
       : workload === "queued"
         ? `${queued}`
@@ -305,7 +312,7 @@ function WorkloadCell({
           className={`h-3 w-3 shrink-0 ${wl.textClass} ${workload === "working" ? "animate-spin" : ""}`}
         />
       )}
-      <span className={`shrink-0 ${wl.textClass}`}>{wl.label}</span>
+      <span className={`shrink-0 ${wl.textClass}`}>{workloadLabel(ta, workload)}</span>
       {counts && (
         <span className="truncate font-mono tabular-nums text-muted-foreground">
           {counts}
@@ -369,6 +376,7 @@ function CliCell({
   runtime: AgentRuntime;
   latestCliVersion: string | null;
 }) {
+  const t = useT("runtimes");
   if (runtime.runtime_mode === "cloud") {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
@@ -395,7 +403,7 @@ function CliCell({
     <div className="flex min-w-0 items-center gap-1 text-xs">
       {isManaged && (
         <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
-          Desktop
+          {t("desktop_badge")}
         </span>
       )}
       <span
@@ -411,12 +419,12 @@ function CliCell({
             render={
               <ArrowUpCircle
                 className="h-3 w-3 shrink-0 text-warning"
-                aria-label="Update available"
+                aria-label={t("update_available")}
               />
             }
           />
           <TooltipContent>
-            Update available: {latestCliVersion}
+            {t("update_available")}: {latestCliVersion}
           </TooltipContent>
         </Tooltip>
       )}
@@ -466,6 +474,8 @@ function RowMenu({
   wsId: string;
   canDelete: boolean;
 }) {
+  const t = useT("runtimes");
+  const c = useT("common");
   const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -476,12 +486,12 @@ function RowMenu({
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success("Runtime deleted");
+        toast.success(t("toast_deleted"));
         setDeleteOpen(false);
       },
       onError: (e) => {
         toast.error(
-          e instanceof Error ? e.message : "Failed to delete runtime",
+          e instanceof Error ? e.message : t("toast_failed_delete"),
         );
       },
     });
@@ -495,7 +505,7 @@ function RowMenu({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Row actions"
+              aria-label={t("row_actions")}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
             />
@@ -513,7 +523,7 @@ function RowMenu({
             onClick={() => setDeleteOpen(true)}
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete
+            {c("delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -526,20 +536,19 @@ function RowMenu({
       >
         <AlertDialogContent onClick={(e) => e.stopPropagation()}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Runtime</AlertDialogTitle>
+            <AlertDialogTitle>{t("delete_title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{runtime.name}&rdquo;?
-              This action cannot be undone.
+              {t("detail_delete_confirm", { name: runtime.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("delete_cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? `${c("delete")}...` : c("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -29,6 +29,7 @@ import {
 } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import { useTabStore, useActiveGroup, resolveRouteIcon, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
 
@@ -118,6 +119,7 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
 }
 
 function NewTabButton() {
+  const t = useT("desktop");
   const addTab = useTabStore((s) => s.addTab);
   const setActiveTab = useTabStore((s) => s.setActiveTab);
 
@@ -127,7 +129,7 @@ function NewTabButton() {
     const activeSlug = useTabStore.getState().activeWorkspaceSlug;
     if (!activeSlug) return;
     const path = paths.workspace(activeSlug).issues();
-    const tabId = addTab(path, "Issues", resolveRouteIcon(path));
+    const tabId = addTab(path, t("route_issues"), resolveRouteIcon(path));
     if (tabId) setActiveTab(tabId);
   };
 

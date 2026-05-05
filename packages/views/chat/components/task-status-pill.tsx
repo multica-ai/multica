@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import { UnicodeSpinner } from "@multica/ui/components/common/unicode-spinner";
 import type { BrailleSpinnerName } from "unicode-animations";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -34,25 +35,27 @@ interface Stage {
   static?: boolean;
 }
 
-// Tool → label. Short, action-flavoured phrases — the daemon-reported tool
+// Tool → labelKey. Short, action-flavoured phrases — the daemon-reported tool
 // slug is meaningful but ugly ("ToolUse: read"); these are the user-facing
 // translations. Unknown tools fall back to "Working" rather than leaking
-// the raw slug.
-const TOOL_STAGES: Record<string, Stage> = {
-  bash: { label: "Running a command", spinner: "helix" },
-  exec: { label: "Running a command", spinner: "helix" },
-  read: { label: "Reading files", spinner: "scan" },
-  glob: { label: "Reading files", spinner: "scan" },
-  grep: { label: "Searching the code", spinner: "scan" },
-  write: { label: "Making edits", spinner: "cascade" },
-  edit: { label: "Making edits", spinner: "cascade" },
-  multi_edit: { label: "Making edits", spinner: "cascade" },
-  multiedit: { label: "Making edits", spinner: "cascade" },
-  web_search: { label: "Searching the web", spinner: "orbit" },
-  websearch: { label: "Searching the web", spinner: "orbit" },
+// the raw slug. labelKey is resolved to a localized label via the chat
+// namespace inside pickStage.
+const TOOL_STAGES: Record<string, { labelKey: string; spinner: BrailleSpinnerName }> = {
+  bash: { labelKey: "pill_running_command", spinner: "helix" },
+  exec: { labelKey: "pill_running_command", spinner: "helix" },
+  read: { labelKey: "pill_reading_files", spinner: "scan" },
+  glob: { labelKey: "pill_reading_files", spinner: "scan" },
+  grep: { labelKey: "pill_searching_code", spinner: "scan" },
+  write: { labelKey: "pill_making_edits", spinner: "cascade" },
+  edit: { labelKey: "pill_making_edits", spinner: "cascade" },
+  multi_edit: { labelKey: "pill_making_edits", spinner: "cascade" },
+  multiedit: { labelKey: "pill_making_edits", spinner: "cascade" },
+  web_search: { labelKey: "pill_searching_web", spinner: "orbit" },
+  websearch: { labelKey: "pill_searching_web", spinner: "orbit" },
 };
 
-const STAGE_FALLBACK: Stage = { label: "Working", spinner: "helix" };
+const STAGE_FALLBACK_KEY = "pill_working";
+const STAGE_FALLBACK_SPINNER: BrailleSpinnerName = "helix";
 
 // During the first-token gap (status=running but no task_message yet)
 // the agent could be loading the model, opening an API session, or
@@ -61,11 +64,11 @@ const STAGE_FALLBACK: Stage = { label: "Working", spinner: "helix" };
 // without claiming what the model is literally doing. Boundaries are
 // tiered (each label implies "this is taking a bit longer") rather
 // than randomised, which would jitter on every render.
-function pickThinkingLabel(elapsedSecs: number): string {
-  if (elapsedSecs < 5) return "Thinking";
-  if (elapsedSecs < 15) return "Reasoning";
-  if (elapsedSecs < 30) return "Working through it";
-  return "Taking a closer look";
+function pickThinkingLabel(elapsedSecs: number, t: ReturnType<typeof useT>): string {
+  if (elapsedSecs < 5) return t("pill_thinking");
+  if (elapsedSecs < 15) return t("pill_reasoning");
+  if (elapsedSecs < 30) return t("pill_working_through");
+  return t("pill_closer_look");
 }
 
 // Pure stage decision. Two-tier signal: presence + status drive the
@@ -78,21 +81,22 @@ function pickStage(
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
   elapsedSecs: number,
+  t: ReturnType<typeof useT>,
 ): Stage {
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
   ) {
-    return { label: "Offline", spinner: null, static: true };
+    return { label: t("pill_offline"), spinner: null, static: true };
   }
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "unstable"
   ) {
-    return { label: "Reconnecting", spinner: "pulse" };
+    return { label: t("pill_reconnecting"), spinner: "pulse" };
   }
-  if (status === "queued") return { label: "Queued", spinner: "pulse" };
-  if (status === "dispatched") return { label: "Starting up", spinner: "breathe" };
+  if (status === "queued") return { label: t("pill_queued"), spinner: "pulse" };
+  if (status === "dispatched") return { label: t("pill_starting_up"), spinner: "breathe" };
 
   // running: latest meaningful message decides the label. We deliberately
   // skip both `error` rows (rendered inline by the timeline; flipping the
@@ -114,20 +118,24 @@ function pickStage(
   // by elapsed so the user perceives progressive waiting rather than
   // a stuck "Thinking..." loop.
   if (!latest) {
-    return { label: pickThinkingLabel(elapsedSecs), spinner: "breathe" };
+    return { label: pickThinkingLabel(elapsedSecs, t), spinner: "breathe" };
   }
 
   if (latest.type === "thinking") {
-    return { label: pickThinkingLabel(elapsedSecs), spinner: "breathe" };
+    return { label: pickThinkingLabel(elapsedSecs, t), spinner: "breathe" };
   }
   if (latest.type === "text") {
-    return { label: "Typing", spinner: "braille" };
+    return { label: t("pill_typing"), spinner: "braille" };
   }
   if (latest.type === "tool_use") {
     const tool = (latest.tool ?? "").toLowerCase();
-    return TOOL_STAGES[tool] ?? STAGE_FALLBACK;
+    const mapped = TOOL_STAGES[tool];
+    if (mapped) {
+      return { label: t(mapped.labelKey), spinner: mapped.spinner };
+    }
+    return { label: t(STAGE_FALLBACK_KEY), spinner: STAGE_FALLBACK_SPINNER };
   }
-  return { label: pickThinkingLabel(elapsedSecs), spinner: "breathe" };
+  return { label: pickThinkingLabel(elapsedSecs, t), spinner: "breathe" };
 }
 
 const WARNING_THRESHOLD_S = 60;
@@ -139,6 +147,9 @@ export function TaskStatusPill({
   availability,
   onCancel,
 }: Props) {
+  const t = useT("chat");
+  const c = useT("common");
+
   // Anchor: locked on first render. Once set we never reassign — otherwise
   // the timer would visibly snap backwards when an optimistic-seeded
   // `Date.now()` anchor is later replaced by a server-side created_at that
@@ -146,8 +157,8 @@ export function TaskStatusPill({
   const anchorRef = useRef<number | null>(null);
   if (anchorRef.current === null) {
     if (pendingTask.created_at) {
-      const t = Date.parse(pendingTask.created_at);
-      anchorRef.current = Number.isFinite(t) ? t : Date.now();
+      const parsed = Date.parse(pendingTask.created_at);
+      anchorRef.current = Number.isFinite(parsed) ? parsed : Date.now();
     } else {
       anchorRef.current = Date.now();
     }
@@ -167,7 +178,7 @@ export function TaskStatusPill({
   // writethrough'd yet.
   const status = taskMessages.length > 0 ? "running" : pendingTask.status;
   const elapsedSecs = Math.max(0, Math.floor((now - anchor) / 1000));
-  const stage = pickStage(status, taskMessages, availability, elapsedSecs);
+  const stage = pickStage(status, taskMessages, availability, elapsedSecs, t);
   const isWarning = elapsedSecs >= WARNING_THRESHOLD_S;
   const showCancel = !!onCancel && elapsedSecs >= CANCEL_THRESHOLD_S;
 
@@ -201,7 +212,7 @@ export function TaskStatusPill({
           className="ml-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent transition-colors"
         >
           <X className="size-3" />
-          Cancel
+          {c("cancel")}
         </button>
       )}
     </div>

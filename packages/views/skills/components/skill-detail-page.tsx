@@ -37,6 +37,7 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -70,13 +71,13 @@ type DraftFile = { id?: string; path: string; content: string };
 // File path validation + inline add
 // ---------------------------------------------------------------------------
 
-function validateNewFilePath(path: string, existing: string[]): string {
+function validateNewFilePath(path: string, existing: string[], t: (key: string) => string): string {
   const p = path.trim();
-  if (!p) return "Path cannot be empty.";
-  if (p.startsWith("/")) return "Absolute paths are not allowed.";
-  if (p.split("/").includes("..")) return 'Paths cannot contain "..".';
-  if (p === SKILL_MD) return "SKILL.md is reserved for the main file.";
-  if (existing.includes(p)) return "A file at this path already exists.";
+  if (!p) return t("detail_path_empty");
+  if (p.startsWith("/")) return t("detail_path_absolute");
+  if (p.split("/").includes("..")) return t("detail_path_dotdot");
+  if (p === SKILL_MD) return t("detail_path_reserved");
+  if (existing.includes(p)) return t("detail_path_exists");
   return "";
 }
 
@@ -89,11 +90,13 @@ function AddFileInline({
   onAdd: (path: string) => void;
   onCancel: () => void;
 }) {
+  const c = useT("common");
+  const t = useT("skills");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
 
   const submit = () => {
-    const err = validateNewFilePath(path, existingPaths);
+    const err = validateNewFilePath(path, existingPaths, t);
     if (err) {
       setError(err);
       return;
@@ -124,10 +127,10 @@ function AddFileInline({
       )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <Button type="button" size="xs" onClick={submit}>
-          Add
+          {c("create")}
         </Button>
         <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
-          Cancel
+          {c("cancel")}
         </Button>
       </div>
     </div>
@@ -139,11 +142,11 @@ function AddFileInline({
 // ---------------------------------------------------------------------------
 
 function UsedBySection({ agents }: { agents: Agent[] }) {
+  const t = useT("skills");
   if (agents.length === 0) {
     return (
       <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
-        Not assigned to any agent yet. Open an agent&rsquo;s Skills tab to
-        assign.
+        {t("detail_no_agents")}
       </div>
     );
   }
@@ -182,15 +185,16 @@ function OriginSidebarCard({
   origin: OriginInfo;
   runtime: AgentRuntime | null;
 }) {
+  const t = useT("skills");
   if (origin.type === "manual") return null;
 
   const isRuntime = origin.type === "runtime_local";
   const label =
     origin.type === "runtime_local"
-      ? "Imported from local runtime"
+      ? t("detail_origin_local")
       : origin.type === "clawhub"
-        ? "Imported from ClawHub"
-        : "Imported from Skills.sh";
+        ? t("detail_origin_clawhub")
+        : t("detail_origin_skillssh");
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
@@ -235,6 +239,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const t = useT("skills");
+  const c = useT("common");
 
   const {
     data: skill,
@@ -432,9 +438,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         exact: true,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Skill saved");
+      toast.success(t("toast_saved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save skill");
+      toast.error(err instanceof Error ? err.message : t("toast_failed_save"));
     } finally {
       setSaving(false);
     }
@@ -462,10 +468,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Skill deleted");
+      toast.success(t("toast_deleted"));
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to delete skill",
+        err instanceof Error ? err.message : t("toast_failed_delete"),
       );
       setDeleting(false);
       setConfirmDelete(false);
@@ -527,22 +533,22 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             render={<AppLink href={paths.skills()} />}
           >
             <ArrowLeft className="h-3 w-3" />
-            All skills
+            {t("all_skills")}
           </Button>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <AlertCircle className="h-8 w-8 text-muted-foreground/40" />
-          <p className="text-sm font-medium">Skill not found</p>
+          <p className="text-sm font-medium">{t("not_found")}</p>
           <p className="max-w-xs text-xs text-muted-foreground">
             {error instanceof Error
               ? error.message
-              : "This skill may have been deleted or you lost access."}
+              : t("not_found_desc")}
           </p>
           <AppLink
             href={paths.skills()}
             className={`${buttonVariants({ variant: "outline", size: "xs" })} mt-2`}
           >
-            Back to Skills
+            {t("back_to_skills")}
           </AppLink>
         </div>
       </div>
@@ -554,14 +560,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (!origin) return null;
     if (origin.type === "runtime_local") {
       return originRuntime
-        ? `Local runtime · ${originRuntime.name}`
+        ? `${t("local_runtime")} · ${originRuntime.name}`
         : origin.provider
-          ? `Local runtime · ${origin.provider}`
-          : "Local runtime";
+          ? `${t("local_runtime")} · ${origin.provider}`
+          : t("local_runtime");
     }
-    if (origin.type === "clawhub") return "Imported · ClawHub";
-    if (origin.type === "skills_sh") return "Imported · Skills.sh";
-    return "Workspace";
+    if (origin.type === "clawhub") return t("imported_clawhub");
+    if (origin.type === "skills_sh") return t("imported_skills_sh");
+    return t("detail_origin_workspace");
   })();
 
   return (
@@ -574,7 +580,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           render={<AppLink href={paths.skills()} />}
         >
           <ArrowLeft className="h-3 w-3" />
-          All skills
+          {t("all_skills")}
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
@@ -584,7 +590,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {!canEdit && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
-              Read-only
+              {t("read_only")}
             </span>
           )}
           {canEdit && (
@@ -596,13 +602,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                     size="icon-sm"
                     onClick={() => setConfirmDelete(true)}
                     className="text-muted-foreground hover:text-destructive"
-                    aria-label="Delete skill"
+                    aria-label={t("delete_skill")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 }
               />
-              <TooltipContent>Delete skill</TooltipContent>
+              <TooltipContent>{t("delete_skill")}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -618,9 +624,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
           <span>
-            Some workspace data failed to load. Creator attribution, runtime
-            names, or edit permissions may appear incomplete until the next
-            refresh.
+            {t("warning_partial")}
           </span>
         </div>
       )}
@@ -631,7 +635,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <aside className="flex w-56 shrink-0 flex-col border-r">
           <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Files · {totalFileCount(skill)}
+              {t("files_heading")} · {totalFileCount(skill)}
             </span>
             {canEdit && (
               <Tooltip>
@@ -643,13 +647,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                       size="icon-sm"
                       onClick={() => setAddingFile(true)}
                       className="text-muted-foreground"
-                      aria-label="Add file"
+                      aria-label={t("add_file")}
                     >
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
                   }
                 />
-                <TooltipContent>Add file</TooltipContent>
+                <TooltipContent>{t("add_file")}</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -677,7 +681,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 className="text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="h-3 w-3" />
-                Delete file
+                {t("delete_file")}
               </Button>
             </div>
           )}
@@ -691,9 +695,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               value={name}
               readOnly={!canEdit}
               onChange={(e) => setName(e.target.value)}
-              placeholder="skill-name"
+              placeholder={t("name_placeholder")}
               className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 read-only:cursor-default"
-              aria-label="Skill name"
+              aria-label={t("name_label")}
             />
             <div className="space-y-1">
               <Label
@@ -701,14 +705,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 className="text-xs text-muted-foreground"
               >
                 <Pencil className="h-3 w-3" />
-                Description
+                {t("description_label")}
               </Label>
               <Textarea
                 id="skill-description"
                 value={description}
                 readOnly={!canEdit}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="One sentence describing when an agent should use this skill…"
+                placeholder={t("description_placeholder")}
                 rows={2}
                 className="resize-none text-sm read-only:cursor-default"
               />
@@ -728,7 +732,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               )}
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden>·</span>
-                <span>Updated {timeAgo(skill.updated_at)}</span>
+                <span>{t("detail_updated")} {timeAgo(skill.updated_at)}</span>
               </span>
               {creator && (
                 <span className="inline-flex items-center gap-2">
@@ -740,7 +744,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                       avatarUrl={creator.avatar_url}
                       size={14}
                     />
-                    by {creator.name}
+                    {t("detail_by")} {creator.name}
                   </span>
                 </span>
               )}
@@ -758,11 +762,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
               <div className="flex-1">
                 <div className="font-medium text-foreground">
-                  Someone else updated this skill
+                  {t("conflict_title")}
                 </div>
                 <div className="mt-0.5 text-muted-foreground">
-                  Your edits are preserved. Discard to pull their changes, or
-                  Save to overwrite.
+                  {t("conflict_desc")}
                 </div>
               </div>
             </div>
@@ -787,7 +790,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             >
               <span className="h-1.5 w-1.5 rounded-full bg-brand" />
               <span className="text-xs text-muted-foreground">
-                Unsaved changes — will overwrite the live skill on save
+                {t("unsaved_changes")}
               </span>
               <div className="ml-auto flex items-center gap-1.5">
                 <Button
@@ -796,7 +799,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   size="xs"
                   onClick={handleDiscard}
                 >
-                  Discard
+                  {t("discard")}
                 </Button>
                 <Button
                   type="button"
@@ -807,12 +810,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   {saving ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      Saving…
+                      {t("saving")}
                     </>
                   ) : (
                     <>
                       <Save className="h-3 w-3" />
-                      Save changes
+                      {t("save_changes")}
                     </>
                   )}
                 </Button>
@@ -825,36 +828,36 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 px-4 py-4">
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Metadata
+              {t("metadata")}
             </h3>
             <dl className="space-y-1.5 text-xs">
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Created</dt>
+                <dt className="min-w-20 text-muted-foreground">{t("created")}</dt>
                 <dd className="min-w-0 flex-1">
                   {timeAgo(skill.created_at)}
                 </dd>
               </div>
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Updated</dt>
+                <dt className="min-w-20 text-muted-foreground">{t("updated")}</dt>
                 <dd className="min-w-0 flex-1">
                   {timeAgo(skill.updated_at)}
                 </dd>
               </div>
               {creator && (
                 <div className="flex gap-2">
-                  <dt className="min-w-20 text-muted-foreground">Created by</dt>
+                  <dt className="min-w-20 text-muted-foreground">{t("created_by")}</dt>
                   <dd className="min-w-0 flex-1">{creator.name}</dd>
                 </div>
               )}
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Files</dt>
+                <dt className="min-w-20 text-muted-foreground">{t("files_count")}</dt>
                 <dd className="min-w-0 flex-1">{totalFileCount(skill)}</dd>
               </div>
               <div
                 className="flex gap-2"
                 title={skill.id}
               >
-                <dt className="min-w-20 text-muted-foreground">ID</dt>
+                <dt className="min-w-20 text-muted-foreground">{t("id")}</dt>
                 <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
                   {skill.id.slice(0, 8)}…
                 </dd>
@@ -865,7 +868,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {origin && origin.type !== "manual" && (
             <div>
               <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Origin
+                {t("origin")}
               </h3>
               <OriginSidebarCard origin={origin} runtime={originRuntime} />
             </div>
@@ -873,20 +876,19 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Used by {skillAgents.length} agent
-              {skillAgents.length === 1 ? "" : "s"}
+              {t("used_by", { count: skillAgents.length })}
             </h3>
             <UsedBySection agents={skillAgents} />
           </div>
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Permissions
+              {t("permissions")}
             </h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {canEdit
-                ? "You can edit and delete this skill. Changes take effect on the next agent run."
-                : `Only the creator${creator ? ` (${creator.name})` : ""} or a workspace admin can edit this skill.`}
+                ? t("permissions_can_edit")
+                : t("permissions_cannot_edit", { creator: creator ? ` (${creator.name})` : "" })}
             </p>
           </div>
         </aside>
@@ -901,17 +903,15 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete skill?</DialogTitle>
+            <DialogTitle>{t("delete_confirm_title")}</DialogTitle>
             <DialogDescription>
-              This will permanently delete &ldquo;{skill.name}&rdquo; and remove
-              it from{" "}
               {skillAgents.length > 0
-                ? `${skillAgents.length} agent${skillAgents.length === 1 ? "" : "s"} currently using it.`
-                : "all agents."}
+                ? t("delete_confirm_desc", { name: skill.name, count: skillAgents.length })
+                : t("delete_confirm_all")}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            This action cannot be undone.
+            {t("delete_cannot_undo")}
           </div>
           <DialogFooter>
             <Button
@@ -920,7 +920,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               onClick={() => setConfirmDelete(false)}
               disabled={deleting}
             >
-              Cancel
+              {c("cancel")}
             </Button>
             <Button
               type="button"
@@ -931,12 +931,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               {deleting ? (
                 <>
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  Deleting…
+                  {t("deleting")}
                 </>
               ) : (
                 <>
                   <Trash2 className="h-3 w-3" />
-                  Delete permanently
+                  {t("delete_permanently")}
                 </>
               )}
             </Button>

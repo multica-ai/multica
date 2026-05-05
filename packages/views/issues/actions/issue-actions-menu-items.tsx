@@ -15,7 +15,6 @@ import {
 import type { Issue } from "@multica/core/types";
 import {
   ALL_STATUSES,
-  STATUS_CONFIG,
   PRIORITY_ORDER,
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
@@ -37,6 +36,7 @@ import {
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
 import type { UseIssueActionsResult } from "./use-issue-actions";
+import { useT } from "@multica/i18n/react";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
 // (variant, inset, onClick, etc.). We bundle the primitives we need into a
@@ -95,6 +95,10 @@ export function IssueActionsMenuItems({
     openDeleteConfirm,
   } = actions;
 
+  const t = useT("issues");
+  const tStatus = useT("status");
+  const tPriority = useT("priority");
+
   const now = () => new Date();
   const inDays = (days: number) => {
     const d = new Date();
@@ -108,13 +112,13 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-          Status
+          {t("detail_status")}
         </P.SubTrigger>
         <P.SubContent>
           {ALL_STATUSES.map((s) => (
             <P.Item key={s} onClick={() => updateField({ status: s })}>
               <StatusIcon status={s} className="h-3.5 w-3.5" />
-              {STATUS_CONFIG[s].label}
+              {tStatus(s)}
               {issue.status === s && (
                 <span className="ml-auto text-xs text-muted-foreground">✓</span>
               )}
@@ -127,7 +131,7 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <PriorityIcon priority={issue.priority} />
-          Priority
+          {t("detail_priority")}
         </P.SubTrigger>
         <P.SubContent>
           {PRIORITY_ORDER.map((p) => (
@@ -136,7 +140,7 @@ export function IssueActionsMenuItems({
                 className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                {PRIORITY_CONFIG[p].label}
+                {tPriority(p)}
               </span>
               {issue.priority === p && (
                 <span className="ml-auto text-xs text-muted-foreground">✓</span>
@@ -150,7 +154,7 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <UserMinus className="h-3.5 w-3.5" />
-          Assignee
+          {t("detail_assignee")}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item
@@ -159,7 +163,7 @@ export function IssueActionsMenuItems({
             }
           >
             <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-            Unassigned
+            {t("actions_unassigned")}
             {!issue.assignee_type && (
               <span className="ml-auto text-xs text-muted-foreground">✓</span>
             )}
@@ -200,23 +204,23 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <Calendar className="h-3.5 w-3.5" />
-          Due date
+          {t("detail_due_date")}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item onClick={() => updateField({ due_date: now().toISOString() })}>
-            Today
+            {t("actions_today")}
           </P.Item>
           <P.Item onClick={() => updateField({ due_date: inDays(1) })}>
-            Tomorrow
+            {t("actions_tomorrow")}
           </P.Item>
           <P.Item onClick={() => updateField({ due_date: inDays(7) })}>
-            Next week
+            {t("actions_next_week")}
           </P.Item>
           {issue.due_date && (
             <>
               <P.Separator />
               <P.Item onClick={() => updateField({ due_date: null })}>
-                Clear date
+                {t("actions_clear_date")}
               </P.Item>
             </>
           )}
@@ -231,11 +235,11 @@ export function IssueActionsMenuItems({
         ) : (
           <Pin className="h-3.5 w-3.5" />
         )}
-        {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+        {isPinned ? t("detail_unpin_sidebar") : t("detail_pin_sidebar")}
       </P.Item>
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />
-        Copy link
+        {t("actions_copy_link")}
       </P.Item>
 
       <P.Separator />
@@ -245,20 +249,20 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <MoreHorizontal className="h-3.5 w-3.5" />
-          More
+          {t("actions_more")}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item onClick={openCreateSubIssue}>
             <Plus className="h-3.5 w-3.5" />
-            Create sub-issue
+            {t("actions_create_sub")}
           </P.Item>
           <P.Item onClick={openSetParent}>
             <ArrowUp className="h-3.5 w-3.5" />
-            Set parent issue...
+            {t("actions_set_parent")}
           </P.Item>
           <P.Item onClick={openAddChild}>
             <ArrowDown className="h-3.5 w-3.5" />
-            Add sub-issue...
+            {t("actions_add_sub")}
           </P.Item>
         </P.SubContent>
       </P.Sub>
@@ -270,7 +274,7 @@ export function IssueActionsMenuItems({
         onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
       >
         <Trash2 className="h-3.5 w-3.5" />
-        Delete issue
+        {t("actions_delete_issue")}
       </P.Item>
     </>
   );

@@ -22,6 +22,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "@multica/i18n/react";
 import { readOrigin, totalFileCount } from "../lib/origin";
 
 // Per-row data assembled at the page level. The columns reach into
@@ -57,24 +58,24 @@ const COL_WIDTHS = {
   chevron: 48,
 } as const;
 
-export function createSkillColumns(): ColumnDef<SkillRow>[] {
+export function createSkillColumns(t: (key: string, params?: Record<string, string | number>) => string): ColumnDef<SkillRow>[] {
   return [
     {
       id: "name",
-      header: "Name",
+      header: t("col_name"),
       size: COL_WIDTHS.name,
       meta: { grow: true },
       cell: ({ row }) => <SkillNameCell row={row.original} />,
     },
     {
       id: "usedBy",
-      header: "Used by",
+      header: t("col_used_by"),
       size: COL_WIDTHS.usedBy,
       cell: ({ row }) => <AgentAssignees agents={row.original.agents} />,
     },
     {
       id: "source",
-      header: "Source · Added by",
+      header: t("col_source"),
       size: COL_WIDTHS.source,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -87,7 +88,7 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
     },
     {
       id: "updated",
-      header: "Updated",
+      header: t("col_updated"),
       size: COL_WIDTHS.updated,
       cell: ({ row }) => (
         <span className="whitespace-nowrap text-xs text-muted-foreground">
@@ -116,6 +117,7 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
 
 function SkillNameCell({ row }: { row: SkillRow }) {
   const { skill, canEdit } = row;
+  const t = useT("skills");
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
@@ -128,7 +130,7 @@ function SkillNameCell({ row }: { row: SkillRow }) {
               }
             />
             <TooltipContent>
-              Read-only — only creator or admin can edit
+              {t("read_only_tooltip")}
             </TooltipContent>
           </Tooltip>
         )}
@@ -149,15 +151,16 @@ function SkillNameCell({ row }: { row: SkillRow }) {
             : "italic text-muted-foreground/50"
         }`}
       >
-        {skill.description || "No description"}
+        {skill.description || t("no_description")}
       </div>
     </div>
   );
 }
 
 function AgentAssignees({ agents }: { agents: Agent[] }) {
+  const t = useT("skills");
   if (agents.length === 0) {
-    return <span className="text-xs text-muted-foreground/70">— unused</span>;
+    return <span className="text-xs text-muted-foreground/70">{t("unused")}</span>;
   }
   const visible = agents.slice(0, 3);
   const extra = agents.length - visible.length;
@@ -199,23 +202,24 @@ function SourceCell({
   creator: MemberWithUser | null;
   runtime: AgentRuntime | null;
 }) {
+  const t = useT("skills");
   const origin = readOrigin(skill);
 
   let icon = <Pencil className="h-3 w-3 shrink-0" />;
-  let label = "Created manually";
+  let label = t("created_manually");
   if (origin.type === "runtime_local") {
     icon = <HardDrive className="h-3 w-3 shrink-0" />;
     label = runtime
-      ? `From ${runtime.name}`
+      ? t("from_runtime", { name: runtime.name })
       : origin.provider
-        ? `From ${origin.provider} runtime`
-        : "From a runtime";
+        ? t("from_provider_runtime", { provider: origin.provider })
+        : t("from_a_runtime");
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From ClawHub";
+    label = t("from_clawhub");
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From Skills.sh";
+    label = t("from_skills_sh");
   }
 
   return (
@@ -232,7 +236,7 @@ function SourceCell({
             avatarUrl={creator.avatar_url}
             size={14}
           />
-          <span className="truncate">by {creator.name}</span>
+          <span className="truncate">{t("added_by", { name: creator.name })}</span>
         </div>
       )}
     </div>

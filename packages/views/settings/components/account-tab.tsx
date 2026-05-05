@@ -10,10 +10,13 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useT } from "@multica/i18n/react";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const t = useT("settings");
+  const tt = useT("toasts");
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -41,9 +44,9 @@ export function AccountTab() {
       if (!result) return;
       const updated = await api.updateMe({ avatar_url: result.link });
       setUser(updated);
-      toast.success("Avatar updated");
+      toast.success(tt("avatar_updated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(err instanceof Error ? err.message : tt("avatar_upload_failed"));
     }
   };
 
@@ -52,9 +55,9 @@ export function AccountTab() {
     try {
       const updated = await api.updateMe({ name: profileName });
       setUser(updated);
-      toast.success("Profile updated");
+      toast.success(tt("profile_updated"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update profile");
+      toast.error(e instanceof Error ? e.message : tt("profile_update_failed"));
     } finally {
       setProfileSaving(false);
     }
@@ -63,7 +66,7 @@ export function AccountTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Profile</h2>
+        <h2 className="text-sm font-semibold">{t("profile")}</h2>
 
         <Card>
           <CardContent className="space-y-4">
@@ -102,12 +105,12 @@ export function AccountTab() {
                 onChange={handleAvatarUpload}
               />
               <div className="text-xs text-muted-foreground">
-                Click to upload avatar
+                {t("avatar_hint")}
               </div>
             </div>
 
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">{t("name")}</Label>
               <Input
                 type="search"
                 value={profileName}
@@ -122,7 +125,7 @@ export function AccountTab() {
                 disabled={profileSaving || !profileName.trim()}
               >
                 <Save className="h-3 w-3" />
-                {profileSaving ? "Updating..." : "Update Profile"}
+                {profileSaving ? t("updating") : t("update_profile")}
               </Button>
             </div>
           </CardContent>

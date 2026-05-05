@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
+import { useT } from "@multica/i18n/react";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   PickerItem,
@@ -35,6 +36,7 @@ export function ModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const t = useT("agents");
 
   const modelsQuery = useQuery(
     runtimeModelsOptions(runtimeOnline ? runtimeId : null),
@@ -72,13 +74,13 @@ export function ModelPicker({
   if (!supported && !modelsQuery.isLoading) {
     return (
       <span className="truncate italic text-muted-foreground">
-        Managed by runtime
+        {t("model_managed_by_runtime")}
       </span>
     );
   }
 
-  const triggerLabel = value || "Default";
-  const triggerTitle = `Model · ${triggerLabel}`;
+  const triggerLabel = value || t("model_default");
+  const triggerTitle = t("model_trigger_title", { label: triggerLabel });
 
   return (
     <PropertyPicker
@@ -103,7 +105,7 @@ export function ModelPicker({
         <div className="p-1.5">
           <Input
             autoFocus
-            placeholder="Search or type a model ID"
+            placeholder={t("model_search_or_type")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-7 text-xs"
@@ -114,7 +116,7 @@ export function ModelPicker({
       {modelsQuery.isLoading && (
         <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          Discovering models…
+          {t("model_discovering")}
         </div>
       )}
 
@@ -134,7 +136,7 @@ export function ModelPicker({
                 <span className="truncate font-medium">{m.label}</span>
                 {m.default && (
                   <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
-                    default
+                    {t("model_default_badge")}
                   </span>
                 )}
               </div>
@@ -149,7 +151,7 @@ export function ModelPicker({
 
       {!modelsQuery.isLoading && filtered.length === 0 && !canCreate && (
         <p className="px-3 py-3 text-center text-xs text-muted-foreground">
-          No models available
+          {t("model_no_models")}
         </p>
       )}
 
@@ -157,11 +159,11 @@ export function ModelPicker({
         <PickerItem
           selected={false}
           onClick={() => void select(trimmedSearch)}
-          tooltip={`Use “${trimmedSearch}” as a custom model id`}
+          tooltip={t("model_custom_tooltip", { id: trimmedSearch })}
         >
           <Plus className="h-3.5 w-3.5 shrink-0 text-primary" />
           <span className="truncate text-primary">
-            Use &ldquo;{trimmedSearch}&rdquo;
+            {t("model_use_custom", { id: trimmedSearch })}
           </span>
         </PickerItem>
       )}
@@ -171,9 +173,9 @@ export function ModelPicker({
           type="button"
           onClick={() => void select("")}
           className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
-          title="Clear and fall back to the runtime's provider default"
+          title={t("model_clear_tooltip")}
         >
-          Clear (use provider default)
+          {t("model_clear_selection")}
         </button>
       )}
     </PropertyPicker>

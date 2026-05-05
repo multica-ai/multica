@@ -5,6 +5,7 @@ import { FileText } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -41,6 +42,8 @@ export function SkillAddDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const wsId = useWorkspaceId();
+  const t = useT("agents");
+  const tc = useT("common");
   const qc = useQueryClient();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const [saving, setSaving] = useState(false);
@@ -58,7 +61,7 @@ export function SkillAddDialog({
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add skill");
+      toast.error(e instanceof Error ? e.message : t("toast_failed_add_skill"));
     } finally {
       setSaving(false);
     }
@@ -68,9 +71,9 @@ export function SkillAddDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-sm">Add skill</DialogTitle>
+          <DialogTitle className="text-sm">{t("skill_add_title")}</DialogTitle>
           <DialogDescription className="text-xs">
-            Select a workspace skill to assign to this agent.
+            {t("skill_add_desc")}
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-64 space-y-1 overflow-y-auto">
@@ -94,13 +97,13 @@ export function SkillAddDialog({
           ))}
           {availableSkills.length === 0 && (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              All workspace skills are already assigned.
+              {t("skill_all_assigned")}
             </p>
           )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tc("cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useT, useLocale } from "@multica/i18n/react";
 import {
   Check,
   ChevronDown,
@@ -90,22 +91,22 @@ export type AutopilotDialogProps =
 // Static data
 // ---------------------------------------------------------------------------
 
-const FREQUENCY_OPTIONS: { value: TriggerFrequency; label: string }[] = [
-  { value: "hourly", label: "Every hour" },
-  { value: "daily", label: "Every day" },
-  { value: "weekdays", label: "Every weekday" },
-  { value: "weekly", label: "Every week" },
-  { value: "custom", label: "Custom cron" },
+const FREQUENCY_OPTIONS: { value: TriggerFrequency; labelKey: string }[] = [
+  { value: "hourly", labelKey: "frequency_hourly" },
+  { value: "daily", labelKey: "frequency_daily" },
+  { value: "weekdays", labelKey: "frequency_weekdays" },
+  { value: "weekly", labelKey: "frequency_weekly" },
+  { value: "custom", labelKey: "frequency_custom" },
 ];
 
-const DAY_OPTIONS: { value: number; label: string; short: string }[] = [
-  { value: 0, label: "Sunday", short: "Sun" },
-  { value: 1, label: "Monday", short: "Mon" },
-  { value: 2, label: "Tuesday", short: "Tue" },
-  { value: 3, label: "Wednesday", short: "Wed" },
-  { value: 4, label: "Thursday", short: "Thu" },
-  { value: 5, label: "Friday", short: "Fri" },
-  { value: 6, label: "Saturday", short: "Sat" },
+const DAY_OPTIONS: { value: number; labelKey: string; shortKey: string }[] = [
+  { value: 0, labelKey: "day_sunday", shortKey: "day_short_sun" },
+  { value: 1, labelKey: "day_monday", shortKey: "day_short_mon" },
+  { value: 2, labelKey: "day_tuesday", shortKey: "day_short_tue" },
+  { value: 3, labelKey: "day_wednesday", shortKey: "day_short_wed" },
+  { value: 4, labelKey: "day_thursday", shortKey: "day_short_thu" },
+  { value: 5, labelKey: "day_friday", shortKey: "day_short_fri" },
+  { value: 6, labelKey: "day_saturday", shortKey: "day_short_sat" },
 ];
 
 const TIMEZONE_OPTIONS = [
@@ -131,20 +132,20 @@ const TIMEZONE_OPTIONS = [
 
 const OUTPUT_MODES: {
   value: AutopilotExecutionMode;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
   Icon: typeof FilePlus2;
 }[] = [
   {
     value: "create_issue",
-    label: "Create issue",
-    description: "Each run creates a tracked issue",
+    labelKey: "output_create_issue_label",
+    descriptionKey: "output_create_issue_desc",
     Icon: FilePlus2,
   },
   {
     value: "run_only",
-    label: "Run only",
-    description: "Silent run, no issue created",
+    labelKey: "output_run_only_label",
+    descriptionKey: "output_run_only_desc",
     Icon: Play,
   },
 ];
@@ -207,9 +208,9 @@ function formatCountdown(target: Date, now: Date): string {
   return "<1m";
 }
 
-function formatNextRunAbsolute(date: Date, timezone: string): string {
+function formatNextRunAbsolute(date: Date, timezone: string, locale?: string): string {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(locale ?? "en-US", {
       timeZone: timezone,
       weekday: "short",
       month: "short",
@@ -219,7 +220,7 @@ function formatNextRunAbsolute(date: Date, timezone: string): string {
       hour12: true,
     }).format(date);
   } catch {
-    return date.toLocaleString();
+    return date.toLocaleString(locale);
   }
 }
 
@@ -242,6 +243,8 @@ function useNowTicker(intervalMs = 30_000): Date {
 
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { open, onOpenChange } = props;
+  const t = useT("autopilots");
+  const c = useT("common");
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -322,8 +325,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           scheduleOk = false;
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success("Autopilot created");
-        else toast.error("Autopilot created, but schedule failed to save");
+        if (scheduleOk) toast.success(t("toast_created"));
+        else toast.error(t("toast_created_schedule_failed"));
       } else {
         await updateAutopilot.mutateAsync({
           id: props.autopilotId,
@@ -356,11 +359,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           }
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success("Autopilot updated");
-        else toast.error("Autopilot updated, but schedule failed to save");
+        if (scheduleOk) toast.success(t("toast_updated"));
+        else toast.error(t("toast_updated_schedule_failed"));
       }
     } catch {
-      toast.error(isCreate ? "Failed to create autopilot" : "Failed to update autopilot");
+      toast.error(isCreate ? t("toast_failed_create") : t("toast_failed_update"));
     } finally {
       setSubmitting(false);
     }
@@ -382,7 +385,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         )}
       >
         <DialogTitle className="sr-only">
-          {isCreate ? "New Autopilot" : "Edit Autopilot"}
+          {isCreate ? t("dialog_title_new") : t("dialog_title_edit")}
         </DialogTitle>
 
         {/* Header */}
@@ -393,11 +396,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 <Rocket className="size-3" />
               </span>
               <span className="font-medium text-foreground">
-                {isCreate ? "New autopilot" : "Edit autopilot"}
+                {isCreate ? t("dialog_new_autopilot") : t("dialog_edit_autopilot")}
               </span>
             </div>
             <span className="text-muted-foreground/60">·</span>
-            <span className="text-muted-foreground">A recurring AI task</span>
+            <span className="text-muted-foreground">{t("dialog_subtitle")}</span>
             {workspaceName && (
               <>
                 <ChevronRight className="size-3 text-muted-foreground/40" />
@@ -417,7 +420,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+              <TooltipContent side="bottom">{isExpanded ? t("dialog_collapse") : t("dialog_expand")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -430,7 +433,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">Close</TooltipContent>
+              <TooltipContent side="bottom">{c("close")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -446,7 +449,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               <TitleEditor
                 autoFocus={isCreate}
                 defaultValue={initial.title ?? ""}
-                placeholder="Autopilot name"
+                placeholder={t("dialog_name")}
                 className="text-2xl font-semibold tracking-tight"
                 onChange={setTitle}
                 onSubmit={handleSubmit}
@@ -455,10 +458,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <div className="px-6 pb-2 shrink-0 flex items-baseline gap-2">
               <span className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-                Runbook
+                {t("dialog_runbook")}
               </span>
               <span className="text-xs text-muted-foreground/80">
-                Read by the agent on every run
+                {t("dialog_runbook_hint")}
               </span>
             </div>
 
@@ -466,7 +469,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
                   defaultValue={initial.description ?? ""}
-                  placeholder={`# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. …\n2. …`}
+                  placeholder={t("dialog_runbook_placeholder")}
                   onUpdate={setDescription}
                   debounceMs={300}
                   showBubbleMenu={false}
@@ -492,7 +495,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               disabled={schedulePillDisabled}
               disabledReason={
                 schedulePillDisabled
-                  ? "This autopilot has multiple schedules — edit them in the detail page."
+                  ? t("dialog_schedule_disabled_reason")
                   : undefined
               }
             />
@@ -504,21 +507,21 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
             <Zap className="size-3.5 text-amber-500 shrink-0" />
             <span className="truncate">
-              Once saved, runs automatically until paused.
+              {t("dialog_autorun_hint")}
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {c("cancel")}
             </Button>
             <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
               {submitting
                 ? isCreate
-                  ? "Creating..."
-                  : "Saving..."
+                  ? t("dialog_creating")
+                  : t("dialog_saving")
                 : isCreate
-                ? "Create autopilot"
-                : "Save"}
+                ? t("dialog_create_button")
+                : c("save")}
             </Button>
           </div>
         </div>
@@ -550,9 +553,10 @@ function AgentSection({
   selectedName?: string;
   selectedDescription?: string;
 }) {
+  const t = useT("autopilots");
   return (
     <div>
-      <SectionLabel>Agent</SectionLabel>
+      <SectionLabel>{t("dialog_agent")}</SectionLabel>
       <AgentPicker
         agentId={selectedId || null}
         onChange={onChange}
@@ -579,7 +583,7 @@ function AgentSection({
             )}
             <span className="flex-1 min-w-0">
               <span className="block text-sm font-medium truncate">
-                {selectedName ?? "Select agent"}
+                {selectedName ?? t("dialog_select_agent")}
               </span>
               {selectedDescription && (
                 <span className="block text-xs text-muted-foreground truncate">
@@ -602,9 +606,10 @@ function OutputModeSection({
   mode: AutopilotExecutionMode;
   onChange: (mode: AutopilotExecutionMode) => void;
 }) {
+  const t = useT("autopilots");
   return (
     <div>
-      <SectionLabel>Output mode</SectionLabel>
+      <SectionLabel>{t("dialog_output_mode")}</SectionLabel>
       <div className="space-y-1.5">
         {OUTPUT_MODES.map((o) => {
           const selected = o.value === mode;
@@ -631,9 +636,9 @@ function OutputModeSection({
                 {selected && <Check className="size-2.5" strokeWidth={3} />}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium">{o.label}</span>
+                <span className="block text-sm font-medium">{t(o.labelKey)}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {o.description}
+                  {t(o.descriptionKey)}
                 </span>
               </span>
             </button>
@@ -655,6 +660,8 @@ function ScheduleSection({
   disabled?: boolean;
   disabledReason?: string;
 }) {
+  const t = useT("autopilots");
+  const { locale } = useLocale();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
   const timezones = useMemo(() => {
@@ -667,7 +674,7 @@ function ScheduleSection({
 
   return (
     <div>
-      <SectionLabel>Schedule</SectionLabel>
+      <SectionLabel>{t("dialog_schedule")}</SectionLabel>
       <div
         className={cn(
           "space-y-2",
@@ -688,7 +695,7 @@ function ScheduleSection({
             <SelectContent>
               {FREQUENCY_OPTIONS.map((f) => (
                 <SelectItem key={f.value} value={f.value}>
-                  {f.label}
+                  {t(f.labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -706,7 +713,7 @@ function ScheduleSection({
               <SelectContent>
                 {DAY_OPTIONS.map((d) => (
                   <SelectItem key={d.value} value={String(d.value)}>
-                    {d.label}
+                    {t(d.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -724,7 +731,7 @@ function ScheduleSection({
             onChange={(e) =>
               onChange({ ...config, cronExpression: e.target.value })
             }
-            placeholder="0 9 * * 1-5"
+            placeholder={t("dialog_cron_placeholder")}
             className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1 h-8 text-sm font-mono outline-none transition-colors focus:border-ring focus:ring-3 focus:ring-ring/50 dark:bg-input/30"
           />
         ) : config.frequency === "hourly" ? (
@@ -752,9 +759,9 @@ function ScheduleSection({
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1">
             <Clock className="size-3 shrink-0" />
             <span className="truncate">
-              Next run:{" "}
+              {t("dialog_next_run")}{" "}
               <span className="text-foreground">
-                {formatNextRunAbsolute(next, config.timezone)}
+                {formatNextRunAbsolute(next, config.timezone, locale)}
               </span>
             </span>
             <span className="ml-auto rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">

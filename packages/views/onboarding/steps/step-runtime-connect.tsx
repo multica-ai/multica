@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { useT } from "@multica/i18n/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type { AgentRuntime } from "@multica/core/types";
@@ -96,6 +97,8 @@ function FancyView({
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const t = useT("onboarding");
+  const c = useT("common");
 
   // Flip to "empty" only after we've waited long enough for the daemon
   // to report. The 5s budget covers the bundled daemon's typical 1–3s
@@ -190,14 +193,14 @@ function FancyView({
 
   const footerHint =
     phase === "found" && selected
-      ? `Selected: ${selected.name}`
+      ? t("rc_footer_selected", { name: selected.name })
       : phase === "found"
-        ? "Pick a runtime above to continue."
+        ? t("rc_footer_pick")
         : phase === "scanning"
-          ? "Waiting for the first result…"
+          ? t("rc_footer_waiting")
           : waitlistSubmitted
-            ? "You're on the waitlist — skip to keep exploring."
-            : "Skip to enter your workspace, or join the cloud waitlist above.";
+            ? t("rc_footer_waitlist")
+            : t("rc_footer_skip_hint");
 
   return (
     <div className="animate-onboarding-enter grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
@@ -214,7 +217,7 @@ function FancyView({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {c("back")}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -278,7 +281,7 @@ function FancyView({
             disabled={submitting}
             onClick={handleSkip}
           >
-            Skip for now
+            {t("rc_skip")}
           </Button>
           <Button
             size="lg"
@@ -286,7 +289,7 @@ function FancyView({
             onClick={handleContinue}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Continue
+            {c("continue")}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -309,18 +312,18 @@ function FancyView({
 // ------------------------------------------------------------
 
 function ScanningView() {
+  const t = useT("onboarding");
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        Looking for your tools…
+        {t("rc_looking")}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Multica drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others. We&apos;re waiting to hear back from your machine about
-        which ones are installed.
+        {t("rc_drives_desc", {
+          claude: "Claude Code",
+          codex: "Codex",
+          cursor: "Cursor",
+        })}
       </p>
       <div className="mt-10 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <SkeletonRuntimeCard />
@@ -341,30 +344,30 @@ function FoundView({
   onSelect: (id: string) => void;
   onlineCount: number;
 }) {
+  const t = useT("onboarding");
   const total = runtimes.length;
   const statusLabel =
     onlineCount === total
-      ? "all online"
+      ? t("rc_status_all_online")
       : onlineCount === 0
-        ? "none online"
-        : `${onlineCount} online`;
+        ? t("rc_status_none_online")
+        : t("rc_status_online_count", { count: onlineCount });
   const statusTone =
     onlineCount === 0 ? "text-muted-foreground" : "text-success";
 
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        We found your runtimes.
+        {t("rc_found_title")}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        We scanned your machine for AI coding tools you&apos;ve already
-        set up. Pick one for your first agent.
+        {t("rc_found_desc")}
       </p>
 
       {/* Summary strip — trust signal ("we really did scan") */}
       <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-xs">
         <span className="font-semibold text-foreground">
-          {total} runtime{total === 1 ? "" : "s"}
+          {t("rc_runtime_count", { count: total })}
         </span>
         <span className="text-muted-foreground">·</span>
         <span className={cn("flex items-center gap-1", statusTone)}>
@@ -402,6 +405,8 @@ function EmptyView({
   onWaitlistSubmitted: () => void;
   onSkip: () => void;
 }) {
+  const t = useT("onboarding");
+  const c = useT("common");
   // Two exits: "Skip for now" (enter the workspace in read-only mode)
   // or "Join waitlist" (capture interest in the hosted runtime we
   // haven't shipped yet). We deliberately don't link out to Claude
@@ -413,29 +418,28 @@ function EmptyView({
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        No supported tools detected.
+        {t("rc_no_tools")}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Multica drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others — we didn&apos;t find any on this machine. Install one and
-        come back, or pick a path below.
+        {t("rc_no_tools_desc", {
+          claude: "Claude Code",
+          codex: "Codex",
+          cursor: "Cursor",
+        })}
       </p>
 
       <div className="mt-10 flex flex-col gap-3.5">
         <EmptyCard
-          title="Skip for now"
-          subtitle="Enter your workspace in read-only mode. Agents can't execute tasks until a runtime connects — but you can still browse, plan, and invite teammates."
-          actionLabel="Skip"
+          title={t("rc_skip")}
+          subtitle={t("rc_skip_desc")}
+          actionLabel={t("rc_skip_action")}
           onAction={onSkip}
         />
 
         <EmptyCard
-          title="Join the cloud runtime waitlist"
-          subtitle="We'll host the runtime for you — no local install, no setup. Not live yet; click to leave your email and get notified."
-          actionLabel={waitlistSubmitted ? "On the waitlist" : "Join waitlist"}
+          title={t("rc_join_waitlist")}
+          subtitle={t("rc_waitlist_desc")}
+          actionLabel={waitlistSubmitted ? t("rc_on_waitlist") : t("pf_join_waitlist")}
           onAction={() => setWaitlistOpen(true)}
         />
       </div>
@@ -446,10 +450,9 @@ function EmptyView({
       >
         <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
+            <DialogTitle>{t("pf_join_waitlist")}</DialogTitle>
             <DialogDescription>
-              Cloud runtimes aren&apos;t live yet. Leave your email and
-              we&apos;ll email you when they are.
+              {t("rc_waitlist_dialog_desc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -462,7 +465,7 @@ function EmptyView({
 
           <DialogFooter>
             <Button variant="ghost" onClick={() => setWaitlistOpen(false)}>
-              {waitlistSubmitted ? "Close" : "Cancel"}
+              {waitlistSubmitted ? c("close") : c("cancel")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -523,6 +526,7 @@ function RuntimeCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const t = useT("onboarding");
   const online = runtime.status === "online";
 
   return (
@@ -553,7 +557,7 @@ function RuntimeCard({
             )}
             aria-hidden
           />
-          {online ? "online" : "offline"}
+          {online ? t("online") : t("offline")}
         </div>
       </div>
       <RadioMark selected={selected} />

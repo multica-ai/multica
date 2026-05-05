@@ -145,7 +145,7 @@ const daemonAPI = {
     ipcRenderer.on("daemon:log-line", handler);
     return () => ipcRenderer.removeListener("daemon:log-line", handler);
   },
-  openLogFile: (): Promise<{ success: boolean; error?: string }> =>
+  openLogFile: (): Promise<{ success: boolean; error?: string; errorCode?: string }> =>
     ipcRenderer.invoke("daemon:open-log-file"),
 };
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Cloud, ChevronDown, Globe, Lock, Loader2 } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ModelDropdown } from "./model-dropdown";
@@ -59,8 +60,10 @@ export function CreateAgentDialog({
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
   const isDuplicate = !!template;
+  const t = useT("agents");
+  const c = useT("common");
   const [name, setName] = useState(
-    template ? `${template.name} (Copy)` : "",
+    template ? `${template.name} ${t("copy_suffix")}` : "",
   );
   const [description, setDescription] = useState(template?.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(
@@ -137,7 +140,7 @@ export function CreateAgentDialog({
       await onCreate(data);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create agent");
+      toast.error(err instanceof Error ? err.message : t("toast_failed_update"));
       setCreating(false);
     }
   };
@@ -147,36 +150,36 @@ export function CreateAgentDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {isDuplicate ? "Duplicate Agent" : "Create Agent"}
+            {isDuplicate ? t("create_duplicate_title") : t("create_title")}
           </DialogTitle>
           <DialogDescription>
             {isDuplicate
-              ? `Create a new agent based on "${template!.name}". Instructions, env, and skills are copied for you.`
-              : "Create a new AI agent for your workspace."}
+              ? t("create_duplicate_description", { name: template!.name })
+              : t("create_description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 min-w-0">
           <div>
-            <Label className="text-xs text-muted-foreground">Name</Label>
+            <Label className="text-xs text-muted-foreground">{t("create_name")}</Label>
             <Input
               autoFocus
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Deep Research Agent"
+              placeholder={t("create_name_placeholder")}
               className="mt-1"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Description</Label>
+            <Label className="text-xs text-muted-foreground">{t("create_description_label")}</Label>
             <Input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this agent do?"
+              placeholder={t("create_description_placeholder")}
               maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
               className="mt-1"
             />
@@ -189,7 +192,7 @@ export function CreateAgentDialog({
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Visibility</Label>
+            <Label className="text-xs text-muted-foreground">{t("create_visibility")}</Label>
             <div className="mt-1.5 flex gap-2">
               <button
                 type="button"
@@ -202,8 +205,8 @@ export function CreateAgentDialog({
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Workspace</div>
-                  <div className="text-xs text-muted-foreground">All members can assign</div>
+                  <div className="font-medium">{t("create_visibility_workspace")}</div>
+                  <div className="text-xs text-muted-foreground">{t("create_visibility_workspace_desc")}</div>
                 </div>
               </button>
               <button
@@ -217,8 +220,8 @@ export function CreateAgentDialog({
               >
                 <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Private</div>
-                  <div className="text-xs text-muted-foreground">Only you can assign</div>
+                  <div className="font-medium">{t("create_visibility_private")}</div>
+                  <div className="text-xs text-muted-foreground">{t("create_visibility_private_desc")}</div>
                 </div>
               </button>
             </div>
@@ -226,7 +229,7 @@ export function CreateAgentDialog({
 
           <div className="min-w-0">
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Runtime</Label>
+              <Label className="text-xs text-muted-foreground">{t("create_runtime")}</Label>
               {hasOtherRuntimes && (
                 <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
                   <button
@@ -238,7 +241,7 @@ export function CreateAgentDialog({
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Mine
+                    {t("create_runtime_mine")}
                   </button>
                   <button
                     type="button"
@@ -249,7 +252,7 @@ export function CreateAgentDialog({
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    All
+                    {t("create_runtime_all")}
                   </button>
                 </div>
               )}
@@ -269,18 +272,18 @@ export function CreateAgentDialog({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">
-                      {runtimesLoading ? "Loading runtimes..." : (selectedRuntime?.name ?? "No runtime available")}
+                      {runtimesLoading ? t("create_runtime_loading") : (selectedRuntime?.name ?? t("create_runtime_none"))}
                     </span>
                     {selectedRuntime?.runtime_mode === "cloud" && (
                       <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        Cloud
+                        {t("create_runtime_cloud")}
                       </span>
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {selectedRuntime
                       ? (getOwnerMember(selectedRuntime.owner_id)?.name ?? selectedRuntime.device_info)
-                      : "Register a runtime before creating an agent"}
+                      : t("create_runtime_none_desc")}
                   </div>
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
@@ -305,7 +308,7 @@ export function CreateAgentDialog({
                           <span className="truncate font-medium">{device.name}</span>
                           {device.runtime_mode === "cloud" && (
                             <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                              Cloud
+                              {t("create_runtime_cloud")}
                             </span>
                           )}
                         </div>
@@ -343,13 +346,13 @@ export function CreateAgentDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {c("cancel")}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={creating || !name.trim() || !selectedRuntime}
           >
-            {creating ? "Creating..." : "Create"}
+            {creating ? t("create_creating") : c("create")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -11,27 +11,36 @@ import type {
 // Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
 // — gives the user enough precision to tell "just lost" from "long lost"
 // at a glance without forcing them to mouse-over for a full timestamp.
-export function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
+export function formatLastSeen(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  lastSeenAt: string | null,
+): string {
+  if (!lastSeenAt) return t("last_seen_never");
   const diffMs = Date.now() - new Date(lastSeenAt).getTime();
-  if (diffMs < 5_000) return "Just now";
+  if (diffMs < 5_000) return t("last_seen_just_now");
 
   const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (minutes < 1) return `${seconds}s ago`;
+  if (minutes < 1) return t("last_seen_seconds_ago", { seconds });
   if (hours < 1) {
     const s = seconds % 60;
-    return s > 0 ? `${minutes}m ${s}s ago` : `${minutes}m ago`;
+    return s > 0
+      ? t("last_seen_minutes_seconds_ago", { minutes, seconds: s })
+      : t("last_seen_minutes_ago", { minutes });
   }
   if (days < 1) {
     const m = minutes % 60;
-    return m > 0 ? `${hours}h ${m}m ago` : `${hours}h ago`;
+    return m > 0
+      ? t("last_seen_hours_minutes_ago", { hours, minutes: m })
+      : t("last_seen_hours_ago", { hours });
   }
   const h = hours % 24;
-  return h > 0 ? `${days}d ${h}h ago` : `${days}d ago`;
+  return h > 0
+    ? t("last_seen_days_hours_ago", { days, hours: h })
+    : t("last_seen_days_ago", { days });
 }
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",

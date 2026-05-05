@@ -12,14 +12,18 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
+import { useT } from "@multica/i18n/react";
 
 // Hour-of-day cost. The "WHEN" tab in the runtime detail uses this to show
 // "during what hours of the day did this runtime spend money", which is
 // fundamentally different from "how much per calendar day". Data is fed in
 // by the parent (single orchestrator pattern) — this component is dumb.
-const hourlyChartConfig = {
-  cost: { label: "Cost", color: "var(--color-chart-1)" },
-} satisfies ChartConfig;
+function useHourlyChartConfig(): ChartConfig {
+  const t = useT("runtimes");
+  return {
+    cost: { label: t("chart_cost"), color: "var(--color-chart-1)" },
+  };
+}
 
 export interface HourlyCostPoint {
   hour: number;
@@ -27,6 +31,7 @@ export interface HourlyCostPoint {
 }
 
 export function HourlyActivityChart({ data }: { data: HourlyCostPoint[] }) {
+  const hourlyChartConfig = useHourlyChartConfig();
   // Always render 24 buckets so the X axis is continuous. The parent passes
   // pre-aggregated server data which may omit hours with zero activity;
   // we fill those in with $0 here so visual gaps are intentional ("nothing

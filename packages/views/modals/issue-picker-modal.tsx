@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
+import { useT } from "@multica/i18n/react";
 import {
   Command,
   CommandDialog,
@@ -31,6 +32,7 @@ export function IssuePickerModal({
   excludeIds,
   onSelect,
 }: IssuePickerModalProps) {
+  const t = useT("modals");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Issue[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -90,7 +92,7 @@ export function IssuePickerModal({
     >
       <Command shouldFilter={false}>
         <CommandInput
-          placeholder="Search issues..."
+          placeholder={t("picker_search")}
           value={query}
           onValueChange={(v) => {
             setQuery(v);
@@ -100,15 +102,15 @@ export function IssuePickerModal({
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Searching...
+              {t("picker_searching")}
             </div>
           )}
           {!isLoading && query.trim() && results.length === 0 && (
-            <CommandEmpty>No issues found.</CommandEmpty>
+            <CommandEmpty>{t("picker_no_results")}</CommandEmpty>
           )}
           {!isLoading && !query.trim() && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Type to search issues
+              {t("picker_type_to_search")}
             </div>
           )}
           {results.length > 0 && (

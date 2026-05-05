@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ONBOARDING_STEP_ORDER } from "@multica/core/onboarding";
+
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
 import { StepHeader } from "./step-header";
 
 describe("StepHeader", () => {

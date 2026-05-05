@@ -29,6 +29,8 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
+import { useT } from "@multica/i18n/react";
+import { openExternal, publicAppUrl } from "../../platform";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -62,14 +64,10 @@ type AvailabilityFilter = "all" | AgentAvailability;
 
 type SortKey = "recent" | "name" | "runs" | "created";
 const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
-const SORT_LABEL: Record<SortKey, string> = {
-  recent: "Recent activity",
-  name: "Name",
-  runs: "Most runs",
-  created: "Recently created",
-};
 
 export function AgentsPage() {
+  const t = useT("agents");
+  const c = useT("common");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -325,9 +323,16 @@ export function AgentsPage() {
     runCountsById,
   ]);
 
+  const SORT_LABEL: Record<SortKey, string> = {
+    recent: t("sort_recent_activity"),
+    name: t("sort_name"),
+    runs: t("sort_most_runs"),
+    created: t("sort_recently_created"),
+  };
+
   const columns = useMemo(
-    () => createAgentColumns({ onDuplicate: handleDuplicate }),
-    [handleDuplicate],
+    () => createAgentColumns({ onDuplicate: handleDuplicate, t }),
+    [handleDuplicate, t],
   );
 
   const table = useReactTable({
@@ -344,7 +349,7 @@ export function AgentsPage() {
   if (isLoading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} t={t} c={c} />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border">
             <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
@@ -371,15 +376,15 @@ export function AgentsPage() {
   if (listError) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} t={t} c={c} />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-sm font-medium">Couldn&rsquo;t load agents</p>
+            <p className="text-sm font-medium">{t("error_title")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {listError instanceof Error
                 ? listError.message
-                : "Something went wrong fetching the agent list."}
+                : t("error_description")}
             </p>
           </div>
           <Button
@@ -388,7 +393,7 @@ export function AgentsPage() {
             size="sm"
             onClick={() => refetchList()}
           >
-            Try again
+            {t("error_retry")}
           </Button>
         </div>
       </div>
@@ -402,12 +407,14 @@ export function AgentsPage() {
       <PageHeaderBar
         totalCount={totalActiveCount}
         onCreate={() => setShowCreate(true)}
+        t={t}
+        c={c}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
-            <EmptyState onCreate={() => setShowCreate(true)} />
+            <EmptyState onCreate={() => setShowCreate(true)} t={t} />
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
@@ -425,12 +432,15 @@ export function AgentsPage() {
                   totalCount={inScope.length}
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
+                  t={t}
+                  SORT_LABEL={SORT_LABEL}
                 />
                 <AvailabilityFilterRow
                   value={availabilityFilter}
                   onChange={setAvailabilityFilter}
                   counts={availabilityCounts}
                   totalCount={inScope.length}
+                  t={t}
                 />
               </>
             ) : (
@@ -439,11 +449,13 @@ export function AgentsPage() {
                 archivedCount={archivedCount}
                 sort={sort}
                 setSort={setSort}
+                t={t}
+                SORT_LABEL={SORT_LABEL}
               />
             )}
 
             {sortedAgents.length === 0 ? (
-              <NoMatches view={view} search={search} scope={scope} />
+              <NoMatches view={view} search={search} scope={scope} t={t} />
             ) : (
               <DataTable
                 table={table}
@@ -481,15 +493,19 @@ export function AgentsPage() {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  t,
+  c,
 }: {
   totalCount: number;
   onCreate: () => void;
+  t: ReturnType<typeof useT>;
+  c: ReturnType<typeof useT>;
 }) {
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <Bot className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">Agents</h1>
+        <h1 className="text-sm font-medium">{t("page_title")}</h1>
         {totalCount > 0 && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
             {totalCount}
@@ -501,20 +517,22 @@ function PageHeaderBar({
             the state-legend job, so the tagline only needs to anchor what
             an agent IS, not what each colour means. */}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
-          AI teammates that pick up issues, comment, and update status.{" "}
+          {t("page_subtitle")}{" "}
           <a
-            href="https://multica.ai/docs/agents"
-            target="_blank"
-            rel="noopener noreferrer"
+            href={publicAppUrl("/docs/agents")}
+            onClick={(event) => {
+              event.preventDefault();
+              openExternal(publicAppUrl("/docs/agents"));
+            }}
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Learn more →
+            {c("learn_more")} →
           </a>
         </p>
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
-        New agent
+        {t("new_agent")}
       </Button>
     </PageHeader>
   );
@@ -536,6 +554,8 @@ function ActiveToolbarRow({
   totalCount,
   archivedCount,
   onShowArchived,
+  t,
+  SORT_LABEL,
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
@@ -548,6 +568,8 @@ function ActiveToolbarRow({
   totalCount: number;
   archivedCount: number;
   onShowArchived: () => void;
+  t: ReturnType<typeof useT>;
+  SORT_LABEL: Record<SortKey, string>;
 }) {
   // Layout: [Search] [Mine|All] ......... [Show archived] [N of M] [Sort ▼]
   // Filter chips were removed (status / workload chips on a small team
@@ -561,7 +583,7 @@ function ActiveToolbarRow({
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search agents…"
+          placeholder={t("search_placeholder")}
           className="h-8 w-64 pl-8 text-sm"
         />
       </div>
@@ -573,13 +595,13 @@ function ActiveToolbarRow({
             onClick={onShowArchived}
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            Show archived ({archivedCount}) →
+            {t("show_archived")} ({archivedCount}) →
           </button>
         )}
         <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-          {visibleCount} of {totalCount}
+          {t("count_of", { visible: visibleCount, total: totalCount })}
         </span>
-        <SortDropdown sort={sort} setSort={setSort} />
+        <SortDropdown sort={sort} setSort={setSort} SORT_LABEL={SORT_LABEL} />
       </div>
     </div>
   );
@@ -594,19 +616,20 @@ function ScopeSegment({
   setScope: (v: Scope) => void;
   counts: { all: number; mine: number };
 }) {
+  const t = useT("agents");
   // Mine first — that's the more frequent scope (your own agents) and
   // also the default selection, so it lives in the leading slot.
   return (
     <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
       <ScopeButton
         active={scope === "mine"}
-        label="Mine"
+        label={t("scope_mine")}
         count={counts.mine}
         onClick={() => setScope("mine")}
       />
       <ScopeButton
         active={scope === "all"}
-        label="All"
+        label={t("scope_all")}
         count={counts.all}
         onClick={() => setScope("all")}
       />
@@ -650,9 +673,11 @@ function ScopeButton({
 function SortDropdown({
   sort,
   setSort,
+  SORT_LABEL,
 }: {
   sort: SortKey;
   setSort: (v: SortKey) => void;
+  SORT_LABEL: Record<SortKey, string>;
 }) {
   return (
     <DropdownMenu>
@@ -693,18 +718,20 @@ function AvailabilityFilterRow({
   onChange,
   counts,
   totalCount,
+  t,
 }: {
   value: AvailabilityFilter;
   onChange: (v: AvailabilityFilter) => void;
   counts: Record<AgentAvailability, number>;
   totalCount: number;
+  t: ReturnType<typeof useT>;
 }) {
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
       <AvailabilityChip
         active={value === "all"}
         onClick={() => onChange("all")}
-        label="All"
+        label={t("all_availability")}
         count={totalCount}
       />
       {availabilityOrder.map((a) => {
@@ -714,7 +741,7 @@ function AvailabilityFilterRow({
             key={a}
             active={value === a}
             onClick={() => onChange(a)}
-            label={cfg.label}
+            label={t(`availability_${a}`)}
             count={counts[a]}
             dotClass={cfg.dotClass}
           />
@@ -767,11 +794,15 @@ function ArchivedToolbarRow({
   archivedCount,
   sort,
   setSort,
+  t,
+  SORT_LABEL,
 }: {
   onBack: () => void;
   archivedCount: number;
   sort: SortKey;
   setSort: (v: SortKey) => void;
+  t: ReturnType<typeof useT>;
+  SORT_LABEL: Record<SortKey, string>;
 }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
@@ -781,15 +812,15 @@ function ArchivedToolbarRow({
         className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3 w-3" />
-        Active agents
+        {t("active_agents")}
       </button>
       <span className="text-muted-foreground/40">/</span>
-      <span className="text-xs font-medium">Archived agents</span>
+      <span className="text-xs font-medium">{t("archived_agents")}</span>
       <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
         {archivedCount}
       </span>
       <div className="ml-auto">
-        <SortDropdown sort={sort} setSort={setSort} />
+        <SortDropdown sort={sort} setSort={setSort} SORT_LABEL={SORT_LABEL} />
       </div>
     </div>
   );
@@ -799,20 +830,19 @@ function ArchivedToolbarRow({
 // Empty / no-matches states
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, t }: { onCreate: () => void; t: ReturnType<typeof useT> }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <Bot className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h2 className="mt-4 text-base font-semibold">No agents yet</h2>
+      <h2 className="mt-4 text-base font-semibold">{t("empty_title")}</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Create an agent and assign it issues, like any teammate. Local agents
-        run on your machine; cloud agents run on Multica&rsquo;s runtime.
+        {t("empty_description")}
       </p>
       <Button type="button" onClick={onCreate} size="sm" className="mt-5">
         <Plus className="h-3 w-3" />
-        New agent
+        {t("new_agent")}
       </Button>
     </div>
   );
@@ -822,10 +852,12 @@ function NoMatches({
   view,
   search,
   scope,
+  t,
 }: {
   view: View;
   search: string;
   scope: Scope;
+  t: ReturnType<typeof useT>;
 }) {
   const hasSearch = search.length > 0;
   // "mine" is the only remaining narrowing dimension after chip filters
@@ -836,18 +868,18 @@ function NoMatches({
   let body: string;
   if (view === "archived") {
     body = hasSearch
-      ? `No archived agents match "${search}".`
-      : "No archived agents yet.";
+      ? t("no_archived_match", { search })
+      : t("no_matches");
   } else if (hasSearch) {
-    body = `No agents match "${search}"${hasFilter ? " in this filter" : ""}.`;
+    body = t("no_agents_match", { search, filter: hasFilter ? t("no_agents_match_filter") : "" });
   } else {
-    body = "No agents match this filter.";
+    body = t("no_matches");
   }
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
       <Search className="h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm">No matches</p>
+      <p className="text-sm">{t("no_matches")}</p>
       <p className="max-w-xs text-xs">{body}</p>
     </div>
   );

@@ -16,6 +16,17 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 
 describe("DeleteWorkspaceDialog", () => {

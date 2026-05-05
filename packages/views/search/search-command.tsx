@@ -48,6 +48,7 @@ import {
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
+import { useT } from "@multica/i18n/react";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "./search-store";
 
@@ -107,17 +108,6 @@ interface NavPage {
   keywords: string[];
 }
 
-const navPages: NavPage[] = [
-  { key: "inbox", label: "Inbox", icon: Inbox, keywords: ["inbox", "notifications"] },
-  { key: "myIssues", label: "My Issues", icon: CircleUser, keywords: ["my", "issues", "assigned"] },
-  { key: "issues", label: "Issues", icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
-  { key: "projects", label: "Projects", icon: FolderKanban, keywords: ["projects", "kanban"] },
-  { key: "agents", label: "Agents", icon: Bot, keywords: ["agents", "bots", "ai"] },
-  { key: "runtimes", label: "Runtimes", icon: Monitor, keywords: ["runtimes", "environments"] },
-  { key: "skills", label: "Skills", icon: BookOpenText, keywords: ["skills", "library"] },
-  { key: "settings", label: "Settings", icon: Settings, keywords: ["settings", "config", "preferences"] },
-];
-
 type ThemeValue = "light" | "dark" | "system";
 
 interface CommandItem {
@@ -135,6 +125,10 @@ interface SearchResults {
 }
 
 export function SearchCommand() {
+  const t = useT("search");
+  const nav = useT("navigation");
+  const tStatus = useT("status");
+  const tProjectStatus = useT("project_status");
   const { push, pathname, getShareableUrl } = useNavigation();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
@@ -142,6 +136,17 @@ export function SearchCommand() {
   const wsId = useWorkspaceId();
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
+
+  const navPages: NavPage[] = [
+    { key: "inbox", label: nav("inbox"), icon: Inbox, keywords: ["inbox", "notifications"] },
+    { key: "myIssues", label: nav("my_issues"), icon: CircleUser, keywords: ["my", "issues", "assigned"] },
+    { key: "issues", label: nav("issues"), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
+    { key: "projects", label: nav("projects"), icon: FolderKanban, keywords: ["projects", "kanban"] },
+    { key: "agents", label: nav("agents"), icon: Bot, keywords: ["agents", "bots", "ai"] },
+    { key: "runtimes", label: nav("runtimes"), icon: Monitor, keywords: ["runtimes", "environments"] },
+    { key: "skills", label: nav("skills"), icon: BookOpenText, keywords: ["skills", "library"] },
+    { key: "settings", label: nav("settings"), icon: Settings, keywords: ["settings", "config", "preferences"] },
+  ];
   const currentWorkspace = useCurrentWorkspace();
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
@@ -190,7 +195,7 @@ export function SearchCommand() {
     const activeThemeCheck = (value: ThemeValue) =>
       theme === value ? (
         <Check
-          aria-label="Current theme"
+          aria-label={t("aria_current_theme")}
           className="ml-auto size-4 shrink-0 text-muted-foreground"
         />
       ) : undefined;
@@ -198,7 +203,7 @@ export function SearchCommand() {
     const items: CommandItem[] = [
       {
         key: "new-issue",
-        label: "New Issue",
+        label: t("command_new_issue"),
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
@@ -208,7 +213,7 @@ export function SearchCommand() {
       },
       {
         key: "new-project",
-        label: "New Project",
+        label: t("command_new_project"),
         icon: Plus,
         keywords: ["new", "project", "create", "add"],
         onSelect: () => {
@@ -223,24 +228,24 @@ export function SearchCommand() {
       items.push(
         {
           key: "copy-issue-link",
-          label: "Copy Issue Link",
+          label: t("command_copy_link"),
           icon: Link2,
           keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
           onSelect: () => {
             const url = getShareableUrl ? getShareableUrl(pathname) : window.location.href;
             void navigator.clipboard.writeText(url);
-            toast.success("Link copied");
+            toast.success(t("toast_link_copied"));
             setOpen(false);
           },
         },
         {
           key: "copy-issue-identifier",
-          label: `Copy Identifier (${identifier})`,
+          label: t("command_copy_identifier", { identifier }),
           icon: Copy,
           keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
           onSelect: () => {
             void navigator.clipboard.writeText(identifier);
-            toast.success(`Copied ${identifier}`);
+            toast.success(t("toast_copied_identifier", { identifier }));
             setOpen(false);
           },
         },
@@ -250,7 +255,7 @@ export function SearchCommand() {
     items.push(
       {
         key: "theme-light",
-        label: "Switch to Light Theme",
+        label: t("command_theme_light"),
         icon: Sun,
         keywords: ["light", "theme", "appearance", "mode", "bright"],
         trailing: activeThemeCheck("light"),
@@ -261,7 +266,7 @@ export function SearchCommand() {
       },
       {
         key: "theme-dark",
-        label: "Switch to Dark Theme",
+        label: t("command_theme_dark"),
         icon: Moon,
         keywords: ["dark", "theme", "appearance", "mode", "night"],
         trailing: activeThemeCheck("dark"),
@@ -272,7 +277,7 @@ export function SearchCommand() {
       },
       {
         key: "theme-system",
-        label: "Use System Theme",
+        label: t("command_theme_system"),
         icon: Monitor,
         keywords: ["system", "theme", "appearance", "mode", "auto"],
         trailing: activeThemeCheck("system"),
@@ -284,7 +289,7 @@ export function SearchCommand() {
     );
 
     return items;
-  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme]);
+  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, t, theme]);
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -449,9 +454,9 @@ export function SearchCommand() {
         showCloseButton={false}
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Search</DialogTitle>
+          <DialogTitle>{t("dialog_title")}</DialogTitle>
           <DialogDescription>
-            Search pages, issues, and projects
+            {t("dialog_description")}
           </DialogDescription>
         </DialogHeader>
         <CommandPrimitive
@@ -462,13 +467,13 @@ export function SearchCommand() {
           <div className="flex items-center gap-3 border-b px-4 py-3">
             <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input
-              placeholder="Type a command or search..."
+              placeholder={t("input_placeholder")}
               value={query}
               onValueChange={handleValueChange}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
-              ESC
+              {t("key_esc")}
             </kbd>
           </div>
 
@@ -478,7 +483,7 @@ export function SearchCommand() {
             {filteredPages.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  Pages
+                  {t("section_pages")}
                 </div>
                 {filteredPages.map((page) => (
                   <CommandPrimitive.Item
@@ -500,7 +505,7 @@ export function SearchCommand() {
             {filteredCommands.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  Commands
+                  {t("section_commands")}
                 </div>
                 {filteredCommands.map((cmd) => (
                   <CommandPrimitive.Item
@@ -523,7 +528,7 @@ export function SearchCommand() {
             {filteredWorkspaces.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  Switch Workspace
+                  {t("section_switch_workspace")}
                 </div>
                 {filteredWorkspaces.map((ws) => (
                   <CommandPrimitive.Item
@@ -557,13 +562,13 @@ export function SearchCommand() {
               filteredCommands.length === 0 &&
               filteredWorkspaces.length === 0 && (
                 <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
-                  No results found.
+                  {t("empty_no_results")}
                 </CommandPrimitive.Empty>
               )}
 
             {!isLoading && results.projects.length > 0 && (
               <CommandPrimitive.Group
-                heading="Projects"
+                heading={t("section_projects")}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
                 {results.projects.map((project) => (
@@ -581,7 +586,7 @@ export function SearchCommand() {
                       <span
                         className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
                       >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+                        {tProjectStatus(project.status as ProjectStatus)}
                       </span>
                     </div>
                     {project.match_source === "description" &&
@@ -602,7 +607,7 @@ export function SearchCommand() {
 
             {!isLoading && results.issues.length > 0 && (
               <CommandPrimitive.Group
-                heading="Issues"
+                heading={t("section_issues")}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
                 {results.issues.map((issue) => (
@@ -626,7 +631,7 @@ export function SearchCommand() {
                       <span
                         className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}
                       >
-                        {STATUS_CONFIG[issue.status].label}
+                        {tStatus(issue.status)}
                       </span>
                     </div>
                     {issue.match_source === "comment" &&
@@ -650,7 +655,7 @@ export function SearchCommand() {
               <CommandPrimitive.Group className="p-2">
                 <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
                   <Clock className="size-3" />
-                  <span>Recent</span>
+                  <span>{t("section_recent")}</span>
                 </div>
                 {recentIssues.map((item) => (
                   <CommandPrimitive.Item
@@ -670,7 +675,7 @@ export function SearchCommand() {
                     <span
                       className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[item.status]?.iconColor ?? ""}`}
                     >
-                      {STATUS_CONFIG[item.status]?.label ?? ""}
+                      {tStatus(item.status)}
                     </span>
                   </CommandPrimitive.Item>
                 ))}
@@ -679,7 +684,7 @@ export function SearchCommand() {
 
             {!isLoading && !query.trim() && recentIssues.length === 0 && (
               <div className="px-5 py-4 text-center text-xs text-muted-foreground">
-                Type to search issues and projects
+                {t("empty_type_to_search")}
               </div>
             )}
           </CommandPrimitive.List>

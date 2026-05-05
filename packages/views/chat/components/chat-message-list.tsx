@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Collapsible,
@@ -17,7 +18,7 @@ import { Markdown } from "@multica/views/common/markdown";
 import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { getFailureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 
@@ -160,6 +161,7 @@ function AssistantMessage({
 }: {
   message: ChatMessage;
 }) {
+  const t = useT("chat");
   const taskId = message.task_id;
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
@@ -197,7 +199,7 @@ function AssistantMessage({
         </div>
       )}
       {message.elapsed_ms != null && (
-        <ElapsedCaption verb="Replied in" elapsedMs={message.elapsed_ms} />
+        <ElapsedCaption verb={t("messages_replied_in")} elapsedMs={message.elapsed_ms} />
       )}
     </div>
   );
@@ -235,12 +237,13 @@ function FailureBubble({
   timeline: ChatTimelineItem[];
   elapsedMs?: number | null;
 }) {
+  const t = useT("chat");
   const [open, setOpen] = useState(false);
   // Map the back-end enum to copy via the shared label table; an unknown
   // reason (e.g. a future enum value the front-end doesn't ship yet)
   // falls back to a generic "Task failed" so we never render a bare slug.
   const label =
-    failureReasonLabel[reason as TaskFailureReason] ?? "Task failed";
+    getFailureReasonLabel(t, reason as TaskFailureReason) ?? t("messages_task_failed");
 
   return (
     <div className="w-full space-y-1.5">
@@ -261,7 +264,7 @@ function FailureBubble({
                 ) : (
                   <ChevronRight className="size-3" />
                 )}
-                <span>Show details</span>
+                <span>{t("messages_show_details")}</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
@@ -274,7 +277,7 @@ function FailureBubble({
       </div>
       {timeline.length > 0 && <TimelineView items={timeline} />}
       {elapsedMs != null && (
-        <ElapsedCaption verb="Failed after" elapsedMs={elapsedMs} />
+        <ElapsedCaption verb={t("messages_failed_after")} elapsedMs={elapsedMs} />
       )}
     </div>
   );
@@ -350,9 +353,10 @@ function ToolGroupCollapsible({
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
 }) {
+  const t = useT("chat");
   const [open, setOpen] = useState(defaultOpen ?? false);
   const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const label = `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  const label = t("messages_n_tools", { count: toolCount });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -447,6 +451,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
+  const t = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
@@ -460,12 +465,12 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {item.tool ? `${item.tool} ${t("messages_result")}` : t("messages_result")}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
+          {output.length > 4000 ? output.slice(0, 4000) + `\n${t("messages_truncated")}` : output}
         </pre>
       </CollapsibleContent>
     </Collapsible>

@@ -10,6 +10,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { api } from "@multica/core/api";
 import type { AgentTask } from "@multica/core/types/agent";
+import { useT } from "@multica/i18n/react";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import { buildTimeline, type TimelineItem } from "./build-timeline";
 
@@ -40,8 +41,10 @@ export function TranscriptButton({
   items: providedItems,
   isLive = false,
   className,
-  title = "View transcript",
+  title,
 }: TranscriptButtonProps) {
+  const t = useT("transcript");
+  const resolvedTitle = title ?? t("view_transcript");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
@@ -82,7 +85,7 @@ export function TranscriptButton({
           render={<button type="button" />}
           onClick={handleClick}
           disabled={loading}
-          aria-label={title}
+          aria-label={resolvedTitle}
           className={cn(
             "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
             className,
@@ -94,7 +97,7 @@ export function TranscriptButton({
             <ScrollText className="h-3.5 w-3.5" />
           )}
         </TooltipTrigger>
-        <TooltipContent>{title}</TooltipContent>
+        <TooltipContent>{resolvedTitle}</TooltipContent>
       </Tooltip>
 
       {open && (

@@ -21,6 +21,7 @@ import {
 } from "@multica/core/issues/mutations";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -39,6 +40,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
 }
 
 export function useIssueTimeline(issueId: string, userId?: string) {
+  const t = useT("issues");
   const qc = useQueryClient();
   const { data: timeline = [], isLoading: loading } = useQuery(
     issueTimelineOptions(issueId),
@@ -218,7 +220,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send comment");
+        toast.error(t("toast_failed_comment"));
       } finally {
         setSubmitting(false);
       }
@@ -237,7 +239,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send reply");
+        toast.error(t("toast_failed_reply"));
       }
     },
     [userId, createCommentMutation],
@@ -248,7 +250,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await updateCommentMutation.mutateAsync({ commentId, content });
       } catch {
-        toast.error("Failed to update comment");
+        toast.error(t("toast_failed_update_comment"));
       }
     },
     [updateCommentMutation],
@@ -259,7 +261,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await deleteCommentMutation.mutateAsync(commentId);
       } catch {
-        toast.error("Failed to delete comment");
+        toast.error(t("toast_failed_delete_comment"));
       }
     },
     [deleteCommentMutation],

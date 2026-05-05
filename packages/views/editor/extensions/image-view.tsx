@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 
 // ---------------------------------------------------------------------------
 // Lightbox — full-screen image preview (ESC or click backdrop to close)
@@ -55,6 +56,7 @@ function ImageLightbox({
 // ---------------------------------------------------------------------------
 
 function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
+  const t = useT("editor");
   const src = node.attrs.src as string;
   const alt = (node.attrs.alt as string) || "";
   const title = node.attrs.title as string | undefined;
@@ -66,18 +68,15 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const handleView = () => setLightbox(true);
 
   const handleDownload = () => {
-    // Cross-origin CDN images can't be fetched as blob (CORS),
-    // and <a download> is ignored for cross-origin URLs.
-    // Open in new tab — user can right-click → Save As.
     window.open(src, "_blank", "noopener,noreferrer");
   };
 
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(src);
-      toast.success("Link copied");
+      toast.success(t("link_copied"));
     } catch {
-      toast.error("Failed to copy link");
+      toast.error(t("failed_copy_link"));
     }
   };
 
@@ -104,16 +103,16 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={handleView} title="View image">
+            <button type="button" onClick={handleView} title={t("view_image")}>
               <Maximize2 className="size-3.5" />
             </button>
-            <button type="button" onClick={handleDownload} title="Download">
+            <button type="button" onClick={handleDownload} title={t("download")}>
               <Download className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={handleCopyLink}
-              title="Copy link"
+              title={t("copy_link")}
             >
               <LinkIcon className="size-3.5" />
             </button>
@@ -121,7 +120,7 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
               <button
                 type="button"
                 onClick={() => deleteNode()}
-                title="Delete"
+                title={t("delete")}
               >
                 <Trash2 className="size-3.5" />
               </button>

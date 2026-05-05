@@ -16,7 +16,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
+import type { DaemonStatus, DaemonPrefs, DaemonActionResult } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 
@@ -620,9 +620,13 @@ async function clearToken(): Promise<void> {
   await removeProfileUserId(active.name);
 }
 
-async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
+async function withGuard<T>(fn: () => Promise<T>): Promise<T | DaemonActionResult> {
   if (operationInProgress) {
-    return { success: false, error: "Another daemon operation is in progress" };
+    return {
+      success: false,
+      error: "另一个守护进程操作正在进行",
+      errorCode: "operation_in_progress",
+    };
   }
   operationInProgress = true;
   try {
@@ -645,9 +649,15 @@ function desktopSpawnEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
-async function startDaemon(): Promise<{ success: boolean; error?: string }> {
+async function startDaemon(): Promise<DaemonActionResult> {
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) {
+    return {
+      success: false,
+      error: "未安装 multica CLI",
+      errorCode: "cli_not_installed",
+    };
+  }
 
   const active = await ensureActiveProfile();
   const existing = await fetchHealthAtPort(active.port);
@@ -683,9 +693,15 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   });
 }
 
-async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
+async function stopDaemon(): Promise<DaemonActionResult> {
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) {
+    return {
+      success: false,
+      error: "未安装 multica CLI",
+      errorCode: "cli_not_installed",
+    };
+  }
 
   const active = await ensureActiveProfile();
   currentState = "stopping";
@@ -921,7 +937,11 @@ export function setupDaemonManager(
     const active = await ensureActiveProfile();
     const logPath = profileLogPath(active.name);
     if (!existsSync(logPath)) {
-      return { success: false, error: "Log file not found yet" };
+      return {
+        success: false,
+        error: "日志文件尚未生成",
+        errorCode: "log_file_missing",
+      };
     }
     // shell.openPath returns "" on success, error string on failure.
     const error = await shell.openPath(logPath);

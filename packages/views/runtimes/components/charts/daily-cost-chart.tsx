@@ -11,27 +11,21 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
+import { useT } from "@multica/i18n/react";
+import { useMemo } from "react";
 import type { DailyCostStackData } from "../../utils";
 
-// Three-segment stack (input / output / cache write) — keeps the user's
-// attention on what's actually driving spend. Cache reads are excluded
-// because their per-token rate is two orders of magnitude smaller and
-// would be visually invisible in a stack; we surface their *savings*
-// separately as a KPI.
-//
-// Series → CSS chart token: stack reads bottom-up as chart-1 (deepest brand
-// blue, "input") → chart-2 (mid) → chart-3 (lightest, "cache write"), so the
-// visual depth maps directly to "primary cost driver → secondary".
-export const costStackConfig = {
-  input: { label: "Input", color: "var(--chart-1)" },
-  output: { label: "Output", color: "var(--chart-2)" },
-  cacheWrite: { label: "Cache write", color: "var(--chart-3)" },
-} satisfies ChartConfig;
+export function useCostStackConfig() {
+  const t = useT("runtimes");
+  return useMemo(() => ({
+    input: { label: t("chart_input"), color: "var(--chart-1)" },
+    output: { label: t("chart_output"), color: "var(--chart-2)" },
+    cacheWrite: { label: t("chart_cache_write"), color: "var(--chart-3)" },
+  }) satisfies ChartConfig, [t]);
+}
 
 export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
-  // No internal empty-state — the parent decides what to show in place of
-  // the chart (often a diagnostic explaining *why* there's no cost). Letting
-  // recharts render an empty axis would be both ugly and uninformative.
+  const costStackConfig = useCostStackConfig();
   return (
     <ChartContainer config={costStackConfig} className="aspect-[3/1] w-full">
       <BarChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
@@ -61,9 +55,6 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
             />
           }
         />
-        {/* Legend is intentionally rendered by the parent (in the chart card
-            header, top-right) so the chart body stays clean and gets the full
-            vertical real estate. */}
         <Bar
           dataKey="input"
           stackId="cost"

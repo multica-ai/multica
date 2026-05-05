@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 import type { IssueStatus } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 
 export function IssuesPage() {
+  const t = useT("issues");
   const wsId = useWorkspaceId();
   const { data: allIssues = [], isLoading: loading } = useQuery(issueListOptions(wsId));
 
@@ -91,7 +93,7 @@ export function IssuesPage() {
 
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error("Failed to move issue") },
+        { onError: () => toast.error(t("toast_failed_move")) },
       );
     },
     [updateIssueMutation],
@@ -141,12 +143,12 @@ export function IssuesPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Header 1: Workspace breadcrumb */}
       <PageHeader className="gap-1.5">
-        <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
+        <WorkspaceAvatar name={workspace?.name ?? t("loading_name")} size="sm" />
         <span className="text-sm text-muted-foreground">
-          {workspace?.name ?? "Workspace"}
+          {workspace?.name ?? t("project_fallback")}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">Issues</span>
+        <span className="text-sm font-medium">{t("page_title")}</span>
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
@@ -157,8 +159,8 @@ export function IssuesPage() {
         {scopedIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">No issues yet</p>
-            <p className="text-xs">Create an issue to get started.</p>
+            <p className="text-sm">{t("empty_title")}</p>
+            <p className="text-xs">{t("empty_description")}</p>
           </div>
         ) : (
           <div className="flex flex-col flex-1 min-h-0">

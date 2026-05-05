@@ -25,23 +25,49 @@ import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
+import { useT } from "@multica/i18n/react";
+
+/** Wrapper that translates the extra tab labels via useT */
+function DesktopSettingsPage() {
+  const t = useT("desktop");
+  return (
+    <SettingsPage
+      extraAccountTabs={[
+        {
+          value: "daemon",
+          label: t("route_daemon"),
+          icon: Server,
+          content: <DaemonSettingsTab />,
+        },
+        {
+          value: "updates",
+          label: t("route_updates"),
+          icon: Download,
+          content: <UpdatesSettingsTab />,
+        },
+      ]}
+    />
+  );
+}
 
 /**
- * Sets document.title from the deepest matched route's handle.title.
+ * Sets document.title from the deepest matched route's handle.titleKey.
+ * The titleKey is resolved through the i18n desktop namespace.
  * The tab system observes document.title via MutationObserver.
  * Pages with dynamic titles (e.g. issue detail) override by setting
  * document.title directly via useDocumentTitle().
  */
 function TitleSync() {
+  const t = useT("desktop");
   const matches = useMatches();
-  const title = [...matches]
+  const handle = [...matches]
     .reverse()
-    .find((m) => (m.handle as { title?: string })?.title)
-    ?.handle as { title?: string } | undefined;
+    .find((m) => (m.handle as { titleKey?: string })?.titleKey)
+    ?.handle as { titleKey?: string } | undefined;
 
   useEffect(() => {
-    if (title?.title) document.title = title.title;
-  }, [title?.title]);
+    if (handle?.titleKey) document.title = t(handle.titleKey);
+  }, [handle?.titleKey, t]);
 
   return null;
 }
@@ -83,81 +109,64 @@ export const appRoutes: RouteObject[] = [
         element: <WorkspaceRouteLayout />,
         children: [
           { index: true, element: <Navigate to="issues" replace /> },
-          { path: "issues", element: <IssuesPage />, handle: { title: "Issues" } },
+          { path: "issues", element: <IssuesPage />, handle: { titleKey: "route_issues" } },
           {
             path: "issues/:id",
             element: <IssueDetailPage />,
-            handle: { title: "Issue" },
+            handle: { titleKey: "route_issues" },
           },
           {
             path: "projects",
             element: <ProjectsPage />,
-            handle: { title: "Projects" },
+            handle: { titleKey: "route_projects" },
           },
           {
             path: "projects/:id",
             element: <ProjectDetailPage />,
-            handle: { title: "Project" },
+            handle: { titleKey: "route_projects" },
           },
           {
             path: "autopilots",
             element: <AutopilotsPage />,
-            handle: { title: "Autopilot" },
+            handle: { titleKey: "route_autopilot" },
           },
           {
             path: "autopilots/:id",
             element: <AutopilotDetailPage />,
-            handle: { title: "Autopilot" },
+            handle: { titleKey: "route_autopilot" },
           },
           {
             path: "my-issues",
             element: <MyIssuesPage />,
-            handle: { title: "My Issues" },
+            handle: { titleKey: "route_my_issues" },
           },
           {
             path: "runtimes",
             element: <DesktopRuntimesPage />,
-            handle: { title: "Runtimes" },
+            handle: { titleKey: "route_runtimes" },
           },
           {
             path: "runtimes/:id",
             element: <RuntimeDetailPage />,
-            handle: { title: "Runtime" },
+            handle: { titleKey: "route_runtimes" },
           },
-          { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
+          { path: "skills", element: <SkillsPage />, handle: { titleKey: "route_skills" } },
           {
             path: "skills/:id",
             element: <SkillDetailPage />,
-            handle: { title: "Skill" },
+            handle: { titleKey: "route_skills" },
           },
-          { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          { path: "agents", element: <AgentsPage />, handle: { titleKey: "route_agents" } },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,
-            handle: { title: "Agent" },
+            handle: { titleKey: "route_agents" },
           },
-          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          { path: "inbox", element: <InboxPage />, handle: { titleKey: "route_inbox" } },
           {
             path: "settings",
-            element: (
-              <SettingsPage
-                extraAccountTabs={[
-                  {
-                    value: "daemon",
-                    label: "Daemon",
-                    icon: Server,
-                    content: <DaemonSettingsTab />,
-                  },
-                  {
-                    value: "updates",
-                    label: "Updates",
-                    icon: Download,
-                    content: <UpdatesSettingsTab />,
-                  },
-                ]}
-              />
-            ),
-            handle: { title: "Settings" },
+            element: <DesktopSettingsPage />,
+            handle: { titleKey: "route_settings" },
           },
         ],
       },

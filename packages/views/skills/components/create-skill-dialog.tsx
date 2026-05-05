@@ -21,6 +21,7 @@ import {
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
+import { useT } from "@multica/i18n/react";
 import {
   Dialog,
   DialogContent,
@@ -66,6 +67,7 @@ function isNameConflictError(msg: string): boolean {
 // ---------------------------------------------------------------------------
 
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
+  const t = useT("skills");
   const methods: {
     key: Method;
     icon: typeof Plus;
@@ -75,20 +77,20 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
     {
       key: "manual",
       icon: Plus,
-      title: "Create manually",
-      desc: "Start from a blank SKILL.md and write your own instructions.",
+      title: t("create_manually"),
+      desc: t("create_manual_desc"),
     },
     {
       key: "url",
       icon: Download,
-      title: "Import from URL",
-      desc: "Pull a published skill from ClawHub or Skills.sh.",
+      title: t("create_import_url"),
+      desc: t("create_url_desc"),
     },
     {
       key: "runtime",
       icon: HardDrive,
-      title: "Copy from runtime",
-      desc: "Promote a skill already installed on your local runtime.",
+      title: t("create_copy_runtime"),
+      desc: t("create_runtime_desc"),
     },
   ];
   return (
@@ -127,6 +129,8 @@ function ManualForm({
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const t = useT("skills");
+  const c = useT("common");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -145,10 +149,10 @@ function ManualForm({
         description: description.trim(),
       });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill created");
+      toast.success(t("toast_created"));
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create skill");
+      setError(err instanceof Error ? err.message : t("toast_failed_save"));
       setLoading(false);
     }
   };
@@ -165,7 +169,7 @@ function ManualForm({
             htmlFor="create-skill-name"
             className="text-xs text-muted-foreground"
           >
-            Name
+            {t("create_name")}
           </Label>
           <Input
             id="create-skill-name"
@@ -175,13 +179,13 @@ function ManualForm({
               setName(e.target.value);
               setError("");
             }}
-            placeholder="e.g. review-helper"
+            placeholder={t("create_name_placeholder")}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Must be unique within the workspace.
+            {t("create_name_hint")}
           </p>
         </div>
 
@@ -191,13 +195,13 @@ function ManualForm({
             className="text-xs text-muted-foreground"
           >
             <Pencil className="h-3 w-3" />
-            Description
+            {t("create_description")}
           </Label>
           <Textarea
             id="create-skill-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="One sentence on when to assign this skill to an agent."
+            placeholder={t("create_desc_placeholder")}
             rows={3}
             className="resize-none"
           />
@@ -212,7 +216,7 @@ function ManualForm({
             <span>
               {error}
               {isNameConflictError(error) && (
-                <> Try a different name and submit again.</>
+                <> {t("create_name_conflict")}</>
               )}
             </span>
           </div>
@@ -227,7 +231,7 @@ function ManualForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {c("cancel")}
         </Button>
         <Button
           type="button"
@@ -238,10 +242,10 @@ function ManualForm({
           {loading ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Creating…
+              {c("creating")}
             </>
           ) : (
-            "Create skill"
+            t("create_button")
           )}
         </Button>
       </div>
@@ -302,6 +306,8 @@ function UrlForm({
 }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const t = useT("skills");
+  const c = useT("common");
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -317,19 +323,19 @@ function UrlForm({
     try {
       const skill = await api.importSkill({ url: trimmed });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill imported");
+      toast.success(t("toast_imported"));
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : t("create_url_import_failed"));
       setLoading(false);
     }
   };
 
   const submittingLabel = (() => {
-    if (!loading) return "Import";
-    if (source === "clawhub") return "Importing from ClawHub…";
-    if (source === "skills.sh") return "Importing from Skills.sh…";
-    return "Importing…";
+    if (!loading) return t("create_url_import");
+    if (source === "clawhub") return t("create_url_importing_clawhub");
+    if (source === "skills.sh") return t("create_url_importing_skillssh");
+    return t("create_url_importing");
   })();
 
   return (
@@ -341,7 +347,7 @@ function UrlForm({
       >
         <div className="space-y-1.5">
           <Label htmlFor="import-url" className="text-xs text-muted-foreground">
-            Skill URL
+            {t("create_url_label")}
           </Label>
           <Input
             id="import-url"
@@ -351,7 +357,7 @@ function UrlForm({
               setUrl(e.target.value);
               setError("");
             }}
-            placeholder="https://clawhub.ai/owner/skill"
+            placeholder={t("create_url_placeholder")}
             className="font-mono text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -361,7 +367,7 @@ function UrlForm({
 
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
-            Supported sources
+            {t("create_url_sources")}
           </p>
           <div className="grid grid-cols-2 gap-2">
             <SourceCard
@@ -390,8 +396,7 @@ function UrlForm({
               {isNameConflictError(error) && (
                 <>
                   {" "}
-                  The imported skill&rsquo;s name already exists — delete the
-                  existing one before retrying.
+                  {t("create_url_conflict")}
                 </>
               )}
             </span>
@@ -407,7 +412,7 @@ function UrlForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {c("cancel")}
         </Button>
         <Button
           type="button"
@@ -436,21 +441,6 @@ function UrlForm({
 // Root dialog
 // ---------------------------------------------------------------------------
 
-const METHOD_TITLES: Record<Method, string> = {
-  chooser: "New skill",
-  manual: "Create manually",
-  url: "Import from URL",
-  runtime: "Copy from runtime",
-};
-
-const METHOD_DESCS: Record<Method, string> = {
-  chooser: "Choose how you want to add a skill to this workspace.",
-  manual: "Write a new SKILL.md from scratch.",
-  url: "Fetch a published skill by URL. Files are pulled server-side.",
-  runtime:
-    "Scan a local runtime and promote one of its on-disk skills into this workspace.",
-};
-
 export function CreateSkillDialog({
   onClose,
   onCreated,
@@ -459,6 +449,22 @@ export function CreateSkillDialog({
   onCreated?: (skill: Skill) => void;
 }) {
   const [method, setMethod] = useState<Method>("chooser");
+  const t = useT("skills");
+  const c = useT("common");
+
+  const METHOD_TITLES: Record<Method, string> = {
+    chooser: c("create"),
+    manual: t("create_manually"),
+    url: t("create_import_url"),
+    runtime: t("create_copy_runtime"),
+  };
+
+  const METHOD_DESCS: Record<Method, string> = {
+    chooser: t("create_chooser_desc"),
+    manual: t("create_chooser_manual"),
+    url: t("create_chooser_url"),
+    runtime: t("create_chooser_runtime"),
+  };
 
   const handleCreated = (skill: Skill) => {
     onCreated?.(skill);
@@ -500,13 +506,13 @@ export function CreateSkillDialog({
                       type="button"
                       onClick={() => setMethod("chooser")}
                       className="-ml-1 rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                      aria-label="Back to method chooser"
+                      aria-label={t("create_back")}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
                     </button>
                   }
                 />
-                <TooltipContent side="bottom">Back</TooltipContent>
+                <TooltipContent side="bottom">{t("create_back")}</TooltipContent>
               </Tooltip>
             )}
             <div className="min-w-0">
@@ -525,13 +531,13 @@ export function CreateSkillDialog({
                   type="button"
                   onClick={onClose}
                   className="rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                  aria-label="Close"
+                  aria-label={c("close")}
                 >
                   <XIcon className="h-3.5 w-3.5" />
                 </button>
               }
             />
-            <TooltipContent side="bottom">Close</TooltipContent>
+            <TooltipContent side="bottom">{c("close")}</TooltipContent>
           </Tooltip>
         </div>
 

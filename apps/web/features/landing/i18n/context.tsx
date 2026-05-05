@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
 import { useConfigStore } from "@multica/core/config";
+import { localeStore } from "@multica/core/i18n";
 import { createEnDict } from "./en";
 import { createZhDict } from "./zh";
 import type { LandingDict, Locale } from "./types";
@@ -38,6 +39,8 @@ export function LocaleProvider({
 
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l);
+    // Sync to Zustand store so dashboard API client sends correct X-Locale header
+    localeStore.getState().setLocale(l);
     document.cookie = `${COOKIE_NAME}=${l}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
   }, []);
 

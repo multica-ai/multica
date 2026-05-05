@@ -4,8 +4,10 @@ import { useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Copy, Check } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 
 function CodeBlockView({ node }: NodeViewProps) {
+  const t = useT("editor");
   const [copied, setCopied] = useState(false);
   const language = node.attrs.language || "";
 
@@ -32,7 +34,7 @@ function CodeBlockView({ node }: NodeViewProps) {
           type="button"
           onClick={handleCopy}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title="Copy code"
+          title={t("copy_code")}
         >
           {copied ? (
             <Check className="h-3.5 w-3.5" />

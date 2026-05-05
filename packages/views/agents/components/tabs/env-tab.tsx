@@ -14,6 +14,7 @@ import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 
 let nextEnvId = 0;
 
@@ -55,6 +56,8 @@ export function EnvTab({
   onSave: (updates: Partial<Agent>) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const t = useT("agents");
+  const tc = useT("common");
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>(
     envMapToEntries(agent.custom_env ?? {}),
   );
@@ -104,16 +107,16 @@ export function EnvTab({
     const keys = envEntries.filter((e) => e.key.trim()).map((e) => e.key.trim());
     const uniqueKeys = new Set(keys);
     if (uniqueKeys.size < keys.length) {
-      toast.error("Duplicate environment variable keys");
+      toast.error(t("env_duplicate_keys"));
       return;
     }
 
     setSaving(true);
     try {
       await onSave({ custom_env: currentEnvMap });
-      toast.success("Environment variables saved");
+      toast.success(t("env_saved"));
     } catch {
-      toast.error("Failed to save environment variables");
+      toast.error(t("env_save_failed"));
     } finally {
       setSaving(false);
     }
@@ -123,8 +126,7 @@ export function EnvTab({
     return (
       <div className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          Injected into the agent process at launch. Values are hidden — only
-          the agent owner or workspace admin can view and edit them.
+          {t("env_injected_readonly")}
         </p>
         {envEntries.length > 0 ? (
           <div className="space-y-2">
@@ -149,7 +151,7 @@ export function EnvTab({
           </div>
         ) : (
           <p className="text-xs italic text-muted-foreground">
-            No environment variables configured.
+            {t("env_no_vars")}
           </p>
         )}
       </div>
@@ -160,15 +162,7 @@ export function EnvTab({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Injected into the agent process at launch (e.g.{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-            ANTHROPIC_API_KEY
-          </code>
-          ,{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-            ANTHROPIC_BASE_URL
-          </code>
-          ).
+          {t("env_injected_edit", { code1: "ANTHROPIC_API_KEY", code2: "ANTHROPIC_BASE_URL" })}
         </p>
         <Button
           type="button"
@@ -178,7 +172,7 @@ export function EnvTab({
           className="shrink-0"
         >
           <Plus className="h-3 w-3" />
-          Add
+          {tc("add")}
         </Button>
       </div>
 
@@ -189,7 +183,7 @@ export function EnvTab({
               <Input
                 value={entry.key}
                 onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
-                placeholder="KEY"
+                placeholder={t("env_key_placeholder")}
                 className="w-[40%] font-mono text-xs"
               />
               <div className="relative flex-1">
@@ -199,14 +193,14 @@ export function EnvTab({
                   onChange={(e) =>
                     updateEnvEntry(index, "value", e.target.value)
                   }
-                  placeholder="value"
+                  placeholder={t("env_value_placeholder")}
                   className="pr-8 font-mono text-xs"
                 />
                 <button
                   type="button"
                   onClick={() => toggleEnvVisibility(index)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={entry.visible ? "Hide value" : "Show value"}
+                  aria-label={entry.visible ? t("env_aria_hide") : t("env_aria_show")}
                 >
                   {entry.visible ? (
                     <EyeOff className="h-3.5 w-3.5" />
@@ -220,7 +214,7 @@ export function EnvTab({
                 size="icon-sm"
                 onClick={() => removeEnvEntry(index)}
                 className="text-muted-foreground hover:text-destructive"
-                aria-label="Remove variable"
+                aria-label={t("env_remove_aria")}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -231,7 +225,7 @@ export function EnvTab({
 
       <div className="flex items-center justify-end gap-3">
         {dirty && (
-          <span className="text-xs text-muted-foreground">Unsaved changes</span>
+          <span className="text-xs text-muted-foreground">{t("overview_unsaved")}</span>
         )}
         <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
           {saving ? (
@@ -239,7 +233,7 @@ export function EnvTab({
           ) : (
             <Save className="h-3.5 w-3.5" />
           )}
-          Save
+          {t("overview_save")}
         </Button>
       </div>
     </div>

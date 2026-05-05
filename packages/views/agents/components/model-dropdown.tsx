@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { useT } from "@multica/i18n/react";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -33,6 +34,7 @@ export function ModelDropdown({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
+  const t = useT("agents");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -83,10 +85,10 @@ export function ModelDropdown({
   const triggerLabel =
     value ||
     (disabled
-      ? "Select a runtime first"
+      ? t("model_select_runtime_first")
       : runtimeOnline
-        ? "Default (provider)"
-        : "Runtime offline — enter manually");
+        ? t("model_default")
+        : t("model_runtime_offline"));
 
   if (!supported && !modelsQuery.isLoading) {
     // Provider doesn't honour per-agent model selection — show a
@@ -94,14 +96,13 @@ export function ModelDropdown({
     // inert. (Hermes reads its model from ~/.hermes/.env.)
     return (
       <div className="min-w-0">
-        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Label className="text-xs text-muted-foreground">{t("model")}</Label>
         <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
-            <div>Model selection is managed by this runtime.</div>
+            <div>{t("model_managed")}</div>
             <div className="mt-0.5 text-xs">
-              Configure the model on the runtime host (e.g. Hermes reads it
-              from its own config file).
+              {t("model_configure")}
             </div>
           </div>
         </div>
@@ -112,9 +113,9 @@ export function ModelDropdown({
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between">
-        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Label className="text-xs text-muted-foreground">{t("model")}</Label>
         {modelsQuery.isError && (
-          <span className="text-xs text-muted-foreground">discovery failed</span>
+          <span className="text-xs text-muted-foreground">{t("model_discovery_failed")}</span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
@@ -129,7 +130,7 @@ export function ModelDropdown({
             </div>
             {value && (
               <div className="truncate text-xs text-muted-foreground">
-                {modelLabel(models, value)}
+                {modelLabel(models, value, t)}
               </div>
             )}
           </div>
@@ -144,7 +145,7 @@ export function ModelDropdown({
           <div className="border-b border-border p-2">
             <Input
               autoFocus
-              placeholder="Search or type a model ID"
+              placeholder={t("model_search_or_type")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8"
@@ -154,7 +155,7 @@ export function ModelDropdown({
             {modelsQuery.isLoading && (
               <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Discovering models…
+                {t("model_discovering")}
               </div>
             )}
 
@@ -179,7 +180,7 @@ export function ModelDropdown({
                           <span className="truncate font-medium">{m.label}</span>
                           {m.default && (
                             <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                              default
+                              {t("model_default_badge")}
                             </span>
                           )}
                         </div>
@@ -201,7 +202,7 @@ export function ModelDropdown({
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  No models available.
+                  {t("model_no_models")}
                 </div>
               )}
 
@@ -212,7 +213,7 @@ export function ModelDropdown({
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="truncate">
-                  Use “{trimmedSearch}”
+                  {t("model_use_custom", { id: trimmedSearch })}
                 </span>
               </button>
             )}
@@ -222,7 +223,7 @@ export function ModelDropdown({
                 onClick={() => select("")}
                 className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
               >
-                Clear selection (use provider default)
+                {t("model_clear_selection")}
               </button>
             )}
           </div>
@@ -242,8 +243,8 @@ function groupByProvider(models: RuntimeModel[]): Record<string, RuntimeModel[]>
   return out;
 }
 
-function modelLabel(models: RuntimeModel[], id: string): string {
+function modelLabel(models: RuntimeModel[], id: string, t: (key: string) => string): string {
   const found = models.find((m) => m.id === id);
-  if (!found) return "custom";
-  return found.provider ? found.provider : "model";
+  if (!found) return t("model_custom_label");
+  return found.provider ? found.provider : t("model_default_label");
 }

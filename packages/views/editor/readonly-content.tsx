@@ -34,6 +34,7 @@ import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import { useT } from "@multica/i18n/react";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
@@ -158,7 +159,8 @@ function ReadonlyLink({
   );
 }
 
-const components: Partial<Components> = {
+function useEditorComponents(t: ReturnType<typeof useT>): Partial<Components> {
+  return useMemo(() => ({
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
 
@@ -175,9 +177,9 @@ const components: Partial<Components> = {
     const handleCopyLink = async () => {
       try {
         await navigator.clipboard.writeText(imgSrc);
-        toast.success("Link copied");
+        toast.success(t("link_copied"));
       } catch {
-        toast.error("Failed to copy link");
+        toast.error(t("failed_copy_link"));
       }
     };
 
@@ -190,13 +192,13 @@ const components: Partial<Components> = {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={handleView} title="View image">
+            <button type="button" onClick={handleView} title={t("view_image")}>
               <Maximize2 className="size-3.5" />
             </button>
-            <button type="button" onClick={handleDownload} title="Download">
+            <button type="button" onClick={handleDownload} title={t("download")}>
               <Download className="size-3.5" />
             </button>
-            <button type="button" onClick={handleCopyLink} title="Copy link">
+            <button type="button" onClick={handleCopyLink} title={t("copy_link")}>
               <LinkIcon className="size-3.5" />
             </button>
           </span>
@@ -213,7 +215,6 @@ const components: Partial<Components> = {
     const dataType = node?.properties?.dataType as string | undefined;
     if (dataType === "fileCard") {
       const rawHref = (node?.properties?.dataHref as string) || "";
-      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
       const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
       const filename = (node?.properties?.dataFilename as string) || "";
       return (
@@ -252,11 +253,9 @@ const components: Partial<Components> = {
       node.position.start.line !== node.position.end.line;
 
     if (!isBlock && !lang) {
-      // Inline code — CSS handles styling via .rich-text-editor code
       return <code {...props}>{children}</code>;
     }
 
-    // Block code — highlight with lowlight, output hljs classes
     const code = String(children).replace(/\n$/, "");
     try {
       const tree = lang
@@ -269,7 +268,6 @@ const components: Partial<Components> = {
         />
       );
     } catch {
-      // Fallback — render without highlighting
       return (
         <code className={className} {...props}>
           {children}
@@ -280,7 +278,8 @@ const components: Partial<Components> = {
 
   // Pre — pass through (CSS handles styling via .rich-text-editor pre)
   pre: ({ children }) => <pre>{children}</pre>,
-};
+  }), [t]);
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -292,9 +291,11 @@ interface ReadonlyContentProps {
 }
 
 export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
+  const t = useT("editor");
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
+  const editorComponents = useEditorComponents(t);
 
   return (
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
@@ -302,7 +303,7 @@ export function ReadonlyContent({ content, className }: ReadonlyContentProps) {
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
-        components={components}
+        components={editorComponents}
       >
         {processed}
       </ReactMarkdown>

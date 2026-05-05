@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT, useLocale } from "@multica/i18n/react";
+import type { InterpolationParams } from "@multica/i18n";
 import {
   Select,
   SelectTrigger,
@@ -24,15 +26,23 @@ export interface TriggerConfig {
 // Constants
 // ---------------------------------------------------------------------------
 
-const FREQUENCIES: { value: TriggerFrequency; label: string }[] = [
-  { value: "hourly", label: "Hourly" },
-  { value: "daily", label: "Daily" },
-  { value: "weekdays", label: "Weekdays" },
-  { value: "weekly", label: "Days" },
-  { value: "custom", label: "Custom" },
+const FREQUENCIES: { value: TriggerFrequency; labelKey: string }[] = [
+  { value: "hourly", labelKey: "freq_hourly" },
+  { value: "daily", labelKey: "freq_daily" },
+  { value: "weekdays", labelKey: "freq_weekdays" },
+  { value: "weekly", labelKey: "freq_weekly" },
+  { value: "custom", labelKey: "freq_custom" },
 ];
 
-const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_KEYS = [
+  "day_sun",
+  "day_mon",
+  "day_tue",
+  "day_wed",
+  "day_thu",
+  "day_fri",
+  "day_sat",
+] as const;
 
 const COMMON_TIMEZONES = [
   "UTC",
@@ -67,10 +77,10 @@ export function getLocalTimezone(): string {
   }
 }
 
-function getTimezoneOffset(tz: string): string {
+function getTimezoneOffset(tz: string, locale?: string): string {
   if (tz === "UTC") return "UTC";
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+    const parts = new Intl.DateTimeFormat(locale ?? "en-US", {
       timeZone: tz,
       timeZoneName: "shortOffset",
     }).formatToParts(new Date());
@@ -80,17 +90,17 @@ function getTimezoneOffset(tz: string): string {
   }
 }
 
-function getTimezoneLabel(tz: string): string {
+function getTimezoneLabel(tz: string, locale?: string): string {
   if (tz === "UTC") return "UTC";
   const city = tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
-  return `${city} (${getTimezoneOffset(tz)})`;
+  return `${city} (${getTimezoneOffset(tz, locale)})`;
 }
 
-function formatTime12h(time: string): string {
+function formatTime12h(time: string, t: (key: string, params?: InterpolationParams) => string): string {
   const [h, m] = time.split(":");
   const hour = parseInt(h ?? "9", 10);
   const min = parseInt(m ?? "0", 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
+  const ampm = hour >= 12 ? t("time_pm") : t("time_am");
   return `${hour % 12 || 12}:${min.toString().padStart(2, "0")} ${ampm}`;
 }
 
@@ -112,10 +122,10 @@ function sortedDays(days: number[]): number[] {
   return [...new Set(days)].sort((a, b) => a - b);
 }
 
-function formatDayList(days: number[]): string {
+function formatDayList(days: number[], t: (key: string, params?: InterpolationParams) => string): string {
   const sorted = sortedDays(days);
   if (sorted.length === 0) return "—";
-  return sorted.map((d) => DAYS_OF_WEEK[d]).join(", ");
+  return sorted.map((d) => t(DAY_KEYS[d] ?? "")).join(", ");
 }
 
 export function toCronExpression(cfg: TriggerConfig): string {
@@ -173,38 +183,48 @@ export function parseCronExpression(cron: string, timezone: string): TriggerConf
   return { ...base, frequency: "custom" };
 }
 
-export function summarizeTrigger(cfg: TriggerConfig): string {
+export function summarizeTrigger(
+  cfg: TriggerConfig,
+  t: (key: string, params?: InterpolationParams) => string,
+): string {
   switch (cfg.frequency) {
     case "hourly": {
       const min = cfg.time.split(":")[1] ?? "00";
-      return `Hourly · :${min}`;
+      return t("summarize_hourly", { min });
     }
     case "daily":
-      return `Daily ${cfg.time}`;
+      return t("summarize_daily", { time: cfg.time });
     case "weekdays":
-      return `Weekdays ${cfg.time}`;
+      return t("summarize_weekdays", { time: cfg.time });
     case "weekly":
-      return `${formatDayList(cfg.daysOfWeek)} ${cfg.time}`;
+      return `${formatDayList(cfg.daysOfWeek, t)} ${cfg.time}`;
     case "custom":
-      return "Custom cron";
+      return t("summarize_custom");
   }
 }
 
-export function describeTrigger(cfg: TriggerConfig): string {
+export function describeTrigger(
+  cfg: TriggerConfig,
+  t: (key: string, params?: InterpolationParams) => string,
+): string {
   const offset = getTimezoneOffset(cfg.timezone);
   switch (cfg.frequency) {
     case "hourly": {
       const min = parseInt(cfg.time.split(":")[1] ?? "0", 10);
-      return `Runs every hour at :${min.toString().padStart(2, "0")}`;
+      return t("describe_hourly", { min: min.toString().padStart(2, "0") });
     }
     case "daily":
-      return `Runs daily at ${formatTime12h(cfg.time)} ${offset}`;
+      return t("describe_daily", { time: formatTime12h(cfg.time, t), offset });
     case "weekdays":
-      return `Runs weekdays at ${formatTime12h(cfg.time)} ${offset}`;
+      return t("describe_weekdays", { time: formatTime12h(cfg.time, t), offset });
     case "weekly":
-      return `Runs every ${formatDayList(cfg.daysOfWeek)} at ${formatTime12h(cfg.time)} ${offset}`;
+      return t("describe_weekly", {
+        days: formatDayList(cfg.daysOfWeek, t),
+        time: formatTime12h(cfg.time, t),
+        offset,
+      });
     case "custom":
-      return `Custom schedule: ${cfg.cronExpression}`;
+      return t("describe_custom", { cron: cfg.cronExpression });
   }
 }
 
@@ -219,6 +239,9 @@ export function TriggerConfigSection({
   config: TriggerConfig;
   onChange: (config: TriggerConfig) => void;
 }) {
+  const t = useT("autopilots");
+  const { locale } = useLocale();
+
   const timezones = useMemo(() => {
     const local = getLocalTimezone();
     const set = new Set(COMMON_TIMEZONES);
@@ -241,7 +264,7 @@ export function TriggerConfigSection({
             )}
             onClick={() => onChange({ ...config, frequency: f.value })}
           >
-            {f.label}
+            {t(f.labelKey)}
           </button>
         ))}
       </div>
@@ -249,16 +272,16 @@ export function TriggerConfigSection({
       {config.frequency === "custom" ? (
         /* Custom cron input */
         <div>
-          <label className="text-xs text-muted-foreground">Cron Expression</label>
+          <label className="text-xs text-muted-foreground">{t("dialog_cron")}</label>
           <input
             type="text"
             value={config.cronExpression}
             onChange={(e) => onChange({ ...config, cronExpression: e.target.value })}
-            placeholder="0 9 * * 1-5"
+            placeholder={t("dialog_cron_placeholder")}
             className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground mt-1">
-            Standard 5-field cron (min hour dom month dow)
+            {t("dialog_cron_hint")}
           </p>
         </div>
       ) : (
@@ -267,7 +290,7 @@ export function TriggerConfigSection({
           <div className="flex gap-3">
             {config.frequency === "hourly" ? (
               <div className="w-24">
-                <label className="text-xs text-muted-foreground">Minute</label>
+                <label className="text-xs text-muted-foreground">{t("dialog_minute")}</label>
                 <input
                   type="number"
                   min={0}
@@ -283,7 +306,7 @@ export function TriggerConfigSection({
             ) : (
               <>
                 <div className="w-28">
-                  <label className="text-xs text-muted-foreground">Time</label>
+                  <label className="text-xs text-muted-foreground">{t("dialog_time")}</label>
                   <input
                     type="time"
                     value={config.time}
@@ -292,20 +315,20 @@ export function TriggerConfigSection({
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <label className="text-xs text-muted-foreground">Timezone</label>
+                  <label className="text-xs text-muted-foreground">{t("dialog_timezone")}</label>
                   <Select
                     value={config.timezone}
                     onValueChange={(v) => v && onChange({ ...config, timezone: v })}
                   >
                     <SelectTrigger className="mt-1 w-full">
                       <SelectValue>
-                        {() => getTimezoneLabel(config.timezone)}
+                        {() => getTimezoneLabel(config.timezone, locale)}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {timezones.map((tz) => (
                         <SelectItem key={tz} value={tz}>
-                          {getTimezoneLabel(tz)}
+                          {getTimezoneLabel(tz, locale)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -318,13 +341,13 @@ export function TriggerConfigSection({
           {/* Day-of-week multi-selector for weekly */}
           {config.frequency === "weekly" && (
             <div>
-              <label className="text-xs text-muted-foreground">Days</label>
+              <label className="text-xs text-muted-foreground">{t("dialog_days")}</label>
               <div className="flex gap-1 mt-1">
-                {DAYS_OF_WEEK.map((day, i) => {
+                {DAY_KEYS.map((dayKey, i) => {
                   const selected = config.daysOfWeek.includes(i);
                   return (
                     <button
-                      key={day}
+                      key={dayKey}
                       type="button"
                       aria-pressed={selected}
                       className={cn(
@@ -344,7 +367,7 @@ export function TriggerConfigSection({
                         });
                       }}
                     >
-                      {day}
+                      {t(dayKey)}
                     </button>
                   );
                 })}
@@ -355,7 +378,7 @@ export function TriggerConfigSection({
       )}
 
       {/* Human-readable preview */}
-      <p className="text-xs text-muted-foreground">{describeTrigger(config)}</p>
+      <p className="text-xs text-muted-foreground">{describeTrigger(config, t)}</p>
     </div>
   );
 }

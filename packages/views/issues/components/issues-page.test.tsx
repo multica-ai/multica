@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/i18n/react";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
 import type { Issue } from "@multica/core/types";
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -204,6 +207,23 @@ vi.mock("@multica/core/modals", () => ({
   ),
 }));
 
+// Mock i18n
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  const dict = en as Record<string, Record<string, string>>;
+  const useT = (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+    const template = ns ? (dict[ns] ?? {})[key] : key;
+    const resolved = template ?? key;
+    if (!params) return resolved;
+    return resolved.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+  };
+  return {
+    useT,
+    useLocale: () => ({ locale: "en" as const, setLocale: vi.fn() }),
+    I18nProvider: ({ children }: { children: React.ReactNode }) => children,
+  };
+});
+
 // Mock sonner toast
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -338,9 +358,11 @@ function renderWithQuery(ui: React.ReactElement) {
     },
   });
   return render(
-    <QueryClientProvider client={qc}>
-      {ui}
-    </QueryClientProvider>,
+    <I18nProvider initialLocale="en" dictionaries={{ en, zh }}>
+      <QueryClientProvider client={qc}>
+        {ui}
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 

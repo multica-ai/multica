@@ -32,6 +32,7 @@ import {
   recordMentionUsage,
   sortUserItemsByRecency,
 } from "./mention-recency";
+import { useT } from "@multica/i18n/react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,7 +67,7 @@ interface MentionGroup {
   items: MentionItem[];
 }
 
-function groupItems(items: MentionItem[]): MentionGroup[] {
+function groupItems(items: MentionItem[], usersLabel: string, issuesLabel: string): MentionGroup[] {
   const users: MentionItem[] = [];
   const issues: MentionItem[] = [];
 
@@ -79,8 +80,8 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   }
 
   const groups: MentionGroup[] = [];
-  if (users.length > 0) groups.push({ label: "Users", items: users });
-  if (issues.length > 0) groups.push({ label: "Issues", items: issues });
+  if (users.length > 0) groups.push({ label: usersLabel, items: users });
+  if (issues.length > 0) groups.push({ label: issuesLabel, items: issues });
   return groups;
 }
 
@@ -115,6 +116,7 @@ function mergeMentionItems(
 
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command }, ref) {
+    const t = useT("editor");
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [serverIssueItems, setServerIssueItems] = useState<MentionItem[]>([]);
     const [isSearchingIssues, setIsSearchingIssues] = useState(false);
@@ -228,12 +230,12 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
       return (
         <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
-          {isWaitingForServer ? "Searching..." : "No results"}
+          {isWaitingForServer ? t("searching") : t("no_results")}
         </div>
       );
     }
 
-    const groups = groupItems(displayItems);
+    const groups = groupItems(displayItems, t("users"), t("issues"));
 
     // Build a flat index mapping: globalIndex → item
     let globalIndex = 0;
@@ -279,6 +281,7 @@ function MentionRow({
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
+  const t = useT("editor");
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -322,7 +325,7 @@ function MentionRow({
       />
       <span className="truncate font-medium">{item.label}</span>
       {item.type === "agent" && (
-        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
+        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">{t("agent")}</Badge>
       )}
     </button>
   );
@@ -342,7 +345,10 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-export function createMentionSuggestion(qc: QueryClient): Omit<
+export function createMentionSuggestion(
+  qc: QueryClient,
+  labels?: { allMembers?: string },
+): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
@@ -367,7 +373,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const allItem: MentionItem[] =
       "all members".includes(q) || "all".includes(q)
-        ? [{ id: "all", label: "All members", type: "all" as const }]
+        ? [{ id: "all", label: labels?.allMembers ?? "All members", type: "all" as const }]
         : [];
 
     const memberItems: MentionItem[] = members

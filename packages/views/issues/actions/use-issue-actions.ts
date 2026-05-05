@@ -21,6 +21,7 @@ import {
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
+import { useT } from "@multica/i18n/react";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
 
@@ -50,6 +51,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = user?.id;
+  const tToasts = useT("toasts");
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -89,7 +91,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       if (!issueId) return;
       updateIssue.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error("Failed to update issue") },
+        { onError: () => toast.error(tToasts("failed_to_update", { item: "issue" })) },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
       // until the issue is moved to an active status.
@@ -125,9 +127,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         : path;
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link copied");
+      toast.success(tToasts("link_copied"));
     } catch {
-      toast.error("Failed to copy link");
+      toast.error(tToasts("failed_to_update", { item: "link" }));
     }
   }, [paths, issueId, navigation]);
 

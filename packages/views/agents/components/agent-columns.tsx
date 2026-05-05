@@ -2,6 +2,7 @@
 
 import { Cloud, Lock, Monitor } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
+import { useT } from "@multica/i18n/react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentActivity,
@@ -14,7 +15,12 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { availabilityConfig, workloadConfig } from "../presence";
+import {
+  availabilityConfig,
+  availabilityLabel,
+  workloadConfig,
+  workloadLabel,
+} from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
 import { Sparkline } from "./sparkline";
 
@@ -64,55 +70,57 @@ const COL_WIDTHS = {
 
 export function createAgentColumns({
   onDuplicate,
+  t,
 }: {
   onDuplicate: (agent: Agent) => void;
+  t: ReturnType<typeof useT>;
 }): ColumnDef<AgentRow>[] {
   return [
     {
       id: "agent",
-      header: "Agent",
+      header: t("column_agent"),
       size: COL_WIDTHS.agent,
       meta: { grow: true },
-      cell: ({ row }) => <AgentNameCell row={row.original} />,
+      cell: ({ row }) => <AgentNameCell row={row.original} t={t} />,
     },
     {
       id: "status",
-      header: "Status",
+      header: t("column_status"),
       size: COL_WIDTHS.status,
       cell: ({ row }) => {
         if (row.original.agent.archived_at) {
           return <span className="text-xs text-muted-foreground">—</span>;
         }
-        return <AvailabilityCell presence={row.original.presence} />;
+        return <AvailabilityCell presence={row.original.presence} t={t} />;
       },
     },
     {
       id: "workload",
-      header: "Workload",
+      header: t("column_workload"),
       size: COL_WIDTHS.workload,
       cell: ({ row }) => {
         if (row.original.agent.archived_at) {
           return <span className="text-xs text-muted-foreground">—</span>;
         }
-        return <WorkloadCell presence={row.original.presence} />;
+        return <WorkloadCell presence={row.original.presence} t={t} />;
       },
     },
     {
       id: "runtime",
-      header: "Runtime",
+      header: t("column_runtime"),
       size: COL_WIDTHS.runtime,
       meta: { grow: true },
-      cell: ({ row }) => <RuntimeCell row={row.original} />,
+      cell: ({ row }) => <RuntimeCell row={row.original} t={t} />,
     },
     {
       id: "activity",
-      header: "Activity (7d)",
+      header: t("column_activity_7d"),
       size: COL_WIDTHS.activity,
-      cell: ({ row }) => <ActivityCell row={row.original} />,
+      cell: ({ row }) => <ActivityCell row={row.original} t={t} />,
     },
     {
       id: "runs",
-      header: () => <div className="text-right">Runs</div>,
+      header: () => <div className="text-right">{t("column_runs")}</div>,
       size: COL_WIDTHS.runs,
       cell: ({ row }) => (
         <div className="text-right font-mono text-xs tabular-nums text-muted-foreground">
@@ -150,7 +158,7 @@ export function createAgentColumns({
 // Cell renderers
 // ---------------------------------------------------------------------------
 
-function AgentNameCell({ row }: { row: AgentRow }) {
+function AgentNameCell({ row, t }: { row: AgentRow; t: ReturnType<typeof useT> }) {
   const { agent, ownerIdToShow } = row;
   const isArchived = !!agent.archived_at;
   const isPrivate = agent.visibility === "private";
@@ -181,7 +189,7 @@ function AgentNameCell({ row }: { row: AgentRow }) {
                 }
               />
               <TooltipContent>
-                Private — only the owner can assign work
+                {t("column_private")}
               </TooltipContent>
             </Tooltip>
           )}
@@ -194,7 +202,7 @@ function AgentNameCell({ row }: { row: AgentRow }) {
           )}
           {isArchived && (
             <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              Archived
+              {t("column_archived")}
             </span>
           )}
         </div>
@@ -205,7 +213,7 @@ function AgentNameCell({ row }: { row: AgentRow }) {
               : "italic text-muted-foreground/50"
           }`}
         >
-          {agent.description || "No description"}
+          {agent.description || t("column_no_description")}
         </div>
       </div>
     </div>
@@ -214,8 +222,10 @@ function AgentNameCell({ row }: { row: AgentRow }) {
 
 function AvailabilityCell({
   presence,
+  t,
 }: {
   presence: AgentPresenceDetail | null | undefined;
+  t: ReturnType<typeof useT>;
 }) {
   if (!presence) {
     return (
@@ -226,15 +236,17 @@ function AvailabilityCell({
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{av.label}</span>
+      <span className={`text-xs ${av.textClass}`}>{availabilityLabel(t, presence.availability)}</span>
     </span>
   );
 }
 
 function WorkloadCell({
   presence,
+  t,
 }: {
   presence: AgentPresenceDetail | null | undefined;
+  t: ReturnType<typeof useT>;
 }) {
   if (!presence) {
     return (
@@ -278,7 +290,7 @@ function WorkloadCell({
           className={`h-3 w-3 shrink-0 ${labelTone} ${isWorking ? "animate-spin" : ""}`}
         />
       )}
-      <span className={`shrink-0 ${labelTone}`}>{wl.label}</span>
+      <span className={`shrink-0 ${labelTone}`}>{workloadLabel(t, presence.workload)}</span>
       {counts && (
         <span className="truncate text-muted-foreground">{counts}</span>
       )}
@@ -286,11 +298,11 @@ function WorkloadCell({
   );
 }
 
-function RuntimeCell({ row }: { row: AgentRow }) {
+function RuntimeCell({ row, t }: { row: AgentRow; t: ReturnType<typeof useT> }) {
   const { agent, runtime } = row;
   const isCloud = agent.runtime_mode === "cloud";
   const RuntimeIcon = isCloud ? Cloud : Monitor;
-  const runtimeLabel = runtime?.name ?? (isCloud ? "Cloud" : "Local");
+  const runtimeLabel = runtime?.name ?? (isCloud ? t("column_cloud") : t("column_local"));
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -307,7 +319,7 @@ function RuntimeCell({ row }: { row: AgentRow }) {
   );
 }
 
-function ActivityCell({ row }: { row: AgentRow }) {
+function ActivityCell({ row, t }: { row: AgentRow; t: ReturnType<typeof useT> }) {
   const { agent, activity } = row;
   if (agent.archived_at) {
     return <span className="text-xs text-muted-foreground/50">—</span>;
@@ -331,31 +343,31 @@ function ActivityCell({ row }: { row: AgentRow }) {
         }
       />
       <TooltipContent>
-        <ActivityTooltipBody activity={activity} />
+        <ActivityTooltipBody activity={activity} t={t} />
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function ActivityTooltipBody({ activity }: { activity: AgentActivity }) {
+function ActivityTooltipBody({ activity, t }: { activity: AgentActivity; t: ReturnType<typeof useT> }) {
   const summary = summarizeActivityWindow(activity, 7);
   const { totalRuns, totalFailed } = summary;
   const { daysSinceCreated } = activity;
 
   const isPartial = daysSinceCreated < 7;
   const headerText = isPartial
-    ? `Created ${daysSinceCreated === 0 ? "today" : `${daysSinceCreated} day${daysSinceCreated === 1 ? "" : "s"} ago`}`
-    : "Last 7 days";
+    ? t("column_created_ago", { days: daysSinceCreated })
+    : t("column_last_7d");
 
   let bodyText: string;
   if (totalRuns === 0) {
-    bodyText = "No activity";
+    bodyText = t("column_no_activity");
   } else {
     const failedFragment =
       totalFailed > 0
-        ? ` · ${totalFailed} failed (${Math.round((totalFailed / totalRuns) * 100)}%)`
+        ? ` · ${totalFailed} ${t("column_failed_fragment")} (${Math.round((totalFailed / totalRuns) * 100)}%)`
         : "";
-    bodyText = `${totalRuns} run${totalRuns === 1 ? "" : "s"}${failedFragment}`;
+    bodyText = t("column_runs_count", { count: totalRuns }) + failedFragment;
   }
 
   return (

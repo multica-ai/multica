@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { useActiveTitleSync } from "@/hooks/use-tab-sync";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
@@ -23,6 +24,7 @@ import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
 
 function SidebarTopBar() {
+  const t = useT("desktop");
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
 
   return (
@@ -37,7 +39,7 @@ function SidebarTopBar() {
         <button
           onClick={goBack}
           disabled={!canGoBack}
-          aria-label="Go back"
+          aria-label={t("nav_go_back")}
           className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
         >
           <ChevronLeft className="size-4" />
@@ -45,7 +47,7 @@ function SidebarTopBar() {
         <button
           onClick={goForward}
           disabled={!canGoForward}
-          aria-label="Go forward"
+          aria-label={t("nav_go_forward")}
           className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
         >
           <ChevronRight className="size-4" />

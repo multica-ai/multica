@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useT } from "@multica/i18n/react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -103,6 +104,7 @@ function StatusAccordionItem({
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
+  const t = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
@@ -158,7 +160,7 @@ function StatusAccordionItem({
             >
               <Plus className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t("list_add_issue")}</TooltipContent>
           </Tooltip>
         </div>
       </Accordion.Header>
@@ -174,7 +176,7 @@ function StatusAccordionItem({
           </>
         ) : (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No issues
+            {t("list_no_issues")}
           </p>
         )}
       </Accordion.Panel>

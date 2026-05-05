@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDetailOptions,
@@ -17,6 +18,7 @@ export function AddChildIssueModal({
   onClose: () => void;
   data: Record<string, unknown> | null;
 }) {
+  const t = useT("modals");
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
@@ -42,15 +44,15 @@ export function AddChildIssueModal({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      title="Add sub-issue"
-      description="Search for an issue to add as a sub-issue"
+      title={t("add_child_title")}
+      description={t("add_child_description")}
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
           { id: selected.id, parent_issue_id: issueId },
-          { onError: () => toast.error("Failed to add sub-issue") },
+          { onError: () => toast.error(t("toast_failed_child")) },
         );
-        toast.success(`Added ${selected.identifier} as sub-issue`);
+        toast.success(t("toast_child_added", { identifier: selected.identifier }));
       }}
     />
   );

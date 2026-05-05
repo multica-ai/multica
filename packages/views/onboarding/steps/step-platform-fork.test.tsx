@@ -33,6 +33,17 @@ vi.mock("../components/use-runtime-picker", () => ({
   useRuntimePicker: () => mocks.pickerState,
 }));
 
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
 import { StepPlatformFork } from "./step-platform-fork";
 
 function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
@@ -86,9 +97,9 @@ describe("StepPlatformFork", () => {
 
   it("renders the three fork options at rest", () => {
     renderFork();
-    expect(screen.getByText(/download the desktop app/i)).toBeInTheDocument();
-    expect(screen.getByText(/^install the cli$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^cloud runtime$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Desktop$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Install the CLI$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Cloud runtime$/i)).toBeInTheDocument();
     // Dialogs closed at rest → no CLI instructions, no email field.
     expect(screen.queryByTestId("cli-instructions")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
@@ -122,7 +133,7 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByText(/download the desktop app/i));
+    await user.click(screen.getByText(/^Desktop$/));
 
     // Routes to the new /download page (not GitHub releases) so the
     // user lands on the OS auto-detect surface.
@@ -167,7 +178,7 @@ describe("StepPlatformFork", () => {
     await user.click(screen.getByRole("button", { name: /show steps/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/1 runtime connected/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 runtime\(s\) connected/i)).toBeInTheDocument();
     expect(
       within(dialog).getByText(/selected: claude code/i),
     ).toBeInTheDocument();
@@ -196,11 +207,11 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     const { onNext } = renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    await user.click(screen.getByRole("button", { name: /join.*waitlist/i }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText(/email/i), "a@b.co");
     await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
+      within(dialog).getByRole("button", { name: /join.*waitlist/i }),
     );
 
     expect(mocks.joinCloudWaitlist).toHaveBeenCalled();
@@ -212,7 +223,7 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     const { onNext } = renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    await user.click(screen.getByRole("button", { name: /join.*waitlist/i }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText(/email/i), "a@b.co");
     await user.type(
@@ -220,7 +231,7 @@ describe("StepPlatformFork", () => {
       "running agents overnight",
     );
     await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
+      within(dialog).getByRole("button", { name: /join.*waitlist/i }),
     );
 
     expect(mocks.joinCloudWaitlist).toHaveBeenCalledTimes(1);
@@ -245,14 +256,14 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    await user.click(screen.getByRole("button", { name: /join.*waitlist/i }));
     const dialog = await screen.findByRole("dialog");
     await user.type(
       within(dialog).getByLabelText(/email/i),
       "solo@example.com",
     );
     await user.click(
-      within(dialog).getByRole("button", { name: /^join waitlist$/i }),
+      within(dialog).getByRole("button", { name: /join.*waitlist/i }),
     );
 
     expect(mocks.joinCloudWaitlist).toHaveBeenCalledWith(
@@ -265,10 +276,10 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    await user.click(screen.getByRole("button", { name: /join.*waitlist/i }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", {
-      name: /^join waitlist$/i,
+      name: /join.*waitlist/i,
     });
     expect(submit).toBeDisabled();
 

@@ -42,6 +42,7 @@
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
     "@multica/core": "workspace:*",
+    "@multica/i18n": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "electron-updater": "^6.8.3",

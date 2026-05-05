@@ -34,7 +34,6 @@ import type { AgentAvailability, Workload } from "@multica/core/agents";
 // list-level summary state.
 
 export interface AvailabilityVisual {
-  label: string;
   // Background fill for the dot indicator.
   dotClass: string;
   // Foreground colour for the label text alongside the dot.
@@ -43,21 +42,26 @@ export interface AvailabilityVisual {
   icon: LucideIcon;
 }
 
+/** Translate an availability label via the agents namespace. */
+export function availabilityLabel(
+  t: (key: string) => string,
+  availability: AgentAvailability,
+): string {
+  return t(`availability_${availability}`);
+}
+
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
   online: {
-    label: "Online",
     dotClass: "bg-success",
     textClass: "text-success",
     icon: CircleDot,
   },
   unstable: {
-    label: "Unstable",
     dotClass: "bg-warning",
     textClass: "text-warning",
     icon: PlugZap,
   },
   offline: {
-    label: "Offline",
     dotClass: "bg-muted-foreground/40",
     textClass: "text-muted-foreground",
     icon: CircleSlash,
@@ -73,16 +77,22 @@ export const availabilityOrder: AgentAvailability[] = [
 ];
 
 export interface WorkloadVisual {
-  label: string;
   // Foreground colour for icon + label text.
   textClass: string;
   // Icon used inline.
   icon: LucideIcon;
 }
 
+/** Translate a workload label via the agents namespace. */
+export function workloadLabel(
+  t: (key: string) => string,
+  workload: Workload,
+): string {
+  return t(`workload_${workload}`);
+}
+
 export const workloadConfig: Record<Workload, WorkloadVisual> = {
   working: {
-    label: "Working",
     textClass: "text-brand",
     icon: Loader2,
   },
@@ -90,12 +100,10 @@ export const workloadConfig: Record<Workload, WorkloadVisual> = {
     // Amber chip: nothing running but tasks waiting. On an offline runtime
     // this is the "stuck" signal we explicitly surface (replacing the old
     // misleading "Running 0/N +Mq" copy).
-    label: "Queued",
     textClass: "text-warning",
     icon: Clock,
   },
   idle: {
-    label: "Idle",
     textClass: "text-muted-foreground",
     icon: AlertCircle,
   },

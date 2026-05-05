@@ -4,6 +4,10 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
 import { isReservedSlug } from "@multica/core/paths";
+import { createTranslator } from "@multica/i18n/core";
+import { en } from "@multica/i18n/dict/en";
+import { zh } from "@multica/i18n/dict/zh";
+import { localeStore } from "@multica/core/i18n/store";
 import type { DataRouter } from "react-router-dom";
 import { createTabRouter } from "../routes";
 
@@ -198,9 +202,14 @@ function defaultPathFor(slug: string): string {
   return `/${slug}/issues`;
 }
 
+function issuesTitle(): string {
+  const locale = localeStore.getState().locale;
+  return createTranslator(locale, { en, zh })("desktop", "route_issues");
+}
+
 function defaultTabFor(slug: string): Tab {
   const path = defaultPathFor(slug);
-  return makeTab(path, "Issues", resolveRouteIcon(path));
+  return makeTab(path, issuesTitle(), resolveRouteIcon(path));
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +255,7 @@ export const useTabStore = create<TabStore>()(
             desiredPath && sanitizeTabPath(desiredPath) === desiredPath
               ? desiredPath
               : defaultPathFor(slug);
-          const tab = makeTab(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeTab(seedPath, issuesTitle(), resolveRouteIcon(seedPath));
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
@@ -273,7 +282,7 @@ export const useTabStore = create<TabStore>()(
               });
               return;
             }
-            const tab = makeTab(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeTab(clean, issuesTitle(), resolveRouteIcon(clean));
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {

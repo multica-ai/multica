@@ -51,10 +51,21 @@ interface DaemonPrefs {
   autoStop: boolean;
 }
 
+type DaemonErrorCode =
+  | "operation_in_progress"
+  | "cli_not_installed"
+  | "log_file_missing";
+
+interface DaemonActionResult {
+  success: boolean;
+  error?: string;
+  errorCode?: DaemonErrorCode;
+}
+
 interface DaemonAPI {
-  start: () => Promise<{ success: boolean; error?: string }>;
-  stop: () => Promise<{ success: boolean; error?: string }>;
-  restart: () => Promise<{ success: boolean; error?: string }>;
+  start: () => Promise<DaemonActionResult>;
+  stop: () => Promise<DaemonActionResult>;
+  restart: () => Promise<DaemonActionResult>;
   getStatus: () => Promise<DaemonStatus>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
@@ -68,7 +79,7 @@ interface DaemonAPI {
   startLogStream: () => void;
   stopLogStream: () => void;
   onLogLine: (callback: (line: string) => void) => () => void;
-  openLogFile: () => Promise<{ success: boolean; error?: string }>;
+  openLogFile: () => Promise<DaemonActionResult>;
 }
 
 interface UpdaterAPI {

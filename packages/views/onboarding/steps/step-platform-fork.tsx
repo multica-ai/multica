@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useT } from "@multica/i18n/react";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
@@ -76,6 +77,7 @@ export function StepPlatformFork({
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const t = useT("onboarding");
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [downloaded, setDownloaded] = useState(false);
@@ -137,12 +139,12 @@ export function StepPlatformFork({
 
   const footerHint = (() => {
     if (waitlistSubmitted) {
-      return "You're on the waitlist — pick Skip to keep exploring.";
+      return t("footer_waitlist");
     }
     if (downloaded) {
-      return "Finish setup on the download page, then come back to this tab.";
+      return t("footer_downloaded");
     }
-    return "Pick a path above — or skip and configure a runtime later.";
+    return t("footer_default");
   })();
 
   return (
@@ -159,7 +161,7 @@ export function StepPlatformFork({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t("back")}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -176,31 +178,30 @@ export function StepPlatformFork({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Step 3 · Runtime
+              {t("step3_runtime")}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Connect a runtime.
+              {t("step3_title")}
             </h1>
             <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-              A runtime is what actually runs your agents&apos; work. Pick
-              how you&apos;d like to set one up.
+              {t("step3_subtitle")}
             </p>
 
             <div className="mt-10 flex max-w-[560px] flex-col gap-3.5">
               <ForkPrimary onClick={pickDesktop} downloaded={downloaded} />
 
               <ForkAlt
-                title="Install the CLI"
-                subtitle="For servers, remote dev boxes, and headless setups. Terminal required."
-                actionLabel="Show steps"
+                title={t("pf_install_cli")}
+                subtitle={t("pf_cli_desc")}
+                actionLabel={t("step3_show_steps")}
                 onAction={handleOpenCli}
               />
 
               <ForkAlt
-                title="Cloud runtime"
-                subtitle="We host the runtime. Not live yet — join the waitlist."
+                title={t("pf_cloud")}
+                subtitle={t("pf_cloud_desc")}
                 actionLabel={
-                  waitlistSubmitted ? "On the list" : "Join waitlist"
+                  waitlistSubmitted ? t("step3_on_the_list") : t("pf_join_waitlist")
                 }
                 onAction={handleOpenCloud}
               />
@@ -219,7 +220,7 @@ export function StepPlatformFork({
             {footerHint}
           </span>
           <Button variant="secondary" onClick={() => onNext(null)}>
-            Skip for now
+            {t("rc_skip")}
           </Button>
         </footer>
       </div>
@@ -269,6 +270,7 @@ function ForkPrimary({
   onClick: () => void;
   downloaded: boolean;
 }) {
+  const t = useT("onboarding");
   return (
     <button
       type="button"
@@ -281,19 +283,19 @@ function ForkPrimary({
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-[17px] font-medium tracking-tight">
           <Download className="h-4 w-4" aria-hidden />
-          {downloaded ? "Continuing on the download page…" : "Download the desktop app"}
+          {downloaded ? t("pf_downloading") : t("pf_desktop")}
         </div>
         <div className="mt-1 text-[13px] text-background/60">
           {downloaded
-            ? "Opened in a new tab. Pick your installer there, then finish setup on desktop."
-            : "Bundled daemon, zero setup. Pick your platform on the next page."}
+            ? t("pf_downloaded_subtitle")
+            : t("pf_desktop_subtitle")}
         </div>
       </div>
       <span
         aria-hidden
         className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-background/10 px-4 py-2 text-[13px] font-medium transition-colors group-hover:bg-background/20"
       >
-        Download
+        {t("pf_download")}
         <ArrowRight className="h-3.5 w-3.5" />
       </span>
     </button>
@@ -371,6 +373,7 @@ function CliInstallDialog({
   selectedName: string | null;
   cliInstructions?: ReactNode;
 }) {
+  const t = useT("onboarding");
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
       {/* max-h + flex column so an unbounded runtime list (N machines)
@@ -378,11 +381,9 @@ function CliInstallDialog({
           Connect button below the viewport. */}
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Install the CLI</DialogTitle>
+          <DialogTitle>{t("pf_cli_dialog_title")}</DialogTitle>
           <DialogDescription>
-            Same daemon as Desktop, installed via terminal. Use it when
-            Desktop doesn&apos;t fit — servers, remote dev boxes, or
-            headless setups.
+            {t("pf_cli_dialog_desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -397,8 +398,7 @@ function CliInstallDialog({
               <div className="flex items-center gap-2 pt-1 text-sm">
                 <div className="h-2 w-2 rounded-full bg-success" />
                 <span className="font-medium">
-                  {runtimes.length} runtime{runtimes.length > 1 ? "s" : ""}{" "}
-                  connected
+                  {t("pf_cli_connected", { count: runtimes.length })}
                 </span>
               </div>
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
@@ -428,16 +428,16 @@ function CliInstallDialog({
           <span className="text-xs text-muted-foreground">
             {hasRuntimes
               ? canConnect && selectedName
-                ? `Selected: ${selectedName}`
-                : "Pick a runtime above."
+                ? t("pf_cli_selected", { name: selectedName })
+                : t("pf_cli_pick_runtime")
               : null}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onClose}>
-              Cancel
+              {t("back")}
             </Button>
             <Button disabled={!canConnect} onClick={onConnect}>
-              Connect &amp; continue
+              {t("pf_cli_connect_continue")}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
@@ -480,6 +480,7 @@ function formatElapsed(seconds: number) {
  */
 function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   const [elapsed, setElapsed] = useState(0);
+  const t = useT("onboarding");
 
   useEffect(() => {
     if (!dialogOpen) {
@@ -520,7 +521,7 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
           className="inline-block size-2 shrink-0 rounded-full bg-success animate-pulse"
         />
         <span className="font-medium text-foreground">
-          Live · Listening for your daemon
+          {t("pf_cli_live")}
         </span>
         <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
           {formatElapsed(elapsed)}
@@ -533,32 +534,30 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
       >
         {stage === "normal" && (
           <>
-            Run the command above. As soon as{" "}
-            <span className="font-mono">multica setup</span> finishes
-            browser sign-in and the daemon starts, your runtime will
-            appear here automatically (usually 10–30 seconds).
+            {t("pf_cli_wait_normal_before")}{" "}
+            <span className="font-mono">multica setup</span>{" "}
+            {t("pf_cli_wait_normal_after")}
           </>
         )}
         {stage === "midway" && (
           <>
-            Still listening. Make sure you finished the browser tab that{" "}
-            <span className="font-mono">multica setup</span> opened — it
-            needs you to approve the sign-in before the daemon can start.
+            {t("pf_cli_wait_midway_before")}{" "}
+            <span className="font-mono">multica setup</span>{" "}
+            {t("pf_cli_wait_midway_after")}
           </>
         )}
         {stage === "slow" && (
           <>
-            Taking longer than usual. Check the terminal where you ran{" "}
-            <span className="font-mono">multica setup</span> for errors.
+            {t("pf_cli_wait_slow_before")}{" "}
+            <span className="font-mono">multica setup</span>{" "}
+            {t("pf_cli_wait_slow_after")}
           </>
         )}
         {stage === "stalled" && (
           <>
-            Nothing coming through yet. If you&apos;re not comfortable
-            with the terminal,{" "}
-            <span className="font-medium text-foreground">Desktop</span>{" "}
-            is the smoother path — it bundles the daemon. Close this
-            dialog and pick Desktop, or hit Skip to continue.
+            {t("pf_cli_wait_stalled_before")}{" "}
+            <span className="font-medium text-foreground">{t("pf_desktop")}</span>{" "}
+            {t("pf_cli_wait_stalled_after")}
           </>
         )}
       </p>
@@ -587,14 +586,14 @@ function CloudWaitlistDialog({
   submitted: boolean;
   onSubmitted: () => void;
 }) {
+  const t = useT("onboarding");
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
+          <DialogTitle>{t("pf_cloud_dialog_title")}</DialogTitle>
           <DialogDescription>
-            Cloud runtimes aren&apos;t live yet. Leave your email and
-            we&apos;ll email you when they are.
+            {t("pf_cloud_dialog_desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -607,7 +606,7 @@ function CloudWaitlistDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            {submitted ? "Close" : "Cancel"}
+            {submitted ? t("close") : t("cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>

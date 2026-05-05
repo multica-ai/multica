@@ -99,6 +99,8 @@ export interface EditorExtensionsOptions {
    * parsed into a mention node.
    */
   disableMentions?: boolean;
+  /** i18n labels passed from the calling component. */
+  labels?: { allMembers?: string };
 }
 
 export function createEditorExtensions(
@@ -141,7 +143,7 @@ export function createEditorExtensions(
           BaseMentionExtension.configure({
             HTMLAttributes: { class: "mention" },
             ...(editable && options.queryClient
-              ? { suggestion: createMentionSuggestion(options.queryClient) }
+              ? { suggestion: createMentionSuggestion(options.queryClient, options.labels) }
               : {}),
           }),
         ]),

@@ -8,6 +8,7 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "../common/actor-avatar";
 import { AppLink } from "../navigation";
 
@@ -17,12 +18,6 @@ interface MemberProfileCardProps {
   // commenter_id, owner_id are all User UUIDs in the polymorphic actor model).
   userId: string;
 }
-
-const ROLE_LABEL: Record<MemberRole, string> = {
-  owner: "Owner",
-  admin: "Admin",
-  member: "Member",
-};
 
 // Mirrors AgentProfileCard's structure so the two hover surfaces feel like
 // twins ("agent and human are both first-class team members"). Content is
@@ -36,6 +31,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
   );
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: runCounts = [] } = useQuery(agentRunCounts30dOptions(wsId));
+  const t = useT("issues");
 
   const member = members.find((m) => m.user_id === userId);
 
@@ -53,7 +49,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 
   if (!member) {
     return (
-      <div className="text-xs text-muted-foreground">Member unavailable</div>
+      <div className="text-xs text-muted-foreground">{t("member_unavailable")}</div>
     );
   }
 
@@ -106,6 +102,12 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 }
 
 function RoleBadge({ role }: { role: MemberRole }) {
+  const t = useT("issues");
+  const ROLE_LABEL: Record<MemberRole, string> = {
+    owner: t("role_owner"),
+    admin: t("role_admin"),
+    member: t("role_member"),
+  };
   return (
     <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
       {ROLE_LABEL[role]}
@@ -121,12 +123,13 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
   // AppLink uses the platform navigation adapter so this works on web (Next
   // router) and desktop (react-router-dom) without per-app branching.
   const p = useWorkspacePaths();
+  const t = useT("issues");
   const visible = agents.slice(0, 2);
   const overflow = agents.length - visible.length;
 
   return (
     <div className="flex flex-col gap-1.5 text-xs">
-      <span className="text-muted-foreground">Agents ({agents.length})</span>
+      <span className="text-muted-foreground">{t("owned_agents", { count: agents.length })}</span>
       <div className="flex flex-col gap-0.5">
         {visible.map((a) => (
           <AppLink
@@ -153,13 +156,13 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
               aria-hidden
               className="mt-0.5 shrink-0 font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
             >
-              Detail →
+              {t("detail_arrow")}
             </span>
           </AppLink>
         ))}
         {overflow > 0 && (
           <span className="text-muted-foreground">
-            and {overflow} other agent{overflow === 1 ? "" : "s"}
+            {overflow === 1 ? t("and_other_agents", { count: overflow }) : t("and_other_agents_plural", { count: overflow })}
           </span>
         )}
       </div>

@@ -9,6 +9,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/multica-ai/multica/releases/latest";
@@ -53,25 +54,25 @@ function isNewer(latest: string, current: string): boolean {
 
 const statusConfig: Record<
   RuntimeUpdateStatus,
-  { label: string; icon: typeof Loader2; color: string }
+  { labelKey: string; icon: typeof Loader2; color: string }
 > = {
   pending: {
-    label: "Waiting for daemon...",
+    labelKey: "update_waiting",
     icon: Loader2,
     color: "text-muted-foreground",
   },
   running: {
-    label: "Updating...",
+    labelKey: "update_updating",
     icon: Loader2,
     color: "text-info",
   },
   completed: {
-    label: "Update complete. Daemon is restarting...",
+    labelKey: "update_complete",
     icon: CheckCircle2,
     color: "text-success",
   },
-  failed: { label: "Update failed", icon: XCircle, color: "text-destructive" },
-  timeout: { label: "Timeout", icon: XCircle, color: "text-warning" },
+  failed: { labelKey: "update_failed", icon: XCircle, color: "text-destructive" },
+  timeout: { labelKey: "update_timeout", icon: XCircle, color: "text-warning" },
 };
 
 interface UpdateSectionProps {
@@ -93,6 +94,8 @@ export function UpdateSection({
   isOnline,
   launchedBy,
 }: UpdateSectionProps) {
+  const t = useT("runtimes");
+  const c = useT("common");
   const isManaged = launchedBy === "desktop";
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
@@ -142,7 +145,7 @@ export function UpdateSection({
             result.status === "failed" ||
             result.status === "timeout"
           ) {
-            setError(result.error ?? "Unknown error");
+            setError(result.error ?? t("update_unknown_error"));
             setUpdating(false);
             cleanup();
           }
@@ -152,7 +155,7 @@ export function UpdateSection({
       }, 2000);
     } catch {
       setStatus("failed");
-      setError("Failed to initiate update");
+      setError(t("update_failed_initiate"));
       setUpdating(false);
     }
   };
@@ -169,7 +172,7 @@ export function UpdateSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">CLI Version:</span>
+        <span className="text-xs text-muted-foreground">{t("update_cli_version")}</span>
         <span className="text-xs font-mono">
           {currentVersion ?? "unknown"}
         </span>
@@ -177,16 +180,16 @@ export function UpdateSection({
         {isManaged ? (
           <span
             className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-            title="The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI."
+            title={t("update_managed_tooltip")}
           >
-            Managed by Desktop
+            {t("update_managed_desktop")}
           </span>
         ) : (
           <>
             {!hasUpdate && currentVersion && latestVersion && !status && (
               <span className="inline-flex items-center gap-1 text-xs text-success">
                 <Check className="h-3 w-3" />
-                Latest
+                {t("update_latest")}
               </span>
             )}
 
@@ -196,7 +199,7 @@ export function UpdateSection({
                 <span className="text-xs font-mono text-info">
                   {latestVersion}
                 </span>
-                <span className="text-xs text-muted-foreground">available</span>
+                <span className="text-xs text-muted-foreground">{t("update_available").toLowerCase()}</span>
               </>
             )}
 
@@ -208,7 +211,7 @@ export function UpdateSection({
                 disabled={updating}
               >
                 <ArrowUpCircle className="h-3 w-3" />
-                Update
+                {t("update_button")}
               </Button>
             )}
           </>
@@ -219,7 +222,7 @@ export function UpdateSection({
             className={`inline-flex items-center gap-1 text-xs ${config.color}`}
           >
             <Icon className={`h-3 w-3 ${isActive ? "animate-spin" : ""}`} />
-            {config.label}
+            {t(config.labelKey)}
           </span>
         )}
       </div>
@@ -240,7 +243,7 @@ export function UpdateSection({
               className="mt-1"
               onClick={handleUpdate}
             >
-              Retry
+              {c("retry")}
             </Button>
           )}
         </div>

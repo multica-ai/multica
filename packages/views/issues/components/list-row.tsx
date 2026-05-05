@@ -15,17 +15,11 @@ import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { useLocale } from "@multica/i18n/react";
 
 export interface ChildProgress {
   done: number;
   total: number;
-}
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 export const ListRow = memo(function ListRow({
@@ -38,6 +32,7 @@ export const ListRow = memo(function ListRow({
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
+  const { locale } = useLocale();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -112,7 +107,7 @@ export const ListRow = memo(function ListRow({
           )}
           {showDueDate && (
             <span className="shrink-0 text-xs text-muted-foreground">
-              {formatDate(issue.due_date!)}
+              {new Date(issue.due_date!).toLocaleDateString(locale, { month: "short", day: "numeric" })}
             </span>
           )}
           {showAssignee && (

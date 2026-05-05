@@ -1,6 +1,7 @@
 import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { RuntimeHealth } from "@multica/core/runtimes";
+import { useT } from "@multica/i18n/react";
 import { ProviderLogo } from "./provider-logo";
 
 export function RuntimeModeIcon({ mode }: { mode: string }) {
@@ -28,26 +29,26 @@ export function ProviderChip({ provider }: { provider: string }) {
 // colours — keeps the palette small and consistent with Skills.
 const HEALTH_VISUAL: Record<
   RuntimeHealth,
-  { dot: string; label: string; tone: string }
+  { dot: string; labelKey: string; tone: string }
 > = {
   online: {
     dot: "bg-success",
-    label: "Online",
+    labelKey: "health_online",
     tone: "bg-success/10 text-success",
   },
   recently_lost: {
     dot: "bg-warning",
-    label: "Recently lost",
+    labelKey: "health_recently_lost",
     tone: "bg-warning/10 text-warning",
   },
   offline: {
     dot: "bg-muted-foreground/40",
-    label: "Offline",
+    labelKey: "health_offline",
     tone: "bg-muted text-muted-foreground",
   },
   about_to_gc: {
     dot: "bg-destructive",
-    label: "About to GC",
+    labelKey: "health_about_to_gc",
     tone: "bg-destructive/10 text-destructive",
   },
 };
@@ -106,9 +107,9 @@ export function HealthIcon({
   return <Icon className={`${className} ${tone}`} />;
 }
 
-export function healthLabel(health: RuntimeHealth | "loading"): string {
-  if (health === "loading") return "—";
-  return HEALTH_VISUAL[health].label;
+export function healthLabel(health: RuntimeHealth | "loading", t?: (key: string) => string): string {
+  if (health === "loading") return t ? t("health_loading") : "—";
+  return t ? t(HEALTH_VISUAL[health].labelKey) : HEALTH_VISUAL[health].labelKey;
 }
 
 export function HealthBadge({
@@ -116,10 +117,11 @@ export function HealthBadge({
 }: {
   health: RuntimeHealth | "loading";
 }) {
+  const t = useT("runtimes");
   if (health === "loading") {
     return (
       <Badge variant="secondary" className="bg-muted text-muted-foreground">
-        —
+        {t("health_loading")}
       </Badge>
     );
   }
@@ -127,7 +129,7 @@ export function HealthBadge({
   return (
     <Badge variant="secondary" className={v.tone}>
       <span className={`h-1.5 w-1.5 rounded-full ${v.dot}`} />
-      {v.label}
+      {t(v.labelKey)}
     </Badge>
   );
 }

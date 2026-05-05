@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -26,6 +27,7 @@ export function AgentPicker({
   align?: "start" | "center" | "end";
 }) {
   const wsId = useWorkspaceId();
+  const t = useT("autopilots");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -44,7 +46,7 @@ export function AgentPicker({
       width="w-56"
       align={align}
       searchable
-      searchPlaceholder="Filter agents..."
+      searchPlaceholder={t("filter_agents")}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={
@@ -58,7 +60,7 @@ export function AgentPicker({
             ) : (
               <>
                 <Bot className="size-3" />
-                <span>Select agent</span>
+                <span>{t("dialog_select_agent")}</span>
               </>
             )}
           </>

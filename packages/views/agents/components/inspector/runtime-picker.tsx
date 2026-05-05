@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Cloud, Monitor } from "lucide-react";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PickerItem,
@@ -34,6 +35,7 @@ export function RuntimePicker({
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>("mine");
+  const t = useT("agents");
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
   const Icon = selected?.runtime_mode === "cloud" ? Cloud : Monitor;
@@ -44,11 +46,14 @@ export function RuntimePicker({
   // producing the "Claude (host) (host · 2.1.121 (Claude Code))" mess.
   // device_info still shows on each row in the popover (small mono line),
   // which is the right place for system detail.
-  const triggerLabel = selected?.name ?? "No runtime";
+  const triggerLabel = selected?.name ?? t("runtime_none");
   const isOnline = selected?.status === "online";
   const triggerTitle = selected
-    ? `Runtime · ${selected.name} · ${isOnline ? "online" : "offline"}`
-    : "Runtime · none selected";
+    ? t("runtime_trigger_title", {
+        name: selected.name,
+        status: isOnline ? t("runtime_online") : t("runtime_offline"),
+      })
+    : t("runtime_trigger_title_none");
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
 
@@ -109,13 +114,13 @@ export function RuntimePicker({
                 active={filter === "mine"}
                 onClick={() => setFilter("mine")}
               >
-                Mine
+                {t("runtime_mine")}
               </FilterButton>
               <FilterButton
                 active={filter === "all"}
                 onClick={() => setFilter("all")}
               >
-                All
+                {t("runtime_all")}
               </FilterButton>
             </div>
           </div>
@@ -124,7 +129,7 @@ export function RuntimePicker({
     >
       {filtered.length === 0 ? (
         <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-          No runtimes
+          {t("runtime_no_runtimes")}
         </p>
       ) : (
         filtered.map((rt) => {
@@ -136,8 +141,8 @@ export function RuntimePicker({
           // line anyway for users who do need that detail.
           const tooltip = [
             rt.name,
-            owner ? `owned by ${owner.name}` : null,
-            rtOnline ? "online" : "offline",
+            owner ? t("runtime_owned_by", { name: owner.name }) : null,
+            rtOnline ? t("runtime_online") : t("runtime_offline"),
           ]
             .filter(Boolean)
             .join(" · ");
@@ -159,7 +164,7 @@ export function RuntimePicker({
                   </span>
                   {rt.runtime_mode === "cloud" && (
                     <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
-                      Cloud
+                      {t("runtime_cloud")}
                     </span>
                   )}
                 </div>
@@ -188,7 +193,7 @@ export function RuntimePicker({
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                   rtOnline ? "bg-success" : "bg-muted-foreground/40"
                 }`}
-                aria-label={rtOnline ? "online" : "offline"}
+                aria-label={rtOnline ? t("runtime_online") : t("runtime_offline")}
               />
             </PickerItem>
           );

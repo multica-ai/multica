@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +17,7 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
-import { useCreateFeedback, useFeedbackDraftStore } from "@multica/core/feedback";
+import { useCreateFeedback } from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -25,13 +26,10 @@ import { captureFeedbackOpened } from "@multica/core/analytics";
 const MAX_MESSAGE_LEN = 10000;
 
 export function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const t = useT("modals");
   const workspace = useCurrentWorkspace();
-  const draft = useFeedbackDraftStore((s) => s.draft);
-  const setDraft = useFeedbackDraftStore((s) => s.setDraft);
-  const clearDraft = useFeedbackDraftStore((s) => s.clearDraft);
-
   const editorRef = useRef<ContentEditorRef>(null);
-  const [message, setMessage] = useState(draft.message);
+  const [message, setMessage] = useState("");
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -55,7 +53,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const handleSubmit = async () => {
     if (!canSubmit) return;
     if (editorRef.current?.hasActiveUploads()) {
-      toast.info("Please wait for uploads to finish…");
+      toast.info(t("toast_uploading"));
       return;
     }
     // Read from the editor ref at submit time — `message` state lags 150ms
@@ -64,7 +62,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
     const latest = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!latest) return;
     if (latest.length > MAX_MESSAGE_LEN) {
-      toast.error("Message is too long");
+      toast.error(t("toast_too_long"));
       return;
     }
     try {
@@ -73,14 +71,13 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         url: typeof window !== "undefined" ? window.location.href : undefined,
         workspace_id: workspace?.id,
       });
-      clearDraft();
-      toast.success("Thanks for the feedback!");
+      toast.success(t("toast_sent"));
       onClose();
     } catch (err) {
       const msg =
         err instanceof Error && err.message
           ? err.message
-          : "Failed to send feedback";
+          : t("toast_feedback_failed");
       toast.error(msg);
     }
   };
@@ -89,10 +86,9 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-2xl !h-[28rem] p-0 gap-0 flex flex-col overflow-hidden">
         <DialogHeader className="px-5 pt-4 pb-2 shrink-0">
-          <DialogTitle>Feedback</DialogTitle>
+          <DialogTitle>{t("feedback_title")}</DialogTitle>
           <DialogDescription>
-            We&apos;d love to hear what&apos;s working, what isn&apos;t, or
-            what you&apos;d like to see next.
+            {t("feedback_description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -103,9 +99,8 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           >
             <ContentEditor
               ref={editorRef}
-              defaultValue={draft.message}
-              placeholder="Tell us about your experience, bugs you've found, or features you'd like to see…"
-              onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
+              placeholder={t("feedback_placeholder")}
+              onUpdate={(md) => setMessage(md)}
               onUploadFile={uploadWithToast}
               onSubmit={handleSubmit}
               debounceMs={150}
@@ -118,7 +113,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
-            {mutation.isPending ? "Sending…" : "Send feedback"}
+            {mutation.isPending ? t("sending") : t("feedback_send")}
             <kbd className="ml-1 inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none">
               ⌘↵
             </kbd>

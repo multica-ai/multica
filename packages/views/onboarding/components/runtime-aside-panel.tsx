@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Shared right-rail aside for Step 3 (runtime).
  *
@@ -6,47 +8,48 @@
  * the user they can swap later. Designed to live inside a two-column
  * editorial shell's `<aside>` column.
  */
+
+import { useT } from "@multica/i18n/react";
+import { openExternal, publicAppUrl } from "../../platform";
+
 export function RuntimeAsidePanel() {
+  const t = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
       <section>
         <div className="mb-3 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          What&apos;s a runtime?
+          {t("aside_what_runtime")}
         </div>
         <p className="text-[14px] leading-[1.6] text-foreground/80">
-          A <strong className="font-medium text-foreground">runtime</strong>{" "}
-          is a small background process that runs on your machine. It
-          connects your workspace to AI coding tools like Claude Code or
-          Codex, and executes the tasks your agents pick up.
+          {t("aside_runtime_desc")}
         </p>
       </section>
 
       <section>
         <div className="mb-3 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Good to know
+          {t("aside_good_to_know")}
         </div>
         <div className="flex flex-col gap-4">
           <AsideItem
             glyph="↻"
-            title="Swap anytime"
-            body="Each agent's runtime is just a setting. Change it whenever you want."
+            title={t("aside_swap")}
+            body={t("aside_runtime_setting")}
           />
           <AsideItem
             glyph="∞"
-            title="Add more later"
-            body="You can connect a second runtime on another machine for a team, or a dedicated one per agent."
+            title={t("aside_add_more")}
+            body={t("aside_connect_more")}
           />
         </div>
       </section>
 
-      <a
-        href="https://multica.ai/docs/daemon-runtimes"
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        type="button"
+        onClick={() => openExternal(publicAppUrl("/docs/daemon-runtimes"))}
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
       >
-        Learn about runtimes →
-      </a>
+        {t("aside_learn_more")}
+      </button>
     </div>
   );
 }

@@ -2,20 +2,24 @@
 
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, CircleCheck } from "lucide-react";
+import { Archive } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 
-function timeAgo(dateStr: string): string {
+function timeAgo(
+  dateStr: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1) return t("time_just_now");
+  if (minutes < 60) return t("time_minutes_short", { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return t("time_hours_short", { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d`;
+  return t("time_days_short", { count: days });
 }
 
 export { timeAgo };
@@ -25,14 +29,13 @@ export function InboxListItem({
   isSelected,
   onClick,
   onArchive,
-  onDone,
 }: {
   item: InboxItem;
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
-  onDone?: () => void;
 }) {
+  const t = useT("inbox");
   const displayTitle = getInboxDisplayTitle(item);
 
   return (
@@ -61,30 +64,10 @@ export function InboxListItem({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {onDone && (
-              <span
-                role="button"
-                tabIndex={-1}
-                title="Mark as done"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDone();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    onDone();
-                  }
-                }}
-                className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-info group-hover:inline-flex"
-              >
-                <CircleCheck className="h-3.5 w-3.5" />
-              </span>
-            )}
             <span
               role="button"
               tabIndex={-1}
-              title="Archive"
+              title={t("archive")}
               onClick={(e) => {
                 e.stopPropagation();
                 onArchive();
@@ -109,7 +92,7 @@ export function InboxListItem({
             <InboxDetailLabel item={item} />
           </p>
           <span className={`shrink-0 text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-            {timeAgo(item.created_at)}
+            {timeAgo(item.created_at, t)}
           </span>
         </div>
       </div>

@@ -10,9 +10,10 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useT } from "@multica/i18n/react";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { MemberProfileCard } from "../members/member-profile-card";
-import { availabilityConfig } from "../agents/presence";
+import { availabilityConfig, availabilityLabel } from "../agents/presence";
 
 interface ActorAvatarProps {
   actorType: string;
@@ -91,10 +92,12 @@ export function ActorAvatar({
 // smaller avatars use a 6 px dot so the indicator doesn't overwhelm them.
 function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
   const ws = useCurrentWorkspace();
+  const t = useT("agents");
   const detail = useAgentPresenceDetail(ws?.id, agentId);
   if (detail === "loading") return null;
 
-  const { dotClass, label } = availabilityConfig[detail.availability];
+  const { dotClass } = availabilityConfig[detail.availability];
+  const label = availabilityLabel(t, detail.availability);
   const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (

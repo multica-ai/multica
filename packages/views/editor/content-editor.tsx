@@ -37,6 +37,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import { useT } from "@multica/i18n/react";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
@@ -140,6 +141,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const workspaceSlug = useWorkspaceSlug();
     const workspaceSlugRef = useRef(workspaceSlug);
     workspaceSlugRef.current = workspaceSlug;
+    const tUi = useT("ui");
 
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
@@ -168,6 +170,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        labels: { allMembers: tUi("mention_all_members") },
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

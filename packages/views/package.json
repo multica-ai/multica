@@ -49,6 +49,7 @@
     "@floating-ui/dom": "^1.7.6",
 
     "@multica/core": "workspace:*",
+    "@multica/i18n": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",

@@ -9,6 +9,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +36,7 @@ function ReplyInput({
   onSubmit,
   size = "default",
 }: ReplyInputProps) {
+  const t = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -119,7 +121,7 @@ function ReplyInput({
                 </button>
               }
             />
-            <TooltipContent side="top">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+            <TooltipContent side="top">{isExpanded ? t("comment_collapse") : t("comment_expand")}</TooltipContent>
           </Tooltip>
           <FileUploadButton
             size="sm"

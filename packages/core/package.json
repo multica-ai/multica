@@ -74,13 +74,16 @@
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
     "./platform": "./platform/index.ts",
-    "./analytics": "./analytics/index.ts"
+    "./analytics": "./analytics/index.ts",
+    "./i18n": "./i18n/index.ts",
+    "./i18n/store": "./i18n/store.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-query-devtools": "^5.96.2",
     "posthog-js": "catalog:",
-    "zustand": "catalog:"
+    "zustand": "catalog:",
+    "@multica/i18n": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"

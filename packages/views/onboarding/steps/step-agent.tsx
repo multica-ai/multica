@@ -5,6 +5,8 @@ import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useT } from "@multica/i18n/react";
+import { openExternal, publicAppUrl } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 import { api } from "@multica/core/api";
 import {
@@ -43,49 +45,45 @@ import { StepHeader } from "../components/step-header";
  */
 interface AgentTemplate {
   id: AgentTemplateId;
-  label: string;
-  defaultName: string;
+  labelKey: string;
+  nameKey: string;
   emoji: string;
-  blurb: string;
-  instructions: string;
+  blurbKey: string;
+  instructionsKey: string;
 }
 
 const AGENT_TEMPLATES: readonly AgentTemplate[] = [
   {
     id: "coding",
-    label: "Coding Agent",
-    defaultName: "Atlas",
+    labelKey: "sa_tmpl_coding_label",
+    nameKey: "sa_tmpl_coding_name",
     emoji: "⌘",
-    blurb: "Writes, refactors, and ships code. Reads your repo.",
-    instructions:
-      "You are a Coding Agent on a product team. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous.",
+    blurbKey: "sa_tmpl_coding_blurb",
+    instructionsKey: "sa_tmpl_coding_instructions",
   },
   {
     id: "planning",
-    label: "Planning Agent",
-    defaultName: "Orion",
+    labelKey: "sa_tmpl_planning_label",
+    nameKey: "sa_tmpl_planning_name",
     emoji: "◐",
-    blurb: "Breaks down work, drafts specs, keeps the board tidy.",
-    instructions:
-      "You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing.",
+    blurbKey: "sa_tmpl_planning_blurb",
+    instructionsKey: "sa_tmpl_planning_instructions",
   },
   {
     id: "writing",
-    label: "Writing Agent",
-    defaultName: "Mira",
+    labelKey: "sa_tmpl_writing_label",
+    nameKey: "sa_tmpl_writing_name",
     emoji: "✎",
-    blurb: "Drafts, summarizes, researches. Long-form friendly.",
-    instructions:
-      "You are a Writing Agent. Draft documents, summarize long content, and research topics on the web when needed. Structure your output as finished prose a reader can use directly — not an outline. Cite sources when you draw from them. Match the tone the user establishes in the issue.",
+    blurbKey: "sa_tmpl_writing_blurb",
+    instructionsKey: "sa_tmpl_writing_instructions",
   },
   {
     id: "assistant",
-    label: "Assistant",
-    defaultName: "Vega",
+    labelKey: "sa_tmpl_assistant_label",
+    nameKey: "sa_tmpl_assistant_name",
     emoji: "✦",
-    blurb: "General-purpose. Good default when the task is unclear.",
-    instructions:
-      "You are a general-purpose teammate. Handle varied tasks — light coding, writing, research, planning — and stay pragmatic about scope. When the task is ambiguous, ask one clarifying question before diving in. Default to short, useful outputs over exhaustive ones.",
+    blurbKey: "sa_tmpl_assistant_blurb",
+    instructionsKey: "sa_tmpl_assistant_instructions",
   },
 ] as const;
 
@@ -106,6 +104,7 @@ export function StepAgent({
   onCreated: (agent: Agent) => void | Promise<void>;
   onBack?: () => void;
 }) {
+  const t = useT("onboarding");
   const recommendedId = recommendTemplate(questionnaire);
   const recommended = TEMPLATE_BY_ID[recommendedId];
 
@@ -120,9 +119,9 @@ export function StepAgent({
     setCreating(true);
     try {
       const req: CreateAgentRequest = {
-        name: template.defaultName,
-        description: template.blurb,
-        instructions: template.instructions,
+        name: t(template.nameKey),
+        description: t(template.blurbKey),
+        instructions: t(template.instructionsKey),
         runtime_id: runtime.id,
         visibility: "workspace",
         template: templateId,
@@ -131,7 +130,7 @@ export function StepAgent({
       await onCreated(agent);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to create agent",
+        err instanceof Error ? err.message : t("sa_toast_failed_create"),
       );
       setCreating(false);
     }
@@ -154,7 +153,7 @@ export function StepAgent({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t("sa_back")}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -174,29 +173,27 @@ export function StepAgent({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Your first agent
+              {t("sa_eyebrow")}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Meet your first teammate.
+              {t("sa_title")}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
-              Your answers point to a{" "}
+              {t("sa_recommended_intro")}{" "}
               <strong className="font-medium text-foreground">
-                {recommended.label}
+                {t(recommended.labelKey)}
               </strong>
-              . Pick whichever of the four fits you — each template ships
-              ready to take its first issue. You can retune its
-              instructions from the agent settings page later.
+              {t("sa_recommended_hint")}
             </p>
 
             <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {AGENT_TEMPLATES.map((t) => (
+              {AGENT_TEMPLATES.map((tmpl) => (
                 <TemplateCard
-                  key={t.id}
-                  template={t}
-                  selected={templateId === t.id}
-                  recommended={recommendedId === t.id}
-                  onSelect={() => setTemplateId(t.id)}
+                  key={tmpl.id}
+                  template={tmpl}
+                  selected={templateId === tmpl.id}
+                  recommended={recommendedId === tmpl.id}
+                  onSelect={() => setTemplateId(tmpl.id)}
                 />
               ))}
             </div>
@@ -208,11 +205,11 @@ export function StepAgent({
             the agent IS this step. */}
         <footer className="flex shrink-0 items-center justify-between gap-4 bg-background px-6 py-4 sm:px-10 md:px-14 lg:px-16">
           <span className="hidden text-xs text-muted-foreground sm:block">
-            One agent is enough to start. Add more from the sidebar later.
+            {t("sa_footer_hint")}
           </span>
           <Button size="lg" onClick={handleCreate} disabled={creating}>
             {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create {template.defaultName}
+            {t("sa_create_button", { name: t(template.nameKey) })}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -240,6 +237,7 @@ function TemplateCard({
   recommended: boolean;
   onSelect: () => void;
 }) {
+  const t = useT("onboarding");
   return (
     <button
       type="button"
@@ -262,16 +260,16 @@ function TemplateCard({
         </span>
         {recommended && (
           <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand">
-            Recommended
+            {t("sa_recommended_badge")}
           </span>
         )}
       </div>
       <div className="flex flex-col gap-1">
         <div className="text-sm font-medium text-foreground">
-          {template.label}
+          {t(template.labelKey)}
         </div>
         <p className="text-xs leading-snug text-muted-foreground">
-          {template.blurb}
+          {t(template.blurbKey)}
         </p>
       </div>
     </button>
@@ -279,63 +277,60 @@ function TemplateCard({
 }
 
 function AboutAgentsSide() {
+  const t = useT("onboarding");
   return (
     <div className="flex max-w-[380px] flex-col gap-8">
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          What&apos;s an agent
+          {t("sa_side_what_eyebrow")}
         </div>
         <h2 className="font-serif text-[22px] font-medium leading-[1.25] tracking-tight text-foreground">
-          An AI teammate that lives in your workspace.
+          {t("sa_side_what_title")}
         </h2>
         <p className="text-[14px] leading-[1.6] text-foreground/80">
-          Agents show up in every assignee picker, just like any other
-          colleague — except they can work 24/7 on whatever runtime you
-          give them.
+          {t("sa_side_what_body")}
         </p>
       </section>
 
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Ways to work with an agent
+          {t("sa_side_ways_eyebrow")}
         </div>
         <div className="flex flex-col gap-4">
           <WayItem
             glyph="→"
-            title="Assign it an issue"
-            body="It picks up the task and reports back in the thread."
+            title={t("ag_assign")}
+            body={t("sa_side_assign_body")}
           />
           <WayItem
             glyph="@"
-            title="@mention in a comment"
-            body="Pull it into a conversation for a quick take."
+            title={t("sa_side_mention_title")}
+            body={t("sa_side_mention_body")}
           />
           <WayItem
             glyph="◯"
-            title="Chat one-on-one"
-            body="Ask quick questions without creating an issue."
+            title={t("ag_chat")}
+            body={t("sa_side_chat_body")}
           />
           <WayItem
             glyph="↻"
-            title="Put it on Autopilot"
-            body="Daily triage, weekly digest, monthly audit — on a schedule."
+            title={t("ag_autopilot")}
+            body={t("sa_side_autopilot_body")}
           />
         </div>
       </section>
 
       <p className="text-[13px] leading-[1.55] text-muted-foreground">
-        Add more agents anytime. A small team of specialized agents beats
-        one jack-of-all-trades.
+        {t("sa_side_footer")}
       </p>
 
-      <a
-        href="https://multica.ai/docs/agents-create"
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        type="button"
+        onClick={() => openExternal(publicAppUrl("/docs/agents-create"))}
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
       >
-        Creating your first agent →
-      </a>
+        {t("sa_side_docs_link")}
+      </button>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { AgentPresenceDetail } from "@multica/core/agents";
+import { useT } from "@multica/i18n/react";
 import { availabilityConfig, workloadConfig } from "../presence";
 
 interface PresenceIndicatorProps {
@@ -33,6 +34,7 @@ export function AgentPresenceIndicator({
   detail,
   compact,
 }: PresenceIndicatorProps) {
+  const t = useT("agents");
   if (!detail) {
     return compact ? (
       <Skeleton className="h-1.5 w-1.5 rounded-full" />
@@ -55,11 +57,14 @@ export function AgentPresenceIndicator({
   const queuedTone =
     detail.availability === "online" ? "text-muted-foreground" : wl.textClass;
 
+  const avLabel = t(`availability_${detail.availability}`);
+  const wlLabel = t(`workload_${detail.workload}`);
+
   if (compact) {
     return (
       <span
         className="inline-flex items-center"
-        title={`${av.label}${detail.workload !== "idle" ? ` · ${wl.label}` : ""}`}
+        title={`${avLabel}${detail.workload !== "idle" ? ` · ${wlLabel}` : ""}`}
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
       </span>
@@ -71,7 +76,7 @@ export function AgentPresenceIndicator({
       {/* Availability — dot + label. Single dimension, single colour. */}
       <span className="inline-flex items-center gap-1.5">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-        <span className={`text-xs ${av.textClass}`}>{av.label}</span>
+        <span className={`text-xs ${av.textClass}`}>{avLabel}</span>
       </span>
 
       {/* Workload — separator + label, with counts when working/queued.
@@ -86,7 +91,7 @@ export function AgentPresenceIndicator({
             isQueued ? queuedTone : wl.textClass
           }`}
         >
-          {wl.label}
+          {wlLabel}
         </span>
         {isWorking && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground">
@@ -95,7 +100,7 @@ export function AgentPresenceIndicator({
         )}
         {showQueueBadge && (
           <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
-            +{detail.queuedCount} queued
+            +{detail.queuedCount} {t("presence_queued")}
           </span>
         )}
         {/* Queued (no running) — show the queued count directly, since

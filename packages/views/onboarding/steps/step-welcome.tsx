@@ -9,6 +9,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import type { IssueStatus } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 
@@ -48,6 +49,7 @@ export function StepWelcome({
   // Tracks which button is mid-flight so we can show a per-button
   // spinner and disable both while one is in progress.
   const [pending, setPending] = useState<"next" | "skip" | null>(null);
+  const t = useT("onboarding");
 
   const handleNext = async () => {
     if (pending) return;
@@ -79,29 +81,27 @@ export function StepWelcome({
             <div className="flex items-center gap-2.5">
               <MulticaIcon className="size-5 text-foreground" noSpin />
               <span className="font-serif text-xl font-medium tracking-tight">
-                Welcome to Multica
+                {t("welcome_to_multica")}
               </span>
             </div>
 
             <h1 className="text-balance font-serif text-5xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
-              Your AI teammates,
+              {t("headline")}
               <br />
-              in <em className="italic text-brand">one workspace.</em>
+              <em className="italic text-brand">{t("headline_em")}</em>
             </h1>
 
             <div className="flex flex-col gap-4">
               <p className="text-lg leading-relaxed text-foreground/85">
-                Assign them work like you&apos;d assign a colleague — they
-                pick it up, update status, and comment when done.
+                {t("assign_them_work")}
               </p>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 {isWeb ? (
                   <>
-                    Desktop bundles the runtime — nothing to install.
-                    Continue on web to connect your own CLI.
+                    {t("desktop_bundles_runtime")}
                   </>
                 ) : (
-                  "By the end, a real agent will be replying to your first issue."
+                  t("agent_will_reply")
                 )}
               </p>
             </div>
@@ -124,7 +124,7 @@ export function StepWelcome({
                     className={buttonVariants({ size: "lg" })}
                   >
                     <Download className="h-4 w-4" />
-                    Download Desktop
+                    {t("download_desktop")}
                   </a>
                   <Button
                     size="lg"
@@ -135,7 +135,7 @@ export function StepWelcome({
                     {pending === "next" && (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     )}
-                    Continue on web
+                    {t("continue_on_web")}
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </>
@@ -148,7 +148,7 @@ export function StepWelcome({
                   {pending === "next" && (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   )}
-                  Start exploring
+                  {t("start_exploring")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               )}
@@ -162,7 +162,7 @@ export function StepWelcome({
                   {pending === "skip" && (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   )}
-                  I&apos;ve done this before
+                  {t("done_this_before")}
                 </Button>
               )}
             </div>
@@ -180,8 +180,7 @@ export function StepWelcome({
         <DragStrip />
         <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
           <p className="max-w-[440px] text-balance text-center font-serif text-[15px] italic leading-snug text-muted-foreground">
-            Every issue, every thread, every decision — shared by your team and
-            agents.
+            {t("illustration_tagline")}
           </p>
           <WelcomeIllustration />
         </div>
@@ -202,16 +201,15 @@ export function StepWelcome({
  * aesthetic of the left column.
  */
 function WelcomeIllustration() {
+  const t = useT("onboarding");
   return (
     <div className="flex w-full max-w-[460px] flex-col gap-3">
       <MockActivityCard
-        actor={{ kind: "user", name: "You", initial: "N" }}
+        actor={{ kind: "user", name: t("swelcome_you"), initial: "N" }}
         issueId="MCA-42"
         content={
           <>
-            <Mention>@Content Agent</Mention> can you draft a short launch
-            post? Pull from <Mention>@Research Agent</Mention>&apos;s interview
-            findings.
+            <Mention>@Content Agent</Mention> {t("swelcome_card1_content")} <Mention>@Research Agent</Mention>&apos;s {t("swelcome_card1_after")}
           </>
         }
       />
@@ -219,27 +217,22 @@ function WelcomeIllustration() {
         className="-translate-x-5 -rotate-[1.2deg]"
         actor={{ kind: "agent", name: "Content Agent", provider: "codex" }}
         issueId="MCA-42"
-        content={
-          <>
-            On it. Pulling Research&apos;s quotes, drafting around the
-            &ldquo;time saved&rdquo; angle…
-          </>
-        }
+        content={t("swelcome_card2_content")}
         status="in_progress"
       />
       <MockActivityCard
         className="translate-x-8 rotate-[1.6deg]"
         actor={{ kind: "agent", name: "Research Agent", provider: "hermes" }}
         issueId="MCA-38"
-        content="This week's user interviews summarized — 12 calls, 4 recurring themes, 3 pull-quotes."
+        content={t("swelcome_card3_content")}
         status="done"
-        timestamp="15 min ago"
+        timestamp={t("swelcome_card3_timestamp")}
       />
       <MockActivityCard
         className="-translate-x-6 -rotate-[0.8deg]"
         actor={{ kind: "agent", name: "Review Agent", provider: "openclaw" }}
         issueId="MCA-42"
-        content="Reviewed Monday's draft — left 4 notes on tone. Standing by for the new one."
+        content={t("swelcome_card4_content")}
         status="in_review"
       />
       <MockActivityCard
@@ -248,12 +241,11 @@ function WelcomeIllustration() {
         issueId="MCA-35"
         content={
           <>
-            Shipped the export feature <Mention>@you</Mention> flagged.
-            Preview link in the PR.
+            {t("swelcome_card5_before")} <Mention>@{t("swelcome_you")}</Mention> {t("swelcome_card5_after")}
           </>
         }
         status="done"
-        timestamp="just now"
+        timestamp={t("swelcome_card5_timestamp")}
       />
     </div>
   );
@@ -352,6 +344,7 @@ function StatusFooter({
   timestamp?: string;
 }) {
   const cfg = STATUS_CONFIG[status];
+  const tStatus = useT("status");
   return (
     <div className="mt-3 flex items-center gap-2 text-xs">
       <span
@@ -364,7 +357,7 @@ function StatusFooter({
             status === "in_progress" && "animate-pulse",
           )}
         />
-        {cfg.label}
+        {tStatus(status)}
       </span>
       {timestamp && (
         <>

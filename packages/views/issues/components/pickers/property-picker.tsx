@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "@multica/i18n/react";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
@@ -28,7 +29,7 @@ export function PropertyPicker({
   width = "w-48",
   align = "end",
   searchable = false,
-  searchPlaceholder = "Filter...",
+  searchPlaceholder,
   onSearchChange,
   header,
   tooltip,
@@ -63,6 +64,8 @@ export function PropertyPicker({
   footer?: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  const t = useT("issues");
+  const resolvedPlaceholder = searchPlaceholder ?? t("picker_filter");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [tooltipHover, setTooltipHover] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -164,8 +167,8 @@ export function PropertyPicker({
                 onSearchChange?.(e.target.value);
               }}
               onKeyDown={handleKeyDown}
-              placeholder={searchPlaceholder}
-              aria-label="Filter options"
+              placeholder={resolvedPlaceholder}
+              aria-label={t("picker_filter")}
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
@@ -260,9 +263,10 @@ export function PickerSection({
 // ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
+  const t = useT("issues");
   return (
     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-      No results
+      {t("picker_no_results")}
     </div>
   );
 }

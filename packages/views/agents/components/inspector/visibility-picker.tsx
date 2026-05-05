@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Globe, Lock } from "lucide-react";
 import type { AgentVisibility } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import {
   PickerItem,
   PropertyPicker,
@@ -17,12 +18,16 @@ export function VisibilityPicker({
   onChange: (next: AgentVisibility) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT("agents");
   const Icon = value === "private" ? Lock : Globe;
-  const label = value === "private" ? "Private" : "Workspace";
+  const label =
+    value === "private"
+      ? t("visibility_private_label")
+      : t("visibility_workspace_label");
   const tooltip =
     value === "private"
-      ? "Visibility · Private — only you can assign"
-      : "Visibility · Workspace — all members can assign";
+      ? t("visibility_tooltip_private")
+      : t("visibility_tooltip_workspace");
 
   const select = async (next: AgentVisibility) => {
     setOpen(false);
@@ -52,9 +57,9 @@ export function VisibilityPicker({
       >
         <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
-          <div className="font-medium">Workspace</div>
+          <div className="font-medium">{t("visibility_workspace_label")}</div>
           <div className="text-xs text-muted-foreground">
-            All members can assign
+            {t("visibility_workspace_desc")}
           </div>
         </div>
       </PickerItem>
@@ -64,9 +69,9 @@ export function VisibilityPicker({
       >
         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
-          <div className="font-medium">Private</div>
+          <div className="font-medium">{t("visibility_private_label")}</div>
           <div className="text-xs text-muted-foreground">
-            Only you can assign
+            {t("visibility_private_desc")}
           </div>
         </div>
       </PickerItem>

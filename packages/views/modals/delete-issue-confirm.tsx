@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +23,8 @@ export function DeleteIssueConfirmModal({
   onClose: () => void;
   data: Record<string, unknown> | null;
 }) {
+  const t = useT("modals");
+  const c = useT("common");
   const issueId = (data?.issueId as string) || "";
   const navigateTo = (data?.onDeletedNavigateTo as string | undefined) || undefined;
   const [deleting, setDeleting] = useState(false);
@@ -33,11 +36,11 @@ export function DeleteIssueConfirmModal({
     setDeleting(true);
     try {
       await deleteIssue.mutateAsync(issueId);
-      toast.success("Issue deleted");
+      toast.success(t("toast_deleted"));
       onClose();
       if (navigateTo) navigation.push(navigateTo);
     } catch {
-      toast.error("Failed to delete issue");
+      toast.error(t("toast_failed_delete"));
       setDeleting(false);
     }
   };
@@ -46,19 +49,19 @@ export function DeleteIssueConfirmModal({
     <AlertDialog open onOpenChange={(v) => { if (!v && !deleting) onClose(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete issue</AlertDialogTitle>
+          <AlertDialogTitle>{t("delete_title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this issue and all its comments. This action cannot be undone.
+            {t("delete_description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={deleting}>{c("cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={handleDelete}
             disabled={deleting}
             className="bg-destructive text-white hover:bg-destructive/90"
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("deleting") : c("delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

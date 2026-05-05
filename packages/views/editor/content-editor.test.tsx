@@ -23,6 +23,17 @@ vi.mock("./bubble-menu", () => ({
   EditorBubbleMenu: () => null,
 }));
 
+vi.mock("@multica/i18n/react", async () => {
+  const { en } = await import("@multica/i18n/dict/en");
+  return {
+    useT: (ns?: string) => (key: string, params?: Record<string, string | number>) => {
+      const template = ns ? en[ns]?.[key] ?? key : key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k: string) => String(params[k] ?? `{${k}}`));
+    },
+  };
+});
+
 vi.mock("@tiptap/react", () => ({
   useEditor: () => ({
     commands: {

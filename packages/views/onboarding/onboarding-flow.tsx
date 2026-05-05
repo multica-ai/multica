@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -56,6 +57,7 @@ export function OnboardingFlow({
   runtimeInstructions?: React.ReactNode;
 }) {
   const user = useAuthStore((s) => s.user);
+  const t = useT("onboarding");
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
   }
@@ -112,12 +114,12 @@ export function OnboardingFlow({
       await completeOnboarding("skip_existing");
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to finish onboarding",
+        err instanceof Error ? err.message : t("toast_failed_create"),
       );
       return;
     }
     onComplete(workspaces[0] ?? undefined);
-  }, [workspaces, onComplete]);
+  }, [workspaces, onComplete, t]);
 
   const handleQuestionnaireSubmit = useCallback(
     async (answers: QuestionnaireAnswers) => {

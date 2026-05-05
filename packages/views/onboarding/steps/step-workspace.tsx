@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -76,6 +77,7 @@ export function StepWorkspace({
 }) {
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const t = useT("onboarding");
 
   const reusing = existing ?? null;
   // Resume path only: user picks which card. `null` = neither yet, so
@@ -130,10 +132,10 @@ export function StepWorkspace({
         onError: (error) => {
           if (isWorkspaceSlugConflict(error)) {
             setSlugServerError(WORKSPACE_SLUG_CONFLICT_ERROR);
-            toast.error("Choose a different workspace URL");
+            toast.error(t("toast_slug_taken"));
             return;
           }
-          toast.error("Failed to create workspace");
+          toast.error(t("toast_failed_create"));
         },
       },
     );
@@ -153,31 +155,31 @@ export function StepWorkspace({
   let onContinue: () => void;
 
   if (existingActive && reusing) {
-    hint = `Opening ${reusing.name}.`;
-    continueLabel = `Open ${reusing.name}`;
+    hint = t("sw_hint_opening", { name: reusing.name });
+    continueLabel = t("sw_btn_open", { name: reusing.name });
     continueDisabled = isCreating;
     onContinue = () => onCreated(reusing);
   } else if (creatingActive) {
     if (isCreating) {
-      hint = `Creating ${name.trim() || "your workspace"}…`;
-      continueLabel = "Creating…";
+      hint = t("sw_hint_creating", { name: name.trim() || t("sw_preview_name") });
+      continueLabel = t("sw_btn_creating");
       continueDisabled = true;
       onContinue = () => {};
     } else if (canCreate) {
-      hint = `Creating ${name.trim()}.`;
-      continueLabel = `Create ${name.trim()}`;
+      hint = t("sw_hint_create_ready", { name: name.trim() });
+      continueLabel = t("sw_btn_create", { name: name.trim() });
       continueDisabled = false;
       onContinue = handleCreate;
     } else {
-      hint = "Name your workspace to create it.";
-      continueLabel = "Create workspace";
+      hint = t("sw_hint_name_required");
+      continueLabel = t("sw_btn_create_workspace");
       continueDisabled = true;
       onContinue = () => {};
     }
   } else {
     // Resume path, nothing picked yet.
-    hint = "Pick your workspace or start a new one.";
-    continueLabel = "Continue";
+    hint = t("sw_hint_pick");
+    continueLabel = t("sw_btn_continue");
     continueDisabled = true;
     onContinue = () => {};
   }
@@ -189,7 +191,7 @@ export function StepWorkspace({
           htmlFor="ws-name"
           className="text-xs font-medium text-muted-foreground"
         >
-          Workspace name
+          {t("sw_label_name")}
         </Label>
         <Input
           id="ws-name"
@@ -197,7 +199,7 @@ export function StepWorkspace({
           type="text"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
-          placeholder="Acme Inc, My Lab, Side Projects…"
+          placeholder={t("ws_name_placeholder")}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
         />
       </div>
@@ -206,7 +208,7 @@ export function StepWorkspace({
           htmlFor="ws-slug"
           className="text-xs font-medium text-muted-foreground"
         >
-          URL
+          {t("sw_label_url")}
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
@@ -217,7 +219,7 @@ export function StepWorkspace({
             type="text"
             value={slug}
             onChange={(e) => handleSlugChange(e.target.value)}
-            placeholder="acme"
+            placeholder={t("ws_slug_placeholder")}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
@@ -226,14 +228,12 @@ export function StepWorkspace({
       </div>
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium text-muted-foreground">
-          Issue prefix
+          {t("sw_label_prefix")}
         </div>
         <div className="text-sm leading-[1.55] text-muted-foreground">
-          Issues will look like{" "}
-          <span className="font-mono text-foreground">
-            {issuePrefix(slug)}-123
-          </span>
-          . You can change this later in settings.
+          {t("sw_prefix_desc", {
+            prefix: `${issuePrefix(slug)}-123`,
+          })}
         </div>
       </div>
     </div>
@@ -253,7 +253,7 @@ export function StepWorkspace({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t("back")}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -270,17 +270,15 @@ export function StepWorkspace({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              {reusing ? "Pick up or start fresh" : "Your first workspace"}
+              {reusing ? t("sw_overline_resume") : t("sw_overline_new")}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
-                ? `Continue with ${reusing.name}, or start another.`
-                : "Name your workspace."}
+                ? t("sw_title_resume", { name: reusing.name })
+                : t("sw_title_new")}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
-              {reusing
-                ? "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces."
-                : "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later."}
+              {reusing ? t("sw_desc_resume") : t("sw_desc_new")}
             </p>
 
             <div className="mt-10">
@@ -388,6 +386,7 @@ function CreateNewWorkspaceCard({
   onSelect: () => void;
   children: ReactNode;
 }) {
+  const t = useT("onboarding");
   return (
     <div
       className={cn(
@@ -413,10 +412,10 @@ function CreateNewWorkspaceCard({
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="truncate text-[14.5px] font-medium text-foreground">
-            Create a new workspace
+            {t("create_new_workspace")}
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            Start fresh — a separate space for a different side of your work.
+            {t("sw_create_card_desc")}
           </div>
         </div>
         <RadioMark selected={selected} />
@@ -427,45 +426,47 @@ function CreateNewWorkspaceCard({
 }
 
 function CreateWorkspaceSide() {
+  const t = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
       <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        What lives inside a workspace
+        {t("sw_side_inside")}
       </div>
 
-      <WorkspacePreviewCard name="Your workspace" slug="workspace" />
+      <WorkspacePreviewCard name={t("sw_preview_name")} slug="workspace" />
 
       <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        Things you&apos;ll do here
+        {t("sw_side_things_todo")}
       </div>
       <div className="flex flex-col gap-3.5">
-        <PerkRow>Assign issues to agents like you would a teammate</PerkRow>
-        <PerkRow>Chat with any agent without creating an issue</PerkRow>
-        <PerkRow>Invite teammates — they see only this workspace</PerkRow>
-        <PerkRow>Switch to other workspaces anytime from the top-left</PerkRow>
+        <PerkRow>{t("ws_feature_agents")}</PerkRow>
+        <PerkRow>{t("ws_feature_chat")}</PerkRow>
+        <PerkRow>{t("ws_feature_invite")}</PerkRow>
+        <PerkRow>{t("ws_feature_switch")}</PerkRow>
       </div>
     </div>
   );
 }
 
 function ExistingWorkspaceSide({ workspace }: { workspace: Workspace }) {
+  const t = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
       <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        Your workspace
+        {t("sw_side_your_workspace")}
       </div>
 
       <WorkspacePreviewCard name={workspace.name} slug={workspace.slug} />
 
       <div className="mt-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        What&apos;s next
+        {t("sw_side_whats_next")}
       </div>
       <div className="flex flex-col gap-3.5">
         <PerkRow>
-          Connect a runtime so your agents have somewhere to run
+          {t("ws_feature_agent")}
         </PerkRow>
-        <PerkRow>Create your first agent matched to your role</PerkRow>
-        <PerkRow>Watch it pick up a starter task and reply</PerkRow>
+        <PerkRow>{t("ws_feature_agents")}</PerkRow>
+        <PerkRow>{t("ws_feature_watch")}</PerkRow>
       </div>
     </div>
   );
@@ -486,6 +487,7 @@ function WorkspacePreviewCard({
   name: string;
   slug: string;
 }) {
+  const t = useT("onboarding");
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
@@ -506,44 +508,44 @@ function WorkspacePreviewCard({
       <div className="flex flex-col">
         <EntityRow
           icon={<Inbox className="h-4 w-4" />}
-          label="Inbox"
-          meta="your notifications"
+          label={t("sw_entity_inbox_label")}
+          meta={t("sw_entity_inbox_meta")}
         />
         <EntityRow
           icon={<ListTodo className="h-4 w-4" />}
-          label="Issues"
-          meta="shared task board"
+          label={t("sw_entity_issues_label")}
+          meta={t("sw_entity_issues_meta")}
         />
         <EntityRow
           icon={<Bot className="h-4 w-4" />}
-          label="Agents"
-          meta="your AI teammates"
+          label={t("sw_entity_agents_label")}
+          meta={t("sw_entity_agents_meta")}
         />
         <EntityRow
           icon={<FolderKanban className="h-4 w-4" />}
-          label="Projects"
-          meta="group related issues"
+          label={t("sw_entity_projects_label")}
+          meta={t("sw_entity_projects_meta")}
         />
         <EntityRow
           icon={<Zap className="h-4 w-4" />}
-          label="Autopilot"
-          meta="scheduled automation"
+          label={t("sw_entity_autopilot_label")}
+          meta={t("sw_entity_autopilot_meta")}
         />
         <EntityRow
           icon={<Monitor className="h-4 w-4" />}
-          label="Runtimes"
-          meta="where agents run"
+          label={t("sw_entity_runtimes_label")}
+          meta={t("sw_entity_runtimes_meta")}
         />
         <EntityRow
           icon={<BookOpenText className="h-4 w-4" />}
-          label="Skills"
-          meta="reusable playbooks"
+          label={t("sw_entity_skills_label")}
+          meta={t("sw_entity_skills_meta")}
         />
         <EntityRow
           dim
           icon={<MoreHorizontal className="h-4 w-4" />}
-          label="And more"
-          meta="and more"
+          label={t("sw_entity_more_label")}
+          meta={t("sw_entity_more_meta")}
         />
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, WifiOff } from "lucide-react";
+import { useT } from "@multica/i18n/react";
 import type { AgentAvailability } from "@multica/core/agents";
 
 interface Props {
@@ -26,16 +27,18 @@ interface Props {
 // viewport size — without `max-w-4xl` the banner stretches wider than the
 // input on large screens and looks "loose".
 export function OfflineBanner({ agentName, availability }: Props) {
+  const t = useT("chat");
+
   if (availability !== "offline" && availability !== "unstable") return null;
 
-  const name = agentName?.trim() || "the agent";
+  const name = agentName?.trim() || t("offline_agent_fallback");
   if (availability === "unstable") {
     return (
       <div className="px-5 mb-1.5">
         <div className="mx-auto flex w-full max-w-4xl items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 ring-1 ring-amber-200/60 dark:ring-amber-900/40">
           <AlertCircle className="size-3.5 shrink-0" />
           <span className="truncate">
-            {name}&apos;s connection is unstable — replies may be delayed.
+            {t("offline_unstable", { name })}
           </span>
         </div>
       </div>
@@ -46,7 +49,7 @@ export function OfflineBanner({ agentName, availability }: Props) {
       <div className="mx-auto flex w-full max-w-4xl items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs bg-muted text-muted-foreground ring-1 ring-border">
         <WifiOff className="size-3.5 shrink-0" />
         <span className="truncate">
-          {name} is offline — your message will be delivered when they&apos;re back.
+          {t("offline_offline", { name })}
         </span>
       </div>
     </div>

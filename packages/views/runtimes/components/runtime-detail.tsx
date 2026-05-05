@@ -37,9 +37,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "@multica/i18n/react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
-import { availabilityConfig, workloadConfig } from "../../agents/presence";
+import {
+  availabilityConfig,
+  availabilityLabel,
+  workloadConfig,
+  workloadLabel,
+} from "../../agents/presence";
 import { formatLastSeen } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
@@ -89,6 +95,8 @@ function useNowTick(intervalMs = 30_000): number {
 }
 
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+  const t = useT("runtimes");
+  const c = useT("common");
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
   const launchedBy =
@@ -124,17 +132,17 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success("Runtime deleted");
+        toast.success(t("toast_deleted"));
         setDeleteOpen(false);
       },
       onError: (e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to delete runtime");
+        toast.error(e instanceof Error ? e.message : t("toast_failed_delete"));
       },
     });
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
-  const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const lastSeen = formatLastSeen(t, runtime.last_seen_at);
 
   return (
     <div className="flex h-full flex-col">
@@ -148,7 +156,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           render={<AppLink href={paths.runtimes()} />}
         >
           <ArrowLeft className="h-3 w-3" />
-          All runtimes
+          {t("page_title")}
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
@@ -158,7 +166,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           {!canDelete && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
-              Read-only
+              {t("detail_read_only")}
             </span>
           )}
           {canDelete && (
@@ -170,13 +178,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
                     size="icon-sm"
                     onClick={() => setDeleteOpen(true)}
                     className="text-muted-foreground hover:text-destructive"
-                    aria-label="Delete runtime"
+                    aria-label={t("delete_confirm")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 }
               />
-              <TooltipContent>Delete runtime</TooltipContent>
+              <TooltipContent>{t("delete_confirm")}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -223,19 +231,19 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Runtime</AlertDialogTitle>
+            <AlertDialogTitle>{t("delete_title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{runtime.name}&rdquo;? This action cannot be undone.
+              {t("detail_delete_confirm", { name: runtime.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("delete_cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? `${c("delete")}...` : c("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -273,6 +281,7 @@ function HeroCard({
   cliVersion: string | null;
   daemonShort: string | null;
 }) {
+  const t = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
   const device = runtime.device_info ? parseDeviceInfo(runtime.device_info) : null;
   const hasTechDetails = !!cliVersion || !!daemonShort;
@@ -291,7 +300,7 @@ function HeroCard({
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
-              last seen {lastSeen}
+              {t("detail_last_seen")} {lastSeen}
             </span>
           </div>
         </div>
@@ -301,7 +310,7 @@ function HeroCard({
           Replaces the older dense `·`-separated meta strip that mixed
           everything (including dev-only IDs) at the same visual weight. */}
       <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <Fact label="Owner">
+        <Fact label={t("detail_owner")}>
           {ownerMember ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <ActorAvatar
@@ -316,7 +325,7 @@ function HeroCard({
             <span className="text-sm text-muted-foreground">—</span>
           )}
         </Fact>
-        <Fact label="Device">
+        <Fact label={t("detail_device")}>
           {device?.hostname ? (
             <Tooltip>
               <TooltipTrigger
@@ -332,7 +341,7 @@ function HeroCard({
             <span className="text-sm text-muted-foreground">—</span>
           )}
         </Fact>
-        <Fact label="Runtime">
+        <Fact label={t("detail_runtime")}>
           <span className="block truncate text-sm">
             {device?.runtime ?? (
               <span className="capitalize">{runtime.provider}</span>
@@ -356,17 +365,17 @@ function HeroCard({
                 showDetails ? "rotate-90" : ""
               }`}
             />
-            Technical details
+            {t("detail_technical")}
           </button>
           {showDetails && (
             <dl className="grid grid-cols-1 gap-y-2 border-t bg-muted/30 px-4 py-3 sm:grid-cols-2">
               {cliVersion && (
-                <Fact label="Daemon CLI" mono compact>
+                <Fact label={t("detail_daemon_cli")} mono compact>
                   {cliVersion}
                 </Fact>
               )}
               {daemonShort && (
-                <Fact label="Daemon ID" mono compact>
+                <Fact label={t("detail_daemon_id")} mono compact>
                   {daemonShort}
                 </Fact>
               )}
@@ -408,19 +417,21 @@ function ServingAgentsCard({
   presenceMap: Map<string, AgentPresenceDetail>;
   agentHref: (agentId: string) => string;
 }) {
+  const t = useT("runtimes");
+  const ta = useT("agents");
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">Serving</span>
+        <span className="text-xs font-semibold">{t("serving")}</span>
         <span className="text-xs text-muted-foreground">
-          {agents.length} agent{agents.length === 1 ? "" : "s"}
+          {t("detail_agent_count", { count: agents.length })}
         </span>
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">
           <Cpu className="h-5 w-5 text-muted-foreground/40" />
           <p className="mt-2 text-xs text-muted-foreground">
-            No agents are bound to this runtime yet.
+            {t("detail_no_agents")}
           </p>
         </div>
       ) : (
@@ -447,7 +458,7 @@ function ServingAgentsCard({
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-                      <span className={av.textClass}>{av.label}</span>
+                      <span className={av.textClass}>{availabilityLabel(ta, detail?.availability ?? "offline")}</span>
                     </span>
                     {wl && detail && detail.workload !== "idle" && (
                       <span className={`inline-flex items-center gap-1 ${wl.textClass}`}>
@@ -455,12 +466,12 @@ function ServingAgentsCard({
                         <wl.icon
                           className={`h-3 w-3 ${detail.workload === "working" ? "animate-spin" : ""}`}
                         />
-                        {wl.label}
+                        {workloadLabel(ta, detail.workload)}
                         {running > 0 && (
-                          <span className="text-muted-foreground">· {running} running</span>
+                          <span className="text-muted-foreground">· {running} {t("detail_running")}</span>
                         )}
                         {queued > 0 && (
-                          <span className="text-muted-foreground">· {queued} queued</span>
+                          <span className="text-muted-foreground">· {queued} {t("detail_queued")}</span>
                         )}
                       </span>
                     )}
@@ -489,17 +500,18 @@ function DiagnosticsCard({
   canDelete: boolean;
   onDelete: () => void;
 }) {
+  const t = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">Diagnostics</span>
+        <span className="text-xs font-semibold">{t("diagnostics")}</span>
       </div>
       <div className="space-y-3 p-4">
         {isLocal && (
           <div>
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-              CLI
+              {t("detail_cli")}
             </div>
             <UpdateSection
               runtimeId={runtime.id}
@@ -518,7 +530,7 @@ function DiagnosticsCard({
               onClick={onDelete}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Delete runtime
+              {t("delete_confirm")}
             </Button>
           </div>
         )}

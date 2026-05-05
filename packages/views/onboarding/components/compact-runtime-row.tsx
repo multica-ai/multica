@@ -1,5 +1,6 @@
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 
 /**
@@ -19,6 +20,7 @@ export function CompactRuntimeRow({
   onSelect: () => void;
 }) {
   const online = runtime.status === "online";
+  const t = useT("onboarding");
   return (
     <div
       role="button"
@@ -47,7 +49,7 @@ export function CompactRuntimeRow({
           "h-2 w-2 shrink-0 rounded-full",
           online ? "bg-success" : "bg-muted-foreground/40",
         )}
-        aria-label={online ? "Online" : "Offline"}
+        aria-label={online ? t("online") : t("offline")}
       />
     </div>
   );

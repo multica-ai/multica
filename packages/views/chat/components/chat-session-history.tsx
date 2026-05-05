@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Bot } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -17,6 +18,7 @@ const logger = createLogger("chat.ui");
 
 export function ChatSessionHistory() {
   const wsId = useWorkspaceId();
+  const t = useT("chat");
   const setShowHistory = useChatStore((s) => s.setShowHistory);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -56,9 +58,9 @@ export function ChatSessionHistory() {
           >
             <ArrowLeft />
           </TooltipTrigger>
-          <TooltipContent side="bottom">Back</TooltipContent>
+          <TooltipContent side="bottom">{t("history_back")}</TooltipContent>
         </Tooltip>
-        <span className="text-sm font-medium">Chat History</span>
+        <span className="text-sm font-medium">{t("history_title")}</span>
       </div>
 
       {/* Session list */}
@@ -66,7 +68,7 @@ export function ChatSessionHistory() {
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
             <MessageSquare className="size-6" />
-            <span className="text-sm">No chat sessions yet</span>
+            <span className="text-sm">{t("history_no_sessions")}</span>
           </div>
         ) : (
           <div>
@@ -77,6 +79,7 @@ export function ChatSessionHistory() {
                 agent={agentMap.get(session.agent_id) ?? null}
                 isActive={session.id === activeSessionId}
                 onSelect={() => handleSelectSession(session)}
+                t={t}
               />
             ))}
           </div>
@@ -91,13 +94,15 @@ function SessionItem({
   agent,
   isActive,
   onSelect,
+  t,
 }: {
   session: ChatSession;
   agent: Agent | null;
   isActive: boolean;
   onSelect: () => void;
+  t: ReturnType<typeof useT>;
 }) {
-  const timeAgo = formatTimeAgo(session.updated_at);
+  const timeAgo = formatTimeAgo(session.updated_at, t);
 
   return (
     <button
@@ -116,7 +121,7 @@ function SessionItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">
-            {session.title || "Untitled"}
+            {session.title || t("history_untitled")}
           </span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -132,7 +137,7 @@ function SessionItem({
   );
 }
 
-function formatTimeAgo(dateStr: string): string {
+function formatTimeAgo(dateStr: string, t: ReturnType<typeof useT>): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -140,9 +145,9 @@ function formatTimeAgo(dateStr: string): string {
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 1) return t("time_just_now");
+  if (diffMins < 60) return t("time_minutes_ago", { count: diffMins });
+  if (diffHours < 24) return t("time_hours_ago", { count: diffHours });
+  if (diffDays < 7) return t("time_days_ago", { count: diffDays });
   return date.toLocaleDateString();
 }

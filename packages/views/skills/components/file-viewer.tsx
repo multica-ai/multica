@@ -5,6 +5,7 @@ import { Pencil, Eye } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { useT } from "@multica/i18n/react";
 import { Markdown } from "../../common/markdown";
 
 function isMarkdown(path: string) {
@@ -89,6 +90,7 @@ export function FileViewer({
 }) {
   const [editing, setEditing] = useState(false);
   const isMd = isMarkdown(path);
+  const t = useT("skills");
 
   const { frontmatter, body } = useMemo(
     () => (isMd ? parseFrontmatter(content) : { frontmatter: null, body: content }),
@@ -122,7 +124,7 @@ export function FileViewer({
                 }
               />
               <TooltipContent>
-                {editing ? "Preview" : "Edit"}
+                {editing ? t("preview") : t("edit")}
               </TooltipContent>
             </Tooltip>
           )}
@@ -135,7 +137,7 @@ export function FileViewer({
           <div className="p-6">
             {frontmatter && <FrontmatterCard data={frontmatter} />}
             <Markdown mode="full">
-              {body || "*No content yet*"}
+              {body || t("no_content_yet")}
             </Markdown>
           </div>
         ) : (
@@ -144,8 +146,8 @@ export function FileViewer({
             onChange={(e) => onChange(e.target.value)}
             placeholder={
               isMd
-                ? "Write markdown content..."
-                : "File content..."
+                ? t("write_markdown")
+                : t("file_content")
             }
             className="h-full min-h-full resize-none rounded-none border-0 font-mono text-sm leading-relaxed focus-visible:ring-0"
           />

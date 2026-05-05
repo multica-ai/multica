@@ -9,6 +9,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { useT } from "@multica/i18n/react";
+import { openExternal, publicAppUrl } from "../../platform";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type {
   QuestionnaireAnswers,
@@ -45,6 +47,7 @@ export function StepQuestionnaire({
   const [submitting, setSubmitting] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const t = useT("onboarding");
 
   const setTeamSize = (v: TeamSize) =>
     setAnswers((a) => ({
@@ -110,7 +113,7 @@ export function StepQuestionnaire({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t("back")}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -134,27 +137,27 @@ export function StepQuestionnaire({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Before we start
+              {t("sq_before_we_start")}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Three questions to get to know you.
+              {t("sq_headline")}
             </h1>
 
             <div className="mt-10 flex flex-col gap-7">
               <QuestionBlock
                 num={1}
-                question="Who will use this workspace?"
-                ariaLabel="Who will use this workspace?"
+                question={t("sq_q1")}
+                ariaLabel={t("sq_q1")}
               >
                 <OptionCard
                   selected={answers.team_size === "solo"}
                   onSelect={() => setTeamSize("solo")}
-                  label="Just me"
+                  label={t("sq_q1_solo")}
                 />
                 <OptionCard
                   selected={answers.team_size === "team"}
                   onSelect={() => setTeamSize("team")}
-                  label="My team (2–10 people)"
+                  label={t("sq_q1_team")}
                 />
                 <OtherOptionCard
                   selected={answers.team_size === "other"}
@@ -163,34 +166,34 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, team_size_other: v }))
                   }
-                  placeholder="e.g. a small community I help run"
+                  placeholder={t("q_team_placeholder")}
                 />
               </QuestionBlock>
 
               <QuestionBlock
                 num={2}
-                question="What best describes you?"
-                ariaLabel="What best describes you?"
+                question={t("sq_q2")}
+                ariaLabel={t("sq_q2")}
               >
                 <OptionCard
                   selected={answers.role === "developer"}
                   onSelect={() => setRole("developer")}
-                  label="Software developer"
+                  label={t("sq_q2_developer")}
                 />
                 <OptionCard
                   selected={answers.role === "product_lead"}
                   onSelect={() => setRole("product_lead")}
-                  label="Product or project lead"
+                  label={t("sq_q2_product_lead")}
                 />
                 <OptionCard
                   selected={answers.role === "writer"}
                   onSelect={() => setRole("writer")}
-                  label="Writer or content creator"
+                  label={t("sq_q2_writer")}
                 />
                 <OptionCard
                   selected={answers.role === "founder"}
                   onSelect={() => setRole("founder")}
-                  label="Founder or operator"
+                  label={t("sq_q2_founder")}
                 />
                 <OtherOptionCard
                   selected={answers.role === "other"}
@@ -199,34 +202,34 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, role_other: v }))
                   }
-                  placeholder="e.g. researcher, designer, ops lead"
+                  placeholder={t("q_role_placeholder")}
                 />
               </QuestionBlock>
 
               <QuestionBlock
                 num={3}
-                question="What do you want to do with Multica?"
-                ariaLabel="What do you want to do with Multica?"
+                question={t("sq_q3")}
+                ariaLabel={t("sq_q3")}
               >
                 <OptionCard
                   selected={answers.use_case === "coding"}
                   onSelect={() => setUseCase("coding")}
-                  label="Write and ship code"
+                  label={t("sq_q3_coding")}
                 />
                 <OptionCard
                   selected={answers.use_case === "planning"}
                   onSelect={() => setUseCase("planning")}
-                  label="Plan and manage projects"
+                  label={t("sq_q3_planning")}
                 />
                 <OptionCard
                   selected={answers.use_case === "writing_research"}
                   onSelect={() => setUseCase("writing_research")}
-                  label="Research or write"
+                  label={t("sq_q3_writing_research")}
                 />
                 <OptionCard
                   selected={answers.use_case === "explore"}
                   onSelect={() => setUseCase("explore")}
-                  label="I'm just exploring for now"
+                  label={t("sq_q3_explore")}
                 />
                 <OtherOptionCard
                   selected={answers.use_case === "other"}
@@ -235,7 +238,7 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, use_case_other: v }))
                   }
-                  placeholder="e.g. automate my weekly reports"
+                  placeholder={t("q_goal_placeholder")}
                 />
               </QuestionBlock>
             </div>
@@ -248,7 +251,7 @@ export function StepQuestionnaire({
             aria-live="polite"
             className="text-xs tabular-nums text-muted-foreground"
           >
-            {answeredCount} of 3 answered
+            {t("sq_progress", { count: answeredCount })}
           </span>
           <Button
             size="lg"
@@ -256,7 +259,7 @@ export function StepQuestionnaire({
             onClick={submit}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Continue
+            {t("sq_continue")}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -300,43 +303,43 @@ function QuestionBlock({
 }
 
 function WhyWeAsk() {
+  const t = useT("onboarding");
   return (
     <div className="flex max-w-[380px] flex-col gap-8">
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Why three questions
+          {t("sq_why_title")}
         </div>
         <h2 className="font-serif text-[22px] font-medium leading-[1.25] tracking-tight text-foreground">
-          So you land running.
+          {t("sq_why_heading")}
         </h2>
       </section>
 
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          What you get
+          {t("sq_what_you_get")}
         </div>
         <div className="flex flex-col gap-4">
           <UnlockItem
             icon={<PenLine className="h-4 w-4" />}
-            title="A starter project, tailored"
-            body="A Getting Started checklist shaped by your answers."
+            title={t("q_starter_project")}
+            body={t("sq_starter_body")}
           />
           <UnlockItem
             icon={<Sparkles className="h-4 w-4" />}
-            title="A head start with agents"
-            body="Connect a runtime and we'll pick a template for your role — plus write its first task."
+            title={t("q_head_start_agents")}
+            body={t("sq_head_start_body")}
           />
         </div>
       </section>
 
-      <a
-        href="https://multica.ai/docs/agents"
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        type="button"
+        onClick={() => openExternal(publicAppUrl("/docs/agents"))}
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
       >
-        Learn how agents work →
-      </a>
+        {t("sq_learn_agents")}
+      </button>
     </div>
   );
 }

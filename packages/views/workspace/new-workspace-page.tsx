@@ -6,6 +6,7 @@ import type { Workspace } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { CreateWorkspaceForm } from "./create-workspace-form";
+import { useT } from "@multica/i18n/react";
 
 /**
  * Full-page shell for the "create workspace" transition. Shared between web
@@ -28,6 +29,7 @@ export function NewWorkspacePage({
   onBack?: () => void;
 }) {
   const logout = useLogout();
+  const t = useT("workspace");
 
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
@@ -40,7 +42,7 @@ export function NewWorkspacePage({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          {t("back")}
         </Button>
       )}
       <Button
@@ -50,23 +52,22 @@ export function NewWorkspacePage({
         onClick={logout}
       >
         <LogOut />
-        Log out
+        {t("log_out")}
       </Button>
 
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
           <div className="text-center">
             <h1 className="text-3xl font-semibold tracking-tight">
-              Welcome to Multica
+              {t("welcome_title")}
             </h1>
             <p className="mt-3 text-muted-foreground">
-              One workspace where you and your AI teammates work side by side —
-              taking issues, leaving comments, sharing the same context.
+              {t("welcome_description")}
             </p>
           </div>
           <CreateWorkspaceForm onSuccess={onSuccess} />
           <p className="text-center text-xs text-muted-foreground">
-            You can invite teammates once your workspace is ready.
+            {t("invite_hint")}
           </p>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
+import { useT } from "@multica/i18n/react";
 
 /**
  * Typed-confirmation dialog for workspace deletion — GitHub's repo-delete
@@ -42,6 +43,7 @@ export function DeleteWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const td = useT("delete_workspace");
   const [typed, setTyped] = useState("");
   const matched = typed === workspaceName;
 
@@ -62,20 +64,15 @@ export function DeleteWorkspaceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete workspace</DialogTitle>
+          <DialogTitle>{td("title")}</DialogTitle>
           <DialogDescription>
-            This cannot be undone. All issues, agents, and data will be
-            permanently removed.
+            {td("description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
           <Label htmlFor="delete-workspace-confirm" className="text-xs">
-            To confirm, type{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-              {workspaceName}
-            </code>{" "}
-            below.
+            {td("confirm_label", { workspaceName })}
           </Label>
           <Input
             id="delete-workspace-confirm"
@@ -104,7 +101,7 @@ export function DeleteWorkspaceDialog({
             onClick={() => onOpenChange(false)}
             disabled={loading}
           >
-            Cancel
+            {td("cancel")}
           </Button>
           <Button
             type="button"
@@ -112,7 +109,7 @@ export function DeleteWorkspaceDialog({
             onClick={submit}
             disabled={!matched || loading}
           >
-            {loading ? "Deleting..." : "Delete workspace"}
+            {loading ? td("deleting") : td("delete")}
           </Button>
         </DialogFooter>
       </DialogContent>

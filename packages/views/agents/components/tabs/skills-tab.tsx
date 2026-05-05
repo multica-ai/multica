@@ -5,6 +5,7 @@ import { FileText, Info, Plus, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
+import { useT } from "@multica/i18n/react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -20,6 +21,8 @@ export function SkillsTab({
   agent: Agent;
 }) {
   const qc = useQueryClient();
+  const t = useT("agents");
+  const tc = useT("common");
   const wsId = useWorkspaceId();
   // Same query the SkillAddDialog uses (TanStack Query dedupes by key, so
   // this isn't an extra request) — used here only to grey out the "Add skill"
@@ -42,7 +45,7 @@ export function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to remove skill");
+      toast.error(e instanceof Error ? e.message : t("toast_failed_remove_skill"));
     } finally {
       setRemoving(false);
     }
@@ -52,8 +55,7 @@ export function SkillsTab({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Workspace skills assigned to this agent. Local runtime skills are
-          always available automatically.
+          {t("skills_assigned_desc")}
         </p>
         <Button
           variant="outline"
@@ -63,14 +65,14 @@ export function SkillsTab({
           className="shrink-0"
         >
           <Plus className="h-3 w-3" />
-          Add skill
+          {tc("add")} {t("inspector_skills").toLowerCase()}
         </Button>
       </div>
 
       <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
         <p className="text-xs text-muted-foreground">
-          Importing creates a workspace copy that your team can edit and reuse.
+          {t("skills_importing_note")}
         </p>
       </div>
 
@@ -78,10 +80,10 @@ export function SkillsTab({
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">
-            No skills assigned
+            {t("skills_no_skills")}
           </p>
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
-            Add workspace skills to share team knowledge with this agent.
+            {t("skills_add_hint")}
           </p>
           {availableCount > 0 && (
             <Button
@@ -90,7 +92,7 @@ export function SkillsTab({
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              Add skill
+              {tc("add")} {t("inspector_skills").toLowerCase()}
             </Button>
           )}
         </div>

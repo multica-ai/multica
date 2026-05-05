@@ -3,12 +3,11 @@
 import { useState, useRef } from "react";
 import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useT } from "@multica/i18n/react";
 import { useCreateProject } from "@multica/core/projects/mutations";
-import { useProjectDraftStore } from "@multica/core/projects";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
-  PROJECT_PRIORITY_CONFIG,
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -56,6 +55,10 @@ function PillButton({
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const router = useNavigation();
+  const t = useT("modals");
+  const c = useT("common");
+  const tProjStatus = useT("project_status");
+  const tPriority = useT("priority");
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const wsPaths = useWorkspacePaths();
@@ -64,30 +67,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
 
-  const draft = useProjectDraftStore((s) => s.draft);
-  const setDraft = useProjectDraftStore((s) => s.setDraft);
-  const clearDraft = useProjectDraftStore((s) => s.clearDraft);
-
-  const [title, setTitle] = useState(draft.title);
+  const [title, setTitle] = useState("");
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const [status, setStatus] = useState<ProjectStatus>(draft.status);
-  const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
-  const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
-  const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
-  const [icon, setIcon] = useState<string | undefined>(draft.icon);
+  const [status, setStatus] = useState<ProjectStatus>("planned");
+  const [priority, setPriority] = useState<ProjectPriority>("none");
+  const [leadType, setLeadType] = useState<"member" | "agent" | undefined>();
+  const [leadId, setLeadId] = useState<string | undefined>();
+  const [icon, setIcon] = useState<string | undefined>();
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-
-  // Sync field changes to draft store
-  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
-  const updateStatus = (v: ProjectStatus) => { setStatus(v); setDraft({ status: v }); };
-  const updatePriority = (v: ProjectPriority) => { setPriority(v); setDraft({ priority: v }); };
-  const updateLead = (type?: "member" | "agent", id?: string) => {
-    setLeadType(type); setLeadId(id);
-    setDraft({ leadType: type, leadId: id });
-  };
-  const updateIcon = (v: string | undefined) => { setIcon(v); setDraft({ icon: v }); };
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -98,7 +87,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery),
   );
 
-  const leadLabel = leadType && leadId ? getActorName(leadType, leadId) : "Lead";
+  const leadLabel = leadType && leadId ? getActorName(leadType, leadId) : t("lead");
 
   const createProject = useCreateProject();
 
@@ -115,12 +104,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_type: leadType,
         lead_id: leadId,
       });
-      clearDraft();
       onClose();
-      toast.success("Project created");
+      toast.success(t("toast_project_created"));
       router.push(wsPaths.projectDetail(project.id));
     } catch {
-      toast.error("Failed to create project");
+      toast.error(t("toast_project_failed_create"));
     } finally {
       setSubmitting(false);
     }
@@ -139,13 +127,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
         )}
       >
-        <DialogTitle className="sr-only">New Project</DialogTitle>
+        <DialogTitle className="sr-only">{t("new_project")}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">New project</span>
+            <span className="font-medium">{t("new_project")}</span>
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -159,7 +147,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+              <TooltipContent side="bottom">{isExpanded ? t("collapse") : t("expand")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -172,7 +160,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">Close</TooltipContent>
+              <TooltipContent side="bottom">{c("close")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -184,7 +172,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  title="Choose icon"
+                  title={t("choose_icon")}
                 >
                   {icon || "📁"}
                 </button>
@@ -193,7 +181,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             <PopoverContent align="start" className="w-auto p-0">
               <EmojiPicker
                 onSelect={(emoji) => {
-                  updateIcon(emoji);
+                  setIcon(emoji);
                   setIconPickerOpen(false);
                 }}
               />
@@ -201,10 +189,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </Popover>
           <TitleEditor
             autoFocus
-            defaultValue={draft.title}
-            placeholder="Project title"
+            defaultValue=""
+            placeholder={t("project_title")}
             className="text-lg font-semibold"
-            onChange={(v) => updateTitle(v)}
+            onChange={(v) => setTitle(v)}
             onSubmit={handleSubmit}
           />
         </div>
@@ -212,9 +200,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <div className="flex-1 min-h-0 overflow-y-auto px-5">
           <ContentEditor
             ref={descEditorRef}
-            defaultValue={draft.description}
-            placeholder="Add description..."
-            onUpdate={(md) => setDraft({ description: md })}
+            defaultValue=""
+            placeholder={t("add_description")}
             debounceMs={500}
           />
         </div>
@@ -225,15 +212,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <PillButton>
                   <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[status].dotColor)} />
-                  <span>{PROJECT_STATUS_CONFIG[status].label}</span>
+                  <span>{tProjStatus(status)}</span>
                 </PillButton>
               }
             />
             <DropdownMenuContent align="start" className="w-44">
               {PROJECT_STATUS_ORDER.map((s) => (
-                <DropdownMenuItem key={s} onClick={() => updateStatus(s)}>
+                <DropdownMenuItem key={s} onClick={() => setStatus(s)}>
                   <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                  <span>{PROJECT_STATUS_CONFIG[s].label}</span>
+                  <span>{tProjStatus(s)}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -244,15 +231,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <PillButton>
                   <PriorityIcon priority={priority} />
-                  <span>{PROJECT_PRIORITY_CONFIG[priority].label}</span>
+                  <span>{tPriority(priority)}</span>
                 </PillButton>
               }
             />
             <DropdownMenuContent align="start" className="w-44">
               {PROJECT_PRIORITY_ORDER.map((pr) => (
-                <DropdownMenuItem key={pr} onClick={() => updatePriority(pr)}>
+                <DropdownMenuItem key={pr} onClick={() => setPriority(pr)}>
                   <PriorityIcon priority={pr} />
-                  <span>{PROJECT_PRIORITY_CONFIG[pr].label}</span>
+                  <span>{tPriority(pr)}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -274,7 +261,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       <span>{leadLabel}</span>
                     </>
                   ) : (
-                    <span className="text-muted-foreground">Lead</span>
+                    <span className="text-muted-foreground">{t("lead")}</span>
                   )}
                 </PillButton>
               }
@@ -285,7 +272,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   type="text"
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
-                  placeholder="Assign lead..."
+                  placeholder={t("assign_lead_placeholder")}
                   className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
                 />
               </div>
@@ -293,25 +280,27 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => {
-                    updateLead(undefined, undefined);
+                    setLeadType(undefined);
+                    setLeadId(undefined);
                     setLeadOpen(false);
                   }}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">No lead</span>
+                  <span className="text-muted-foreground">{t("no_lead")}</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Members
+                      {t("members")}
                     </div>
                     {filteredMembers.map((m) => (
                       <button
                         type="button"
                         key={m.user_id}
                         onClick={() => {
-                          updateLead("member", m.user_id);
+                          setLeadType("member");
+                          setLeadId(m.user_id);
                           setLeadOpen(false);
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -325,14 +314,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredAgents.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Agents
+                      {t("agents")}
                     </div>
                     {filteredAgents.map((a) => (
                       <button
                         type="button"
                         key={a.id}
                         onClick={() => {
-                          updateLead("agent", a.id);
+                          setLeadType("agent");
+                          setLeadId(a.id);
                           setLeadOpen(false);
                         }}
                         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -347,7 +337,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   filteredAgents.length === 0 &&
                   leadFilter && (
                     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                      No results
+                      {t("no_results")}
                     </div>
                   )}
               </div>
@@ -357,7 +347,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
           <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {submitting ? "Creating..." : "Create Project"}
+            {submitting ? t("creating_project") : c("create")}
           </Button>
         </div>
       </DialogContent>

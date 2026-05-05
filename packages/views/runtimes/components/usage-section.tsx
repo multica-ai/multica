@@ -30,8 +30,9 @@ import {
   DailyCostChart,
   HourlyActivityChart,
   ActivityHeatmap,
-  costStackConfig,
+  useCostStackConfig,
 } from "./charts";
+import { useT } from "@multica/i18n/react";
 
 // Single source of truth for the period selector. KPIs, the When-chart, the
 // Cost-by tabs, and the CSV export all read from the same `days` value so
@@ -103,6 +104,7 @@ function fmtMoney(n: number): string {
 // ---------------------------------------------------------------------------
 
 export function UsageSection({ runtimeId }: { runtimeId: string }) {
+  const t = useT("runtimes");
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180),
   );
@@ -136,7 +138,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
           its tab disables this control to telegraph that. */}
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs uppercase tracking-wider text-muted-foreground">
-          Period
+          {t("usage_period")}
         </span>
         <Segmented
           value={days}
@@ -152,7 +154,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
           divider; the big numbers carry the visual weight of the page. */}
       <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
         <KpiCard
-          label={`Cost · ${days}D`}
+          label={t("usage_cost_days", { days })}
           value={fmtMoney(totals.cost)}
           hint={
             costDelta == null ? undefined : (
@@ -166,27 +168,27 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
                 }
               >
                 {costDelta > 0 ? "+" : ""}
-                {costDelta}% vs prev
+                {t("usage_vs_prev", { pct: costDelta })}
               </span>
             )
           }
         />
         <KpiCard
-          label={`Cache savings · ${days}D`}
+          label={t("usage_cache_savings", { days })}
           value={fmtMoney(totals.cacheSavings)}
           accent={totals.cacheSavings > 0 ? "success" : "default"}
           hint={
             <span>
-              {cacheHitRate}% hit · {formatTokens(totals.cacheRead)} reads
+              {t("usage_cache_hint", { pct: cacheHitRate, reads: formatTokens(totals.cacheRead) })}
             </span>
           }
         />
         <KpiCard
-          label={`Tokens · ${days}D`}
+          label={t("usage_tokens_days", { days })}
           value={formatTokens(tokensTotal)}
           hint={
             <span>
-              in {formatTokens(totals.input)} · out {formatTokens(totals.output)}
+              {t("usage_tokens_hint", { in: formatTokens(totals.input), out: formatTokens(totals.output) })}
             </span>
           }
         />
@@ -235,6 +237,7 @@ function WhenChart({
   filtered: RuntimeUsage[];
   days: TimeRange;
 }) {
+  const t = useT("runtimes");
   const [tab, setTab] = useState<WhenTab>("daily");
 
   // Lazy-fetch hourly cost — only needed when its tab is active. Daily and
@@ -258,15 +261,15 @@ function WhenChart({
     <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h4 className="text-sm font-semibold">When this runtime spent</h4>
+          <h4 className="text-sm font-semibold">{t("usage_when")}</h4>
           <Segmented
             value={tab}
             onChange={setTab}
             options={
               [
-                { label: "Daily", value: "daily" },
-                { label: "Hourly", value: "hourly" },
-                { label: "Heatmap", value: "heatmap" },
+                { label: t("usage_daily"), value: "daily" },
+                { label: t("usage_hourly"), value: "hourly" },
+                { label: t("usage_heatmap"), value: "heatmap" },
               ] as const
             }
           />
@@ -279,7 +282,7 @@ function WhenChart({
           squares; the long view is the whole point). */}
       {tab === "heatmap" && (
         <p className="mb-2 text-center text-xs text-muted-foreground">
-          Last 26 weeks · daily $ intensity (period selector ignored here)
+          {t("usage_heatmap_desc")}
         </p>
       )}
 
@@ -329,6 +332,7 @@ function HourlyTab({
 // ---------------------------------------------------------------------------
 
 function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
+  const t = useT("runtimes");
   const hasTokens = usage.some(
     (u) =>
       u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens >
@@ -341,23 +345,23 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
       <BarChart3 className="h-5 w-5 text-muted-foreground/50" />
       {!hasTokens ? (
         <p className="text-xs text-muted-foreground">
-          No usage in this period.
+          {t("usage_no_usage")}
         </p>
       ) : unmapped.length > 0 ? (
         <>
           <p className="text-xs text-muted-foreground">
-            Tokens recorded but pricing missing for:
+            {t("usage_no_pricing")}
           </p>
           <p className="font-mono text-[11px] text-foreground">
             {unmapped.join(", ")}
           </p>
           <p className="text-[11px] text-muted-foreground/70">
-            Add to MODEL_PRICING in packages/views/runtimes/utils.ts
+            {t("usage_no_pricing_hint")}
           </p>
         </>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Tokens recorded but cost calculation returned $0.
+          {t("usage_zero_cost")}
         </p>
       )}
     </div>
@@ -370,6 +374,7 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
 // ---------------------------------------------------------------------------
 
 function ChartLegend() {
+  const costStackConfig = useCostStackConfig();
   const items = [
     { label: costStackConfig.input.label, color: "var(--color-chart-1)" },
     { label: costStackConfig.output.label, color: "var(--color-chart-2)" },
@@ -405,6 +410,7 @@ function CostByBlock({
   days: number;
   usage: RuntimeUsage[];
 }) {
+  const t = useT("runtimes");
   const [tab, setTab] = useState<"agent" | "model">("agent");
 
   // by-agent is server-side aggregation (fetched lazily on tab activation).
@@ -422,21 +428,21 @@ function CostByBlock({
 
   const caption =
     tab === "agent"
-      ? `${byAgent.length} agent${byAgent.length === 1 ? "" : "s"} on this runtime`
-      : `${byModel.length} model${byModel.length === 1 ? "" : "s"} used`;
+      ? t("usage_agents_caption", { count: byAgent.length })
+      : t("usage_models_caption", { count: byModel.length });
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
         <div className="flex items-center gap-3">
-          <h4 className="text-sm font-semibold">Cost by {tab}</h4>
+          <h4 className="text-sm font-semibold">{t("usage_cost_by")} {tab}</h4>
           <Segmented
             value={tab}
             onChange={setTab}
             options={
               [
-                { label: "By agent", value: "agent" },
-                { label: "By model", value: "model" },
+                { label: t("usage_by_agent"), value: "agent" },
+                { label: t("usage_by_model"), value: "model" },
               ] as const
             }
           />
@@ -447,6 +453,7 @@ function CostByBlock({
         {tab === "agent" && (
           <CostByList
             rows={byAgent}
+            emptyHint={t("usage_no_usage")}
             renderKey={(key) => {
               const agent = agents.find((a) => a.id === key);
               return (
@@ -463,6 +470,7 @@ function CostByBlock({
         {tab === "model" && (
           <CostByList
             rows={byModel}
+            emptyHint={t("usage_no_usage")}
             renderKey={(key) => (
               <span className="truncate font-mono text-xs text-foreground">
                 {key}
@@ -481,7 +489,7 @@ function CostByBlock({
 function CostByList({
   rows,
   renderKey,
-  emptyHint = "No usage in this period.",
+  emptyHint = "",
 }: {
   rows: CostByKey[];
   renderKey: (key: string) => React.ReactNode;
@@ -531,6 +539,7 @@ function CostByList({
 // ---------------------------------------------------------------------------
 
 function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
+  const t = useT("runtimes");
   const [open, setOpen] = useState(false);
   return (
     <div className="border-t pt-3">
@@ -542,7 +551,7 @@ function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
         <ChevronRight
           className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}
         />
-        Daily breakdown table
+        {t("usage_daily_table")}
       </button>
       {open && (
         <div className="mt-3 rounded-md border p-4">
@@ -554,6 +563,7 @@ function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
 }
 
 function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
+  const t = useT("runtimes");
   const byDate = new Map<string, RuntimeUsage[]>();
   for (const u of usage) {
     const existing = byDate.get(u.date) ?? [];
@@ -563,12 +573,12 @@ function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
   return (
     <div className="rounded-lg border">
       <div className="grid grid-cols-[100px_1fr_80px_80px_80px_80px] gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-        <div>Date</div>
-        <div>Model</div>
-        <div className="text-right">Input</div>
-        <div className="text-right">Output</div>
-        <div className="text-right">Cache R</div>
-        <div className="text-right">Cache W</div>
+        <div>{t("usage_date")}</div>
+        <div>{t("usage_model")}</div>
+        <div className="text-right">{t("usage_input")}</div>
+        <div className="text-right">{t("usage_output")}</div>
+        <div className="text-right">{t("usage_cache_r")}</div>
+        <div className="text-right">{t("usage_cache_w")}</div>
       </div>
       <div className="max-h-64 overflow-y-auto divide-y">
         {[...byDate.entries()].map(([date, rows]) =>
@@ -614,10 +624,11 @@ function UsageSkeleton() {
 }
 
 function UsageEmpty() {
+  const t = useT("runtimes");
   return (
     <div className="flex flex-col items-center rounded-lg border border-dashed py-8">
       <BarChart3 className="h-5 w-5 text-muted-foreground/40" />
-      <p className="mt-2 text-xs text-muted-foreground">No usage data yet</p>
+      <p className="mt-2 text-xs text-muted-foreground">{t("usage_empty")}</p>
     </div>
   );
 }

@@ -30,14 +30,24 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { DaemonPanel } from "./daemon-panel";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
-  DAEMON_STATE_LABELS,
-  daemonStateDescription,
+  type DaemonActionResult,
+  getDaemonStateKeys,
+  daemonStateDescKey,
   formatUptime,
 } from "../../../shared/daemon-types";
+
+function daemonErrorDescription(
+  result: DaemonActionResult,
+  t: (key: string) => string,
+): string | undefined {
+  if (!result.errorCode) return result.error;
+  return t(`error_${result.errorCode}`);
+}
 
 /**
  * Header card on the desktop Runtimes page that surfaces the daemon embedded
@@ -50,6 +60,7 @@ import {
  * the list. The `desktop-runtimes-page` wrapper is the only mount point.
  */
 export function DaemonRuntimeCard() {
+  const t = useT("desktop");
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [panelOpen, setPanelOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -83,9 +94,9 @@ export function DaemonRuntimeCard() {
   const affectedTasks = useMemo(
     () =>
       snapshot.filter(
-        (t) =>
-          localRuntimeIds.has(t.runtime_id) &&
-          (t.status === "running" || t.status === "dispatched"),
+        (task) =>
+          localRuntimeIds.has(task.runtime_id) &&
+          (task.status === "running" || task.status === "dispatched"),
       ),
     [snapshot, localRuntimeIds],
   );
@@ -104,9 +115,11 @@ export function DaemonRuntimeCard() {
     const result = await window.daemonAPI.start();
     if (!result.success) {
       setActionLoading(false);
-      toast.error("Failed to start daemon", { description: result.error });
+      toast.error(t("toast_failed_start"), {
+        description: daemonErrorDescription(result, t),
+      });
     }
-  }, []);
+  }, [t]);
 
   // The actual stop call, separated from the click handler so we can call
   // it both from the direct path (no active tasks) and from the confirm
@@ -115,9 +128,11 @@ export function DaemonRuntimeCard() {
     setActionLoading(true);
     const result = await window.daemonAPI.stop();
     if (!result.success) {
-      toast.error("Failed to stop daemon", { description: result.error });
+      toast.error(t("toast_failed_stop"), {
+        description: daemonErrorDescription(result, t),
+      });
     }
-  }, []);
+  }, [t]);
 
   // Click on the Stop button. If there's nothing running, just stop;
   // otherwise pop a confirm dialog explaining the blast radius.
@@ -133,16 +148,18 @@ export function DaemonRuntimeCard() {
     setActionLoading(true);
     const result = await window.daemonAPI.restart();
     if (!result.success) {
-      toast.error("Failed to restart daemon", { description: result.error });
+      toast.error(t("toast_failed_restart"), {
+        description: daemonErrorDescription(result, t),
+      });
       return;
     }
     // Success feedback — the daemon takes a few seconds to come back online,
     // and the only other UI signal is the state badge flipping briefly. A
     // toast confirms the click was received and tells the user what to expect.
-    toast.success("Restarting daemon", {
-      description: "Runtimes will be back online in a few seconds.",
+    toast.success(t("toast_restarting"), {
+      description: t("toast_restarting_desc"),
     });
-  }, []);
+  }, [t]);
 
   const handleRetryInstall = useCallback(async () => {
     setActionLoading(true);
@@ -166,7 +183,7 @@ export function DaemonRuntimeCard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Server className="size-4 text-muted-foreground" />
-            Local daemon
+            {t("local_daemon")}
             <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-0.5 text-xs font-normal">
               <span
                 className={cn(
@@ -180,7 +197,7 @@ export function DaemonRuntimeCard() {
                   isRunning ? "text-foreground" : "text-muted-foreground",
                 )}
               >
-                {DAEMON_STATE_LABELS[status.state]}
+                {t(getDaemonStateKeys(status.state))}
               </span>
               {isRunning && status.uptime && (
                 <span className="text-muted-foreground">
@@ -190,7 +207,7 @@ export function DaemonRuntimeCard() {
             </span>
           </CardTitle>
           <CardDescription>
-            {daemonStateDescription(status.state, runtimeCount)}
+            {(() => { const { key, params } = daemonStateDescKey(status.state, runtimeCount); return t(key, params); })()}
           </CardDescription>
           <CardAction className="self-center">
             <div className="flex items-center gap-1.5">
@@ -202,7 +219,7 @@ export function DaemonRuntimeCard() {
                     onClick={() => setPanelOpen(true)}
                   >
                     <ScrollText className="size-3.5 mr-1.5" />
-                    View logs
+                    {t("view_logs")}
                   </Button>
                   <Button
                     size="sm"
@@ -211,7 +228,7 @@ export function DaemonRuntimeCard() {
                     disabled={actionLoading}
                   >
                     <RotateCw className="size-3.5 mr-1.5" />
-                    Restart
+                    {t("restart")}
                   </Button>
                   <Button
                     size="sm"
@@ -220,7 +237,7 @@ export function DaemonRuntimeCard() {
                     disabled={actionLoading}
                   >
                     <Square className="size-3.5 mr-1.5" />
-                    Stop
+                    {t("stop")}
                   </Button>
                 </>
               )}
@@ -236,7 +253,7 @@ export function DaemonRuntimeCard() {
                   ) : (
                     <Play className="size-3.5 mr-1.5" />
                   )}
-                  Start
+                  {t("start")}
                 </Button>
               )}
 
@@ -248,14 +265,14 @@ export function DaemonRuntimeCard() {
                   disabled={actionLoading}
                 >
                   <RotateCw className="size-3.5 mr-1.5" />
-                  Retry setup
+                  {t("retry_setup")}
                 </Button>
               )}
 
               {(isTransitioning || isInstalling) && (
                 <Button size="sm" variant="outline" disabled>
                   <Activity className="size-3.5 mr-1.5 animate-pulse" />
-                  {DAEMON_STATE_LABELS[status.state]}
+                  {t(getDaemonStateKeys(status.state))}
                 </Button>
               )}
             </div>
@@ -296,8 +313,8 @@ function StopConfirmDialog({
   affectedCount: number;
   onConfirm: () => void;
 }) {
-  const plural = affectedCount === 1 ? "" : "s";
-  const verb = affectedCount === 1 ? "is" : "are";
+  const t = useT("desktop");
+  const tc = useT("common");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -308,22 +325,19 @@ function StopConfirmDialog({
           </div>
           <DialogHeader className="flex-1 gap-1">
             <DialogTitle className="text-sm font-semibold">
-              Stop daemon with {affectedCount} active task{plural}?
+              {t("stop_confirm_title", { count: affectedCount })}
             </DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
-              {affectedCount} task{plural} {verb} currently running on this
-              device. Stopping now will interrupt {affectedCount === 1 ? "it" : "them"}{" "}
-              — affected tasks get marked <strong>failed</strong> once the
-              timeout hits. The daemon won&apos;t auto-restart.
+              {t("stop_confirm_desc", { count: affectedCount })}
             </DialogDescription>
           </DialogHeader>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {tc("cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            Stop daemon
+            {t("stop_daemon")}
           </Button>
         </DialogFooter>
       </DialogContent>

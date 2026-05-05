@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useT } from "@multica/i18n/react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { childIssuesOptions } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -14,6 +15,7 @@ export function SetParentIssueModal({
   onClose: () => void;
   data: Record<string, unknown> | null;
 }) {
+  const t = useT("modals");
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
@@ -31,15 +33,15 @@ export function SetParentIssueModal({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      title="Set parent issue"
-      description="Search for an issue to set as the parent of this issue"
+      title={t("set_parent_title")}
+      description={t("set_parent_description")}
       excludeIds={excludeIds}
       onSelect={(selected) => {
         updateIssue.mutate(
           { id: issueId, parent_issue_id: selected.id },
-          { onError: () => toast.error("Failed to update issue") },
+          { onError: () => toast.error(t("toast_failed_parent")) },
         );
-        toast.success(`Set ${selected.identifier} as parent issue`);
+        toast.success(t("toast_parent_set", { identifier: selected.identifier }));
       }}
     />
   );

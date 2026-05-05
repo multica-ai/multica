@@ -10,6 +10,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
+import { useT, useLocale } from "@multica/i18n/react";
 
 export function DueDatePicker({
   dueDate,
@@ -25,6 +26,8 @@ export function DueDatePicker({
   align?: "start" | "center" | "end";
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT("issues");
+  const { locale } = useLocale();
   const date = dueDate ? new Date(dueDate) : undefined;
   const isOverdue = date ? date < new Date() : false;
 
@@ -39,10 +42,10 @@ export function DueDatePicker({
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span className={isOverdue ? "text-destructive" : ""}>
-                {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {date.toLocaleDateString(locale, { month: "short", day: "numeric" })}
               </span>
             ) : (
-              <span className="text-muted-foreground">Due date</span>
+              <span className="text-muted-foreground">{t("picker_due_date")}</span>
             )}
           </>
         )}
@@ -67,7 +70,7 @@ export function DueDatePicker({
               }}
               className="text-muted-foreground hover:text-foreground"
             >
-              Clear date
+              {t("picker_clear_date")}
             </Button>
           </div>
         )}

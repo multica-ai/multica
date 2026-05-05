@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Globe } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "@multica/i18n/react";
 import {
   PropertyPicker,
   PickerEmpty,
@@ -40,6 +41,7 @@ export function TimezonePicker({
   disabled,
   className,
 }: TimezonePickerProps) {
+  const t = useT("autopilots");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
@@ -65,7 +67,7 @@ export function TimezonePicker({
       width="w-64"
       align="start"
       searchable
-      searchPlaceholder="Search timezone..."
+      searchPlaceholder={t("search_timezone")}
       onSearchChange={setFilter}
       triggerRender={
         <button
