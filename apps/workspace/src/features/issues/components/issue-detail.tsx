@@ -79,6 +79,7 @@ import { useModalStore } from "@/features/modals";
 import { Link, useRouter } from "@/shared/router";
 import { timeAgo } from "@/shared/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { IssueTimerSection } from "@/features/time-tracking";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -1064,6 +1065,11 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               onRemoveDependency={handleRemoveIssueDependency}
             />
           </div>
+
+          <div className="my-8 border-t" />
+
+          {/* Time tracking */}
+          <IssueTimerSection issueId={issue.id} />
 
           <div className="my-8 border-t" />
 

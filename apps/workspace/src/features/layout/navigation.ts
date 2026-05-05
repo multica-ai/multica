@@ -9,6 +9,7 @@ import {
   Settings,
   CircleUser,
   Columns3,
+  Clock,
 } from "lucide-react";
 
 export const primaryNav = [
@@ -19,6 +20,7 @@ export const primaryNav = [
   { href: "/today", label: "Today", icon: CalendarDays },
   { href: "/upcoming", label: "Upcoming", icon: CalendarRange },
   { href: "/my-work", label: "My Work", icon: CircleUser },
+  { href: "/my-time", label: "My Time", icon: Clock },
   { href: "/notifications", label: "Notifications", icon: Inbox },
 ];
 
@@ -36,6 +38,8 @@ export function isWorkspaceNavActive(pathname: string, href: string): boolean {
       return pathname === "/" || pathname === "/inbox" || pathname === "/notifications";
     case "/my-work":
       return pathname === "/my-work" || pathname === "/my-issues";
+    case "/my-time":
+      return pathname === "/my-time";
     case "/agents":
       return pathname === "/agents" || pathname.startsWith("/agents/");
     case "/projects":

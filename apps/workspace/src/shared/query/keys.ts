@@ -56,9 +56,15 @@ export const queryKeys = {
     notificationPreferences: () => ["settings", "notification-preferences"] as const,
     aiSettings: (workspaceId: string) => ["settings", "ai", workspaceId] as const,
   },
+  timeTracking: {
+    all: () => ["time-tracking"] as const,
+    current: (workspaceId: string) => ["time-tracking", "current", workspaceId] as const,
+    entries: (workspaceId: string) => ["time-tracking", "entries", workspaceId] as const,
+    issueEntries: (issueId: string) => ["time-tracking", "issue", issueId] as const,
+  },
 } as const;
 
-const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks"]);
+const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking"]);
 
 export function isWorkspaceScopedQueryKey(queryKey: readonly unknown[]): boolean {
   const root = queryKey[0];

@@ -15,6 +15,7 @@ import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { createLogger } from "@/shared/logger";
 import { useRealtimeSync } from "./use-realtime-sync";
+import { useTimeTrackingSync } from "@/features/time-tracking/hooks/use-time-tracking-sync";
 
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
@@ -58,6 +59,8 @@ export function WSProvider({ children }: { children: ReactNode }) {
 
   // Centralized WS → store sync (uses state so it re-subscribes when WS changes)
   useRealtimeSync(wsClient);
+  // Time tracking WS sync.
+  useTimeTrackingSync();
 
   const subscribe = useCallback(
     (event: WSEventType, handler: EventHandler) => {

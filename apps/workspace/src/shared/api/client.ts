@@ -47,6 +47,9 @@ import type {
   TestNotificationPreferenceRequest,
   AISettingsResponse,
   UpdateAISettingsRequest,
+  TimeEntry,
+  CreateTimeEntryRequest,
+  UpdateTimeEntryRequest,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -786,5 +789,53 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
+  }
+
+  // Time Tracking
+
+  /** Start a live timer or create a manual time entry. */
+  async startTimeEntry(data: CreateTimeEntryRequest): Promise<TimeEntry> {
+    return this.fetch("/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Stop the running timer for the given entry ID. */
+  async stopTimeEntry(entryId: string): Promise<TimeEntry> {
+    return this.fetch(`/api/time-entries/${entryId}/stop`, { method: "PATCH" });
+  }
+
+  /** Get the currently running timer for the authenticated user (null if none). */
+  async getCurrentTimeEntry(): Promise<TimeEntry | null> {
+    return this.fetch("/api/time-entries/current");
+  }
+
+  /** List time entries for the current user in the active workspace (most recent first). */
+  async listTimeEntries(params?: { limit?: number; offset?: number }): Promise<TimeEntry[]> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.offset) search.set("offset", String(params.offset));
+    return this.fetch(`/api/time-entries?${search}`);
+  }
+
+  /** List time entries linked to a specific issue. */
+  async listIssueTimeEntries(issueId: string): Promise<TimeEntry[]> {
+    return this.fetch(`/api/issues/${issueId}/time-entries`);
+  }
+
+  /** Update description or issue link on a time entry. */
+  async updateTimeEntry(entryId: string, data: UpdateTimeEntryRequest): Promise<TimeEntry> {
+    return this.fetch(`/api/time-entries/${entryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Delete a time entry. */
+  async deleteTimeEntry(entryId: string): Promise<void> {
+    await this.fetch(`/api/time-entries/${entryId}`, { method: "DELETE" });
   }
 }

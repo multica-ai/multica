@@ -43,6 +43,7 @@ import {
   primaryNav,
   workspaceNav,
 } from "../navigation";
+import { GlobalTimerWidget } from "@/features/time-tracking";
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
@@ -213,6 +214,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          <GlobalTimerWidget />
           <SidebarMenuItem>
             <SidebarMenuButton
               className="text-muted-foreground hover:text-destructive"

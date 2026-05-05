@@ -34,6 +34,7 @@ import { RuntimesPage } from "@/features/runtimes";
 import { ProjectsPage } from "@/features/projects";
 import { ProjectBoardPage } from "@/features/projects/components/project-board-page";
 import { SkillsPage } from "@/features/skills";
+import { MyTimePage } from "@/features/time-tracking/pages/MyTimePage";
 
 function LoadingScreen() {
   return (
@@ -276,6 +277,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const myTimeRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "my-time",
+  component: MyTimePage,
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   loginRoute,
@@ -298,6 +305,7 @@ const routeTree = rootRoute.addChildren([
     runtimesRoute,
     skillsRoute,
     settingsRoute,
+    myTimeRoute,
   ]),
 ]);
 

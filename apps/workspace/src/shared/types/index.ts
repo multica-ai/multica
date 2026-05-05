@@ -41,3 +41,4 @@ export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
 export type { NotificationPreference, UpdateNotificationPreferenceRequest, TestNotificationPreferenceRequest } from "./notification-preference";
+export type { TimeEntry, CreateTimeEntryRequest, UpdateTimeEntryRequest, ListTimeEntriesResponse } from "./time-entry";
