@@ -1,15 +1,21 @@
 "use client";
 
-import { useMemo } from "react";
-import { Clock } from "lucide-react";
+import { useMemo, useState, useRef } from "react";
+import { Clock, Play, Square, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TimeEntry } from "@/shared/types";
-import { useCurrentTimerQuery, useTimeEntriesQuery, useStopTimerMutation, useDeleteTimeEntryMutation } from "../hooks/use-time-tracking";
+import {
+  useCurrentTimerQuery,
+  useTimeEntriesQuery,
+  useStartTimerMutation,
+  useStopTimerMutation,
+  useDeleteTimeEntryMutation,
+} from "../hooks/use-time-tracking";
 import { LiveDuration, formatDuration } from "../components/LiveDuration";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Trash2, Square } from "lucide-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +50,55 @@ function sumDuration(entries: TimeEntry[]): number {
   }, 0);
 }
 
-// ── Running timer card ────────────────────────────────────────────────────────
+// ── Start timer bar ───────────────────────────────────────────────────────────
+
+/**
+ * Inline bar at the top of My Time page that lets users kick off a new timer.
+ * Hidden while a timer is already running.
+ */
+function StartTimerBar() {
+  const [description, setDescription] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const startMutation = useStartTimerMutation();
+
+  const handleStart = () => {
+    const now = new Date().toISOString();
+    startMutation.mutate(
+      { description: description.trim() || undefined, start_time: now },
+      {
+        onSuccess: () => setDescription(""),
+        onError: () => toast.error("Failed to start timer"),
+      },
+    );
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3">
+      <Play className="size-4 shrink-0 text-muted-foreground" />
+      <Input
+        ref={inputRef}
+        placeholder="What are you working on? (press Enter to start)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleStart();
+        }}
+        className="h-8 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+      />
+      <Button
+        size="sm"
+        className="shrink-0"
+        disabled={startMutation.isPending}
+        onClick={handleStart}
+      >
+        <Play className="mr-1.5 size-3.5" />
+        Start
+      </Button>
+    </div>
+  );
+}
+
+
 
 function RunningTimerCard({ entry }: { entry: TimeEntry }) {
   const stopMutation = useStopTimerMutation();
@@ -159,8 +213,12 @@ export function MyTimePage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-6">
-          {/* Running timer card */}
-          {currentEntry && <RunningTimerCard entry={currentEntry} />}
+          {/* Running timer card or start timer bar */}
+          {currentEntry ? (
+            <RunningTimerCard entry={currentEntry} />
+          ) : (
+            <StartTimerBar />
+          )}
 
           {/* Entry history */}
           {isLoading ? (
@@ -174,7 +232,7 @@ export function MyTimePage() {
               <Clock className="size-10 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">No time entries yet.</p>
               <p className="text-xs text-muted-foreground">
-                Start a timer from the sidebar or from any issue.
+                Use the bar above to start tracking your first timer.
               </p>
             </div>
           ) : (

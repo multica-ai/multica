@@ -1,23 +1,24 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Clock, Square, Play } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Clock, Square, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { useCurrentTimerQuery, useStartTimerMutation, useStopTimerMutation } from "../hooks/use-time-tracking";
 import { LiveDuration } from "./LiveDuration";
 
 /**
- * Compact timer widget shown in the sidebar.
+ * Compact timer widget shown in the sidebar footer.
  *
- * Idle → opens a popover where the user types a description and hits Start.
- * Running → shows a live counter with a stop button.
+ * States:
+ * - Idle/collapsed: shows "Track time" button
+ * - Idle/expanded: shows inline input + Start button (no Popover anchor issues)
+ * - Running: shows live duration counter + Stop button
  */
 export function GlobalTimerWidget() {
-  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [description, setDescription] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -27,6 +28,13 @@ export function GlobalTimerWidget() {
 
   const isRunning = !!currentEntry;
 
+  // Auto-focus the input when the form expands.
+  useEffect(() => {
+    if (expanded) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [expanded]);
+
   const handleStart = () => {
     const now = new Date().toISOString();
     startMutation.mutate(
@@ -34,7 +42,7 @@ export function GlobalTimerWidget() {
       {
         onSuccess: () => {
           setDescription("");
-          setOpen(false);
+          setExpanded(false);
         },
         onError: () => {
           toast.error("Failed to start timer");
@@ -55,7 +63,6 @@ export function GlobalTimerWidget() {
     return (
       <SidebarMenuItem>
         <div className="flex items-center gap-2 px-2 py-1.5 text-sm">
-          {/* Live counter */}
           <Clock className="size-4 shrink-0 text-brand" />
           <div className="min-w-0 flex-1">
             {currentEntry.description ? (
@@ -66,7 +73,6 @@ export function GlobalTimerWidget() {
               className="text-sm font-semibold text-foreground"
             />
           </div>
-          {/* Stop button */}
           <Button
             size="icon"
             variant="ghost"
@@ -82,23 +88,11 @@ export function GlobalTimerWidget() {
     );
   }
 
-  // ── Idle state ──────────────────────────────────────────────────────────────
-  return (
-    <SidebarMenuItem>
-      <Popover
-        open={open}
-        onOpenChange={(v) => {
-          setOpen(v);
-          // Auto-focus the description input when popover opens.
-          if (v) setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-      >
-        <PopoverTrigger render={<SidebarMenuButton className="text-muted-foreground" />}>
-          <Clock />
-          <span>Track time</span>
-        </PopoverTrigger>
-        <PopoverContent side="right" align="end" className="w-64 p-3" sideOffset={8}>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Start timer</p>
+  // ── Idle / expanded inline form ─────────────────────────────────────────────
+  if (expanded) {
+    return (
+      <SidebarMenuItem>
+        <div className="px-2 py-1.5 space-y-2">
           <Input
             ref={inputRef}
             placeholder="What are you working on?"
@@ -106,20 +100,45 @@ export function GlobalTimerWidget() {
             onChange={(e) => setDescription(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleStart();
+              if (e.key === "Escape") setExpanded(false);
             }}
-            className="mb-3 h-8 text-sm"
+            className="h-7 text-xs"
           />
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={startMutation.isPending}
-            onClick={handleStart}
-          >
-            <Play className="mr-1.5 size-3.5" />
-            Start
-          </Button>
-        </PopoverContent>
-      </Popover>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 flex-1 text-xs"
+              disabled={startMutation.isPending}
+              onClick={handleStart}
+            >
+              <Play className="mr-1 size-3" />
+              Start
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0 text-muted-foreground"
+              onClick={() => setExpanded(false)}
+              aria-label="Cancel"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      </SidebarMenuItem>
+    );
+  }
+
+  // ── Idle / collapsed ────────────────────────────────────────────────────────
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className="text-muted-foreground"
+        onClick={() => setExpanded(true)}
+      >
+        <Clock />
+        <span>Track time</span>
+      </SidebarMenuButton>
     </SidebarMenuItem>
   );
 }
