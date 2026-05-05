@@ -39,6 +39,7 @@ export interface Issue {
   project_id: string | null;
   position: number;
   due_date: string | null;
+  is_private?: boolean;
   reactions?: IssueReaction[];
   attachments?: Attachment[];
   created_at: string;

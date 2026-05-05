@@ -246,13 +246,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
+	h.publishToAudience(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
-	})
+	}, h.audienceForIssue(r.Context(), issue))
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -492,7 +492,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
-	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	h.publishToAudience(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp}, h.audienceForIssue(r.Context(), parentIssue))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -539,9 +540,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
-	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
+	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	h.publishToAudience(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
 		"comment_id": commentId,
 		"issue_id":   uuidToString(comment.IssueID),
-	})
+	}, h.audienceForIssue(r.Context(), parentIssue))
 	w.WriteHeader(http.StatusNoContent)
 }

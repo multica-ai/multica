@@ -45,7 +45,6 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
-  scope_enforcement_enabled: boolean;
   budget_enforcement_enabled: boolean;
 }
 

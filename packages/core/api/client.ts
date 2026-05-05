@@ -61,6 +61,7 @@ import type {
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Project,
+  ProjectMember,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -756,17 +757,6 @@ export class ApiClient {
     });
   }
 
-  async setMemberScopeEnforcement(
-    workspaceId: string,
-    memberId: string,
-    enabled: boolean,
-  ): Promise<MemberWithUser> {
-    return this.fetch(
-      `/api/workspaces/${workspaceId}/members/${memberId}/scope-enforcement`,
-      { method: "PATCH", body: JSON.stringify({ enabled }) },
-    );
-  }
-
   async setMemberBudgetEnforcement(
     workspaceId: string,
     memberId: string,
@@ -1017,6 +1007,55 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async updateProjectAccess(
+    id: string,
+    access: "workspace" | "restricted",
+  ): Promise<Project> {
+    return this.fetch(`/api/projects/${id}/access`, {
+      method: "PATCH",
+      body: JSON.stringify({ access }),
+    });
+  }
+
+  async listProjectMembers(
+    id: string,
+  ): Promise<{ members: ProjectMember[] }> {
+    return this.fetch(`/api/projects/${id}/members`);
+  }
+
+  async addProjectMember(
+    id: string,
+    userId: string,
+  ): Promise<{ member: unknown }> {
+    return this.fetch(`/api/projects/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  async removeProjectMember(id: string, userId: string): Promise<void> {
+    await this.fetch(`/api/projects/${id}/members/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listMemberProjects(
+    workspaceId: string,
+    memberId: string,
+  ): Promise<{
+    projects: Array<{
+      id: string;
+      title: string;
+      icon: string | null;
+      color: string | null;
+      added_at: string;
+    }>;
+  }> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/members/${memberId}/projects`,
+    );
   }
 
   // Pins

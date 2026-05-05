@@ -36,6 +36,30 @@ UPDATE project SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateProjectAccess :one
+UPDATE project SET access = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ListProjectsAccessibleToUser :many
+-- Workspace-bound list filtered by access rules:
+--   * project.access = 'workspace'         → visible to every member
+--   * project.access = 'restricted' AND
+--     (workspace admin/owner OR explicit project_member row)
+SELECT p.* FROM project p
+WHERE p.workspace_id = $1
+  AND (
+    p.access = 'workspace'
+    OR sqlc.arg('is_admin')::boolean
+    OR EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')::uuid
+    )
+  )
+  AND (sqlc.narg('status')::text IS NULL OR p.status = sqlc.narg('status'))
+  AND (sqlc.narg('priority')::text IS NULL OR p.priority = sqlc.narg('priority'))
+ORDER BY p.created_at DESC;
+
 -- name: GetProjectByRepoURL :one
 SELECT * FROM project
 WHERE workspace_id = $1 AND repo_url = $2;

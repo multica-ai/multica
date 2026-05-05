@@ -339,6 +339,7 @@ type Issue struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
+	IsPrivate          bool               `json:"is_private"`
 }
 
 type IssueDependency struct {
@@ -384,7 +385,6 @@ type Member struct {
 	UserID                   pgtype.UUID        `json:"user_id"`
 	Role                     string             `json:"role"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	ScopeEnforcementEnabled  bool               `json:"scope_enforcement_enabled"`
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
 }
 
@@ -424,6 +424,16 @@ type Project struct {
 	Priority    string             `json:"priority"`
 	Color       pgtype.Text        `json:"color"`
 	RepoUrl     pgtype.Text        `json:"repo_url"`
+	Access      string             `json:"access"`
+}
+
+type ProjectMember struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
 }
 
 type RuntimeSetupToken struct {

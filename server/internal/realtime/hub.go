@@ -202,6 +202,48 @@ func (h *Hub) Run() {
 	}
 }
 
+// BroadcastToWorkspaceUsers sends a message only to clients in the given
+// workspace whose userID is present in audience. When audience is nil, it
+// behaves the same as BroadcastToWorkspace. Used for project-restricted /
+// standalone-private events where only an explicit subset of members is
+// allowed to see the update.
+func (h *Hub) BroadcastToWorkspaceUsers(workspaceID string, audience map[string]bool, message []byte) {
+	if audience == nil {
+		h.BroadcastToWorkspace(workspaceID, message)
+		return
+	}
+	h.mu.RLock()
+	clients := h.rooms[workspaceID]
+	var slow []*Client
+	for client := range clients {
+		if !audience[client.userID] {
+			continue
+		}
+		select {
+		case client.send <- message:
+		default:
+			slow = append(slow, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	if len(slow) > 0 {
+		h.mu.Lock()
+		for _, client := range slow {
+			if room, ok := h.rooms[workspaceID]; ok {
+				if _, exists := room[client]; exists {
+					delete(room, client)
+					close(client.send)
+					if len(room) == 0 {
+						delete(h.rooms, workspaceID)
+					}
+				}
+			}
+		}
+		h.mu.Unlock()
+	}
+}
+
 // BroadcastToWorkspace sends a message only to clients in the given workspace.
 func (h *Hub) BroadcastToWorkspace(workspaceID string, message []byte) {
 	h.mu.RLock()

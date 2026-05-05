@@ -14,7 +14,7 @@ import (
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled
+RETURNING id, workspace_id, user_id, role, created_at, budget_enforcement_enabled
 `
 
 type CreateMemberParams struct {
@@ -32,7 +32,6 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 	)
 	return i, err
@@ -48,7 +47,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled FROM member
+SELECT id, workspace_id, user_id, role, created_at, budget_enforcement_enabled FROM member
 WHERE id = $1
 `
 
@@ -61,14 +60,13 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 	)
 	return i, err
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled FROM member
+SELECT id, workspace_id, user_id, role, created_at, budget_enforcement_enabled FROM member
 WHERE user_id = $1 AND workspace_id = $2
 `
 
@@ -86,7 +84,6 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 	)
 	return i, err
@@ -94,7 +91,7 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 
 const getMemberWithUser = `-- name: GetMemberWithUser :one
 SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
-       m.scope_enforcement_enabled, m.budget_enforcement_enabled,
+       m.budget_enforcement_enabled,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
@@ -107,7 +104,6 @@ type GetMemberWithUserRow struct {
 	UserID                   pgtype.UUID        `json:"user_id"`
 	Role                     string             `json:"role"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	ScopeEnforcementEnabled  bool               `json:"scope_enforcement_enabled"`
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
 	UserName                 string             `json:"user_name"`
 	UserEmail                string             `json:"user_email"`
@@ -123,7 +119,6 @@ func (q *Queries) GetMemberWithUser(ctx context.Context, id pgtype.UUID) (GetMem
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 		&i.UserName,
 		&i.UserEmail,
@@ -133,7 +128,7 @@ func (q *Queries) GetMemberWithUser(ctx context.Context, id pgtype.UUID) (GetMem
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled FROM member
+SELECT id, workspace_id, user_id, role, created_at, budget_enforcement_enabled FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -153,7 +148,6 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 			&i.UserID,
 			&i.Role,
 			&i.CreatedAt,
-			&i.ScopeEnforcementEnabled,
 			&i.BudgetEnforcementEnabled,
 		); err != nil {
 			return nil, err
@@ -168,7 +162,7 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 
 const listMembersWithUser = `-- name: ListMembersWithUser :many
 SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
-       m.scope_enforcement_enabled, m.budget_enforcement_enabled,
+       m.budget_enforcement_enabled,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
@@ -182,7 +176,6 @@ type ListMembersWithUserRow struct {
 	UserID                   pgtype.UUID        `json:"user_id"`
 	Role                     string             `json:"role"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	ScopeEnforcementEnabled  bool               `json:"scope_enforcement_enabled"`
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
 	UserName                 string             `json:"user_name"`
 	UserEmail                string             `json:"user_email"`
@@ -204,7 +197,6 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 			&i.UserID,
 			&i.Role,
 			&i.CreatedAt,
-			&i.ScopeEnforcementEnabled,
 			&i.BudgetEnforcementEnabled,
 			&i.UserName,
 			&i.UserEmail,
@@ -220,10 +212,38 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
+const listWorkspaceAdminUserIDs = `-- name: ListWorkspaceAdminUserIDs :many
+SELECT user_id FROM member
+WHERE workspace_id = $1 AND role IN ('owner', 'admin')
+`
+
+// Returns the user_ids of every owner/admin in the workspace. Used by the
+// WS audience filter to keep workspace governance always-on for restricted
+// and private events.
+func (q *Queries) ListWorkspaceAdminUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceAdminUserIDs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMemberBudgetEnforcement = `-- name: UpdateMemberBudgetEnforcement :one
 UPDATE member SET budget_enforcement_enabled = $2
 WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled
+RETURNING id, workspace_id, user_id, role, created_at, budget_enforcement_enabled
 `
 
 type UpdateMemberBudgetEnforcementParams struct {
@@ -240,7 +260,6 @@ func (q *Queries) UpdateMemberBudgetEnforcement(ctx context.Context, arg UpdateM
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 	)
 	return i, err
@@ -249,7 +268,7 @@ func (q *Queries) UpdateMemberBudgetEnforcement(ctx context.Context, arg UpdateM
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled
+RETURNING id, workspace_id, user_id, role, created_at, budget_enforcement_enabled
 `
 
 type UpdateMemberRoleParams struct {
@@ -266,33 +285,6 @@ func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRolePara
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
-		&i.BudgetEnforcementEnabled,
-	)
-	return i, err
-}
-
-const updateMemberScopeEnforcement = `-- name: UpdateMemberScopeEnforcement :one
-UPDATE member SET scope_enforcement_enabled = $2
-WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at, scope_enforcement_enabled, budget_enforcement_enabled
-`
-
-type UpdateMemberScopeEnforcementParams struct {
-	ID                      pgtype.UUID `json:"id"`
-	ScopeEnforcementEnabled bool        `json:"scope_enforcement_enabled"`
-}
-
-func (q *Queries) UpdateMemberScopeEnforcement(ctx context.Context, arg UpdateMemberScopeEnforcementParams) (Member, error) {
-	row := q.db.QueryRow(ctx, updateMemberScopeEnforcement, arg.ID, arg.ScopeEnforcementEnabled)
-	var i Member
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.UserID,
-		&i.Role,
-		&i.CreatedAt,
-		&i.ScopeEnforcementEnabled,
 		&i.BudgetEnforcementEnabled,
 	)
 	return i, err

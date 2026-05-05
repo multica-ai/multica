@@ -29,7 +29,7 @@ INSERT INTO project (
     lead_type, lead_id, priority, color
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access
 `
 
 type CreateProjectParams struct {
@@ -71,6 +71,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.Color,
 		&i.RepoUrl,
+		&i.Access,
 	)
 	return i, err
 }
@@ -85,7 +86,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access FROM project
 WHERE id = $1
 `
 
@@ -106,12 +107,13 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.Priority,
 		&i.Color,
 		&i.RepoUrl,
+		&i.Access,
 	)
 	return i, err
 }
 
 const getProjectByRepoURL = `-- name: GetProjectByRepoURL :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access FROM project
 WHERE workspace_id = $1 AND repo_url = $2
 `
 
@@ -137,12 +139,13 @@ func (q *Queries) GetProjectByRepoURL(ctx context.Context, arg GetProjectByRepoU
 		&i.Priority,
 		&i.Color,
 		&i.RepoUrl,
+		&i.Access,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -168,6 +171,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.Color,
 		&i.RepoUrl,
+		&i.Access,
 	)
 	return i, err
 }
@@ -208,7 +212,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -244,6 +248,76 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.Color,
 			&i.RepoUrl,
+			&i.Access,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectsAccessibleToUser = `-- name: ListProjectsAccessibleToUser :many
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.color, p.repo_url, p.access FROM project p
+WHERE p.workspace_id = $1
+  AND (
+    p.access = 'workspace'
+    OR $2::boolean
+    OR EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = p.id AND pm.user_id = $3::uuid
+    )
+  )
+  AND ($4::text IS NULL OR p.status = $4)
+  AND ($5::text IS NULL OR p.priority = $5)
+ORDER BY p.created_at DESC
+`
+
+type ListProjectsAccessibleToUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IsAdmin     bool        `json:"is_admin"`
+	UserID      pgtype.UUID `json:"user_id"`
+	Status      pgtype.Text `json:"status"`
+	Priority    pgtype.Text `json:"priority"`
+}
+
+// Workspace-bound list filtered by access rules:
+//   - project.access = 'workspace'         → visible to every member
+//   - project.access = 'restricted' AND
+//     (workspace admin/owner OR explicit project_member row)
+func (q *Queries) ListProjectsAccessibleToUser(ctx context.Context, arg ListProjectsAccessibleToUserParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listProjectsAccessibleToUser,
+		arg.WorkspaceID,
+		arg.IsAdmin,
+		arg.UserID,
+		arg.Status,
+		arg.Priority,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.Color,
+			&i.RepoUrl,
+			&i.Access,
 		); err != nil {
 			return nil, err
 		}
@@ -268,7 +342,7 @@ UPDATE project SET
     lead_id = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access
 `
 
 type UpdateProjectParams struct {
@@ -312,6 +386,40 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.Color,
 		&i.RepoUrl,
+		&i.Access,
+	)
+	return i, err
+}
+
+const updateProjectAccess = `-- name: UpdateProjectAccess :one
+UPDATE project SET access = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, color, repo_url, access
+`
+
+type UpdateProjectAccessParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Access string      `json:"access"`
+}
+
+func (q *Queries) UpdateProjectAccess(ctx context.Context, arg UpdateProjectAccessParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProjectAccess, arg.ID, arg.Access)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.Color,
+		&i.RepoUrl,
+		&i.Access,
 	)
 	return i, err
 }

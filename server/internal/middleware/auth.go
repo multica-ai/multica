@@ -38,10 +38,12 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Per-task token: tokens starting with "mtt_". Short-lived,
-			// scope-limited; only routes that opt in via AllowTaskScope
-			// can be reached with one of these. Member-facing routes are
-			// guarded by RequireUserScope and reject these.
+			// Per-task token: tokens starting with "mtt_". Short-lived
+			// and revocable, but otherwise grants the same access as the
+			// agent's owner — agents see the workspace through their
+			// owner's eyes (vanilla scope). The narrower task-scope
+			// behavior was rolled back; AllowTaskScopeFor*/RequireUserScope
+			// middlewares now no-op for mtt_ tokens.
 			if strings.HasPrefix(tokenString, auth.TaskTokenPrefix) {
 				if queries == nil {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
@@ -73,13 +75,7 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
 
-				ctx := withTaskScope(r.Context(), TaskScopeContext{
-					TaskID:      uuidToString(tt.TaskID),
-					IssueID:     uuidToString(tt.IssueID),
-					AgentID:     uuidToString(tt.AgentID),
-					WorkspaceID: uuidToString(tt.WorkspaceID),
-				})
-				next.ServeHTTP(w, r.WithContext(ctx))
+				next.ServeHTTP(w, r.WithContext(withUserScope(r.Context())))
 				return
 			}
 

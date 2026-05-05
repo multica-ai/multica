@@ -12,6 +12,11 @@ type Event struct {
 	ActorType   string // "member", "agent", or "system"
 	ActorID     string
 	Payload     any // JSON-serializable, same shape as current WS payloads
+
+	// AudienceUserIDs, when non-nil, restricts WS fan-out to clients whose
+	// userID is present in this slice. Used for project-restricted /
+	// standalone-private events. nil means broadcast to whole workspace.
+	AudienceUserIDs []string
 }
 
 // Handler is a function that processes an event.

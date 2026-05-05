@@ -44,6 +44,11 @@ echo "Running migrations…"
 make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 
 echo "Building Next.js frontend…"
+# Next.js 16 sometimes leaves stale client-reference-manifest entries
+# when an incremental build runs over a previous build with route-group
+# changes — pages then 500 in production with InvariantError. Clean
+# .next first so every deploy is a from-scratch build.
+rm -rf apps/web/.next
 pnpm --filter @multica/web build
 
 echo "Restarting launchd jobs…"

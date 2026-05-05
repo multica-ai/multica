@@ -56,7 +56,7 @@ export type {
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
-export type { Project, ProjectStatus, ProjectPriority, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
+export type { Project, ProjectStatus, ProjectPriority, ProjectAccess, ProjectMember, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   Autopilot,

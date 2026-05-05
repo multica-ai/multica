@@ -54,46 +54,6 @@ type updateMemberToggleRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-// PatchMemberScopeEnforcement flips the JEH-324 token-scope toggle for
-// a single member. Owner/admin only. Returns the refreshed member row.
-func (h *Handler) PatchMemberScopeEnforcement(w http.ResponseWriter, r *http.Request) {
-	caller, ok := h.requireWorkspaceAdmin(w, r)
-	if !ok {
-		return
-	}
-	target, ok := h.loadTargetMember(w, r, caller)
-	if !ok {
-		return
-	}
-
-	var body updateMemberToggleRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-
-	if target.ScopeEnforcementEnabled == body.Enabled {
-		writeJSON(w, http.StatusOK, memberToToggleResponse(target))
-		return
-	}
-
-	updated, err := h.Queries.UpdateMemberScopeEnforcement(r.Context(), db.UpdateMemberScopeEnforcementParams{
-		ID:                      target.ID,
-		ScopeEnforcementEnabled: body.Enabled,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "update toggle: "+err.Error())
-		return
-	}
-
-	slog.Info("member scope enforcement toggled",
-		"member_id", uuidToString(updated.ID),
-		"enabled", updated.ScopeEnforcementEnabled,
-		"by", uuidToString(caller.UserID),
-	)
-	writeJSON(w, http.StatusOK, memberToToggleResponse(updated))
-}
-
 // PatchMemberBudgetEnforcement flips the JEH-327 budget-cap toggle.
 // Owner/admin only.
 func (h *Handler) PatchMemberBudgetEnforcement(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +151,6 @@ func memberToToggleResponse(m db.Member) MemberWithUserResponse {
 		UserID:                   uuidToString(m.UserID),
 		Role:                     m.Role,
 		CreatedAt:                timestampToString(m.CreatedAt),
-		ScopeEnforcementEnabled:  m.ScopeEnforcementEnabled,
 		BudgetEnforcementEnabled: m.BudgetEnforcementEnabled,
 	}
 }

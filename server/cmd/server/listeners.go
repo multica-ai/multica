@@ -155,7 +155,15 @@ func registerListeners(bus *events.Bus, hub *realtime.Hub) {
 			return
 		}
 		if e.WorkspaceID != "" {
-			hub.BroadcastToWorkspace(e.WorkspaceID, data)
+			if e.AudienceUserIDs != nil {
+				audience := make(map[string]bool, len(e.AudienceUserIDs))
+				for _, uid := range e.AudienceUserIDs {
+					audience[uid] = true
+				}
+				hub.BroadcastToWorkspaceUsers(e.WorkspaceID, audience, data)
+			} else {
+				hub.BroadcastToWorkspace(e.WorkspaceID, data)
+			}
 		} else if strings.HasPrefix(e.Type, "daemon:") {
 			hub.Broadcast(data)
 		}

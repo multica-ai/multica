@@ -1,16 +1,43 @@
 -- name: ListIssues :many
-SELECT id, workspace_id, title, status, priority,
-       assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
-FROM issue
-WHERE workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-  AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
-  AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
-  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
-  AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-ORDER BY position ASC, created_at DESC
+-- Access-filtered list of issues. The access predicate enforces:
+--   * is_admin = TRUE  → no filter (workspace owners/admins always see all)
+--   * standalone issue + is_private = FALSE → visible
+--   * standalone issue + is_private = TRUE  → only creator
+--   * project issue:
+--       project.access = 'workspace' → visible
+--       project.access = 'restricted' AND user is project_member → visible
+SELECT i.id, i.workspace_id, i.title, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
+       i.number, i.project_id
+FROM issue i
+LEFT JOIN project p ON p.id = i.project_id
+WHERE i.workspace_id = $1
+  AND (
+    sqlc.arg('is_admin')::boolean
+    OR (
+      i.project_id IS NULL AND (
+        i.is_private = FALSE
+        OR (i.creator_type = 'member' AND i.creator_id = sqlc.arg('user_id')::uuid)
+      )
+    )
+    OR (
+      i.project_id IS NOT NULL AND (
+        p.access = 'workspace'
+        OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')::uuid
+        )
+      )
+    )
+  )
+  AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
+  AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
+  AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: GetIssue :one
@@ -46,6 +73,7 @@ UPDATE issue SET
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
+    is_private = COALESCE(sqlc.narg('is_private'), is_private),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

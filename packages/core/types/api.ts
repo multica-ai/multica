@@ -27,6 +27,7 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  is_private?: boolean;
 }
 
 export interface ListIssuesParams {

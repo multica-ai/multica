@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ShieldCheck, Wallet, Crown, Shield, User as UserIcon, UserMinus } from "lucide-react";
+import { ArrowLeft, Wallet, Crown, Shield, User as UserIcon, UserMinus } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -63,7 +63,6 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   });
 
   const [busy, setBusy] = useState(false);
-  const [confirmScopeOff, setConfirmScopeOff] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const navigation = useNavigation();
 
@@ -92,33 +91,6 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
 
   const rc = roleConfig[member.role];
   const RoleIcon = rc.icon;
-
-  const applyScope = async (enabled: boolean) => {
-    setBusy(true);
-    try {
-      const updated = await api.setMemberScopeEnforcement(workspace.id, member.id, enabled);
-      qc.setQueryData<MemberWithUser[]>(workspaceKeys.members(wsId), (prev) =>
-        prev?.map((m) => (m.id === member.id ? { ...m, ...updated } : m)) ?? prev,
-      );
-      toast.success(
-        enabled
-          ? "Scope enforcement enabled"
-          : "Scope enforcement disabled — wider 1h token will be issued",
-      );
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update toggle");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleScopeChange = (enabled: boolean) => {
-    if (!enabled) {
-      setConfirmScopeOff(true);
-      return;
-    }
-    void applyScope(true);
-  };
 
   const handleBudgetChange = async (enabled: boolean) => {
     setBusy(true);
@@ -228,27 +200,8 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
       </Card>
 
       <Card>
-        <CardContent className="space-y-6">
+        <CardContent>
           <div className="flex items-start gap-4">
-            <ShieldCheck className="mt-0.5 h-5 w-5 text-muted-foreground" />
-            <div className="flex-1">
-              <div className="flex items-center justify-between gap-4">
-                <h2 className="text-sm font-medium">Token-scope enforcement</h2>
-                <Switch
-                  checked={member.scope_enforcement_enabled}
-                  disabled={!canManage || busy}
-                  onCheckedChange={handleScopeChange}
-                />
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                When ON, agent tasks triggered by this member receive a strict 1-hour
-                per-task token (default). When OFF, the token is widened to user-scope
-                for that 1 hour — use only for trusted members.
-              </p>
-            </div>
-          </div>
-
-          <div className="border-t border-border/40 pt-6 flex items-start gap-4">
             <Wallet className="mt-0.5 h-5 w-5 text-muted-foreground" />
             <div className="flex-1">
               <div className="flex items-center justify-between gap-4">
@@ -288,6 +241,10 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
         </CardContent>
       </Card>
 
+      {canManage && (
+        <MemberProjectsCard wsId={wsId} memberId={memberId} memberName={member.name} />
+      )}
+
       {canRemove && (
         <Card>
           <CardContent className="space-y-3">
@@ -309,30 +266,6 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
           </CardContent>
         </Card>
       )}
-
-      <AlertDialog open={confirmScopeOff} onOpenChange={(v) => !v && setConfirmScopeOff(false)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Disable scope enforcement for {member.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Their agent tasks will receive a 1-hour wider-scope token instead of the
-              strict per-task token. Use only for trusted members.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                setConfirmScopeOff(false);
-                await applyScope(false);
-              }}
-            >
-              Disable
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={confirmRemove} onOpenChange={(v) => !v && setConfirmRemove(false)}>
         <AlertDialogContent>
@@ -357,5 +290,71 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * MemberProjectsCard — lists the restricted projects this workspace member
+ * is a project_member of. Hidden when the result is empty AND the request
+ * succeeded; shown with a clear empty state when populated. Open projects
+ * are deliberately omitted — they're noise in an open-by-default workspace.
+ */
+function MemberProjectsCard({
+  wsId,
+  memberId,
+  memberName,
+}: {
+  wsId: string;
+  memberId: string;
+  memberName: string;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["workspace", wsId, "members", memberId, "projects"],
+    queryFn: () => api.listMemberProjects(wsId, memberId),
+  });
+
+  const projects = data?.projects ?? [];
+
+  return (
+    <Card data-testid="member-projects-card">
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium">Restricted projects</h2>
+          {!isLoading && (
+            <span className="text-xs text-muted-foreground">
+              {projects.length} {projects.length === 1 ? "project" : "projects"}
+            </span>
+          )}
+        </div>
+
+        {isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : projects.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {memberName} is not in any restricted projects. Open projects are
+            visible to every workspace member and aren&rsquo;t listed here.
+          </p>
+        ) : (
+          <ul className="rounded-md border border-border divide-y">
+            {projects.map((p) => (
+              <li
+                key={p.id}
+                data-testid="member-project-row"
+                className="flex items-center gap-3 px-3 py-2 text-sm"
+              >
+                <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/70" />
+                <span className="shrink-0 w-5 text-center text-base">
+                  {p.icon || "📁"}
+                </span>
+                <span className="flex-1 min-w-0 truncate">{p.title}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  added {new Date(p.added_at).toLocaleDateString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

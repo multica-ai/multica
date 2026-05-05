@@ -1,0 +1,5 @@
+ALTER TABLE issue DROP COLUMN IF EXISTS is_private;
+
+DROP TABLE IF EXISTS project_member;
+
+ALTER TABLE project DROP COLUMN IF EXISTS access;

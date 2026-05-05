@@ -38,6 +38,7 @@ type IssueResponse struct {
 	ProjectID          *string                 `json:"project_id"`
 	Position           float64                 `json:"position"`
 	DueDate            *string                 `json:"due_date"`
+	IsPrivate          bool                    `json:"is_private"`
 	CreatedAt          string                  `json:"created_at"`
 	UpdatedAt          string                  `json:"updated_at"`
 	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
@@ -63,6 +64,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
+		IsPrivate:     i.IsPrivate,
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
@@ -527,6 +529,20 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Locked decision: restricted matches are hidden entirely, not shown
+	// as redacted. A user who can't access an issue must never know it
+	// matched their search.
+	member, hasMember := ctxMember(ctx)
+	if hasMember && !isWorkspaceAdmin(member) {
+		filtered := results[:0]
+		for _, sr := range results {
+			if h.canAccessIssue(ctx, member, sr.issue) {
+				filtered = append(filtered, sr)
+			}
+		}
+		results = filtered
+	}
+
 	var total int64
 	if len(results) > 0 {
 		total = results[0].totalCount
@@ -631,8 +647,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
+	member, ok := h.resolveMemberFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
 		WorkspaceID: wsUUID,
+		IsAdmin:     isWorkspaceAdmin(member),
+		UserID:      member.UserID,
 		Limit:       int32(limit),
 		Offset:      int32(offset),
 		Status:      statusFilter,
@@ -915,7 +938,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp}, h.audienceForIssue(r.Context(), issue))
 
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
@@ -938,6 +961,7 @@ type UpdateIssueRequest struct {
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
+	IsPrivate          *bool    `json:"is_private"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1061,6 +1085,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Standalone-issue privacy: only set when caller has access. The
+	// loadIssueForUser check above already gates this — non-creator,
+	// non-admin members get 404 before reaching here.
+	if req.IsPrivate != nil {
+		params.IsPrivate = pgtype.Bool{Bool: *req.IsPrivate, Valid: true}
+	}
+
 	// Enforce agent visibility: private agents can only be assigned by owner/admin.
 	if req.AssigneeType != nil && *req.AssigneeType == "agent" && req.AssigneeID != nil {
 		if ok, msg := h.canAssignAgent(r.Context(), r, *req.AssigneeID, workspaceID); !ok {
@@ -1093,7 +1124,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+	h.publishToAudience(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
@@ -1110,7 +1141,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	}, h.audienceForIssue(r.Context(), prevIssue))
 
 	// Reconcile task queue when assignee changes.
 	if assigneeChanged {
@@ -1251,7 +1282,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id})
+	h.publishToAudience(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": id}, h.audienceForIssue(r.Context(), issue))
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }

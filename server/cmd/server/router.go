@@ -262,11 +262,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
-						// Per-member enforcement toggles + spend
-						// roll-up powering the member detail page.
-						r.Patch("/scope-enforcement", h.PatchMemberScopeEnforcement)
+						// Per-member budget toggle + spend roll-up
+						// powering the member detail page.
 						r.Patch("/budget-enforcement", h.PatchMemberBudgetEnforcement)
 						r.Get("/usage", h.GetMemberUsage)
+						// Restricted projects this member belongs to —
+						// powers the Projects tab on the detail page.
+						r.Get("/projects", h.ListMemberProjects)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 				})
@@ -353,6 +355,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Patch("/access", h.UpdateProjectAccess)
+					r.Get("/members", h.ListProjectMembers)
+					r.Post("/members", h.AddProjectMember)
+					r.Delete("/members/{userId}", h.RemoveProjectMember)
 					r.Get("/artifacts", h.ListArtifactsForProject)
 				})
 			})

@@ -68,6 +68,8 @@ import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, Iss
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { PrivacyToggle } from "./privacy-toggle";
+import { RestrictedRef } from "../../common/restricted-ref";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
@@ -426,11 +428,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
-  const { data: parentIssue = null } = useQuery({
+  const parentIssueQuery = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
+    retry: false,
   });
+  const parentIssue = parentIssueQuery.data ?? null;
+  // Parent exists (issue.parent_issue_id is set) but we got a 404 →
+  // the parent lives in a restricted project we can't access. Render
+  // a redacted placeholder so the user knows there IS a parent.
+  const parentIsRestricted =
+    !!parentIssueId && !parentIssue && parentIssueQuery.isError;
   const { data: projectForBreadcrumb = null } = useQuery({
     ...projectDetailOptions(wsId, issue?.project_id ?? ""),
     enabled: !!issue?.project_id,
@@ -606,11 +615,19 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           <PropRow label="Project">
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {!issue.project_id && (
+            <PropRow label="Visibility">
+              <PrivacyToggle
+                isPrivate={Boolean(issue.is_private)}
+                onUpdate={(value) => handleUpdateField({ is_private: value })}
+              />
+            </PropRow>
+          )}
         </div>}
       </div>
 
       {/* Parent issue */}
-      {parentIssue && (
+      {(parentIssue || parentIsRestricted) && (
         <div>
           <button
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
@@ -620,14 +637,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            {parentIsRestricted ? (
+              <RestrictedRef variant="inline" />
+            ) : parentIssue ? (
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
+              >
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+              </AppLink>
+            ) : null}
           </div>}
         </div>
       )}

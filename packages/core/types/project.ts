@@ -2,6 +2,8 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export type ProjectAccess = "workspace" | "restricted";
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -14,10 +16,19 @@ export interface Project {
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  access: ProjectAccess;
   created_at: string;
   updated_at: string;
   issue_count: number;
   done_count: number;
+}
+
+export interface ProjectMember {
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  added_at: string;
 }
 
 export interface CreateProjectRequest {

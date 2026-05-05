@@ -112,6 +112,19 @@ func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, pay
 	})
 }
 
+// publishToAudience is like publish but restricts WS fan-out to the given
+// user IDs. When audience is nil, behaves identically to publish.
+func (h *Handler) publishToAudience(eventType, workspaceID, actorType, actorID string, payload any, audience []string) {
+	h.Bus.Publish(events.Event{
+		Type:            eventType,
+		WorkspaceID:     workspaceID,
+		ActorType:       actorType,
+		ActorID:         actorID,
+		Payload:         payload,
+		AudienceUserIDs: audience,
+	})
+}
+
 func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
@@ -289,18 +302,29 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		return db.Issue{}, false
 	}
 
+	var issue db.Issue
 	// Try identifier format first (e.g., "JIA-42").
-	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
-		return issue, true
+	if found, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		issue = found
+	} else {
+		got, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parseUUID(issueID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return db.Issue{}, false
+		}
+		issue = got
 	}
 
-	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-		ID:          parseUUID(issueID),
-		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "issue not found")
-		return db.Issue{}, false
+	// Enforce project access / standalone privacy. 404 (not 403) so the
+	// existence of the issue isn't leaked to non-members.
+	if member, ok := h.resolveMemberFromRequest(r); ok {
+		if !h.canAccessIssue(r.Context(), member, issue) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return db.Issue{}, false
+		}
 	}
 	return issue, true
 }

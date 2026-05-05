@@ -69,6 +69,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { RestrictedDot } from "../../common/restricted-dot";
+import { ProjectAccessTab } from "./project-access-tab";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -237,7 +239,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
-  const [projectTab, setProjectTab] = useState<"issues" | "documents">("issues");
+  const [projectTab, setProjectTab] = useState<"issues" | "documents" | "access">("issues");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -646,12 +648,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <Tabs
               value={projectTab}
-              onValueChange={(v) => setProjectTab(v as "issues" | "documents")}
+              onValueChange={(v) => setProjectTab(v as "issues" | "documents" | "access")}
               className="flex flex-1 flex-col"
             >
               <TabsList className="mx-4 mt-2 w-fit">
                 <TabsTrigger value="issues">Issues</TabsTrigger>
                 <TabsTrigger value="documents">Documents</TabsTrigger>
+                <TabsTrigger value="access">
+                  {project.access === "restricted" && <RestrictedDot className="mr-1.5" />}
+                  Access
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="issues" className="flex flex-1 flex-col">
                 <ViewStoreProvider store={projectViewStore}>
@@ -662,6 +668,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </TabsContent>
               <TabsContent value="documents" className="flex-1 overflow-auto">
                 <ProjectDocuments projectId={projectId} />
+              </TabsContent>
+              <TabsContent value="access" className="flex-1 overflow-auto">
+                <ProjectAccessTab project={project} />
               </TabsContent>
             </Tabs>
           </div>

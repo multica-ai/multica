@@ -100,6 +100,12 @@ func (h *Handler) GetProjectByRepo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"project": nil})
 		return
 	}
+	if member, ok := ctxMember(r.Context()); ok {
+		if !h.canAccessProject(r.Context(), member, project) {
+			writeJSON(w, http.StatusOK, map[string]any{"project": nil})
+			return
+		}
+	}
 	resp := projectToResponse(project)
 	total, done := h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.IssueCount = total
@@ -117,8 +123,15 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
-	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
+	member, ok := h.resolveMemberFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	projects, err := h.Queries.ListProjectsAccessibleToUser(r.Context(), db.ListProjectsAccessibleToUserParams{
 		WorkspaceID: parseUUID(workspaceID),
+		IsAdmin:     isWorkspaceAdmin(member),
+		UserID:      member.UserID,
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 	})
@@ -162,6 +175,12 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
+	}
+	if member, ok := ctxMember(r.Context()); ok {
+		if !h.canAccessProject(r.Context(), member, project) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
@@ -551,6 +570,19 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("search projects rows error", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
 		return
+	}
+
+	// Filter out projects the caller cannot access. The dynamic search
+	// SQL above does not select project.access; canAccessProjectByID
+	// re-fetches the row so the predicate has the truth.
+	if member, ok := ctxMember(ctx); ok && !isWorkspaceAdmin(member) {
+		filtered := results[:0]
+		for _, row := range results {
+			if h.canAccessProjectByID(ctx, member, row.project.ID) {
+				filtered = append(filtered, row)
+			}
+		}
+		results = filtered
 	}
 
 	var total int64
