@@ -79,3 +79,4 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type { WikiPage, CreateWikiPageRequest, UpdateWikiPageRequest, ListWikiPagesResponse } from "./wiki";

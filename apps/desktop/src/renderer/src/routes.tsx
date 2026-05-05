@@ -19,6 +19,7 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
+import { WikiListPage } from "@multica/views/wiki";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
 import { Download, Server } from "lucide-react";
@@ -136,6 +137,7 @@ export const appRoutes: RouteObject[] = [
             element: <AgentDetailPage />,
             handle: { title: "Agent" },
           },
+          { path: "wiki", element: <WikiListPage />, handle: { title: "Wiki" } },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "settings",
