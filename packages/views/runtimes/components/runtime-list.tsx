@@ -19,7 +19,6 @@ import { latestCliVersionOptions } from "@multica/core/runtimes";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { DataTable } from "@multica/ui/components/ui/data-table";
-import { useT } from "@multica/i18n/react";
 import { useNavigation } from "../../navigation";
 import { type RuntimeRow, createRuntimeColumns } from "./runtime-columns";
 
@@ -88,7 +87,6 @@ export function RuntimeList({
   const wsId = useWorkspaceId();
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
-  const t = useT("runtimes");
   const user = useAuthStore((s) => s.user);
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -143,9 +141,8 @@ export function RuntimeList({
         latestCliVersion,
         wsId,
         now,
-        t,
       }),
-    [showOwner, latestCliVersion, wsId, now, t],
+    [showOwner, latestCliVersion, wsId, now],
   );
 
   const table = useReactTable({

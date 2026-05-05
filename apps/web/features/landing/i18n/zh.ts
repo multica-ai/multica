@@ -284,6 +284,58 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.24",
+        date: "2026-05-03",
+        title: "Repo Checkout `--ref`、Hermes 历史回放修复与多副本 Model Picker",
+        changes: [],
+        features: [
+          "`multica repo checkout --ref` 支持按分支、tag 或指定 commit 拉取仓库",
+          "`multica agent avatar` 命令支持直接通过 CLI 上传 Agent 头像",
+          "Inbox 中已完成任务新增 archive 按钮，移除冗余的 mark-as-done 悬浮按钮",
+        ],
+        improvements: [
+          "长 timeline 的 Issue 从 Inbox 打开不再卡顿 —— Markdown 渲染管线已 memoize，无关的 WS 事件不会再重渲染数千条评论",
+          "Model Picker 在多副本部署下可用 —— pending 请求改走 Redis 持久化，Daemon 上报失败也会自动重试",
+          "Daemon 空认领缓存 TTL 调高，空闲态 DB 压力进一步下降",
+        ],
+        fixes: [
+          "新创建的 Agent 立刻在各处可见 —— 创建时即 hydrate Agent 缓存",
+          "Hermes 在新一轮对话开始时不再重放上一轮答案 —— 历史 chunk 受单轮门禁限制",
+          "Codex runtime 模型选择器开放 GPT-5.5 系列",
+          "`multica login --token <PAT>` 正确接收 PAT 作为参数值",
+          "CLI update 完成状态上报更可靠",
+          "Session resume 按 runtime 正确守卫，避免跨 runtime 复用 session",
+          "看板拖拽 Issue 时显示设置不再丢失",
+          "Autopilot 列表在移动端 viewport 下响应式排版",
+          "Quick Create 生成的描述更贴合用户输入",
+          "Skill upsert 清理 null bytes，修复 PostgreSQL UTF8 错误",
+          "Connect Remote 弹窗的安装脚本 URL 修正",
+        ],
+      },
+      {
+        version: "0.2.21",
+        date: "2026-04-30",
+        title: "Quick Capture 全面升级、Mermaid 图表与 Typed Project Resources",
+        changes: [],
+        features: [
+          "Quick Capture 取代旧的 New Issue 弹窗 —— 支持连续创建、文件上传，并能根据粘贴的 URL 自动丰富标题与描述",
+          "Markdown 内联渲染 Mermaid 图表，复杂图支持全屏 lightbox",
+          "Project 支持单独绑定 repo，无需依赖 workspace 默认配置",
+          "Agent / 评论 / Runtime / Skill 全面接入权限感知 UI，没有权限的操作不再展示",
+        ],
+        improvements: [
+          "Daemon `/tasks/claim` 轮询走 Redis 空认领 fast-path，空闲态 DB 压力下降，长期 open 的 Issue 自动回收磁盘",
+          "Multica Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
+          "Desktop 拦截 Cmd+R / Ctrl+R / F5 防止意外刷新，开发模式与 Updates 设置中均展示真实版本号",
+        ],
+        fixes: [
+          "Quick Create 不再凭空脑补需求，并自动把发起人订阅到 Issue",
+          "Inbox 点击通知后立即跳到目标评论；从 Issue 详情页 Mark as Done 时自动归档",
+          "Task rerun 启动全新 session，跳过被污染的 resume 状态",
+          "受邀成员登录后路由到所在 workspace，不再强制带去 `/onboarding`",
+        ],
+      },
+      {
         version: "0.2.20",
         date: "2026-04-29",
         title: "Create Issue by Agent、Agent Presence v3 与 Daemon WebSocket 心跳",

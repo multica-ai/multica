@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useT } from "@multica/i18n/react";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -48,6 +47,14 @@ interface CommentCardProps {
   entry: TimelineEntry;
   allReplies: Map<string, TimelineEntry[]>;
   currentUserId?: string;
+  /**
+   * True when the current user is a workspace owner/admin and can therefore
+   * moderate comments authored by anyone — restoring the admin override that
+   * the backend already grants at `comment.go:507-512`. Computed once in
+   * `issue-detail.tsx` and threaded down so neither this component nor
+   * `CommentRow` has to rerun the rule per row.
+   */
+  canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
@@ -71,23 +78,21 @@ function DeleteCommentDialog({
   onConfirm: () => void;
   hasReplies?: boolean;
 }) {
-  const t = useT("issues");
-  const c = useT("common");
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("comment_delete_title")}</AlertDialogTitle>
+          <AlertDialogTitle>Delete comment</AlertDialogTitle>
           <AlertDialogDescription>
             {hasReplies
-              ? t("comment_delete_with_replies")
-              : t("comment_delete_single")}
+              ? "This comment and all its replies will be permanently deleted. This cannot be undone."
+              : "This comment will be permanently deleted. This cannot be undone."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{c("cancel")}</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            {c("delete")}
+            Delete
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -156,6 +161,7 @@ function CommentRow({
   issueId,
   entry,
   currentUserId,
+  canModerate = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -163,13 +169,12 @@ function CommentRow({
   issueId: string;
   entry: TimelineEntry;
   currentUserId?: string;
+  canModerate?: boolean;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
   const { getActorName } = useActorName();
-  const t = useT("issues");
-  const c = useT("common");
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
@@ -180,6 +185,8 @@ function CommentRow({
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -207,7 +214,7 @@ function CommentRow({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error(t("toast_failed_update"));
+      toast.error("Failed to update comment");
     }
   };
 
@@ -252,23 +259,27 @@ function CommentRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
                 copyMarkdown(entry.content ?? "");
-                toast.success(c("copied"));
+                toast.success("Copied");
               }}>
                 <Copy className="h-3.5 w-3.5" />
-                {t("comment_copy")}
+                Copy
               </DropdownMenuItem>
-              {isOwn && (
+              {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={startEdit}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    {t("comment_edit")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {c("delete")}
-                  </DropdownMenuItem>
+                  {canEditEntry && (
+                    <DropdownMenuItem onClick={startEdit}>
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </DropdownMenuItem>
+                  )}
+                  {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                  {canDeleteEntry && (
+                    <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
                 </>
               )}
             </DropdownMenuContent>
@@ -292,7 +303,7 @@ function CommentRow({
             <ContentEditor
               ref={editEditorRef}
               defaultValue={entry.content ?? ""}
-              placeholder={t("comment_edit_placeholder")}
+              placeholder="Edit comment..."
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
@@ -305,8 +316,8 @@ function CommentRow({
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>{c("cancel")}</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>{c("save")}</Button>
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
+              <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
             </div>
           </div>
           {isDragOver && <FileDropOverlay />}
@@ -337,11 +348,12 @@ function CommentRow({
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-function CommentCard({
+function CommentCardImpl({
   issueId,
   entry,
   allReplies,
   currentUserId,
+  canModerate = false,
   onReply,
   onEdit,
   onDelete,
@@ -349,8 +361,6 @@ function CommentCard({
   highlightedCommentId,
 }: CommentCardProps) {
   const { getActorName } = useActorName();
-  const t = useT("issues");
-  const c = useT("common");
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -365,6 +375,12 @@ function CommentCard({
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  // Author-only edit is the same as before; admins additionally get edit
+  // *and* delete on member-authored comments, plus delete on agent-authored
+  // ones. Edit on agent comments is intentionally never offered — agents
+  // own their own outputs.
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -392,7 +408,7 @@ function CommentCard({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error(t("toast_failed_update"));
+      toast.error("Failed to update comment");
     }
   };
 
@@ -448,7 +464,7 @@ function CommentCard({
             )}
             {!open && replyCount > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
-                {replyCount} {replyCount === 1 ? t("reply_singular") : t("reply_plural")}
+                {replyCount} {replyCount === 1 ? "reply" : "replies"}
               </span>
             )}
 
@@ -469,23 +485,27 @@ function CommentCard({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
                     copyMarkdown(entry.content ?? "");
-                    toast.success(c("copied"));
+                    toast.success("Copied");
                   }}>
                     <Copy className="h-3.5 w-3.5" />
-                    {t("comment_copy")}
+                    Copy
                   </DropdownMenuItem>
-                  {isOwn && (
+                  {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={startEdit}>
-                        <Pencil className="h-3.5 w-3.5" />
-                        {t("comment_edit")}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {c("delete")}
-                      </DropdownMenuItem>
+                      {canEditEntry && (
+                        <DropdownMenuItem onClick={startEdit}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </DropdownMenuItem>
+                      )}
+                      {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                      {canDeleteEntry && (
+                        <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
                 </DropdownMenuContent>
@@ -515,7 +535,7 @@ function CommentCard({
                   <ContentEditor
                     ref={editEditorRef}
                     defaultValue={entry.content ?? ""}
-                    placeholder={t("comment_edit_placeholder")}
+                    placeholder="Edit comment..."
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
@@ -528,8 +548,8 @@ function CommentCard({
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{c("cancel")}</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>{c("save")}</Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
+                    <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
                   </div>
                 </div>
                 {parentDragOver && <FileDropOverlay />}
@@ -561,6 +581,7 @@ function CommentCard({
                 issueId={issueId}
                 entry={reply}
                 currentUserId={currentUserId}
+                canModerate={canModerate}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
@@ -572,7 +593,7 @@ function CommentCard({
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
-              placeholder={t("comment_leave_reply")}
+              placeholder="Leave a reply..."
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
@@ -584,5 +605,12 @@ function CommentCard({
     </Card>
   );
 }
+
+// Memoized so a long timeline (e.g. Inbox-embedded IssueDetail with thousands
+// of comments) does not re-render every card on each parent state update or
+// WS-driven cache refresh. Default shallow comparison is sufficient: the
+// timeline grouping is useMemo'd in issue-detail.tsx (stable Map ref), and
+// every callback is stabilized via useCallback in use-issue-timeline.ts.
+const CommentCard = memo(CommentCardImpl);
 
 export { CommentCard, type CommentCardProps };

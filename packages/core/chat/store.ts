@@ -51,7 +51,7 @@ function writeDrafts(storage: StorageAdapter, key: string, drafts: Record<string
 
 export const CHAT_MIN_W = 360;
 export const CHAT_MIN_H = 480;
-export const CHAT_DEFAULT_W = 420;
+export const CHAT_DEFAULT_W = 380;
 export const CHAT_DEFAULT_H = 600;
 
 /**

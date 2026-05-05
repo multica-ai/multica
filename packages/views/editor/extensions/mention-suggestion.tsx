@@ -15,6 +15,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
 import type {
   Issue,
@@ -369,6 +371,15 @@ export function createMentionSuggestion(
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
+    // Read current user identity imperatively — this factory runs outside
+    // React render so we can't useAuthStore() as a hook here. The Proxy in
+    // packages/core/auth/index.ts forwards `.getState()` to the registered
+    // store. Used to gate personal agents in the @mention list so members
+    // don't see (or auto-complete) agents they couldn't assign anyway.
+    const userId = useAuthStore.getState().user?.id ?? null;
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
+
     const q = query.toLowerCase();
 
     const allItem: MentionItem[] =
@@ -385,7 +396,12 @@ export function createMentionSuggestion(
       }));
 
     const agentItems: MentionItem[] = agents
-      .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
+      .filter(
+        (a) =>
+          !a.archived_at &&
+          a.name.toLowerCase().includes(q) &&
+          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+      )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
     // Members and agents share a single ranked list — recently mentioned

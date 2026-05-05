@@ -44,7 +44,9 @@ import {
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
 import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
+import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { useT, useLocale } from "@multica/i18n/react";
 
@@ -64,12 +66,35 @@ const RUN_STATUS_CONFIG: Record<string, { labelKey: string; color: string; icon:
   failed: { labelKey: "run_status_failed", color: "text-destructive", icon: XCircle },
 };
 
-function RunRow({ run }: { run: AutopilotRun }) {
+function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const wsPaths = useWorkspacePaths();
   const t = useT("autopilots");
   const { locale } = useLocale();
   const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
   const StatusIcon = cfg.icon;
+
+  // For runs with a task_id (run_only mode), build a minimal AgentTask so
+  // TranscriptButton can lazy-load the execution transcript.
+  const syntheticTask: AgentTask | null = run.task_id
+    ? {
+        id: run.task_id,
+        agent_id: agentId,
+        runtime_id: "",
+        issue_id: "",
+        status:
+          run.status === "running" ? "running" :
+          run.status === "completed" ? "completed" :
+          run.status === "failed" ? "failed" :
+          "queued",
+        priority: 0,
+        dispatched_at: null,
+        started_at: run.triggered_at || null,
+        completed_at: run.completed_at || null,
+        result: null,
+        error: run.failure_reason || null,
+        created_at: run.created_at,
+      }
+    : null;
 
   const content = (
     <>
@@ -86,6 +111,14 @@ function RunRow({ run }: { run: AutopilotRun }) {
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatDate(run.triggered_at || run.created_at, locale)}
       </span>
+      {syntheticTask && !run.issue_id && (
+        <TranscriptButton
+          task={syntheticTask}
+          agentName={agentName}
+          isLive={run.status === "running"}
+          title="View execution log"
+        />
+      )}
     </>
   );
 
@@ -447,7 +480,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             ) : (
               <div className="rounded-md border overflow-hidden">
                 {runs.map((run) => (
-                  <RunRow key={run.id} run={run} />
+                  <RunRow key={run.id} run={run} agentId={autopilot.assignee_id} agentName={getActorName("agent", autopilot.assignee_id)} />
                 ))}
               </div>
             )}

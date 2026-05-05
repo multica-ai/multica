@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useT } from "@multica/i18n/react";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import {
   DropdownMenu,
@@ -28,6 +27,7 @@ import {
   MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -59,8 +59,6 @@ export function AgentCreatePanel({
   onSwitchMode?: () => void;
   data?: Record<string, unknown> | null;
 }) {
-  const t = useT("modals");
-  const c = useT("common");
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
@@ -83,6 +81,9 @@ export function AgentCreatePanel({
 
   const lastAgentId = useQuickCreateStore((s) => s.lastAgentId);
   const setLastAgentId = useQuickCreateStore((s) => s.setLastAgentId);
+  const promptDraft = useQuickCreateStore((s) => s.prompt);
+  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
+  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -130,7 +131,7 @@ export function AgentCreatePanel({
   );
   const versionBlocked = versionCheck.state !== "ok";
 
-  const initialPrompt = (data?.prompt as string) || "";
+  const initialPrompt = (data?.prompt as string) || promptDraft;
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
@@ -169,8 +170,9 @@ export function AgentCreatePanel({
     try {
       await api.quickCreateIssue({ agent_id: agentId, prompt: md });
       setLastAgentId(agentId);
+      clearPrompt();
       setLastMode("agent");
-      toast.success(t("toast_sent_to_agent"), {
+      toast.success("Sent to agent — you'll get an inbox notification when it's done", {
         duration: 4000,
       });
       if (keepOpen) {
@@ -198,7 +200,7 @@ export function AgentCreatePanel({
           min_version?: string;
         };
         if (body.code === "agent_unavailable") {
-          setError(body.reason || t("quick_create_agent_unavailable"));
+          setError(body.reason || "Agent is unavailable. Pick another agent.");
           setSubmitting(false);
           return;
         }
@@ -209,13 +211,13 @@ export function AgentCreatePanel({
           // consistency.
           const cur = body.current_version || "unknown";
           setError(
-            t("quick_create_version_below", { version: cur, required: body.min_version || MIN_QUICK_CREATE_CLI_VERSION }),
+            `This agent's daemon CLI (${cur}) is below the required ${body.min_version || MIN_QUICK_CREATE_CLI_VERSION}. Upgrade the daemon to use Create with agent.`,
           );
           setSubmitting(false);
           return;
         }
       }
-      setError(t("quick_create_failed"));
+      setError("Failed to submit. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -241,23 +243,24 @@ export function AgentCreatePanel({
 
   return (
     <>
-        <DialogTitle className="sr-only">{t("quick_create_title")}</DialogTitle>
+        <DialogTitle className="sr-only">Quick create issue</DialogTitle>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">{t("create_with_agent")}</span>
+            <span className="font-medium">Create with agent</span>
           </div>
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
               auto-pop every open. */}
           <button
+            type="button"
             onClick={onClose}
-            title={c("close")}
-            aria-label={c("close")}
+            title="Close"
+            aria-label="Close"
             className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
           >
             <XIcon className="size-4" />
@@ -271,9 +274,10 @@ export function AgentCreatePanel({
               render={
                 <button
                   type="button"
+                  aria-label="Select agent"
                   className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm px-1.5 py-1 -ml-1.5 hover:bg-accent/60"
                 >
-                  <span>{t("created_by")}</span>
+                  <span>Created by</span>
                   {selectedAgent ? (
                     <span className="flex items-center gap-1.5 text-foreground">
                       <ActorAvatar
@@ -284,7 +288,7 @@ export function AgentCreatePanel({
                       {selectedAgent.name}
                     </span>
                   ) : (
-                    <span>{t("pick_agent")}</span>
+                    <span>Pick an agent…</span>
                   )}
                 </button>
               }
@@ -292,7 +296,7 @@ export function AgentCreatePanel({
             <DropdownMenuContent align="start" className="w-64 max-h-72 overflow-y-auto">
               {visibleAgents.length === 0 ? (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  {t("quick_create_no_agents")}
+                  No agents available.
                 </div>
               ) : (
                 visibleAgents.map((a: Agent) => (
@@ -310,6 +314,9 @@ export function AgentCreatePanel({
                       size={16}
                     />
                     <span className="flex-1 truncate">{a.name}</span>
+                    {agentId === a.id && (
+                      <Check className="size-3.5 text-muted-foreground" />
+                    )}
                   </DropdownMenuItem>
                 ))
               )}
@@ -320,8 +327,8 @@ export function AgentCreatePanel({
         {selectedAgent && versionBlocked && (
           <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
             {versionCheck.state === "missing"
-              ? t("quick_create_no_version", { version: versionCheck.min })
-              : t("quick_create_version_below", { version: versionCheck.current, required: versionCheck.min })}
+              ? `This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ ${versionCheck.min}. Upgrade the daemon and reconnect, or switch to manual create.`
+              : `This agent's daemon CLI is ${versionCheck.current} — Create with agent needs ≥ ${versionCheck.min}. Upgrade the daemon, or switch to manual create.`}
           </div>
         )}
 
@@ -339,8 +346,11 @@ export function AgentCreatePanel({
           <ContentEditor
             ref={editorRef}
             defaultValue={initialPrompt}
-            placeholder={t("tell_agent")}
-            onUpdate={(md) => setHasContent(md.trim().length > 0)}
+            placeholder='Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"'
+            onUpdate={(md) => {
+              setHasContent(md.trim().length > 0);
+              setPrompt(md);
+            }}
             onUploadFile={handleUploadFile}
             onSubmit={submit}
             debounceMs={150}
@@ -353,36 +363,36 @@ export function AgentCreatePanel({
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <div className="flex items-center gap-1.5">
+        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-h-7 items-center gap-2">
             <FileUploadButton
               size="sm"
+              disabled={uploading}
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
-            <span className="text-xs text-muted-foreground">
-              {keepOpen && sentCount > 0 && (
-                <span className="text-emerald-600 dark:text-emerald-400">{t("quick_create_sent_count", { count: sentCount })} </span>
-              )}
-              {t("quick_create_submit_hint")}
-            </span>
+            {keepOpen && sentCount > 0 && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                {sentCount} sent
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={switchToManual}
-              title={t("switch_manual")}
-              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              title="Switch to manual create — fill the fields yourself"
+              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="size-3.5" />
-              {t("switch_manual")}
+              Switch to Manual
             </button>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
               <Switch
                 size="sm"
                 checked={keepOpen}
                 onCheckedChange={setKeepOpen}
               />
-              {t("quick_create_create_another")}
+              Create another
             </label>
             <Button
               size="sm"
@@ -390,14 +400,14 @@ export function AgentCreatePanel({
               disabled={!hasContent || !agentId || submitting || versionBlocked || uploading}
               title={
                 versionBlocked
-                  ? t("quick_create_version_title", { version: versionCheck.min })
+                  ? `Daemon CLI must be ≥ ${versionCheck.min}`
                   : undefined
               }
-              className={justSent ? "!bg-emerald-600 !text-white" : undefined}
+              className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
-              {submitting ? t("sending") : uploading ? t("uploading") : justSent ? (
-                <span className="flex items-center gap-1"><Check className="size-3.5" />{t("sent")}</span>
-              ) : c("create")}
+              {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
+                <span className="flex items-center gap-1"><Check className="size-3.5" />Sent</span>
+              ) : `Create (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
         </div>

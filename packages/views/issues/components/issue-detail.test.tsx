@@ -3,6 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
+
+const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsMobile: () => mockViewport.isMobile,
+}));
+
 // useWorkspaceId() derives from useCurrentWorkspace (relative import inside
 // @multica/core/hooks.tsx). vi.mock("@multica/core/paths") only intercepts
 // the bare-specifier, not the internal relative import. Mock the hooks module
@@ -377,6 +384,7 @@ function renderIssueDetail(issueId = "issue-1") {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
@@ -436,6 +444,19 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+  });
+
+  it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
+    mockViewport.isMobile = true;
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {

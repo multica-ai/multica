@@ -1,11 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { capturePageview } from "@multica/core/analytics";
 import { useAuthStore } from "@multica/core/auth";
-import { useTabStore } from "@/stores/tab-store";
+import {
+  getActiveTab,
+  useActiveTabIdentity,
+  useTabStore,
+} from "@/stores/tab-store";
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
 
 /**
- * Fires a PostHog $pageview whenever the user's visible surface changes.
+ * Fires a PostHog $pageview whenever the user's visible surface changes,
+ * EXCEPT for re-activations of an already-known tab on its already-known
+ * path.
  *
  * Desktop has three layers that can own the visible page:
  *
@@ -17,10 +23,18 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  *   3. Otherwise → the active tab's path (workspace-scoped, e.g.
  *      `/acme/issues/123`). Kept in sync by `useTabRouterSync`.
  *
- * The overlay takes precedence over the tab path because it is visually in
- * front of the tab system; the logged-out state shadows both because the
- * shell doesn't render at all yet. This keeps the `$pageview` stream aligned
- * with what the user actually sees.
+ * Tab-switch suppression: re-activating an already-open tab surfaces a
+ * previously-visited path under a `(workspace, tabId)` we have already
+ * seen — the pageview was emitted when the user originally navigated
+ * there, so re-emitting on every switch just inflates PostHog billing
+ * without adding signal (real-data audit: desktop tab switches were
+ * ~50% of all `$pageview` events).
+ *
+ * Newly opened tabs (`openInNewTab`, `addTab`) and cross-workspace
+ * `switchWorkspace(slug, path)` to a previously-unseen tab still fire,
+ * because their key is not in the observed map yet. The map is seeded
+ * from the persisted tab store on first render so tabs restored from a
+ * previous session don't all re-emit on first activation.
  *
  * PostHog's `capture_pageview: true` auto-capture is intentionally off (see
  * `initAnalytics`) so this component owns the event shape, matching the web
@@ -29,32 +43,73 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
 export function PageviewTracker() {
   const user = useAuthStore((s) => s.user);
   const overlay = useWindowOverlayStore((s) => s.overlay);
-  const activeTabPath = useTabStore((s) => {
-    const slug = s.activeWorkspaceSlug;
-    if (!slug) return null;
-    const group = s.byWorkspace[slug];
-    if (!group) return null;
-    return group.tabs.find((t) => t.id === group.activeTabId)?.path ?? null;
-  });
+  const { slug: activeWorkspaceSlug, tabId: activeTabId } = useActiveTabIdentity();
+  const activeTabPath = useTabStore((s) => getActiveTab(s)?.path ?? null);
 
-  const path = resolvePath(user, overlay, activeTabPath);
+  // (slug:tabId) → last path observed while that tab was visible. Lets us
+  // tell "re-activating a tab on a path we already saw" (suppress) apart
+  // from "newly opened tab" or "intra-tab navigation" (fire). Seeded
+  // synchronously on first render from the persisted tab store so
+  // session-restored tabs don't re-emit on first click.
+  const observedTabsRef = useRef<Map<string, string> | null>(null);
+  if (observedTabsRef.current === null) {
+    const seed = new Map<string, string>();
+    for (const [slug, group] of Object.entries(useTabStore.getState().byWorkspace)) {
+      for (const tab of group.tabs) {
+        seed.set(`${slug}:${tab.id}`, tab.path);
+      }
+    }
+    observedTabsRef.current = seed;
+  }
+  const lastSurfaceRef = useRef<{
+    kind: "login" | "overlay" | "tab" | null;
+    key: string | null;
+    path: string | null;
+  }>({ kind: null, key: null, path: null });
 
   useEffect(() => {
-    if (!path) return;
+    let kind: "login" | "overlay" | "tab";
+    let path: string;
+    let key: string | null = null;
+
+    if (!user) {
+      kind = "login";
+      path = "/login";
+    } else if (overlay) {
+      kind = "overlay";
+      path = overlayPath(overlay);
+    } else if (activeTabPath && activeTabId && activeWorkspaceSlug) {
+      kind = "tab";
+      key = `${activeWorkspaceSlug}:${activeTabId}`;
+      path = activeTabPath;
+    } else {
+      return;
+    }
+
+    const observed = observedTabsRef.current!;
+    const last = lastSurfaceRef.current;
+    const next = { kind, key, path };
+
+    if (kind === "tab" && key !== null) {
+      const knownPath = observed.get(key);
+      const isReactivation =
+        last.key !== key && knownPath !== undefined && knownPath === path;
+      observed.set(key, path);
+      if (isReactivation) {
+        lastSurfaceRef.current = next;
+        return;
+      }
+    }
+
+    const unchanged =
+      last.kind === kind && last.key === key && last.path === path;
+    if (unchanged) return;
+
     capturePageview(path);
-  }, [path]);
+    lastSurfaceRef.current = next;
+  }, [user, overlay, activeWorkspaceSlug, activeTabId, activeTabPath]);
 
   return null;
-}
-
-function resolvePath(
-  user: unknown,
-  overlay: WindowOverlay | null,
-  activeTabPath: string | null,
-): string | null {
-  if (!user) return "/login";
-  if (overlay) return overlayPath(overlay);
-  return activeTabPath;
 }
 
 function overlayPath(overlay: WindowOverlay): string {
@@ -65,5 +120,7 @@ function overlayPath(overlay: WindowOverlay): string {
       return "/onboarding";
     case "invite":
       return `/invite/${overlay.invitationId}`;
+    case "invitations":
+      return "/invitations";
   }
 }

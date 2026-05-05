@@ -59,6 +59,8 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
+import { useSkillPermissions } from "@multica/core/permissions";
+import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
@@ -265,6 +267,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   );
 
   const canEdit = useCanEditSkill(skill, wsId);
+  // Rich Decision for the read-only banner — same answer as `canEdit`, but
+  // carries the `reason` enum the banner needs to render correct copy.
+  const skillPermissions = useSkillPermissions(skill ?? null, wsId);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -613,6 +618,16 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           )}
         </div>
       </div>
+
+      {!canEdit && (
+        <div className="px-4 pt-3">
+          <CapabilityBanner
+            reason={skillPermissions.canEdit.reason}
+            resource="skill"
+            ownerName={creator?.name}
+          />
+        </div>
+      )}
 
       {/* Supporting query error banner (non-blocking — the page still works
           but agent attribution / runtime names / permission checks are

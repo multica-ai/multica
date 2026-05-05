@@ -34,6 +34,7 @@ import type { AgentAvailability, Workload } from "@multica/core/agents";
 // list-level summary state.
 
 export interface AvailabilityVisual {
+  label: string;
   // Background fill for the dot indicator.
   dotClass: string;
   // Foreground colour for the label text alongside the dot.
@@ -52,16 +53,19 @@ export function availabilityLabel(
 
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
   online: {
+    label: "Online",
     dotClass: "bg-success",
     textClass: "text-success",
     icon: CircleDot,
   },
   unstable: {
+    label: "Unstable",
     dotClass: "bg-warning",
     textClass: "text-warning",
     icon: PlugZap,
   },
   offline: {
+    label: "Offline",
     dotClass: "bg-muted-foreground/40",
     textClass: "text-muted-foreground",
     icon: CircleSlash,
@@ -77,6 +81,7 @@ export const availabilityOrder: AgentAvailability[] = [
 ];
 
 export interface WorkloadVisual {
+  label: string;
   // Foreground colour for icon + label text.
   textClass: string;
   // Icon used inline.
@@ -93,10 +98,12 @@ export function workloadLabel(
 
 export const workloadConfig: Record<Workload, WorkloadVisual> = {
   working: {
+    label: "Working",
     textClass: "text-brand",
     icon: Loader2,
   },
   queued: {
+    label: "Queued",
     // Amber chip: nothing running but tasks waiting. On an offline runtime
     // this is the "stuck" signal we explicitly surface (replacing the old
     // misleading "Running 0/N +Mq" copy).
@@ -104,6 +111,7 @@ export const workloadConfig: Record<Workload, WorkloadVisual> = {
     icon: Clock,
   },
   idle: {
+    label: "Idle",
     textClass: "text-muted-foreground",
     icon: AlertCircle,
   },

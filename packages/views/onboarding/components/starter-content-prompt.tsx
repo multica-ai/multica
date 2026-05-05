@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
-import { useT } from "@multica/i18n/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "@multica/views/navigation";
-import { publicAppUrl } from "@multica/views/platform";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { pinKeys } from "@multica/core/pins";
 import { projectKeys } from "@multica/core/projects";
 import { issueKeys } from "@multica/core/issues/queries";
+import {
+  memberListOptions,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -23,6 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { useT } from "@multica/i18n/react";
+import { publicAppUrl } from "../../platform";
 import { buildImportPayload } from "../utils/starter-content-templates";
 
 /**
@@ -52,11 +56,26 @@ export function StarterContentPrompt() {
     null,
   );
 
+  // Member-list fetch is the proxy we use to detect "did this user CREATE
+  // this workspace, or were they invited into it?" An invitee is by definition
+  // not the only member (the inviter is also there); a fresh self-created
+  // workspace has exactly one member — the creator. `starter_content_state`
+  // is a user-level field and can't represent (user, workspace) state directly,
+  // so we layer this membership check on top until that field is migrated to
+  // the `member` table. See follow-up issue: starter_content_state per-workspace.
+  const { data: members = [] } = useQuery({
+    ...memberListOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
+  const isSoloMember =
+    members.length === 1 && members[0]?.user_id === user?.id;
+
   const shouldShow =
     !!user &&
     !!workspace &&
     user.onboarded_at != null &&
-    user.starter_content_state == null;
+    user.starter_content_state == null &&
+    isSoloMember;
 
   if (!shouldShow || !workspace || !user) return null;
 
@@ -70,7 +89,7 @@ export function StarterContentPrompt() {
         userName: user.name || user.email,
         questionnaire,
         t,
-        docsUrl: publicAppUrl("/docs"),
+        docsUrl: publicAppUrl("docs"),
       });
       const result = await api.importStarterContent(payload);
 
@@ -81,15 +100,27 @@ export function StarterContentPrompt() {
       // publishes `pin:created` / `project:created` / `issue:created` for
       // OTHER sessions; on this session both paths run and the second
       // invalidate is a no-op.
-      qc.invalidateQueries({ queryKey: pinKeys.all(workspace.id, user.id) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(workspace.id) });
-      qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });
+      //
+      // Agents are invalidated too: the server picks the welcome issue's
+      // assignee from its own agent list, and the issue-detail page we
+      // navigate to immediately resolves that ID through the cached agent
+      // list. If the cache is stale (or never populated since
+      // onboarding-flow created the agent without invalidating), the
+      // assignee renders as "Unknown Agent". Awaiting Promise.all
+      // guarantees every relevant query is at least marked stale before
+      // the navigation kicks in, so the next mount refetches.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: pinKeys.all(workspace.id, user.id) }),
+        qc.invalidateQueries({ queryKey: projectKeys.all(workspace.id) }),
+        qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) }),
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(workspace.id) }),
+      ]);
 
       // Sync the new starter_content_state into the auth store so this
       // component unmounts cleanly on the next render.
       await refreshMe();
 
-      toast.success(t("toast_starter_added"));
+      toast.success("Starter tasks added — check your sidebar");
 
       // If the server took the agent-guided branch, a welcome issue
       // exists and we jump to it. Otherwise, stay on the issues list —
@@ -101,7 +132,7 @@ export function StarterContentPrompt() {
       }
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : t("scp_import_failed"),
+        err instanceof Error ? err.message : "Import failed — please retry",
       );
       setSubmitting(null);
     }
@@ -117,7 +148,7 @@ export function StarterContentPrompt() {
       toast.error(
         err instanceof Error
           ? err.message
-          : t("scp_dismiss_failed"),
+          : "Could not dismiss — please retry",
       );
       setSubmitting(null);
     }
@@ -137,14 +168,15 @@ export function StarterContentPrompt() {
       <DialogContent showCloseButton={false} className="sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle className="text-balance font-serif text-[22px] leading-[1.2] font-medium tracking-tight">
-            {t("scp_dialog_title")}
+            Welcome — add starter tasks?
           </DialogTitle>
           <DialogDescription className="pt-2 text-[14px] leading-[1.55]">
             A{" "}
             <span className="font-medium text-foreground">
-              {t("scp_getting_started")}
+              Getting Started
             </span>{" "}
-            {t("scp_dialog_desc")}
+            project with short tasks that walk through how agents, issues,
+            and context work in Multica.
           </DialogDescription>
         </DialogHeader>
 
@@ -157,13 +189,13 @@ export function StarterContentPrompt() {
             {submitting === "dismiss" && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            {t("scp_start_blank")}
+            Start blank workspace
           </Button>
           <Button onClick={onImport} disabled={submitting !== null}>
             {submitting === "import" && (
               <Loader2 className="h-4 w-4 animate-spin" />
             )}
-            {t("scp_add_starter")}
+            Add starter tasks
           </Button>
         </DialogFooter>
       </DialogContent>

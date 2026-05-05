@@ -38,6 +38,7 @@
     "./chat": "./chat/index.ts",
     "./settings": "./settings/index.ts",
     "./invite": "./invite/index.ts",
+    "./invitations": "./invitations/index.ts",
     "./onboarding": "./onboarding/index.ts",
     "./platform": "./platform/index.ts"
   },
@@ -47,7 +48,6 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/dom": "^1.7.6",
-
     "@multica/core": "workspace:*",
     "@multica/i18n": "workspace:*",
     "@multica/ui": "workspace:*",
@@ -74,6 +74,8 @@
     "hast-util-to-html": "^4.0.1",
     "katex": "catalog:",
     "lowlight": "^3.3.0",
+    "mermaid": "catalog:",
+    "motion": "^12.38.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
     "recharts": "3.8.0",

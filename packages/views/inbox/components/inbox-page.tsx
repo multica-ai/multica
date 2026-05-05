@@ -7,7 +7,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { useT } from "@multica/i18n/react";
 import {
   inboxListOptions,
   deduplicateInboxItems,
@@ -21,6 +20,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
+
 import { IssueDetail } from "../../issues/components";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
@@ -52,13 +52,13 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabelKeys } from "./inbox-detail-label";
+import { useT } from "@multica/i18n/react";
 import { getInboxDisplayTitle } from "./inbox-display";
 
 export function InboxPage() {
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const wsPaths = useWorkspacePaths();
-  const t = useT("inbox");
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
 
@@ -68,6 +68,7 @@ export function InboxPage() {
   }, [urlIssue]);
 
   const wsId = useWorkspaceId();
+  const t = useT("inbox");
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
@@ -119,7 +120,6 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
-
   // Auto-mark-read whenever a selected item is unread — covers both click-
   // to-select and URL-param-select (e.g. OS notification click on desktop).
   // The mutation flips `read: true` optimistically, so this effect settles
@@ -131,7 +131,7 @@ export function InboxPage() {
   useEffect(() => {
     if (!selectedId || selectedRead) return;
     markReadMutate(selectedId, {
-      onError: () => toast.error(t("toast_failed_read")),
+      onError: () => toast.error("Failed to mark as read"),
     });
   }, [selectedId, selectedRead, markReadMutate]);
 
@@ -143,21 +143,21 @@ export function InboxPage() {
     const archived = items.find((i) => i.id === id);
     if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
     archiveMutation.mutate(id, {
-      onError: () => toast.error(t("toast_failed_archive")),
+      onError: () => toast.error("Failed to archive"),
     });
   };
 
   // Batch operations
   const handleMarkAllRead = () => {
     markAllReadMutation.mutate(undefined, {
-      onError: () => toast.error(t("toast_failed_mark_all")),
+      onError: () => toast.error("Failed to mark all as read"),
     });
   };
 
   const handleArchiveAll = () => {
     setSelectedKey("");
     archiveAllMutation.mutate(undefined, {
-      onError: () => toast.error(t("toast_failed_archive_all")),
+      onError: () => toast.error("Failed to archive all"),
     });
   };
 
@@ -165,14 +165,14 @@ export function InboxPage() {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey("");
     archiveAllReadMutation.mutate(undefined, {
-      onError: () => toast.error(t("toast_failed_archive_read")),
+      onError: () => toast.error("Failed to archive read items"),
     });
   };
 
   const handleArchiveCompleted = () => {
     setSelectedKey("");
     archiveCompletedMutation.mutate(undefined, {
-      onError: () => toast.error(t("toast_failed_archive_completed")),
+      onError: () => toast.error("Failed to archive completed"),
     });
   };
 
@@ -181,7 +181,7 @@ export function InboxPage() {
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold">{t("page_title")}</h1>
+        <h1 className="text-sm font-semibold">Inbox</h1>
         {unreadCount > 0 && (
           <span className="text-xs text-muted-foreground">
             {unreadCount}
@@ -203,20 +203,20 @@ export function InboxPage() {
         <DropdownMenuContent align="end" className="w-auto">
           <DropdownMenuItem onClick={handleMarkAllRead}>
             <CheckCheck className="h-4 w-4" />
-            {t("mark_all_read")}
+            Mark all as read
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleArchiveAll}>
             <Archive className="h-4 w-4" />
-            {t("archive_all")}
+            Archive all
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleArchiveAllRead}>
             <BookCheck className="h-4 w-4" />
-            {t("archive_all_read")}
+            Archive all read
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleArchiveCompleted}>
             <ListChecks className="h-4 w-4" />
-            {t("archive_completed")}
+            Archive completed
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -226,7 +226,7 @@ export function InboxPage() {
   const listBody = items.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">{t("no_notifications")}</p>
+      <p className="text-sm">No notifications</p>
     </div>
   ) : (
     <div>
@@ -260,6 +260,12 @@ export function InboxPage() {
         // longer exists.
         setSelectedKey("");
       }}
+      onDone={() => {
+        setSelectedKey("");
+        archiveMutation.mutate(selected.id, {
+          onError: () => toast.error("Failed to archive"),
+        });
+      }}
     />
   ) : selected ? (
     <div className="p-6">
@@ -274,7 +280,7 @@ export function InboxPage() {
       )}
       {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
-          <p className="text-xs font-medium text-muted-foreground">{t("original_input")}</p>
+          <p className="text-xs font-medium text-muted-foreground">Original input</p>
           <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
         </div>
       )}
@@ -298,7 +304,7 @@ export function InboxPage() {
               useModalStore.getState().open("create-issue");
             }}
           >
-            {t("edit_as_advanced_form")}
+            Edit as advanced form
           </Button>
         )}
         <Button
@@ -307,7 +313,7 @@ export function InboxPage() {
           onClick={() => handleArchive(selected.id)}
         >
           <Archive className="mr-1.5 h-3.5 w-3.5" />
-          {t("archive")}
+          Archive
         </Button>
       </div>
     </div>
@@ -349,7 +355,7 @@ export function InboxPage() {
               className="gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
-              {t("back_to_inbox")}
+              Inbox
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
@@ -422,8 +428,8 @@ export function InboxPage() {
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
               {items.length === 0
-                ? t("inbox_empty")
-                : t("select_notification")}
+                ? "Your inbox is empty"
+                : "Select a notification to view details"}
             </p>
           </div>
         )}

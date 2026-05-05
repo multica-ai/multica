@@ -215,6 +215,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		*run = updatedRun
 	}
 
+	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
+	// inserts the task row directly via Queries.CreateAutopilotTask
+	// (bypassing TaskService.Enqueue*), so without this the runtime
+	// would not get a wakeup and any cached "empty" verdict would
+	// stall the task until the TTL expired.
+	s.TaskSvc.NotifyTaskEnqueued(task)
+
 	slog.Info("autopilot dispatched (run_only)",
 		"autopilot_id", util.UUIDToString(ap.ID),
 		"task_id", util.UUIDToString(task.ID),

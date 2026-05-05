@@ -22,6 +22,7 @@ import {
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
@@ -141,27 +142,42 @@ export function AgentsPage() {
     [agents, view],
   );
 
-  // Layer 1b — ownership scope. Counts shown on the segment are
-  // computed against the inView set so the numbers always reflect
+  // Layer 1b — visibility. Personal (visibility=private) agents owned by
+  // someone else are hidden from regular members; workspace owners/admins
+  // still see everything. Mirrors the assign-to-issue gate so the list
+  // only ever shows agents the user could actually act on. Backend keeps
+  // returning all agents, so admin tools (and the API itself) are
+  // unaffected — this is a UI-only filter.
+  const visibleInView = useMemo(() => {
+    return inView.filter((a) =>
+      canAssignAgentToIssue(a, {
+        userId: currentUser?.id ?? null,
+        role: myRole,
+      }).allowed,
+    );
+  }, [inView, currentUser?.id, myRole]);
+
+  // Layer 1c — ownership scope. Counts shown on the segment are
+  // computed against the visibleInView set so the numbers always reflect
   // "what would I see if I clicked this".
   const scopeCounts = useMemo(() => {
     let mine = 0;
     if (currentUser) {
-      for (const a of inView) {
+      for (const a of visibleInView) {
         if (a.owner_id === currentUser.id) mine += 1;
       }
     }
-    return { all: inView.length, mine };
-  }, [inView, currentUser]);
+    return { all: visibleInView.length, mine };
+  }, [visibleInView, currentUser]);
 
   const inScope = useMemo(() => {
     // Archived view ignores Mine / All — its toolbar has no scope
     // segment, so silently filtering by `scope` would hide other
     // people's archived agents without any UI to explain why.
-    if (view === "archived") return inView;
-    if (scope === "all" || !currentUser) return inView;
-    return inView.filter((a) => a.owner_id === currentUser.id);
-  }, [inView, scope, currentUser, view]);
+    if (view === "archived") return visibleInView;
+    if (scope === "all" || !currentUser) return visibleInView;
+    return visibleInView.filter((a) => a.owner_id === currentUser.id);
+  }, [visibleInView, scope, currentUser, view]);
 
   // Final cut — availability chip + search.
   const filteredAgents = useMemo(() => {
@@ -262,6 +278,7 @@ export function AgentsPage() {
 
   const handleCreate = async (data: CreateAgentRequest) => {
     const agent = await api.createAgent(data);
+    let cachedAgent = agent;
     // When duplicating, carry the source agent's skill assignments over.
     // Skills aren't part of CreateAgentRequest (they're managed via
     // setAgentSkills) so the create endpoint can't take them inline; we
@@ -273,14 +290,21 @@ export function AgentsPage() {
         await api.setAgentSkills(agent.id, {
           skill_ids: duplicateTemplate.skills.map((s) => s.id),
         });
+        cachedAgent = { ...agent, skills: duplicateTemplate.skills };
       } catch {
         // Surfaced softly; the agent itself is fine.
       }
     }
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === cachedAgent.id);
+      return exists
+        ? current.map((a) => (a.id === cachedAgent.id ? cachedAgent : a))
+        : [...current, cachedAgent];
+    });
     setShowCreate(false);
     setDuplicateTemplate(null);
     navigation.push(paths.agentDetail(agent.id));
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
   };
 
   const handleDuplicate = useCallback((agent: Agent) => {
@@ -309,6 +333,7 @@ export function AgentsPage() {
         activity: activityMap.get(agent.id) ?? null,
         runCount: runCountsById.get(agent.id) ?? 0,
         ownerIdToShow,
+        isOwnedByMe: isOwner,
         canManage,
       };
     });
@@ -331,8 +356,8 @@ export function AgentsPage() {
   };
 
   const columns = useMemo(
-    () => createAgentColumns({ onDuplicate: handleDuplicate, t }),
-    [handleDuplicate, t],
+    () => createAgentColumns({ onDuplicate: handleDuplicate }),
+    [handleDuplicate],
   );
 
   const table = useReactTable({

@@ -106,6 +106,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
 	if rdb != nil {
+		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 	}
@@ -118,6 +119,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+
+	// Empty-claim cache: lets the daemon poll path skip a Postgres
+	// scan when a recent check confirmed the runtime had no queued
+	// task. Returns nil when rdb is nil — TaskService treats that
+	// as "no cache, always hit DB" (existing behavior).
+	h.TaskService.EmptyClaim = service.NewEmptyClaimCache(rdb)
 
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
@@ -349,6 +356,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Get("/resources", h.ListProjectResources)
+					r.Post("/resources", h.CreateProjectResource)
+					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 				})
 			})
 
@@ -486,6 +496,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+			})
+
+			// Notification preferences
+			r.Route("/api/notification-preferences", func(r chi.Router) {
+				r.Get("/", h.GetNotificationPreferences)
+				r.Put("/", h.UpdateNotificationPreferences)
 			})
 		})
 	})

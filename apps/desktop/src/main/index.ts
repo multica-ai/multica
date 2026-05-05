@@ -111,6 +111,22 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
+  // Prevent Cmd+R / Ctrl+R / Shift+Cmd+R / Shift+Ctrl+R / F5 from
+  // reloading the page. In a desktop app an accidental reload destroys
+  // in-memory state (tabs, drafts, WS connections) with no URL bar to
+  // navigate back. DevTools refresh (via the DevTools UI) still works.
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown") return;
+    const cmdOrCtrl =
+      process.platform === "darwin" ? input.meta : input.control;
+    if (
+      (cmdOrCtrl && input.key.toLowerCase() === "r") ||
+      input.key === "F5"
+    ) {
+      _event.preventDefault();
+    }
+  });
+
   installContextMenu(mainWindow.webContents);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {

@@ -11,12 +11,12 @@ import {
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useT } from "@multica/i18n/react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
-import { availabilityConfig, availabilityLabel } from "../presence";
+import { availabilityConfig } from "../presence";
+import { VisibilityBadge } from "./visibility-badge";
 
 interface AgentProfileCardProps {
   agentId: string;
@@ -25,7 +25,6 @@ interface AgentProfileCardProps {
 export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
-  const t = useT("agents");
   const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
@@ -46,7 +45,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">{t("profile_unavailable")}</div>
+      <div className="text-xs text-muted-foreground">Agent unavailable</div>
     );
   }
 
@@ -83,9 +82,10 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-sm font-semibold">{agent.name}</p>
+            {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {t("profile_archived")}
+                Archived
               </span>
             )}
           </div>
@@ -98,7 +98,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
             href={p.agentDetail(agent.id)}
             className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
           >
-            {t("profile_detail")} →
+            Detail →
           </AppLink>
         )}
       </div>
@@ -114,11 +114,11 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           it knows), owner (who manages it). Model is intentionally
           omitted — power-user detail lives on the detail page. */}
       <div className="flex flex-col gap-1.5 text-xs">
-        <RuntimeRow agent={agent} runtime={runtime} t={t} />
+        <RuntimeRow agent={agent} runtime={runtime} />
         {agent.skills.length > 0 && (
-          <SkillsRow skills={agent.skills.map((s) => s.name)} t={t} />
+          <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
-        {owner && <MetaRow label={t("profile_owner")} value={owner.name} />}
+        {owner && <MetaRow label="Owner" value={owner.name} />}
       </div>
     </div>
   );
@@ -135,7 +135,6 @@ function AgentAvailabilityLine({
   wsId: string | undefined;
   agentId: string;
 }) {
-  const t = useT("agents");
   const detail = useAgentPresenceDetail(wsId, agentId);
   if (detail === "loading") {
     return <Skeleton className="mt-0.5 h-3 w-16" />;
@@ -144,7 +143,7 @@ function AgentAvailabilityLine({
   return (
     <div className="mt-0.5 inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{availabilityLabel(t, detail.availability)}</span>
+      <span className={`text-xs ${av.textClass}`}>{av.label}</span>
     </div>
   );
 }
@@ -159,11 +158,9 @@ function AgentAvailabilityLine({
 function RuntimeRow({
   agent,
   runtime,
-  t,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
-  t: ReturnType<typeof useT>;
 }) {
   const isCloud = agent.runtime_mode === "cloud";
   const health: RuntimeHealth = isCloud
@@ -171,10 +168,10 @@ function RuntimeRow({
     : runtime
       ? deriveRuntimeHealth(runtime, Date.now())
       : "offline";
-  const label = runtime?.name ?? (isCloud ? t("profile_cloud") : t("profile_unknown_runtime"));
+  const label = runtime?.name ?? (isCloud ? "Cloud" : "Unknown runtime");
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{t("profile_runtime")}</span>
+      <span className="w-12 shrink-0 text-muted-foreground">Runtime</span>
       <HealthIcon health={health} className="h-3 w-3 shrink-0" />
       <span className="min-w-0 truncate" title={label}>
         {label}
@@ -202,12 +199,12 @@ function MetaRow({
   );
 }
 
-function SkillsRow({ skills, t }: { skills: string[]; t: ReturnType<typeof useT> }) {
+function SkillsRow({ skills }: { skills: string[] }) {
   const visible = skills.slice(0, 3);
   const overflow = skills.length - visible.length;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{t("profile_skills")}</span>
+      <span className="w-12 shrink-0 text-muted-foreground">Skills</span>
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
           <span

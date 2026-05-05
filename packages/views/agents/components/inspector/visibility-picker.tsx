@@ -2,32 +2,38 @@
 
 import { useState } from "react";
 import { Globe, Lock } from "lucide-react";
+import {
+  VISIBILITY_DESCRIPTION,
+  VISIBILITY_LABEL,
+  VISIBILITY_TOOLTIP,
+} from "@multica/core/agents";
 import type { AgentVisibility } from "@multica/core/types";
-import { useT } from "@multica/i18n/react";
 import {
   PickerItem,
   PropertyPicker,
 } from "../../../issues/components/pickers";
+import { VisibilityBadge } from "../visibility-badge";
 import { CHIP_CLASS } from "./chip";
 
 export function VisibilityPicker({
   value,
+  canEdit = true,
   onChange,
 }: {
   value: AgentVisibility;
+  /** When false, render a read-only `<VisibilityBadge>` and skip the popover. */
+  canEdit?: boolean;
   onChange: (next: AgentVisibility) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
-  const t = useT("agents");
+
+  if (!canEdit) {
+    return <VisibilityBadge value={value} />;
+  }
+
   const Icon = value === "private" ? Lock : Globe;
-  const label =
-    value === "private"
-      ? t("visibility_private_label")
-      : t("visibility_workspace_label");
-  const tooltip =
-    value === "private"
-      ? t("visibility_tooltip_private")
-      : t("visibility_tooltip_workspace");
+  const label = VISIBILITY_LABEL[value];
+  const tooltip = `Visibility · ${VISIBILITY_TOOLTIP[value]}`;
 
   const select = async (next: AgentVisibility) => {
     setOpen(false);
@@ -57,9 +63,9 @@ export function VisibilityPicker({
       >
         <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
-          <div className="font-medium">{t("visibility_workspace_label")}</div>
+          <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
           <div className="text-xs text-muted-foreground">
-            {t("visibility_workspace_desc")}
+            {VISIBILITY_DESCRIPTION.workspace}
           </div>
         </div>
       </PickerItem>
@@ -69,9 +75,9 @@ export function VisibilityPicker({
       >
         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <div className="text-left">
-          <div className="font-medium">{t("visibility_private_label")}</div>
+          <div className="font-medium">{VISIBILITY_LABEL.private}</div>
           <div className="text-xs text-muted-foreground">
-            {t("visibility_private_desc")}
+            {VISIBILITY_DESCRIPTION.private}
           </div>
         </div>
       </PickerItem>
