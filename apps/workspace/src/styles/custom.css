@@ -39,3 +39,211 @@
 [data-sonner-toast] [data-icon] {
   margin-top: 2.5px;
 }
+
+/* =============================================================================
+ * react-big-calendar theme overrides
+ * Scoped to .rbc-theme so only our BigCalendar wrapper is affected.
+ * Uses shadcn CSS variables for automatic light/dark support.
+ * ============================================================================= */
+
+.rbc-theme {
+  /* Let the calendar fill its container */
+  container-type: inline-size;
+}
+
+ */ Base reset: use shadcn surface / text tokens /* 
+.rbc-theme .rbc-calendar {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, inherit);
+  font-size: 0.8125rem; /*  matches app body */13px 
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+ */ Toolbar /* 
+.rbc-theme .rbc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--background);
+}
+
+.rbc-theme .rbc-toolbar-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.rbc-theme .rbc-btn-group button {
+  background-color: transparent;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 150ms, color 150ms;
+}
+
+.rbc-theme .rbc-btn-group button:hover {
+  background-color: var(--muted);
+  color: var(--foreground);
+}
+
+.rbc-theme .rbc-btn-group button.rbc-active,
+.rbc-theme .rbc-btn-group button.rbc-active:hover {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+ */ Headers / date cells /* 
+.rbc-theme .rbc-header {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+  background-color: var(--background);
+}
+
+.rbc-theme .rbc-header + .rbc-header {
+  border-left: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-date-cell {
+  padding: 0.25rem 0.375rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  text-align: right;
+}
+
+.rbc-theme .rbc-date-cell.rbc-now > button,
+.rbc-theme .rbc-date-cell.rbc-now {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.rbc-theme .rbc-off-range-bg {
+  background-color: var(--muted) / 0.4;
+}
+
+ */ Month view grid /* 
+.rbc-theme .rbc-month-view {
+  border: none;
+}
+
+.rbc-theme .rbc-month-row + .rbc-month-row {
+  border-top: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-day-bg + .rbc-day-bg {
+  border-left: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-day-bg:hover {
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
+ */ Time grid (day / week views) /* 
+.rbc-theme .rbc-time-view {
+  border: none;
+}
+
+.rbc-theme .rbc-time-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-timeslot-group {
+  border-bottom: 1px solid var(--border) / 0.5;
+  min-height: 2.5rem;
+}
+
+.rbc-theme .rbc-time-slot {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+.rbc-theme .rbc-time-gutter .rbc-timeslot-group {
+  border-bottom: 1px solid transparent;
+}
+
+.rbc-theme .rbc-day-slot .rbc-time-slot {
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.rbc-theme .rbc-current-time-indicator {
+  background-color: var(--primary);
+  height: 2px;
+}
+
+ */ Events /* 
+.rbc-theme .rbc-event {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: opacity 150ms;
+}
+
+.rbc-theme .rbc-event:hover {
+  opacity: 0.85;
+}
+
+.rbc-theme .rbc-event.rbc-selected,
+.rbc-theme .rbc-event:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.rbc-theme .rbc-event-label {
+  font-size: 0.6875rem;
+  opacity: 0.8;
+}
+
+/* "show more" link */
+.rbc-theme .rbc-show-more {
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: none;
+  cursor: pointer;
+}
+
+ */ Today highlight /* 
+.rbc-theme .rbc-today {
+  background-color: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+ */ Agenda view /* 
+.rbc-theme .rbc-agenda-view table.rbc-agenda-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.rbc-theme .rbc-agenda-view table.rbc-agenda-table thead > tr > th {
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-agenda-view table.rbc-agenda-table tbody > tr > td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.rbc-theme .rbc-agenda-event-cell {
+  color: var(--foreground);
+}

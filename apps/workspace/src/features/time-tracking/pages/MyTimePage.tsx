@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, useRef } from "react";
-import { Clock, Play, Square, Pencil } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Clock, Play, Square, Pencil, CalendarDays } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TimeEntry } from "@/shared/types";
 import {
@@ -12,7 +13,7 @@ import {
 } from "../hooks/use-time-tracking";
 import { LiveDuration, formatDuration } from "../components/LiveDuration";
 import { TimeEntryEditSheet } from "../components/TimeEntryEditSheet";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -206,9 +207,15 @@ export function MyTimePage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Page header */}
-      <div className="flex items-center gap-2 border-b px-6 py-4">
-        <Clock className="size-5 text-muted-foreground" />
-        <h1 className="text-lg font-semibold">My Time</h1>
+      <div className="flex items-center justify-between border-b px-6 py-4">
+        <div className="flex items-center gap-2">
+          <Clock className="size-5 text-muted-foreground" />
+          <h1 className="text-lg font-semibold">My Time</h1>
+        </div>
+        <Link to="/my-time/calendar" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <CalendarDays className="mr-1.5 size-3.5" />
+            Calendar
+          </Link>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">

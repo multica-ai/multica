@@ -259,6 +259,12 @@ type Project struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RunningTimer struct {
+	UserID      pgtype.UUID        `json:"user_id"`
+	TimeEntryID pgtype.UUID        `json:"time_entry_id"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+}
+
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
@@ -304,6 +310,19 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type TimeEntry struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	Description     pgtype.Text        `json:"description"`
+	StartTime       pgtype.Timestamptz `json:"start_time"`
+	StopTime        pgtype.Timestamptz `json:"stop_time"`
+	DurationSeconds int64              `json:"duration_seconds"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

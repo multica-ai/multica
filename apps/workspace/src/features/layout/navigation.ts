@@ -21,6 +21,7 @@ export const primaryNav = [
   { href: "/upcoming", label: "Upcoming", icon: CalendarRange },
   { href: "/my-work", label: "My Work", icon: CircleUser },
   { href: "/my-time", label: "My Time", icon: Clock },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/notifications", label: "Notifications", icon: Inbox },
 ];
 
@@ -39,7 +40,9 @@ export function isWorkspaceNavActive(pathname: string, href: string): boolean {
     case "/my-work":
       return pathname === "/my-work" || pathname === "/my-issues";
     case "/my-time":
-      return pathname === "/my-time";
+      return pathname === "/my-time" || pathname.startsWith("/my-time/");
+    case "/calendar":
+      return pathname === "/calendar";
     case "/agents":
       return pathname === "/agents" || pathname.startsWith("/agents/");
     case "/projects":
