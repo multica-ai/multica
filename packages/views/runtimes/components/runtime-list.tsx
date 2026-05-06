@@ -39,7 +39,7 @@ const EMPTY_WORKLOAD: RuntimeWorkload = {
 // the avatar stack; .length doubles as the agent count) plus task counts
 // split by status. Built once per render off the workspace-wide
 // agents / agent-task-snapshot caches; filtered locally — no extra requests.
-function buildWorkloadIndex(
+export function buildWorkloadIndex(
   agents: Agent[],
   tasks: AgentTask[],
 ): Map<string, RuntimeWorkload> {
@@ -47,7 +47,7 @@ function buildWorkloadIndex(
   const agentToRuntime = new Map<string, string>();
 
   for (const a of agents) {
-    if (!a.runtime_id) continue;
+    if (!a.runtime_id || a.archived_at) continue;
     agentToRuntime.set(a.id, a.runtime_id);
     const entry =
       result.get(a.runtime_id) ?? {
