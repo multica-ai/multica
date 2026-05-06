@@ -282,7 +282,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		runtimeName = overrides.RuntimeName
 	}
 
-	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
+	// Workspaces root: override > env > default (~/multica_workspaces).
+	// Profile no longer affects the default — Desktop, Web, and CLI all share
+	// ~/multica_workspaces/ so a workspace's local files don't fork by client.
+	// MigrateLegacyWorkspacesRoot relocates pre-change profile-suffixed dirs.
 	workspacesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
 	if overrides.WorkspacesRoot != "" {
 		workspacesRoot = overrides.WorkspacesRoot
@@ -292,11 +295,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
 		}
-		if profile != "" {
-			workspacesRoot = filepath.Join(home, "multica_workspaces_"+profile)
-		} else {
-			workspacesRoot = filepath.Join(home, "multica_workspaces")
-		}
+		workspacesRoot = filepath.Join(home, "multica_workspaces")
 	}
 	workspacesRoot, err = filepath.Abs(workspacesRoot)
 	if err != nil {
