@@ -1,6 +1,7 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen } from "@testing-library/react";
+import { renderWithI18n } from "../test/i18n";
 
 const longRepoUrl =
   "https://github.com/multica-ai/a-very-long-repository-name-that-needs-a-tooltip";
@@ -33,6 +34,14 @@ vi.mock("@multica/core/projects", () => ({
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
+
+const configMock = vi.hoisted(() => ({ repoApprovalRequired: false }));
+
+vi.mock("@multica/core/config", () => {
+  const useConfigStore = (selector: (state: typeof configMock) => unknown) =>
+    selector(configMock);
+  return { useConfigStore };
+});
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({
@@ -159,10 +168,30 @@ vi.mock("sonner", () => ({
 import { CreateProjectModal } from "./create-project";
 
 describe("CreateProjectModal", () => {
+  beforeEach(() => {
+    configMock.repoApprovalRequired = false;
+  });
+
   it("exposes full repository URLs in the repository picker", () => {
-    render(<CreateProjectModal onClose={vi.fn()} />);
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
     expect(screen.getByTitle(longRepoUrl)).toHaveTextContent(longRepoUrl);
     expect(screen.getByRole("tooltip", { name: longRepoUrl })).toBeInTheDocument();
+  });
+
+  it("renders the custom URL paste form when repo approval is off", () => {
+    configMock.repoApprovalRequired = false;
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+    expect(
+      screen.getByPlaceholderText("https://github.com/owner/repo"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the custom URL paste form when repo approval is required", () => {
+    configMock.repoApprovalRequired = true;
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+    expect(
+      screen.queryByPlaceholderText("https://github.com/owner/repo"),
+    ).not.toBeInTheDocument();
   });
 });

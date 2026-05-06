@@ -11,6 +11,7 @@ import {
 } from "@multica/core/projects";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
 import type {
   GithubRepoResourceRef,
   ProjectResource,
@@ -37,6 +38,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
+  const repoApprovalRequired = useConfigStore((s) => s.repoApprovalRequired);
   const [open, setOpen] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -52,11 +54,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       .map((r) => (r.resource_ref as GithubRepoResourceRef).url),
   );
 
-  // Only approved workspace repos can be attached. Pending repos must be
-  // approved through the workspace settings flow first.
-  const approvedRepos = (workspace?.repos ?? []).filter(
-    (r) => r.status === "approved",
-  );
+  // When approval is required, workspace settings is the single source of
+  // truth: only approved repos are pickable and the ad-hoc paste form is
+  // hidden. When approval is off, status is irrelevant — show everything
+  // and let the user paste arbitrary URLs.
+  const allRepos = workspace?.repos ?? [];
+  const pickableRepos = repoApprovalRequired
+    ? allRepos.filter((r) => r.status === "approved")
+    : allRepos;
 
   const handleAttach = async (url: string) => {
     try {
@@ -122,9 +127,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               <div className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.resources.popover_title)}
               </div>
-              {approvedRepos.length > 0 ? (
+              {pickableRepos.length > 0 ? (
                 <div className="space-y-1">
-                  {approvedRepos.map((repo) => {
+                  {pickableRepos.map((repo) => {
                     const isAttached = attachedUrls.has(repo.url);
                     const isDisabled = isAttached || createResource.isPending;
                     return (
@@ -162,8 +167,18 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {t(($) => $.resources.popover_empty_approval)}
+                  {repoApprovalRequired
+                    ? t(($) => $.resources.popover_empty_approval)
+                    : t(($) => $.resources.popover_empty)}
                 </p>
+              )}
+              {!repoApprovalRequired && (
+                <CustomRepoForm
+                  onSubmit={async (url) => {
+                    await handleAttach(url);
+                    setAddOpen(false);
+                  }}
+                />
               )}
             </PopoverContent>
           </Popover>
@@ -232,5 +247,47 @@ function ResourceRow({
         <Trash2 className="size-3" />
       </button>
     </div>
+  );
+}
+
+function CustomRepoForm({
+  onSubmit,
+}: {
+  onSubmit: (url: string) => Promise<void> | void;
+}) {
+  const { t } = useT("projects");
+  const [url, setUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const handle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(trimmed);
+      setUrl("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
+      <input
+        type="url"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder={t(($) => $.resources.url_placeholder)}
+        className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+      />
+      <Button
+        type="submit"
+        size="sm"
+        variant="ghost"
+        className="h-6 px-2 text-xs"
+        disabled={!url.trim() || submitting}
+      >
+        {t(($) => $.resources.url_submit)}
+      </Button>
+    </form>
   );
 }
