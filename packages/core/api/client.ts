@@ -276,6 +276,13 @@ export class ApiClient {
     });
   }
 
+  async googleMobileLogin(idToken: string, platform: string): Promise<LoginResponse> {
+    return this.fetch("/auth/google/mobile", {
+      method: "POST",
+      body: JSON.stringify({ id_token: idToken, platform }),
+    });
+  }
+
   async dingtalkLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/dingtalk", {
       method: "POST",
@@ -769,6 +776,7 @@ export class ApiClient {
   async getConfig(): Promise<{
     cdn_domain: string;
     google_client_id?: string;
+    google_ios_client_id?: string;
     dingtalk_client_id?: string;
     dingtalk_oauth_scope?: string;
     hide_email_login?: boolean;

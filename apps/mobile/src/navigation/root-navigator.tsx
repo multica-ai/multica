@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, StyleSheet, Text, View } from "react-native";
 import { NavigationIndependentTree } from "@react-navigation/core";
 import {
   NavigationContainer,
@@ -8,6 +8,7 @@ import {
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuthStore } from "@multica/core/auth";
+import { useCoreQueryClient } from "@multica/core/provider";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
@@ -24,6 +25,7 @@ import { InboxDetailScreen } from "../screens/mine/inbox-detail-screen";
 import { InboxScreen } from "../screens/mine/inbox-screen";
 import { AgentsScreen } from "../screens/mine/agents-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
+import { SettingScreen } from "../screens/mine/setting-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import { colors, spacing } from "../theme/tokens";
@@ -40,6 +42,7 @@ export type RootStackParamList = {
   Agents: undefined;
   Inbox: undefined;
   InboxDetail: { inboxItemId: string };
+  Setting: undefined;
 };
 
 type TabParamList = {
@@ -53,6 +56,45 @@ const Tabs = createBottomTabNavigator<TabParamList>();
 export function RootNavigator() {
   const user = useAuthStore((state) => state.user);
   const isLoading = useAuthStore((state) => state.isLoading);
+  const loginWithToken = useAuthStore((state) => state.loginWithToken);
+  const queryClient = useCoreQueryClient();
+  const handledAuthUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    async function handleAuthUrl(url: string | null) {
+      if (!url || handledAuthUrlRef.current === url) return;
+
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return;
+      }
+
+      const authPath = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, "");
+      if (authPath !== "auth/callback") return;
+
+      const token = parsed.searchParams.get("token");
+      if (!token) return;
+
+      handledAuthUrlRef.current = url;
+      try {
+        queryClient.clear();
+        await loginWithToken(token);
+      } catch {
+        handledAuthUrlRef.current = null;
+      }
+    }
+
+    void Linking.getInitialURL().then(handleAuthUrl);
+    const subscription = Linking.addEventListener("url", (event) => {
+      void handleAuthUrl(event.url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loginWithToken, queryClient]);
 
   if (isLoading) {
     return (
@@ -94,6 +136,7 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={AgentsScreen} name="Agents" />
             <Stack.Screen component={InboxScreen} name="Inbox" />
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
+            <Stack.Screen component={SettingScreen} name="Setting" />
           </Stack.Navigator>
         </WorkspaceGate>
       </NavigationContainer>

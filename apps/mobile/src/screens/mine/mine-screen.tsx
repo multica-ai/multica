@@ -3,9 +3,8 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
-import { Bot, Inbox, Server } from "lucide-react-native";
-import { useMobileLogout } from "../../auth/use-mobile-logout";
-import { Button, Screen } from "../../components/ui/primitives";
+import { Bot, Inbox, Server, Settings } from "lucide-react-native";
+import { Screen } from "../../components/ui/primitives";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
@@ -16,9 +15,10 @@ const readOnlyEntries = [
   { label: "Runtimes", route: "Runtimes", icon: Server },
   { label: "Agents", route: "Agents", icon: Bot },
   { label: "Inbox", route: "Inbox", icon: Inbox },
+  { label: "Setting", route: "Setting", icon: Settings },
 ] as const satisfies ReadonlyArray<{
   label: string;
-  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Inbox">;
+  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Inbox" | "Setting">;
   icon: typeof Server;
 }>;
 
@@ -26,7 +26,6 @@ export function MineScreen() {
   const navigation = useNavigation<MineNavigation>();
   const { workspace } = useMobileWorkspace();
   const user = useAuthStore((state) => state.user);
-  const logout = useMobileLogout();
   const { data: inboxItems = [] } = useInboxList(workspace.id);
   const displayName = user?.name || user?.email || "User";
   const initial = displayName.trim().charAt(0).toUpperCase() || "U";
@@ -57,7 +56,7 @@ export function MineScreen() {
           </View>
         </View>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Read-only views</Text>
+          <Text style={styles.sectionTitle}>More</Text>
           <View style={styles.entryRow}>
             {readOnlyEntries.slice(0, 4).map((entry) => {
               const Icon = entry.icon;
@@ -85,11 +84,6 @@ export function MineScreen() {
             })}
           </View>
         </View>
-      </View>
-      <View style={styles.footer}>
-        <Button onPress={logout} style={styles.logoutButton} variant="secondary">
-          Log out
-        </Button>
       </View>
     </Screen>
   );
@@ -189,12 +183,5 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
-  },
-  footer: {
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  logoutButton: {
-    width: "60%",
   },
 });
