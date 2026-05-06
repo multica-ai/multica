@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -1376,9 +1377,21 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if content == "" {
 		return
 	}
-	// Look up issue to get workspace ID for mention expansion and broadcasting.
+	// Look up issue to get workspace ID for policy evaluation, mention expansion, and broadcasting.
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
+		return
+	}
+	agent, err := s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          agentID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("failed to evaluate agent comment policy", "agent_id", util.UUIDToString(agentID), "issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if agentpolicy.FromRuntimeConfig(agent.RuntimeConfig).DeniesAgentMentionsByDefault() && containsAgentMention(content) {
+		slog.Warn("agent policy blocked synthesized agent mention comment", "agent_id", util.UUIDToString(agentID), "issue_id", util.UUIDToString(issueID))
 		return
 	}
 	// Resolve thread root: if parentID points to a reply (has its own parent),
@@ -1422,6 +1435,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_status": issue.Status,
 		},
 	})
+}
+
+func containsAgentMention(content string) bool {
+	for _, mention := range util.ParseMentions(content) {
+		if mention.Type == "agent" {
+			return true
+		}
+	}
+	return false
 }
 
 func issueToMap(issue db.Issue, issuePrefix string) map[string]any {

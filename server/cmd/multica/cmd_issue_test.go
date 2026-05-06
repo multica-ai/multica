@@ -502,6 +502,126 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 	}
 }
 
+func newCollaborationRequestTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "collaboration-request-test"}
+	cmd.Flags().String("to", "", "")
+	cmd.Flags().String("purpose", "", "")
+	cmd.Flags().Bool("purpose-stdin", false, "")
+	cmd.Flags().String("mode", "discussion_only", "")
+	cmd.Flags().Int("max-turns", 2, "")
+	cmd.Flags().Int("ttl-minutes", 0, "")
+	cmd.Flags().String("parent-request", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestIssueCollaborationRequestCreateBuildsControllerRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			if got := r.URL.Query().Get("workspace_id"); got != "ws-1" {
+				t.Errorf("workspace_id query = %q, want ws-1", got)
+			}
+			json.NewEncoder(w).Encode([]map[string]any{{"id": "agent-3333", "name": "reviewer"}})
+		case "/api/issues/issue-1/collaboration-requests":
+			gotPath = r.URL.Path
+			gotMethod = r.Method
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "request-1",
+				"status":         "queued",
+				"to_agent_id":    "agent-3333",
+				"target_task_id": "task-1",
+				"expires_at":     "2026-05-02T00:00:00Z",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	_ = cmd.Flags().Set("purpose", `review\nrisk`)
+	_ = cmd.Flags().Set("max-turns", "3")
+	_ = cmd.Flags().Set("ttl-minutes", "90")
+	_ = cmd.Flags().Set("parent-request", "request-parent")
+
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = devNull
+	defer func() {
+		os.Stdout = origStdout
+		_ = devNull.Close()
+	}()
+
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err != nil {
+		t.Fatalf("runIssueCollaborationRequestCreate: %v", err)
+	}
+
+	if gotPath != "/api/issues/issue-1/collaboration-requests" || gotMethod != http.MethodPost {
+		t.Fatalf("request = %s %s, want POST /api/issues/issue-1/collaboration-requests", gotMethod, gotPath)
+	}
+	if gotBody["to_agent_id"] != "agent-3333" {
+		t.Errorf("to_agent_id = %v, want agent-3333", gotBody["to_agent_id"])
+	}
+	if gotBody["purpose"] != "review\nrisk" {
+		t.Errorf("purpose = %q, want decoded newline", gotBody["purpose"])
+	}
+	if gotBody["mode"] != "discussion_only" {
+		t.Errorf("mode = %v, want discussion_only", gotBody["mode"])
+	}
+	if gotBody["max_turns"] != float64(3) || gotBody["ttl_minutes"] != float64(90) {
+		t.Errorf("bounds = max_turns:%v ttl_minutes:%v, want 3/90", gotBody["max_turns"], gotBody["ttl_minutes"])
+	}
+	if gotBody["parent_request_id"] != "request-parent" {
+		t.Errorf("parent_request_id = %v, want request-parent", gotBody["parent_request_id"])
+	}
+}
+
+func TestIssueCollaborationRequestCreateValidatesRequiredFlags(t *testing.T) {
+	cmd := newCollaborationRequestTestCmd()
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("expected --to validation error, got %v", err)
+	}
+
+	cmd = newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--purpose or --purpose-stdin is required") {
+		t.Fatalf("expected purpose validation error, got %v", err)
+	}
+
+	cmd = newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	_ = cmd.Flags().Set("purpose", "review")
+	_ = cmd.Flags().Set("max-turns", "0")
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--max-turns must be positive") {
+		t.Fatalf("expected max-turns validation error, got %v", err)
+	}
+
+	cmd = newCollaborationRequestTestCmd()
+	_ = cmd.Flags().Set("to", "reviewer")
+	_ = cmd.Flags().Set("purpose", "review")
+	_ = cmd.Flags().Set("ttl-minutes", "-1")
+	if err := runIssueCollaborationRequestCreate(cmd, []string{"issue-1"}); err == nil || !strings.Contains(err.Error(), "--ttl-minutes must be zero or positive") {
+		t.Fatalf("expected ttl-minutes validation error, got %v", err)
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,

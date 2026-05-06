@@ -178,14 +178,15 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	RuntimeConfig json.RawMessage          `json:"runtime_config,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	Model         string                   `json:"model,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {

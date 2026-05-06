@@ -171,6 +171,25 @@ var issueRerunCmd = &cobra.Command{
 	RunE:  runIssueRerun,
 }
 
+var issueCollaborationRequestCmd = &cobra.Command{
+	Use:   "collaboration-request",
+	Short: "Create or list audited agent collaboration requests",
+}
+
+var issueCollaborationRequestCreateCmd = &cobra.Command{
+	Use:   "create <issue-id>",
+	Short: "Ask the controller to route a bounded same-issue request to another agent",
+	Args:  exactArgs(1),
+	RunE:  runIssueCollaborationRequestCreate,
+}
+
+var issueCollaborationRequestListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List audited collaboration requests on an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueCollaborationRequestList,
+}
+
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title or description",
@@ -194,6 +213,7 @@ func init() {
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueRerunCmd)
+	issueCmd.AddCommand(issueCollaborationRequestCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -203,6 +223,9 @@ func init() {
 	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberRemoveCmd)
+
+	issueCollaborationRequestCmd.AddCommand(issueCollaborationRequestCreateCmd)
+	issueCollaborationRequestCmd.AddCommand(issueCollaborationRequestListCmd)
 
 	// issue list
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -260,6 +283,17 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue collaboration-request create/list
+	issueCollaborationRequestCreateCmd.Flags().String("to", "", "Target agent name or ID (required)")
+	issueCollaborationRequestCreateCmd.Flags().String("purpose", "", "Purpose for the target agent (decodes \\n, \\r, \\t, \\\\; pipe via --purpose-stdin to preserve literal backslashes)")
+	issueCollaborationRequestCreateCmd.Flags().Bool("purpose-stdin", false, "Read collaboration request purpose from stdin")
+	issueCollaborationRequestCreateCmd.Flags().String("mode", "discussion_only", "Collaboration mode (discussion_only)")
+	issueCollaborationRequestCreateCmd.Flags().Int("max-turns", 2, "Maximum target-agent turns requested")
+	issueCollaborationRequestCreateCmd.Flags().Int("ttl-minutes", 0, "Request TTL in minutes (0 = server policy default)")
+	issueCollaborationRequestCreateCmd.Flags().String("parent-request", "", "Parent collaboration request ID for bounded chains")
+	issueCollaborationRequestCreateCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCollaborationRequestListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1021,6 +1055,114 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, task)
 	}
 	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), strVal(task, "agent_id"))
+	return nil
+}
+
+func runIssueCollaborationRequestCreate(cmd *cobra.Command, args []string) error {
+	target, _ := cmd.Flags().GetString("to")
+	if strings.TrimSpace(target) == "" {
+		return fmt.Errorf("--to is required")
+	}
+	purpose, hasPurpose, err := resolveTextFlag(cmd, "purpose")
+	if err != nil {
+		return err
+	}
+	if !hasPurpose || strings.TrimSpace(purpose) == "" {
+		return fmt.Errorf("--purpose or --purpose-stdin is required")
+	}
+	maxTurns, _ := cmd.Flags().GetInt("max-turns")
+	if maxTurns <= 0 && cmd.Flags().Changed("max-turns") {
+		return fmt.Errorf("--max-turns must be positive")
+	}
+	ttlMinutes, _ := cmd.Flags().GetInt("ttl-minutes")
+	if ttlMinutes < 0 {
+		return fmt.Errorf("--ttl-minutes must be zero or positive")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	aType, aID, err := resolveAssignee(ctx, client, target)
+	if err != nil {
+		return fmt.Errorf("resolve target agent: %w", err)
+	}
+	if aType != "agent" {
+		return fmt.Errorf("collaboration request target must be an agent, got %s", aType)
+	}
+
+	body := map[string]any{
+		"to_agent_id": aID,
+		"purpose":     purpose,
+	}
+	if v, _ := cmd.Flags().GetString("mode"); v != "" {
+		body["mode"] = v
+	}
+	if maxTurns > 0 {
+		body["max_turns"] = maxTurns
+	}
+	if ttlMinutes > 0 {
+		body["ttl_minutes"] = ttlMinutes
+	}
+	if v, _ := cmd.Flags().GetString("parent-request"); v != "" {
+		body["parent_request_id"] = v
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/collaboration-requests", body, &result); err != nil {
+		return fmt.Errorf("create collaboration request: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	headers := []string{"ID", "STATUS", "TO_AGENT", "TASK", "EXPIRES"}
+	rows := [][]string{{
+		truncateID(strVal(result, "id")),
+		strVal(result, "status"),
+		truncateID(strVal(result, "to_agent_id")),
+		truncateID(strVal(result, "target_task_id")),
+		strVal(result, "expires_at"),
+	}}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueCollaborationRequestList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var requests []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+args[0]+"/collaboration-requests", &requests); err != nil {
+		return fmt.Errorf("list collaboration requests: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, requests)
+	}
+	headers := []string{"ID", "STATUS", "FROM", "TO", "MODE", "DEPTH", "EXPIRES"}
+	rows := make([][]string, 0, len(requests))
+	for _, r := range requests {
+		rows = append(rows, []string{
+			truncateID(strVal(r, "id")),
+			strVal(r, "status"),
+			truncateID(strVal(r, "from_agent_id")),
+			truncateID(strVal(r, "to_agent_id")),
+			strVal(r, "mode"),
+			fmt.Sprintf("%v", r["depth"]),
+			strVal(r, "expires_at"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 
