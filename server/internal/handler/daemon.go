@@ -671,10 +671,25 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*pr
 		Status:    "ok",
 	}
 
-	if pending := h.UpdateStore.PopPending(runtimeID); pending != nil {
-		ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
-			ID:            pending.ID,
-			TargetVersion: pending.TargetVersion,
+	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasUpdate, probeUpdateErr := h.UpdateStore.HasPending(probeUpdateCtx, runtimeID)
+	cancelProbeUpdate()
+	switch {
+	case probeUpdateErr == nil && hasUpdate:
+		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID)
+		if popUpdateErr != nil {
+			slog.Warn("update PopPending failed", "error", popUpdateErr, "runtime_id", runtimeID)
+		} else if pending != nil {
+			ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
+				ID:            pending.ID,
+				TargetVersion: pending.TargetVersion,
+			}
+		}
+	case probeUpdateErr != nil:
+		if errors.Is(probeUpdateErr, context.DeadlineExceeded) || errors.Is(probeUpdateErr, context.Canceled) {
+			slog.Warn("update HasPending timed out", "runtime_id", runtimeID)
+		} else {
+			slog.Warn("update HasPending failed", "error", probeUpdateErr, "runtime_id", runtimeID)
 		}
 	}
 
