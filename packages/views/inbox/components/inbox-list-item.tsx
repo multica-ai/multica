@@ -2,7 +2,7 @@
 
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, CircleCheck } from "lucide-react";
+import { Archive } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
@@ -30,13 +30,11 @@ export function InboxListItem({
   isSelected,
   onClick,
   onArchive,
-  onDone,
 }: {
   item: InboxItem;
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
-  onDone?: () => void;
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
@@ -68,26 +66,6 @@ export function InboxListItem({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {onDone && (
-              <span
-                role="button"
-                tabIndex={-1}
-                title={t(($) => $.list.mark_done_tooltip)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDone();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    onDone();
-                  }
-                }}
-                className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-info group-hover:inline-flex"
-              >
-                <CircleCheck className="h-3.5 w-3.5" />
-              </span>
-            )}
             <span
               role="button"
               tabIndex={-1}

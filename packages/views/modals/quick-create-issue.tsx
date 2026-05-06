@@ -27,6 +27,7 @@ import {
   MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -82,6 +83,9 @@ export function AgentCreatePanel({
 
   const lastAgentId = useQuickCreateStore((s) => s.lastAgentId);
   const setLastAgentId = useQuickCreateStore((s) => s.setLastAgentId);
+  const promptDraft = useQuickCreateStore((s) => s.prompt);
+  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
+  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -114,7 +118,10 @@ export function AgentCreatePanel({
   // daemons handle attachments and partial-failure retries incorrectly
   // (see PR #1851 / MUL-1496). Pre-check on the picker so the user gets
   // immediate feedback instead of waiting for the inbox failure; the
-  // server re-validates as the trust boundary.
+  // server re-validates as the trust boundary. Dev-built daemons
+  // (git-describe shape) are exempted inside checkQuickCreateCliVersion
+  // — frontend and server share the same signal there, so they agree by
+  // construction across web/desktop/staging without comparing env flags.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>
@@ -129,7 +136,7 @@ export function AgentCreatePanel({
   );
   const versionBlocked = versionCheck.state !== "ok";
 
-  const initialPrompt = (data?.prompt as string) || "";
+  const initialPrompt = (data?.prompt as string) || promptDraft;
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
@@ -168,6 +175,7 @@ export function AgentCreatePanel({
     try {
       await api.quickCreateIssue({ agent_id: agentId, prompt: md });
       setLastAgentId(agentId);
+      clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
         duration: 4000,
@@ -350,7 +358,10 @@ export function AgentCreatePanel({
             ref={editorRef}
             defaultValue={initialPrompt}
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
-            onUpdate={(md) => setHasContent(md.trim().length > 0)}
+            onUpdate={(md) => {
+              setHasContent(md.trim().length > 0);
+              setPrompt(md);
+            }}
             onUploadFile={handleUploadFile}
             onSubmit={submit}
             debounceMs={150}
@@ -407,7 +418,7 @@ export function AgentCreatePanel({
             >
               {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : t(($) => $.create_issue.agent.submit)}
+              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
         </div>

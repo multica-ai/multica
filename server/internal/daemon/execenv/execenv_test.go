@@ -1,6 +1,8 @@
 package execenv
 
 import (
+	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +13,10 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.Default()
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func TestShortID(t *testing.T) {
@@ -27,6 +33,24 @@ func TestShortID(t *testing.T) {
 		if got := shortID(tt.input); got != tt.want {
 			t.Errorf("shortID(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestPredictRootDir(t *testing.T) {
+	t.Parallel()
+	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	if got != want {
+		t.Errorf("PredictRootDir = %q, want %q", got, want)
+	}
+	if got := PredictRootDir("", "ws", "task"); got != "" {
+		t.Errorf("expected empty when workspaces root missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "", "task"); got != "" {
+		t.Errorf("expected empty when workspace ID missing, got %q", got)
+	}
+	if got := PredictRootDir("/r", "ws", ""); got != "" {
+		t.Errorf("expected empty when task ID missing, got %q", got)
 	}
 }
 
@@ -120,6 +144,139 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	}
 }
 
+func TestPrepareWithProjectResources(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Agent UX 2026",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-pr",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	// resources.json should exist and decode back to what we wrote.
+	resourcesPath := filepath.Join(env.WorkDir, ".multica", "project", "resources.json")
+	raw, err := os.ReadFile(resourcesPath)
+	if err != nil {
+		t.Fatalf("failed to read resources.json: %v", err)
+	}
+	var got struct {
+		ProjectID    string `json:"project_id"`
+		ProjectTitle string `json:"project_title"`
+		Resources    []struct {
+			ID           string          `json:"id"`
+			ResourceType string          `json:"resource_type"`
+			ResourceRef  json.RawMessage `json:"resource_ref"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
+	}
+	if got.ProjectID != taskCtx.ProjectID {
+		t.Errorf("resources.json project_id = %q, want %q", got.ProjectID, taskCtx.ProjectID)
+	}
+	if got.ProjectTitle != taskCtx.ProjectTitle {
+		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	}
+	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
+		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
+	}
+
+	// CLAUDE.md should mention the project context block.
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Project Context",
+		"Agent UX 2026",
+		"GitHub repo",
+		"https://github.com/multica-ai/multica",
+		"default branch: `main`",
+		".multica/project/resources.json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
+// When the issue's project has its own github_repo resources, those should be
+// the only repos rendered in the meta-skill — workspace-level repos must not
+// leak into the agent prompt to avoid confusing it about which repo to use.
+//
+// The handler-side override is exercised in handler tests; this test confirms
+// the rendering side: given a TaskContextForEnv where Repos was already
+// narrowed by the server to project repos only, the meta skill renders just
+// those.
+func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Project A",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/project-repo"},
+		},
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  []byte(`{"url":"https://github.com/org/project-repo"}`),
+			},
+		},
+	}
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	if !strings.Contains(s, "https://github.com/org/project-repo") {
+		t.Errorf("CLAUDE.md missing project repo URL")
+	}
+	if strings.Contains(s, "https://github.com/org/workspace-repo") {
+		t.Errorf("CLAUDE.md should not contain workspace repo when project has its own")
+	}
+}
+
+func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+		t.Fatalf("writeProjectResources: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no resources.json to be written when project context is empty")
+	}
+}
+
 func TestPrepareWithRepoContext(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -127,8 +284,8 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend", Description: "Go backend"},
-			{URL: "https://github.com/org/frontend", Description: "React frontend"},
+			{URL: "https://github.com/org/backend"},
+			{URL: "https://github.com/org/frontend"},
 		},
 	}
 	env, err := Prepare(PrepareParams{
@@ -170,9 +327,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
-		"Go backend",
 		"https://github.com/org/frontend",
-		"React frontend",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
@@ -590,17 +745,17 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// Skills should be in .config/opencode/skills/ (native discovery).
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "SKILL.md"))
+	// Skills should be in .opencode/skills/ (native discovery).
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "SKILL.md"))
 	if err != nil {
-		t.Fatalf("failed to read .config/opencode/skills/go-conventions/SKILL.md: %v", err)
+		t.Fatalf("failed to read .opencode/skills/go-conventions/SKILL.md: %v", err)
 	}
 	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
 		t.Error("SKILL.md missing content")
 	}
 
-	// Supporting files should also be under .config/opencode/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "templates", "example.go"))
+	// Supporting files should also be under .opencode/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "templates", "example.go"))
 	if err != nil {
 		t.Fatalf("failed to read supporting file: %v", err)
 	}
@@ -719,7 +874,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "c3d4e5f6-a7b8-9012-cdef-123456789012",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend", Description: "Go backend"},
+			{URL: "https://github.com/org/backend"},
 		},
 	}
 	env, err := Prepare(PrepareParams{
@@ -760,7 +915,6 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
-		"Go backend",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing %q", want)
@@ -1223,6 +1377,51 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
+	}
+}
+
+// Regression for issue #2081: when the per-task auth.json is a stale regular
+// file (e.g. left behind from an earlier Windows copy fallback), a subsequent
+// Reuse() / prepareCodexHome must refresh it from the shared source rather
+// than preserve the stale copy. Without this, Codex would keep retrying with
+// a refresh token the OAuth server has already revoked, surfacing as
+// `refresh_token_reused` / `token_expired` until the user manually nukes the
+// workspace directory.
+func TestPrepareCodexHome_RefreshesStaleAuthCopyOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"v1"}`), 0o644)
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+
+	// Pre-seed the per-task home with a stale regular-file auth.json,
+	// simulating a previous run where os.Symlink failed and createFileLink
+	// fell back to copying.
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	stalePath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(stalePath, []byte(`{"refresh_token":"v0_stale"}`), 0o644); err != nil {
+		t.Fatalf("seed stale auth: %v", err)
+	}
+
+	// Shared source rotates to v2 while the per-task copy is still stuck on v0.
+	os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"v2"}`), 0o644)
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	// After Reuse, dst should mirror the current shared source — either as a
+	// fresh symlink (preferred) or as a fresh copy (Windows fallback).
+	data, err := os.ReadFile(stalePath)
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if string(data) != `{"refresh_token":"v2"}` {
+		t.Errorf("auth.json content = %q, want refreshed v2 contents", data)
 	}
 }
 
@@ -1767,7 +1966,7 @@ func TestWriteReadGCMeta(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	wsID := "ws-test-001"
 
-	if err := WriteGCMeta(dir, issueID, wsID); err != nil {
+	if err := WriteGCMeta(dir, issueID, wsID, discardLogger()); err != nil {
 		t.Fatalf("WriteGCMeta: %v", err)
 	}
 
@@ -1789,8 +1988,20 @@ func TestWriteReadGCMeta(t *testing.T) {
 
 func TestWriteGCMeta_EmptyRoot(t *testing.T) {
 	t.Parallel()
-	if err := WriteGCMeta("", "issue", "ws"); err != nil {
+	if err := WriteGCMeta("", "issue", "ws", discardLogger()); err != nil {
 		t.Fatalf("expected nil for empty root, got %v", err)
+	}
+}
+
+func TestWriteGCMeta_EmptyIssueID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if err := WriteGCMeta(dir, "", "ws", discardLogger()); err != nil {
+		t.Fatalf("expected nil for empty issue ID, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, gcMetaFile)); !os.IsNotExist(err) {
+		t.Fatalf("expected gc meta file to be absent, got err=%v", err)
 	}
 }
 

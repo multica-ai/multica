@@ -106,8 +106,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
 	if rdb != nil {
+		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
+		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
+		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
 	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
@@ -118,6 +121,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+
+	// Empty-claim cache: lets the daemon poll path skip a Postgres
+	// scan when a recent check confirmed the runtime had no queued
+	// task. Returns nil when rdb is nil — TaskService treats that
+	// as "no cache, always hit DB" (existing behavior).
+	h.TaskService.EmptyClaim = service.NewEmptyClaimCache(rdb)
 
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
@@ -349,6 +358,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Get("/resources", h.ListProjectResources)
+					r.Post("/resources", h.CreateProjectResource)
+					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 				})
 			})
 
@@ -467,7 +479,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
-					r.Delete("/", h.ArchiveChatSession)
+					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/pending-task", h.GetPendingChatTask)

@@ -52,6 +52,16 @@ describe("NoAccessPage", () => {
     expect(navigate).toHaveBeenCalledWith("/");
   });
 
+  it("clears last_workspace_slug cookie on mount so the proxy stops looping us back", () => {
+    document.cookie = "last_workspace_slug=stale; path=/";
+    render(<NoAccessPage />);
+    // Assert empty value, not just absence of "stale" — the proxy reads any
+    // truthy value as a redirect target, so a buggy clear that left e.g.
+    // `last_workspace_slug=other` would still trap users.
+    const value = document.cookie.match(/last_workspace_slug=([^;]*)/)?.[1];
+    expect(value ?? "").toBe("");
+  });
+
   it("fully logs out on 'Sign in as a different user' instead of just navigating", () => {
     renderPage();
     fireEvent.click(

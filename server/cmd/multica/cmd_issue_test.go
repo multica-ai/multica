@@ -358,6 +358,220 @@ func TestResolveAssigneeByID(t *testing.T) {
 	})
 }
 
+// TestResolveAssigneeByIDStrict covers the strict UUID resolver that backs
+// --assignee-id / --to-id / --user-id. Unlike resolveAssignee it must reject
+// non-UUID inputs (no name fallback) and surface a clear error when the UUID
+// is well-formed but not present in the workspace.
+func TestResolveAssigneeByIDStrict(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+		{"id": "192b9cca-2222-2222-2222-222222222222", "name": "Open Claw - J"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("full UUID resolves the right agent in a substring-collision workspace", func(t *testing.T) {
+		// This is the MUL-1254 scenario: agent "J" is unreachable by name
+		// because every other agent has "J" in it. UUID lookup must
+		// deterministically pick the right one.
+		aType, aID, err := resolveAssigneeByID(ctx, client, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q), want agent J", aType, aID)
+		}
+	})
+
+	t.Run("uppercase UUID is normalized", func(t *testing.T) {
+		aType, aID, err := resolveAssigneeByID(ctx, client, "5FB87AC7-23B5-4A7A-81FA-ED295A54545D")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q), want agent J", aType, aID)
+		}
+	})
+
+	t.Run("UUID resolves a member", func(t *testing.T) {
+		aType, aID, err := resolveAssigneeByID(ctx, client, "aaaaaaaa-1111-1111-1111-111111111111")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want Alice", aType, aID)
+		}
+	})
+
+	t.Run("non-UUID input is rejected without name fallback", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "Alice")
+		if err == nil {
+			t.Fatal("expected error for non-UUID input")
+		}
+		if !strings.Contains(err.Error(), "UUID") {
+			t.Errorf("expected UUID error, got: %v", err)
+		}
+	})
+
+	t.Run("UUID prefix (ShortID) is rejected — strict mode requires canonical form", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "5fb87ac7")
+		if err == nil {
+			t.Fatal("expected error for ShortID")
+		}
+	})
+
+	t.Run("well-formed UUID with no matching entity errors", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "deadbeef-1111-1111-1111-111111111111")
+		if err == nil {
+			t.Fatal("expected error for missing entity")
+		}
+		if !strings.Contains(err.Error(), "no member or agent") {
+			t.Errorf("expected not-found error, got: %v", err)
+		}
+	})
+
+	t.Run("missing workspace ID", func(t *testing.T) {
+		noWSClient := cli.NewAPIClient(srv.URL, "", "test-token")
+		_, _, err := resolveAssigneeByID(ctx, noWSClient, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		if err == nil {
+			t.Fatal("expected error for missing workspace ID")
+		}
+	})
+}
+
+// TestPickAssigneeFromFlags covers the flag-pair picker that backs every
+// assignee-taking command. The mutual-exclusion guard is the load-bearing
+// piece — silently preferring one side would let a buggy script set both
+// flags and assign the wrong entity.
+func TestPickAssigneeFromFlags(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "test"}
+		c.Flags().String("assignee", "", "")
+		c.Flags().String("assignee-id", "", "")
+		return c
+	}
+
+	t.Run("neither flag set returns hasValue=false", func(t *testing.T) {
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, newCmd(), "assignee", "assignee-id")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if has {
+			t.Errorf("expected hasValue=false")
+		}
+	})
+
+	t.Run("name flag uses fuzzy resolver", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "Alice")
+		typ, id, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err != nil || !has || typ != "member" || id != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q, %v, %v), want Alice", typ, id, has, err)
+		}
+	})
+
+	t.Run("id flag uses strict resolver", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee-id", "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		typ, id, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err != nil || !has || typ != "agent" || id != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q, %v, %v), want agent J", typ, id, has, err)
+		}
+	})
+
+	t.Run("both flags set is rejected", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "Alice")
+		_ = c.Flags().Set("assignee-id", "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		_, _, _, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected mutually-exclusive error")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually-exclusive error, got: %v", err)
+		}
+	})
+
+	// Explicit-empty regression: a script that interpolates an empty env var
+	// into `--assignee-id "$MAYBE_UUID"` must NOT silently route through the
+	// "no flag set" branch — that would defeat the whole point of the strict
+	// UUID flag (issue list returning everything, create leaving the issue
+	// unassigned, subscriber add subscribing the caller). Detection is via
+	// Flags().Changed, so an explicit empty string surfaces as a UUID error.
+	t.Run("explicit empty --assignee-id surfaces as UUID error, not silent skip", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee-id", "")
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected UUID error for explicit empty assignee-id")
+		}
+		if !has {
+			t.Errorf("expected hasValue=true so caller treats this as a real attempt, not a no-op")
+		}
+		if !strings.Contains(err.Error(), "UUID") {
+			t.Errorf("expected UUID-shaped error, got: %v", err)
+		}
+	})
+
+	t.Run("explicit empty --assignee surfaces as not-found, not silent skip", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "")
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected resolver error for explicit empty assignee")
+		}
+		if !has {
+			t.Errorf("expected hasValue=true so caller treats this as a real attempt, not a no-op")
+		}
+	})
+
+	t.Run("explicit empty on both flags is mutually exclusive (set wins over value)", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "")
+		_ = c.Flags().Set("assignee-id", "")
+		_, _, _, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually-exclusive error, got: %v", err)
+		}
+	})
+}
+
 func TestIssueSubscriberList(t *testing.T) {
 	subscribersResp := []map[string]any{
 		{

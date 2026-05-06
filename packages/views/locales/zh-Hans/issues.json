@@ -140,8 +140,10 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个 issue 从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
-    "task_completed": "完成了 task",
-    "task_failed": "task 失败"
+    "task_completed_one": "完成了 task",
+    "task_completed_other": "完成了 task（{{count}} 次）",
+    "task_failed_one": "task 失败",
+    "task_failed_other": "task 失败（{{count}} 次）"
   },
   "comment": {
     "delete_title": "删除评论",

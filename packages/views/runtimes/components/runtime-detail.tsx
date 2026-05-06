@@ -121,7 +121,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canDelete = isAdmin || isRuntimeOwner;
 
-  const servingAgents = agents.filter((a) => a.runtime_id === runtime.id);
+  const servingAgents = agents.filter(
+    (a) => a.runtime_id === runtime.id && !a.archived_at,
+  );
 
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {

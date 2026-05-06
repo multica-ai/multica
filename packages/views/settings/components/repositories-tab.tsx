@@ -50,15 +50,15 @@ export function RepositoriesTab() {
   };
 
   const handleAddRepo = () => {
-    setRepos([...repos, { url: "", description: "" }]);
+    setRepos([...repos, { url: "" }]);
   };
 
   const handleRemoveRepo = (index: number) => {
     setRepos(repos.filter((_, i) => i !== index));
   };
 
-  const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
-    setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  const handleRepoChange = (index: number, value: string) => {
+    setRepos(repos.map((r, i) => (i === index ? { ...r, url: value } : r)));
   };
 
   if (!workspace) return null;
@@ -75,25 +75,15 @@ export function RepositoriesTab() {
             </p>
 
             {repos.map((repo, index) => (
-              <div key={index} className="flex gap-2">
-                <div className="flex-1 space-y-1.5">
-                  <Input
-                    type="url"
-                    value={repo.url}
-                    onChange={(e) => handleRepoChange(index, "url", e.target.value)}
-                    disabled={!canManageWorkspace}
-                    placeholder={t(($) => $.repositories.url_placeholder)}
-                    className="text-sm"
-                  />
-                  <Input
-                    type="text"
-                    value={repo.description}
-                    onChange={(e) => handleRepoChange(index, "description", e.target.value)}
-                    disabled={!canManageWorkspace}
-                    placeholder={t(($) => $.repositories.description_placeholder)}
-                    className="text-sm"
-                  />
-                </div>
+              <div key={index} className="flex items-start gap-2">
+                <Input
+                  type="url"
+                  value={repo.url}
+                  onChange={(e) => handleRepoChange(index, e.target.value)}
+                  disabled={!canManageWorkspace}
+                  placeholder={t(($) => $.repositories.url_placeholder)}
+                  className="flex-1 min-w-0 text-sm"
+                />
                 {canManageWorkspace && (
                   <Button
                     variant="ghost"
@@ -108,7 +98,7 @@ export function RepositoriesTab() {
             ))}
 
             {canManageWorkspace && (
-              <div className="flex items-center justify-between pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <Button variant="outline" size="sm" onClick={handleAddRepo}>
                   <Plus className="h-3 w-3" />
                   {t(($) => $.repositories.add)}

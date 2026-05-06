@@ -141,8 +141,10 @@
     "due_date_removed": "removed due date",
     "title_renamed": "renamed this issue from \"{{from}}\" to \"{{to}}\"",
     "description_updated": "updated the description",
-    "task_completed": "completed the task",
-    "task_failed": "task failed"
+    "task_completed_one": "completed the task",
+    "task_completed_other": "completed the task ({{count}} times)",
+    "task_failed_one": "task failed",
+    "task_failed_other": "task failed ({{count}} times)"
   },
   "comment": {
     "delete_title": "Delete comment",

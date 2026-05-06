@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient, useMutationState } from "@tanstack/react-query";
 import type { Comment, TimelineEntry, Reaction } from "@multica/core/types";
 import type {
@@ -47,10 +47,15 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
   const [submitting, setSubmitting] = useState(false);
 
-  const createCommentMutation = useCreateComment(issueId);
-  const updateCommentMutation = useUpdateComment(issueId);
-  const deleteCommentMutation = useDeleteComment(issueId);
-  const toggleReactionMutation = useToggleCommentReaction(issueId);
+  // TanStack Query v5 returns a fresh result wrapper from useMutation on
+  // every render, but the mutate / mutateAsync functions inside are stable
+  // across renders. Pull just the stable handles so the useCallback
+  // identities below do not flip on every parent re-render — listing the
+  // whole mutation object would defeat React.memo on CommentCard.
+  const { mutateAsync: createComment } = useCreateComment(issueId);
+  const { mutateAsync: updateComment } = useUpdateComment(issueId);
+  const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
+  const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
   // Reconnect recovery
   useWSReconnect(
@@ -215,24 +220,21 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       if (!content.trim() || submitting || !userId) return;
       setSubmitting(true);
       try {
-        await createCommentMutation.mutateAsync({
-          content,
-          attachmentIds,
-        });
+        await createComment({ content, attachmentIds });
       } catch {
         toast.error(t(($) => $.comment.send_failed));
       } finally {
         setSubmitting(false);
       }
     },
-    [userId, submitting, createCommentMutation, t],
+    [userId, submitting, createComment, t],
   );
 
   const submitReply = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
       if (!content.trim() || !userId) return;
       try {
-        await createCommentMutation.mutateAsync({
+        await createComment({
           content,
           type: "comment",
           parentId,
@@ -242,29 +244,29 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         toast.error(t(($) => $.comment.send_reply_failed));
       }
     },
-    [userId, createCommentMutation, t],
+    [userId, createComment, t],
   );
 
   const editComment = useCallback(
     async (commentId: string, content: string) => {
       try {
-        await updateCommentMutation.mutateAsync({ commentId, content });
+        await updateComment({ commentId, content });
       } catch {
         toast.error(t(($) => $.comment.update_failed));
       }
     },
-    [updateCommentMutation, t],
+    [updateComment, t],
   );
 
   const deleteComment = useCallback(
     async (commentId: string) => {
       try {
-        await deleteCommentMutation.mutateAsync(commentId);
+        await deleteCommentAsync(commentId);
       } catch {
         toast.error(t(($) => $.comment.delete_failed));
       }
     },
-    [deleteCommentMutation, t],
+    [deleteCommentAsync, t],
   );
 
   // --- Optimistic UI derivation for comment reactions ---
@@ -322,20 +324,29 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     });
   }, [timeline, pendingReactionVars, userId]);
 
+  // Read timeline through a ref so toggleReaction's identity does not change
+  // on every WS event. Without this, every memoized CommentCard down-tree
+  // would re-render on each timeline mutation, defeating the React.memo cost
+  // savings on long timelines (see Inbox-freeze fix).
+  const timelineRef = useRef(timeline);
+  useEffect(() => {
+    timelineRef.current = timeline;
+  }, [timeline]);
+
   const toggleReaction = useCallback(
     async (commentId: string, emoji: string) => {
       if (!userId) return;
       // Read from server timeline (not optimistic) to find the real reaction
-      const entry = timeline.find((e) => e.id === commentId);
+      const entry = timelineRef.current.find((e) => e.id === commentId);
       const existing: Reaction | undefined = (entry?.reactions ?? []).find(
         (r) =>
           r.emoji === emoji &&
           r.actor_type === "member" &&
           r.actor_id === userId,
       );
-      toggleReactionMutation.mutate({ commentId, emoji, existing });
+      toggleCommentReaction({ commentId, emoji, existing });
     },
-    [userId, timeline, toggleReactionMutation],
+    [userId, toggleCommentReaction],
   );
 
   return {

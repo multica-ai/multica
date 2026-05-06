@@ -55,7 +55,8 @@
     "section_description": "描述",
     "description_placeholder": "添加描述...",
     "empty_issues_title": "还没有关联的 issue",
-    "empty_issues_hint": "在 issue 详情页将 issue 关联到这个项目。",
+    "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
+    "empty_issues_new_button": "新建 issue",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动 issue 失败"

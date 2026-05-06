@@ -208,7 +208,8 @@ func init() {
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
-	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
+	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member or agent; fuzzy match)")
+	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
@@ -222,7 +223,8 @@ func init() {
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent)")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent; fuzzy match)")
+	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
@@ -235,7 +237,8 @@ func init() {
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
-	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent)")
+	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent; fuzzy match)")
+	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -245,7 +248,8 @@ func init() {
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue assign
-	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent)")
+	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent; fuzzy match)")
+	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -281,11 +285,13 @@ func init() {
 	issueSubscriberListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue subscriber add
-	issueSubscriberAddCmd.Flags().String("user", "", "Member or agent name to subscribe (defaults to the caller)")
+	issueSubscriberAddCmd.Flags().String("user", "", "Member or agent name to subscribe (fuzzy match; defaults to the caller)")
+	issueSubscriberAddCmd.Flags().String("user-id", "", "Member or agent UUID to subscribe (mutually exclusive with --user)")
 	issueSubscriberAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue subscriber remove
-	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (defaults to the caller)")
+	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (fuzzy match; defaults to the caller)")
+	issueSubscriberRemoveCmd.Flags().String("user-id", "", "Member or agent UUID to unsubscribe (mutually exclusive with --user)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -319,11 +325,11 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
 		params.Set("limit", fmt.Sprintf("%d", v))
 	}
-	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
-		_, aID, resolveErr := resolveAssignee(ctx, client, v)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve assignee: %w", resolveErr)
-		}
+	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve assignee: %w", resolveErr)
+	}
+	if hasAssignee {
 		params.Set("assignee_id", aID)
 	}
 	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
@@ -476,11 +482,11 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
-	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve assignee: %w", resolveErr)
-		}
+	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve assignee: %w", resolveErr)
+	}
+	if hasAssignee {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
 	}
@@ -599,14 +605,15 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
-	if cmd.Flags().Changed("assignee") {
-		v, _ := cmd.Flags().GetString("assignee")
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
+	if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("assignee-id") {
+		aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
-		body["assignee_type"] = aType
-		body["assignee_id"] = aID
+		if hasAssignee {
+			body["assignee_type"] = aType
+			body["assignee_id"] = aID
+		}
 	}
 	if cmd.Flags().Changed("parent") {
 		v, _ := cmd.Flags().GetString("parent")
@@ -645,12 +652,14 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
+	toNameSet := cmd.Flags().Changed("to")
+	toIDSet := cmd.Flags().Changed("to-id")
 
-	if toName == "" && !unassign {
-		return fmt.Errorf("provide --to <name> or --unassign")
+	if !toNameSet && !toIDSet && !unassign {
+		return fmt.Errorf("provide --to <name>, --to-id <uuid>, or --unassign")
 	}
-	if toName != "" && unassign {
-		return fmt.Errorf("--to and --unassign are mutually exclusive")
+	if (toNameSet || toIDSet) && unassign {
+		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -662,16 +671,20 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	body := map[string]any{}
+	displayTarget := toName
 	if unassign {
 		body["assignee_type"] = nil
 		body["assignee_id"] = nil
 	} else {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, toName)
+		aType, aID, _, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "to", "to-id")
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
+		if displayTarget == "" {
+			displayTarget = truncateID(aID)
+		}
 	}
 
 	var result map[string]any
@@ -682,7 +695,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	if unassign {
 		fmt.Fprintf(os.Stderr, "Issue %s unassigned.\n", truncateID(args[0]))
 	} else {
-		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", truncateID(args[0]), toName)
+		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", truncateID(args[0]), displayTarget)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1145,11 +1158,11 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 
 	body := map[string]any{}
 	userName, _ := cmd.Flags().GetString("user")
-	if userName != "" {
-		uType, uID, resolveErr := resolveAssignee(ctx, client, userName)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve user: %w", resolveErr)
-		}
+	uType, uID, hasUser, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "user", "user-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve user: %w", resolveErr)
+	}
+	if hasUser {
 		body["user_type"] = uType
 		body["user_id"] = uID
 	}
@@ -1163,6 +1176,8 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 	target := "caller"
 	if userName != "" {
 		target = userName
+	} else if hasUser {
+		target = truncateID(uID)
 	}
 	if action == "subscribe" {
 		fmt.Fprintf(os.Stderr, "Subscribed %s to issue %s.\n", target, truncateID(issueID))
@@ -1267,6 +1282,83 @@ func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
 		parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
 	}
 	return fmt.Errorf("ambiguous assignee %q; matches:\n%s", input, strings.Join(parts, "\n"))
+}
+
+// resolveAssigneeByID strictly resolves a canonical UUID to (assignee_type,
+// assignee_id) by looking it up against the workspace's members and agents.
+// It is the deterministic counterpart to resolveAssignee: callers that already
+// hold a UUID (e.g. agents reading IDs from `multica workspace members
+// --output json`) should use this instead of round-tripping through name
+// matching, which can be ambiguous in workspaces with overlapping names.
+func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string) (string, string, error) {
+	if client.WorkspaceID == "" {
+		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+	input := strings.TrimSpace(id)
+	if !uuidRegexp.MatchString(input) {
+		return "", "", fmt.Errorf("expected a canonical UUID, got %q", id)
+	}
+
+	var members []map[string]any
+	memberErr := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+
+	var agents []map[string]any
+	agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
+	agentErr := client.GetJSON(ctx, agentPath, &agents)
+
+	if memberErr != nil && agentErr != nil {
+		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", memberErr, agentErr)
+	}
+
+	for _, m := range members {
+		if strings.EqualFold(strVal(m, "user_id"), input) {
+			return "member", strVal(m, "user_id"), nil
+		}
+	}
+	for _, a := range agents {
+		if strings.EqualFold(strVal(a, "id"), input) {
+			return "agent", strVal(a, "id"), nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no member or agent found with ID %q", input)
+}
+
+// pickAssigneeFromFlags reads a (name-flag, id-flag) pair off cmd and resolves
+// it to (assignee_type, assignee_id). The third return reports whether either
+// flag was *explicitly set*; callers use it to decide whether to write
+// `assignee_*` into the request body. The two flags are mutually exclusive —
+// passing both is rejected up-front so a script that accidentally sets both
+// never silently applies one over the other.
+//
+// Presence is detected via Flags().Changed (not value-emptiness): a script
+// that interpolates an empty env var (`--assignee-id "$MAYBE_UUID"`) must
+// fail loudly through resolveAssignee/resolveAssigneeByID rather than silently
+// degrade to "no filter / unassigned / subscribe caller", which would defeat
+// the strict-UUID guarantee the new flags exist for.
+func pickAssigneeFromFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, nameFlag, idFlag string) (string, string, bool, error) {
+	nameSet := cmd.Flags().Changed(nameFlag)
+	idSet := cmd.Flags().Changed(idFlag)
+	if nameSet && idSet {
+		return "", "", false, fmt.Errorf("--%s and --%s are mutually exclusive", nameFlag, idFlag)
+	}
+	if idSet {
+		idVal, _ := cmd.Flags().GetString(idFlag)
+		t, i, err := resolveAssigneeByID(ctx, client, idVal)
+		if err != nil {
+			return "", "", true, err
+		}
+		return t, i, true, nil
+	}
+	if nameSet {
+		name, _ := cmd.Flags().GetString(nameFlag)
+		t, i, err := resolveAssignee(ctx, client, name)
+		if err != nil {
+			return "", "", true, err
+		}
+		return t, i, true, nil
+	}
+	return "", "", false, nil
 }
 
 func formatAssignee(issue map[string]any) string {

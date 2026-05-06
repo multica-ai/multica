@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import type { RuntimeConfigResult } from "../shared/runtime-config";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -21,7 +22,23 @@ function fetchAppInfo(): { version: string; os: "macos" | "windows" | "linux" | 
   return { version: "unknown", os };
 }
 
+function fetchRuntimeConfig(): RuntimeConfigResult {
+  try {
+    const result = ipcRenderer.sendSync("runtime-config:get") as RuntimeConfigResult | undefined;
+    if (result && typeof result === "object" && "ok" in result) return result;
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        message: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+  return { ok: false, error: { message: "Runtime config unavailable" } };
+}
+
 const appInfo = fetchAppInfo();
+const runtimeConfig = fetchRuntimeConfig();
 
 // Read the OS-preferred locale that main injected via additionalArguments.
 // Zero IPC, zero blocking — process.argv is populated before preload runs.
@@ -50,6 +67,8 @@ const desktopAPI = {
       ipcRenderer.removeListener("locale:system-changed", handler);
     };
   },
+  /** Validated runtime endpoint config, or a blocking config error. */
+  runtimeConfig,
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>

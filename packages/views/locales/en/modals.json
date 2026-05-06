@@ -67,7 +67,15 @@
     "submit": "Create Project",
     "submitting": "Creating...",
     "toast_created": "Project created",
-    "toast_failed": "Failed to create project"
+    "toast_failed": "Failed to create project",
+    "repos_pill": "Repos",
+    "repos_pill_count_one": "{{count}} repo",
+    "repos_pill_count_other": "{{count}} repos",
+    "repos_heading": "Attach GitHub repos to this project",
+    "repos_empty": "No workspace-level repos yet. Paste a URL below to attach one ad-hoc.",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "Add",
+    "repos_selected": "Selected"
   },
   "create_issue": {
     "sr_manual": "New Issue",

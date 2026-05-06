@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,8 +13,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"errors"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -937,7 +936,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// handling, no-retry on partial failure). Older daemons either
 	// double-create issues on partial CLI failures or mishandle pasted
 	// screenshot URLs; fail closed before enqueuing rather than surface
-	// the breakage as an inbox failure twenty seconds later.
+	// the breakage as an inbox failure twenty seconds later. Dev-built
+	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
+	// so `make daemon` works without weakening staging or production.
 	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
@@ -1691,6 +1692,32 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	var rawUpdates map[string]json.RawMessage
 	if raw, exists := rawTop["updates"]; exists {
 		json.Unmarshal(raw, &rawUpdates)
+	}
+
+	// Short-circuit when no mutation field is present in `updates`. Without
+	// this, the loop below runs N no-op UPDATEs (every if-guard skips, every
+	// COALESCE preserves the existing value) and reports `{"updated": N}` —
+	// the response cheerfully claims success while nothing changed. Most
+	// real-world cases that hit this path are caller mistakes (status placed
+	// at the top level, "update" misspelled as singular). Telling the truth
+	// here — `{"updated": 0}` — keeps the wire shape stable while making the
+	// count match reality. See multica-ai/multica#1660.
+	hasMutation := req.Updates.Title != nil ||
+		req.Updates.Description != nil ||
+		req.Updates.Status != nil ||
+		req.Updates.Priority != nil ||
+		req.Updates.Position != nil
+	if !hasMutation {
+		for _, k := range []string{"assignee_type", "assignee_id", "due_date", "parent_issue_id", "project_id"} {
+			if _, ok := rawUpdates[k]; ok {
+				hasMutation = true
+				break
+			}
+		}
+	}
+	if !hasMutation {
+		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
+		return
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)

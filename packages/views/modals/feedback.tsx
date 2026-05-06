@@ -22,6 +22,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { captureFeedbackOpened } from "@multica/core/analytics";
 import { useT } from "../i18n";
+import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 
 const MAX_MESSAGE_LEN = 10000;
 
@@ -121,7 +122,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}
             <kbd className="ml-1 inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none">
-              {"⌘↵"}
+              {formatShortcut(modKey, enterKey)}
             </kbd>
           </Button>
         </div>

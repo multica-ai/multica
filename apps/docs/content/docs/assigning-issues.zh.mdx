@@ -32,9 +32,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ```bash
 multica issue assign MUL-42 --to alice
+multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-`--to` 后跟成员用户名或智能体名字。给智能体起个好记的名字会让这一步顺很多——工作区里重名的会按列出顺序选第一个，建议先改名再分配。
+`--to` 后跟成员用户名或智能体名字（模糊匹配）。如果工作区里有同名 / 互相含子串的成员或智能体（例如 agent `J` 旁边还有 `Cursor - J`），改用 `--to-id <uuid>`：UUID 来自 `multica workspace members --output json` 的 `user_id` 或 `multica agent list --output json` 的 `id`，是唯一精确的方式，特别适合脚本和驱动 CLI 的智能体。`--to` 和 `--to-id` 互斥。
 
 取消分配：
 

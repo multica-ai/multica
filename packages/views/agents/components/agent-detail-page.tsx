@@ -206,7 +206,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         </div>
       )}
 
-      <div className="grid flex-1 min-h-0 grid-cols-[320px_minmax(0,1fr)] gap-4 p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
         <AgentDetailInspector
           agent={agent}
           runtime={runtime}
@@ -361,7 +361,7 @@ function DetailLoadingSkeleton() {
       <PageHeader className="px-5">
         <Skeleton className="h-5 w-48" />
       </PageHeader>
-      <div className="grid flex-1 min-h-0 grid-cols-[320px_minmax(0,1fr)] gap-4 p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
         <div className="flex flex-col gap-4 rounded-lg border p-5">
           <Skeleton className="h-14 w-14 rounded-lg" />
           <Skeleton className="h-5 w-40" />

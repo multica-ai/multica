@@ -67,7 +67,15 @@
     "submit": "创建项目",
     "submitting": "创建中...",
     "toast_created": "已创建项目",
-    "toast_failed": "创建项目失败"
+    "toast_failed": "创建项目失败",
+    "repos_pill": "代码仓库",
+    "repos_pill_count_one": "{{count}} 个仓库",
+    "repos_pill_count_other": "{{count}} 个仓库",
+    "repos_heading": "为此项目关联 GitHub 仓库",
+    "repos_empty": "还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "添加",
+    "repos_selected": "已选"
   },
   "create_issue": {
     "sr_manual": "新建 issue",

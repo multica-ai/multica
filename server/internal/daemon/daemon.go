@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,11 +27,18 @@ import (
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
 // workspaceState tracks registered runtimes for a single workspace.
+//
+// allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
+// every refresh from the server. taskRepoURLs covers repos that the server
+// surfaced through a per-task claim (project github_repo resources today,
+// possibly other typed sources later) — those don't show up in
+// GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
+	taskRepoURLs    map[string]struct{}
 	settings        json.RawMessage // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
@@ -46,7 +55,7 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSetCh chan struct{}      // notifies the WS wakeup loop to reconnect with a new runtime set
+	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -58,6 +67,16 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+
+	activeEnvRootsMu sync.Mutex
+	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
+
+	// bgSyncs tracks background goroutines started by registerTaskRepos so
+	// callers (notably tests using t.TempDir-backed cache roots) can wait for
+	// them to drain before tearing the daemon down. Without this the bg
+	// goroutine can race against t.TempDir cleanup, leaving a partially
+	// deleted bare clone and an unrelated `not empty` cleanup failure.
+	bgSyncs sync.WaitGroup
 }
 
 // New creates a new Daemon instance.
@@ -68,15 +87,16 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
-		cfg:           cfg,
-		client:        client,
-		repoCache:     repocache.New(cacheRoot, logger),
-		logger:        logger,
-		workspaces:    make(map[string]*workspaceState),
-		runtimeIndex:  make(map[string]Runtime),
-		runtimeSetCh:  make(chan struct{}, 1),
-		agentVersions: make(map[string]string),
-		wsHBLastAck:   make(map[string]time.Time),
+		cfg:            cfg,
+		client:         client,
+		repoCache:      repocache.New(cacheRoot, logger),
+		logger:         logger,
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   make(map[string]Runtime),
+		runtimeSet:     newRuntimeSetWatcher(),
+		agentVersions:  make(map[string]string),
+		wsHBLastAck:    make(map[string]time.Time),
+		activeEnvRoots: make(map[string]int),
 	}
 }
 
@@ -97,18 +117,48 @@ func (d *Daemon) agentVersion(provider string) string {
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
-	select {
-	case d.runtimeSetCh <- struct{}{}:
-	default:
+	d.runtimeSet.notify()
+}
+
+// runtimeSetWatcher is a tiny pub/sub for runtime-set changes. It exists
+// because more than one supervisor (taskWakeupLoop, heartbeatLoop, pollLoop)
+// needs to react to runtime-set changes; a single buffered channel would
+// race so only the first listener would learn about each change.
+//
+// Each subscriber gets a 1-slot channel; missed nudges coalesce into a
+// single signal — the subscriber is expected to re-derive the current
+// runtime set via allRuntimeIDs() rather than relying on edge counts.
+type runtimeSetWatcher struct {
+	mu          sync.Mutex
+	subscribers map[chan struct{}]struct{}
+}
+
+func newRuntimeSetWatcher() *runtimeSetWatcher {
+	return &runtimeSetWatcher{subscribers: make(map[chan struct{}]struct{})}
+}
+
+// Subscribe returns a channel that receives a non-blocking nudge whenever
+// the runtime set changes, and an unsubscribe func the caller must invoke
+// when done.
+func (w *runtimeSetWatcher) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	w.mu.Lock()
+	w.subscribers[ch] = struct{}{}
+	w.mu.Unlock()
+	return ch, func() {
+		w.mu.Lock()
+		delete(w.subscribers, ch)
+		w.mu.Unlock()
 	}
 }
 
-func (d *Daemon) drainRuntimeSetChanged() {
-	for {
+func (w *runtimeSetWatcher) notify() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for ch := range w.subscribers {
 		select {
-		case <-d.runtimeSetCh:
+		case ch <- struct{}{}:
 		default:
-			return
 		}
 	}
 }
@@ -203,7 +253,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.workspaceSyncLoop(ctx)
 
 	taskWakeups := make(chan struct{}, 1)
-	d.drainRuntimeSetChanged()
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
@@ -358,8 +407,13 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	if !ok {
 		return false
 	}
-	_, allowed := ws.allowedRepoURLs[repoURL]
-	return allowed
+	if _, allowed := ws.allowedRepoURLs[repoURL]; allowed {
+		return true
+	}
+	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
+		return true
+	}
+	return false
 }
 
 func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
@@ -389,6 +443,69 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 		return true // default: enabled
 	}
 	return *s.CoAuthoredByEnabled
+}
+
+// registerTaskRepos merges task-scoped repos (e.g. project github_repo
+// resources lifted into resp.Repos by the claim handler) into the workspace's
+// allowlist and kicks off a cache sync for any URLs that aren't yet cached.
+//
+// It's safe to call with the workspace's own repos — duplicates are
+// idempotent. Called from runTask before the agent spawns so
+// `multica repo checkout` accepts project-only URLs without an extra round
+// trip back to GetWorkspaceRepos (which doesn't carry project resources).
+func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
+	if len(repos) == 0 {
+		return
+	}
+
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		return
+	}
+	if ws.taskRepoURLs == nil {
+		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
+	}
+	toSync := make([]RepoData, 0, len(repos))
+	for _, repo := range repos {
+		url := strings.TrimSpace(repo.URL)
+		if url == "" {
+			continue
+		}
+		// Don't re-sync if the URL is already tracked (workspace or task-scoped)
+		// AND the cache already has it.
+		_, inWorkspace := ws.allowedRepoURLs[url]
+		_, inTask := ws.taskRepoURLs[url]
+		if (inWorkspace || inTask) && d.repoCache != nil && d.repoCache.Lookup(workspaceID, url) != "" {
+			ws.taskRepoURLs[url] = struct{}{}
+			continue
+		}
+		ws.taskRepoURLs[url] = struct{}{}
+		toSync = append(toSync, RepoData{URL: url})
+	}
+	d.mu.Unlock()
+
+	if d.repoCache != nil && len(toSync) > 0 {
+		// Sync in the background — same shape used at workspace registration.
+		// `ensureRepoReady` reports a meaningful error if the cache isn't ready
+		// yet, so the agent's first checkout will surface a sync failure
+		// without silently treating it as a config bug.
+		d.bgSyncs.Add(1)
+		go func() {
+			defer d.bgSyncs.Done()
+			d.syncWorkspaceRepos(workspaceID, toSync)
+		}()
+	}
+}
+
+// waitBackgroundSyncs blocks until every background sync started by
+// registerTaskRepos has finished. Intended for test teardown: tests that
+// hand the daemon a t.TempDir-backed repo cache must call this before
+// returning, otherwise an in-flight clone/fetch can race against TempDir
+// cleanup and surface as an unrelated "directory not empty" failure.
+func (d *Daemon) waitBackgroundSyncs() {
+	d.bgSyncs.Wait()
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
@@ -580,34 +697,104 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	return nil
 }
 
+// heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
+// gets an independent ticker so a slow heartbeat for one runtime cannot block
+// heartbeats for any other runtime — this matters when a single daemon serves
+// multiple workspaces, because the previous shared loop would serialize an
+// up-to-30s HTTP timeout across every runtime in the set.
 func (d *Daemon) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(d.cfg.HeartbeatInterval)
-	defer ticker.Stop()
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
 
+	cancels := make(map[string]context.CancelFunc)
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
+
+	sync := func() {
+		want := make(map[string]struct{})
+		for _, rid := range d.allRuntimeIDs() {
+			want[rid] = struct{}{}
+		}
+		for rid, cancel := range cancels {
+			if _, ok := want[rid]; !ok {
+				cancel()
+				delete(cancels, rid)
+			}
+		}
+		for rid := range want {
+			if _, ok := cancels[rid]; ok {
+				continue
+			}
+			rctx, rcancel := context.WithCancel(ctx)
+			cancels[rid] = rcancel
+			go d.runRuntimeHeartbeat(rctx, rid)
+		}
+	}
+
+	sync()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-runtimeSetCh:
+			sync()
+		}
+	}
+}
+
+// runRuntimeHeartbeat owns the HTTP heartbeat schedule for a single runtime.
+// The first tick fires after a small jittered delay (up to one full interval)
+// to avoid a thundering herd when the daemon registers many runtimes at once.
+func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
+	interval := d.cfg.HeartbeatInterval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	// Jittered initial delay; cap at the interval so the first beat still
+	// happens within one period.
+	if jitter := time.Duration(rand.Int63n(int64(interval))); jitter > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(jitter):
+		}
+	}
+
+	d.runHeartbeatTick(ctx, rid)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, rid := range d.allRuntimeIDs() {
-				// Skip HTTP heartbeat for runtimes that successfully acked
-				// a recent WebSocket heartbeat. The WS path keeps last_seen_at
-				// fresh and delivers actions, so the HTTP write would be a
-				// duplicate DB update. If the WS heartbeat goes silent the
-				// freshness window expires and HTTP resumes automatically on
-				// the next tick — that is the fallback the WS path relies on.
-				if d.wsHeartbeatRecentlyAcked(rid) {
-					continue
-				}
-				resp, err := d.client.SendHeartbeat(ctx, rid)
-				if err != nil {
-					d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
-					continue
-				}
-				d.handleHeartbeatActions(ctx, rid, resp)
-			}
+			d.runHeartbeatTick(ctx, rid)
 		}
 	}
+}
+
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+	// Skip HTTP heartbeat for runtimes that successfully acked a recent
+	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
+	// actions, so the HTTP write would be a duplicate DB update. If the WS
+	// heartbeat goes silent the freshness window expires and HTTP resumes
+	// automatically on the next tick — that is the fallback the WS path
+	// relies on.
+	if d.wsHeartbeatRecentlyAcked(rid) {
+		return
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
+		}
+		return
+	}
+	d.handleHeartbeatActions(ctx, rid, resp)
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -648,7 +835,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 
 	entry, ok := d.cfg.Agents[rt.Provider]
 	if !ok {
-		d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  fmt.Sprintf("no agent configured for provider %q", rt.Provider),
 		})
@@ -657,7 +844,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 
 	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
-		d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
@@ -682,7 +869,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			Default:  m.Default,
 		})
 	}
-	d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{
+	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
@@ -733,19 +920,20 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 	})
 }
 
-// localSkillReportBackoffs defines the retry schedule for delivering a
-// local-skill result to the server. First attempt runs immediately, then we
-// back off. The sum (≈6.5s) stays well under the server-side running timeout
-// (60s) so a report that eventually lands still updates the request instead
-// of racing a timeout transition.
+// runtimeReportBackoffs defines the retry schedule for delivering any
+// daemon→server async result (model list, local-skill list, local-skill
+// import). First attempt runs immediately, then we back off. The sum
+// (≈6.5s) stays well under the server-side running timeout (60s) so a
+// report that eventually lands still updates the request instead of
+// racing a timeout transition.
 //
 // Overridable for tests to avoid real sleeps.
-var localSkillReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
 // reportLocalSkillListResult delivers a list-report to the server with retry
-// on transient failures. See reportLocalSkillResultWithRetry for semantics.
+// on transient failures. See reportRuntimeResultWithRetry for semantics.
 func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportLocalSkillResultWithRetry(ctx, "list", rt.ID, requestID, func(ctx context.Context) error {
+	d.reportRuntimeResultWithRetry(ctx, "local_skill_list", rt.ID, requestID, func(ctx context.Context) error {
 		return d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, payload)
 	})
 }
@@ -753,29 +941,39 @@ func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, req
 // reportLocalSkillImportResult delivers an import-report to the server with
 // retry on transient failures.
 func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportLocalSkillResultWithRetry(ctx, "import", rt.ID, requestID, func(ctx context.Context) error {
+	d.reportRuntimeResultWithRetry(ctx, "local_skill_import", rt.ID, requestID, func(ctx context.Context) error {
 		return d.client.ReportLocalSkillImportResult(ctx, rt.ID, requestID, payload)
 	})
 }
 
-// reportLocalSkillResultWithRetry retries `fn` on 5xx / network errors and
-// stops on success, 4xx, or after exhausting localSkillReportBackoffs.
+// reportModelListResult delivers a model-list report to the server with retry
+// on transient failures. Without this the daemon used to fire once and
+// swallow any 5xx, leaving the request stranded in "running" on the server
+// until its 60s timeout — defeating the multi-node store fix.
+func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
+	d.reportRuntimeResultWithRetry(ctx, "model_list", rt.ID, requestID, func(ctx context.Context) error {
+		return d.client.ReportModelListResult(ctx, rt.ID, requestID, payload)
+	})
+}
+
+// reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
+// stops on success, 4xx, or after exhausting runtimeReportBackoffs.
 //
 // Why this exists: the server persists the report through a Redis / DB
-// write; on a transient store failure it now correctly returns 500 (see
-// PR #1557). Without a client-side retry the daemon would fire once,
-// swallow the error, and the pending request stays in "running" on the
-// server until the 60s timeout — which is exactly the "daemon did not
-// respond" failure mode the whole store refactor was meant to fix. 4xx is
-// treated as permanent (request-not-found, cross-workspace token rejected,
-// bad body) — retrying those just wastes heartbeat cycles.
-func (d *Daemon) reportLocalSkillResultWithRetry(ctx context.Context, kind, runtimeID, requestID string, fn func(context.Context) error) {
+// write; on a transient store failure it correctly returns 500. Without a
+// client-side retry the daemon would fire once, swallow the error, and the
+// pending request stays in "running" on the server until its timeout — which
+// is exactly the "daemon did not respond" failure mode the multi-node store
+// fix was meant to eliminate. 4xx is treated as permanent (request-not-found,
+// cross-workspace token rejected, bad body) — retrying those just wastes
+// heartbeat cycles.
+func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtimeID, requestID string, fn func(context.Context) error) {
 	var lastErr error
-	for attempt, wait := range localSkillReportBackoffs {
+	for attempt, wait := range runtimeReportBackoffs {
 		if wait > 0 {
 			select {
 			case <-ctx.Done():
-				d.logger.Error("local skill report cancelled",
+				d.logger.Error("runtime async report cancelled",
 					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
 					"attempt", attempt, "error", ctx.Err())
 				return
@@ -785,7 +983,7 @@ func (d *Daemon) reportLocalSkillResultWithRetry(ctx context.Context, kind, runt
 		err := fn(ctx)
 		if err == nil {
 			if attempt > 0 {
-				d.logger.Info("local skill report succeeded after retry",
+				d.logger.Info("runtime async report succeeded after retry",
 					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
 					"attempt", attempt+1)
 			}
@@ -797,17 +995,17 @@ func (d *Daemon) reportLocalSkillResultWithRetry(ctx context.Context, kind, runt
 		// body). No amount of retrying will make it succeed.
 		var reqErr *requestError
 		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
-			d.logger.Error("local skill report rejected — not retrying",
+			d.logger.Error("runtime async report rejected — not retrying",
 				"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
 				"status", reqErr.StatusCode, "error", err)
 			return
 		}
 
-		d.logger.Warn("local skill report failed — will retry",
+		d.logger.Warn("runtime async report failed — will retry",
 			"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
 			"attempt", attempt+1, "error", err)
 	}
-	d.logger.Error("local skill report exhausted retries",
+	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
 }
 
@@ -819,7 +1017,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	// could brick the embedded binary mid-update. Refuse cleanly.
 	if d.cfg.LaunchedBy == "desktop" {
 		d.logger.Info("refusing CLI self-update: daemon is managed by Desktop", "runtime_id", runtimeID, "update_id", update.ID)
-		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 			"status": "failed",
 			"error":  "CLI is managed by Multica Desktop — update the Desktop app to upgrade the CLI",
 		})
@@ -836,7 +1034,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
 	// Report running status.
-	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 		"status": "running",
 	})
 
@@ -848,7 +1046,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		output, err = cli.UpdateViaBrew()
 		if err != nil {
 			d.logger.Error("CLI update failed", "error", err, "output", output)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 				"status": "failed",
 				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
 			})
@@ -860,7 +1058,7 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		output, err = cli.UpdateViaDownload(update.TargetVersion)
 		if err != nil {
 			d.logger.Error("CLI update failed", "error", err)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 				"status": "failed",
 				"error":  fmt.Sprintf("download update failed: %v", err),
 			})
@@ -869,13 +1067,69 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
-	d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 		"status": "completed",
 		"output": fmt.Sprintf("Updated to %s", update.TargetVersion),
 	})
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+}
+
+// updateReportBackoffs defines the retry schedule for delivering CLI update
+// status back to the server. This mirrors localSkillReportBackoffs because
+// both features have the same user-visible failure mode: the daemon completed
+// work locally, but a transient report failure leaves the UI waiting until the
+// server-side request times out.
+//
+// Overridable for tests to avoid real sleeps.
+var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+
+func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
+	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
+	})
+}
+
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+	var lastErr error
+	for attempt, wait := range updateReportBackoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				d.logger.Error("CLI update report cancelled",
+					"runtime_id", runtimeID, "update_id", updateID,
+					"attempt", attempt, "error", ctx.Err())
+				return
+			case <-time.After(wait):
+			}
+		}
+
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				d.logger.Info("CLI update report succeeded after retry",
+					"runtime_id", runtimeID, "update_id", updateID,
+					"attempt", attempt+1)
+			}
+			return
+		}
+		lastErr = err
+
+		var reqErr *requestError
+		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
+			d.logger.Error("CLI update report rejected — not retrying",
+				"runtime_id", runtimeID, "update_id", updateID,
+				"status", reqErr.StatusCode, "error", err)
+			return
+		}
+
+		d.logger.Warn("CLI update report failed — will retry",
+			"runtime_id", runtimeID, "update_id", updateID,
+			"attempt", attempt+1, "error", err)
+	}
+	d.logger.Error("CLI update report exhausted retries",
+		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
@@ -906,96 +1160,191 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
+// pollLoop supervises one runtimePoller goroutine per registered runtime,
+// fans wake-up signals out to all of them, and waits for in-flight tasks to
+// drain on shutdown. Per-runtime workers replace the previous round-robin
+// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
+// longer delays claims on every other runtime — that was the cross-workspace
+// stall mode reported in MUL-1744.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
-	sem := make(chan struct{}, d.cfg.MaxConcurrentTasks)
-	var wg sync.WaitGroup
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
+	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
 
-	pollOffset := 0
-	pollCount := 0
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
+
+	type pollerHandle struct {
+		cancel context.CancelFunc
+		wakeup chan struct{}
+	}
+	pollers := make(map[string]*pollerHandle)
+
+	syncPollers := func() {
+		want := make(map[string]struct{})
+		for _, rid := range d.allRuntimeIDs() {
+			want[rid] = struct{}{}
+		}
+		for rid, h := range pollers {
+			if _, ok := want[rid]; !ok {
+				h.cancel()
+				delete(pollers, rid)
+			}
+		}
+		for rid := range want {
+			if _, ok := pollers[rid]; ok {
+				continue
+			}
+			pctx, pcancel := context.WithCancel(ctx)
+			wakeup := make(chan struct{}, 1)
+			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
+			pollerWG.Add(1)
+			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
+				defer pollerWG.Done()
+				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+			}(rid, pctx, wakeup)
+		}
+	}
+
+	syncPollers()
+
 	for {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
+			for _, h := range pollers {
+				h.cancel()
+			}
+			// Wait for all pollers to fully return before waiting on taskWG.
+			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
+			// could race with taskWG.Wait when the counter is zero, which
+			// is an undefined sync.WaitGroup misuse.
+			pollerWG.Wait()
+
 			waitDone := make(chan struct{})
-			go func() { wg.Wait(); close(waitDone) }()
+			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
 			case <-waitDone:
 			case <-time.After(30 * time.Second):
 				d.logger.Warn("timed out waiting for in-flight tasks")
 			}
 			return ctx.Err()
-		default:
-		}
-
-		runtimeIDs := d.allRuntimeIDs()
-		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
-				wg.Wait()
-				return err
-			}
-			continue
-		}
-
-		claimed := false
-		n := len(runtimeIDs)
-		for i := 0; i < n; i++ {
-			// Check if we have capacity before claiming.
-			select {
-			case sem <- struct{}{}:
-				// Acquired a slot.
-			default:
-				// All slots occupied, stop trying to claim.
-				d.logger.Debug("poll: at capacity", "running", d.cfg.MaxConcurrentTasks)
-				goto sleep
-			}
-
-			rid := runtimeIDs[(pollOffset+i)%n]
-			task, err := d.client.ClaimTask(ctx, rid)
-			if err != nil {
-				<-sem // Release the slot.
-				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
-				continue
-			}
-			if task != nil {
-				taskTarget := task.IssueID
-				if taskTarget == "" && task.ChatSessionID != "" {
-					taskTarget = "chat:" + shortID(task.ChatSessionID)
+		case <-runtimeSetCh:
+			syncPollers()
+		case <-taskWakeups:
+			// Fan out to every runtime poller. Any of them might have a queued
+			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
+			// of wake-ups doesn't pile up.
+			for _, h := range pollers {
+				select {
+				case h.wakeup <- struct{}{}:
+				default:
 				}
-				d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
-				wg.Add(1)
-				d.activeTasks.Add(1)
-				go func(t Task) {
-					defer wg.Done()
-					defer d.activeTasks.Add(-1)
-					defer func() { <-sem }()
-					d.handleTask(ctx, t)
-				}(*task)
-				claimed = true
-				pollOffset = (pollOffset + i + 1) % n
-				break
 			}
-			// No task for this runtime, release the slot and try next.
-			<-sem
-		}
-
-	sleep:
-		if !claimed {
-			pollCount++
-			if pollCount%20 == 1 {
-				d.logger.Debug("poll: no tasks", "runtimes", runtimeIDs, "cycle", pollCount)
-			}
-			pollOffset = (pollOffset + 1) % n
-			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
-				wg.Wait()
-				return err
-			}
-		} else {
-			pollCount = 0
 		}
 	}
 }
 
-func (d *Daemon) handleTask(ctx context.Context, task Task) {
+// runRuntimePoller is the per-runtime claim+dispatch loop. It owns its own
+// poll cadence and wakeup channel so that a slow HTTP claim for this runtime
+// cannot delay any other runtime's claims.
+//
+// The execution slot is acquired BEFORE ClaimTask. The alternative —
+// claiming first and then waiting for a slot — would let claimed tasks pile
+// up in the server-side `dispatched` state without a corresponding
+// StartTask, and the server's sweeper would fail them as `failed/timeout`
+// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
+// exact user-visible failure this issue is fixing, so we cannot risk
+// recreating it under load.
+//
+// Slot-before-claim does mean a slow claim holds a slot during its HTTP
+// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
+// below the 300s dispatch timeout, so other runtimes' tasks stay in
+// server-side `queued` state (which has no timeout) rather than entering
+// `dispatched` and racing the sweeper.
+//
+// pollerCtx is cancelled when this runtime is removed from the watched set
+// (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
+// passed to handleTask so an in-flight task is not killed just because the
+// runtime set changed mid-flight — the task continues to run until the
+// daemon itself shuts down (or the server cancels it).
+func (d *Daemon) runRuntimePoller(
+	pollerCtx, parentCtx context.Context,
+	rid string,
+	sem chan int,
+	wakeup <-chan struct{},
+	taskWG *sync.WaitGroup,
+) {
+	for {
+		if pollerCtx.Err() != nil {
+			return
+		}
+
+		// Acquire an execution slot before claiming. If at capacity, sleep
+		// without claiming so we don't push a task into `dispatched` and
+		// then race the 5-min server-side dispatch timeout while waiting.
+		var slot int
+		select {
+		case slot = <-sem:
+		case <-pollerCtx.Done():
+			return
+		default:
+			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		task, err := d.client.ClaimTask(pollerCtx, rid)
+		if err != nil {
+			sem <- slot
+			if pollerCtx.Err() == nil {
+				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
+			}
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		if task == nil {
+			sem <- slot
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		taskTarget := task.IssueID
+		if taskTarget == "" && task.ChatSessionID != "" {
+			taskTarget = "chat:" + shortID(task.ChatSessionID)
+		}
+		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
+		taskWG.Add(1)
+		d.activeTasks.Add(1)
+		go func(t Task, slot int) {
+			defer taskWG.Done()
+			defer d.activeTasks.Add(-1)
+			defer func() { sem <- slot }()
+			d.handleTask(parentCtx, t, slot)
+		}(*task, slot)
+		// Loop immediately: more tasks may already be queued for this runtime.
+	}
+}
+
+// newTaskSlotSemaphore returns a buffered channel pre-populated with stable
+// slot indices [0, n). Receive to acquire a slot, send the same slot back to
+// release. Used by pollLoop to expose MULTICA_TASK_SLOT to spawned tasks.
+func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
+	sem := make(chan int, maxConcurrentTasks)
+	for i := 0; i < maxConcurrentTasks; i++ {
+		sem <- i
+	}
+	return sem
+}
+
+func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
@@ -1048,7 +1397,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		}
 	}()
 
-	result, err := d.runTask(runCtx, task, provider, taskLog)
+	result, err := d.runTask(runCtx, task, provider, slot, taskLog)
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -1112,13 +1461,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	// can look up the issue later. Written last so that a mid-task crash
 	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID); err != nil {
+		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}
 }
 
-func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
+func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -1127,6 +1476,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+
+	// task.Repos is the authoritative repo list for this task — when the
+	// claimed task belongs to a project with github_repo resources the server
+	// has already narrowed it to project repos only. Make sure those URLs are
+	// in the per-workspace allowlist and the local cache, otherwise
+	// `multica repo checkout` would reject project-only URLs that aren't also
+	// bound at the workspace level.
+	d.registerTaskRepos(task.WorkspaceID, task.Repos)
 
 	entry, ok := d.cfg.Agents[provider]
 	if !ok {
@@ -1155,6 +1512,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentInstructions:       instructions,
 		AgentSkills:             convertSkillsForEnv(skills),
 		Repos:                   convertReposForEnv(task.Repos),
+		ProjectID:               task.ProjectID,
+		ProjectTitle:            task.ProjectTitle,
+		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1163,6 +1523,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AutopilotSource:         task.AutopilotSource,
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
+	}
+
+	// Mark candidate env roots as active before any env work so the GC loop
+	// can't reclaim artifacts inside them mid-execution. We mark both the
+	// predicted root for a fresh Prepare and the prior root for Reuse — they
+	// usually differ (Reuse keeps the original task's directory).
+	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	d.markActiveEnvRoot(predictedRoot)
+	defer d.unmarkActiveEnvRoot(predictedRoot)
+	if task.PriorWorkDir != "" {
+		priorRoot := filepath.Dir(task.PriorWorkDir)
+		if priorRoot != predictedRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
+		}
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
@@ -1186,6 +1561,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
+	// Belt-and-suspenders: also mark whatever root we ended up with, in case
+	// future changes diverge from PredictRootDir.
+	if env.RootDir != predictedRoot && env.RootDir != "" {
+		d.markActiveEnvRoot(env.RootDir)
+		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
@@ -1199,6 +1580,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
+	// per-agent. When one daemon hosts multiple agents, slots index shared
+	// daemon-level resources such as GPUs.
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        d.client.Token(),
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
@@ -1207,6 +1591,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -1371,6 +1756,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,
 				Usage:     usageEntries,
+			}, nil
+		}
+		// Detect "poisoned" terminal output: the agent didn't reach a real
+		// conclusion but emitted a known fallback marker (iteration limit,
+		// fallback meta message). Route through the blocked path with a
+		// specific failure_reason so the server can exclude this session
+		// from the (agent_id, issue_id) resume lookup — otherwise a manual
+		// rerun would inherit the same poisoned session and reproduce the
+		// same bad output.
+		if reason, ok := classifyPoisonedOutput(result.Output); ok {
+			taskLog.Warn("agent finished with poisoned fallback output, classifying as blocked",
+				"failure_reason", reason,
+			)
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       result.Output,
+				SessionID:     result.SessionID,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				Usage:         usageEntries,
+				FailureReason: reason,
 			}, nil
 		}
 		return TaskResult{
@@ -1655,7 +2061,7 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL, Description: r.Description}
+		info[i] = repocache.RepoInfo{URL: r.URL}
 	}
 	return info
 }
@@ -1666,9 +2072,57 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL}
 	}
 	return result
+}
+
+func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {
+	if len(resources) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectResourceForEnv, len(resources))
+	for i, r := range resources {
+		result[i] = execenv.ProjectResourceForEnv{
+			ID:           r.ID,
+			ResourceType: r.ResourceType,
+			ResourceRef:  r.ResourceRef,
+			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+// markActiveEnvRoot records that a task is currently using the given env root,
+// so the GC loop won't reclaim its artifacts mid-execution. Calls are
+// reference-counted so a reuse path marked twice (predicted + prior) only
+// becomes inactive after both unmark calls.
+func (d *Daemon) markActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	d.activeEnvRoots[envRoot]++
+}
+
+func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	if d.activeEnvRoots[envRoot] <= 1 {
+		delete(d.activeEnvRoots, envRoot)
+		return
+	}
+	d.activeEnvRoots[envRoot]--
+}
+
+func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	return d.activeEnvRoots[envRoot] > 0
 }
 
 // shortID returns the first 8 characters of an ID for readable logs.

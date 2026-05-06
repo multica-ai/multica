@@ -116,8 +116,21 @@ func agentToResponse(a db.Agent) AgentResponse {
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description"`
+	URL string `json:"url"`
+}
+
+// ProjectResourceData is the wire shape for a project resource included in a
+// claim response. The daemon reads this list and writes it into the agent's
+// working directory so skills/agents can discover project-scoped context.
+//
+// resource_ref is type-specific JSON; the daemon doesn't interpret it beyond
+// well-known fields like url for github_repo. New types can be added without
+// changing this struct.
+type ProjectResourceData struct {
+	ID           string          `json:"id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        string          `json:"label,omitempty"`
 }
 
 type AgentTaskResponse struct {
@@ -138,7 +151,10 @@ type AgentTaskResponse struct {
 	MaxAttempts             int32           `json:"max_attempts"`
 	ParentTaskID            *string         `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData  `json:"agent,omitempty"`
-	Repos                   []RepoData      `json:"repos,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`         // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`      // for surfacing in agent context
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`  // resources attached to the project
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue

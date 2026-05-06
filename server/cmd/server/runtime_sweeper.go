@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -16,9 +17,15 @@ import (
 const (
 	// sweepInterval is how often we check for stale runtimes and tasks.
 	sweepInterval = 30 * time.Second
-	// staleThresholdSeconds marks runtimes offline if no heartbeat for this long.
-	// The daemon heartbeat interval is 15s, so 45s = 3 missed heartbeats.
-	staleThresholdSeconds = 45.0
+	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
+	// long. Must be strictly greater than runtimeHeartbeatDBFlushInterval
+	// (60s in handler/daemon.go) plus one daemon heartbeat cycle (~15s) so
+	// the DB stale window never trips on an alive-but-DB-lagging runtime
+	// when the sweeper's Redis check errors and we fall back to the DB.
+	// 90s leaves a 15s buffer above the 75s worst-case DB age and still
+	// keeps detection latency for a genuinely-dead runtime under
+	// staleThreshold + sweepInterval = 120s.
+	staleThresholdSeconds = 90.0
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
@@ -35,7 +42,14 @@ const (
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
 // This handles cases where the daemon crashes, is killed without calling
 // the deregister endpoint, or leaves tasks in a non-terminal state.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
+//
+// liveness is consulted before flipping any candidate to offline: when the
+// LivenessStore is available and reports the runtime as alive, we skip the
+// row even though its DB last_seen_at is old (Redis is the authority on the
+// hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
+// When liveness is unavailable or errors, we fall back to trusting the DB
+// stale window — that is the original behavior.
+func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -44,7 +58,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, taskSvc *servic
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sweepStaleRuntimes(ctx, queries, taskSvc, bus)
+			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			gcRuntimes(ctx, queries, bus)
 		}
@@ -53,13 +67,32 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, taskSvc *servic
 
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
 // then fails any tasks belonging to those offline runtimes.
-func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
-	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
+func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+	candidates, err := queries.SelectStaleOnlineRuntimes(ctx, staleThresholdSeconds)
+	if err != nil {
+		slog.Warn("runtime sweeper: failed to list stale online runtimes", "error", err)
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	toOffline := filterStaleRuntimesByLiveness(ctx, candidates, liveness)
+	if len(toOffline) == 0 {
+		return
+	}
+
+	staleRows, err := queries.MarkRuntimesOfflineByIDs(ctx, db.MarkRuntimesOfflineByIDsParams{
+		Ids:          toOffline,
+		StaleSeconds: staleThresholdSeconds,
+	})
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to mark stale runtimes offline", "error", err)
 		return
 	}
 	if len(staleRows) == 0 {
+		// All filtered candidates raced into a non-online state between the
+		// SELECT and the UPDATE. Nothing to broadcast.
 		return
 	}
 
@@ -68,6 +101,15 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, taskSvc *servi
 	for _, row := range staleRows {
 		wsID := util.UUIDToString(row.WorkspaceID)
 		workspaces[wsID] = true
+	}
+
+	// Drop liveness records for confirmed-offline runtimes so a future
+	// MGET sweep doesn't see a stray key keep them "alive". TTLs would
+	// reap these eventually, but explicit cleanup is cheap and clearer.
+	if liveness.Available() {
+		for _, row := range staleRows {
+			liveness.Forget(ctx, util.UUIDToString(row.ID))
+		}
 	}
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
@@ -92,6 +134,40 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, taskSvc *servi
 			},
 		})
 	}
+}
+
+// filterStaleRuntimesByLiveness narrows a SELECT-of-stale-candidates down to
+// the set that should actually be flipped offline. When liveness is available
+// and reports a candidate as alive, we skip it (DB is just lagging). When the
+// store is unavailable or errors, we trust the DB stale window — i.e. every
+// candidate flips, matching the legacy MarkStaleRuntimesOffline behavior.
+func filterStaleRuntimesByLiveness(ctx context.Context, candidates []db.SelectStaleOnlineRuntimesRow, liveness handler.LivenessStore) []pgtype.UUID {
+	ids := make([]pgtype.UUID, 0, len(candidates))
+	if !liveness.Available() {
+		for _, c := range candidates {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	idStrs := make([]string, len(candidates))
+	for i, c := range candidates {
+		idStrs[i] = util.UUIDToString(c.ID)
+	}
+	alive, ok := liveness.IsAliveBatch(ctx, idStrs)
+	if !ok {
+		// Store hiccup: degrade to DB-only behavior for this tick.
+		for _, c := range candidates {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	for i, c := range candidates {
+		if alive[idStrs[i]] {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // gcRuntimes deletes offline runtimes that have exceeded the TTL and have

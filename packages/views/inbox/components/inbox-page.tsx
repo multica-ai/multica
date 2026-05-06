@@ -20,7 +20,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+
 import { IssueDetail } from "../../issues/components";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
@@ -120,9 +120,9 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
-  const updateIssueMutation = useUpdateIssue();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
+
 
   // Auto-mark-read whenever a selected item is unread — covers both click-
   // to-select and URL-param-select (e.g. OS notification click on desktop).
@@ -147,18 +147,6 @@ export function InboxPage() {
     const archived = items.find((i) => i.id === id);
     if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
     archiveMutation.mutate(id, {
-      onError: () => toast.error(t(($) => $.errors.archive_failed)),
-    });
-  };
-
-  const handleDone = (item: InboxItem) => {
-    if (!item.issue_id) return;
-    setSelectedKey("");
-    updateIssueMutation.mutate(
-      { id: item.issue_id, status: "done" },
-      { onError: () => toast.error(t(($) => $.errors.mark_done_failed)) },
-    );
-    archiveMutation.mutate(item.id, {
       onError: () => toast.error(t(($) => $.errors.archive_failed)),
     });
   };
@@ -253,11 +241,6 @@ export function InboxPage() {
           isSelected={(item.issue_id ?? item.id) === selectedKey}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
-          onDone={
-            item.issue_id && item.issue_status !== "done" && item.issue_status !== "cancelled"
-              ? () => handleDone(item)
-              : undefined
-          }
         />
       ))}
     </div>

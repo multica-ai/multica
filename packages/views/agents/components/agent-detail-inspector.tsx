@@ -95,7 +95,7 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-lg border bg-background">
+    <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       {/* Identity */}
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
         <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />

@@ -12,19 +12,20 @@ package handler
 // (`/new-workspace`, `/create-team`) collide with common user workspace names.
 var reservedSlugs = map[string]bool{
 	// Auth flow
-	"login":      true,
-	"logout":     true,
-	"signin":     true,
-	"signout":    true,
-	"signup":     true,
-	"auth":       true,
-	"oauth":      true,
-	"callback":   true,
-	"invite":     true,
-	"verify":     true,
-	"reset":      true,
-	"password":   true,
-	"onboarding": true, // historical, kept reserved post-removal
+	"login":       true,
+	"logout":      true,
+	"signin":      true,
+	"signout":     true,
+	"signup":      true,
+	"auth":        true,
+	"oauth":       true,
+	"callback":    true,
+	"invite":      true,
+	"invitations": true,
+	"verify":      true,
+	"reset":       true,
+	"password":    true,
+	"onboarding":  true, // historical, kept reserved post-removal
 
 	// Platform / marketing routes (current + likely-future)
 	"api":       true,

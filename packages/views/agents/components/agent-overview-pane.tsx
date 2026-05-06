@@ -117,14 +117,14 @@ export function AgentOverviewPane({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
-      <div className="flex shrink-0 items-center gap-0 border-b px-4">
+    <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
+      <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b px-2 md:px-4">
         {detailTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => requestTabChange(tab.id)}
-            className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === tab.id
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -212,6 +212,6 @@ export function AgentOverviewPane({
 // list) still scrolls via the parent's overflow-y-auto.
 function TabContent({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-6">{children}</div>
+    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">{children}</div>
   );
 }

@@ -20,17 +20,19 @@ var errRuntimeSetChanged = errors.New("runtime set changed")
 
 func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}) {
 	backoff := time.Second
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
 
 	for {
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, d.runtimeSetCh); err != nil {
+			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, runtimeSetCh); err != nil {
 				return
 			}
 			continue
 		}
 
-		err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups)
+		err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
 		if ctx.Err() != nil {
 			return
 		}
@@ -42,7 +44,7 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}
 			d.logger.Debug("task wakeup websocket unavailable; polling fallback remains active", "error", err, "retry_in", backoff)
 		}
 
-		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), d.runtimeSetCh); err != nil {
+		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), runtimeSetCh); err != nil {
 			return
 		}
 		if backoff < 30*time.Second {
@@ -66,7 +68,7 @@ func jitterDuration(d time.Duration) time.Duration {
 	return d + delta
 }
 
-func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}) error {
+func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}, runtimeSetCh <-chan struct{}) error {
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
 		return err
@@ -101,8 +103,16 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
-	// sender now coexists with future server-initiated writes.
-	writes := make(chan []byte, 8)
+	// sender now coexists with future server-initiated writes. The buffer
+	// is sized to fit a full per-runtime heartbeat batch plus headroom; a
+	// fixed 8-slot queue would silently drop heartbeats once a daemon
+	// watched more than ~8 runtimes (typical when one machine connects to
+	// several workspaces), even when the network was healthy.
+	writeBufSize := 16
+	if 2*len(runtimeIDs) > writeBufSize {
+		writeBufSize = 2 * len(runtimeIDs)
+	}
+	writes := make(chan []byte, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
 
@@ -138,7 +148,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-d.runtimeSetCh:
+	case <-runtimeSetCh:
 		return errRuntimeSetChanged
 	case err := <-errCh:
 		return err
