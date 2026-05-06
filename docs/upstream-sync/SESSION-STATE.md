@@ -6,11 +6,11 @@
 
 ```yaml
 status: COMPLETED            # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 5 NO-GO — STOPPED for user review"
-current_task: "AWAITING USER DECISION"
-last_iteration_at: "2026-05-05T23:24:00Z"
-total_iterations: 8
-total_tokens_estimate: 3700000
+current_phase: "Phase 6 NO-GO (37/126 files moved; 201 conflict files unchanged) — STOPPED for user review"
+current_task: "AWAITING USER DECISION on next-step direction (see chunk-p6-13 validation report)"
+last_iteration_at: "2026-05-06T06:25:00Z"
+total_iterations: 15           # 8 phase-5 + 7 phase-6 chunks
+total_tokens_estimate: 4200000 # ~3.7M phase 1-5 + ~500k phase 6
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -126,6 +126,36 @@ phase_5:
   merge_attempted_at: chore/upstream-sync-validation (then aborted)
   recommendation: Phase 6 — relocate 126 net-new fork files from upstream paths to cerebro-* zones
   completion_report: docs/upstream-sync/COMPLETION-REPORT.md
+
+phase_6:
+  status: NO_GO                           # done-criterion <50 conflict files NOT MET
+  files_planned: 126
+  files_moved: 37                         # 7 chunks × frontend-only moves
+  files_deferred: 79                      # backend *Handler-method files (test fixture coupling) + package main mcp helpers
+  conflict_files_before: 201
+  conflict_files_after: 201               # UNCHANGED — moving net-new fork files doesn't reduce conflicts
+  go_no_go: NO-GO
+  finding: |
+    Phase 6 plan assumed net-new fork files in upstream paths cause conflicts.
+    Empirical: they don't. `git merge` only conflicts on AA/MM/DM states. Net-new
+    fork files merge as clean ADDs. The real conflict source is upstream-modified
+    files where cerebro also patches (chat-message-list, comment-card, issue-detail
+    etc.) plus upstream-deleted files (apps/docs/) — none of which Phase 6 touched.
+  validation_report: docs/upstream-sync/eval-reports/chunk-p6-13-validation-20260506T062500Z.md
+  chunks_landed:                          # all per-session-eval green per chunk
+    - 1f28e85e  # chunk 1: cerebro-profile (NEW pkg, 13 files)
+    - c637c258  # chunk 2: cerebro-chat (NEW pkg, 2 production files; 3 vitest specs deferred + 4 Go tests deferred)
+    - 3d21a7e7  # chunk 3: cerebro-access frontend (6 files; backend access.go family deferred)
+    - 3d907464  # chunk 11: cerebro-preferences NEW + cerebro-attachments + cerebro-access + cerebro-ui populated (9 files)
+    - 8bb4aa97  # chunk 10: cerebro-inbox frontend (2 files; inbox_folder.go + notifications.go deferred)
+    - 7229a893  # chunk 4: cerebro-budgets NEW frontend (2 files; budget*.go family deferred)
+    - beb3fa90  # chunk 6: cerebro-runtime frontend (3 files; install_runtime/sandbox deferred)
+  chunks_skipped:                         # blockers documented
+    - chunk-5  # core/types/artifact.ts cycle: types/index.ts re-exports, can't move without breaking core→cerebro rule
+    - chunk-7  # cmd_mcp*.go: package main → 5 unexported helpers (resolveProfile etc.) used in 15+ call sites; reverted cleanly
+    - chunk-8  # cerebro-users handlers: *Handler methods + testHandler fixture
+    - chunk-9  # work_session.go: same blocker
+    - chunk-12 # backend test/routing remainder: same fixture / package main coupling
 ```
 
 ## Branches in flight
@@ -157,6 +187,15 @@ open_prs: []
 2026-05-05T23:18:00Z | Phase 4   | golden_file_fix | Subagent over-marked: added marker to server/pkg/agent/sandbox/testdata/default.golden.sb which broke TestGenerate_Golden (golden files must match generator output bit-for-bit). Reverted; added !**/testdata/** to scripts/cerebro-zones.txt to prevent regression.
 2026-05-05T23:24:00Z | Phase 5   | chunk_12_NO_GO | Real upstream/main merge attempted on chore/upstream-sync-validation: 201 conflict files (vs <15 target, vs >30 NO-GO threshold). Auto-resolution patterns (--theirs apps/docs/, server/pkg/db/generated/) only resolved 6 paths because most docs files were deleted upstream (DD state). Merge aborted cleanly. Branch chore/upstream-sync-validation exists at chore/upstream-sync-analysis HEAD for user inspection. STOPPED for user review per /loop instruction.
 2026-05-05T23:24:00Z | DONE      | LOOP_STOPPED | COMPLETION-REPORT.md written. Strategy needs Phase 6 redirect (relocate 126 net-new fork files from upstream paths to cerebro-* zones). Cumulative tokens: ~3.7M / 7M = 53%.
+2026-05-06T05:38:00Z | Phase 6 chunk 1 | GO | cerebro-profile NEW pkg + 13 file moves (12 core/profile + 1 settings tab + 1 test). Side-effect fix: cerebro-inbox react-resizable-panels ^3.0.7 → ^4.7.5 to unblock pnpm install (3.x no longer published).
+2026-05-06T05:48:00Z | Phase 6 chunk 2 | GO | cerebro-chat NEW pkg + 2 production files (chat-status-line, tool-summary). 3 vitest specs deferred (cross-package vi.mock resolution risk) + 4 Go chat tests deferred (testHandler private fixtures).
+2026-05-06T05:54:00Z | Phase 6 chunk 3 | GO | cerebro-access frontend expansion: 4 restricted-* + 2 project-access-tab. Test mock fix: ../../common/actor-avatar → @multica/views/common/actor-avatar after move.
+2026-05-06T06:04:00Z | Phase 6 chunk 11 | GO | cerebro-preferences NEW (4 files) + cerebro-attachments (1) + cerebro-access (2 privacy-toggle) + cerebro-ui populated (jump-to-latest-button + use-sticky-bottom). 5 upstream-zone consumers updated.
+2026-05-06T06:09:00Z | Phase 6 chunk 10 | GO | cerebro-inbox extension: core/folders.ts + views/components/inbox-chat-panel.tsx. Added ChatInput/ChatMessageList/ChatMessageSkeleton to @multica/views/chat barrel for cross-package imports.
+2026-05-06T06:14:00Z | Phase 6 chunk 4 | GO | cerebro-budgets NEW pkg + kill-switch-section (2 files). Document deferral of backend budget*.go / workspace_pause*.go family.
+2026-05-06T06:18:00Z | Phase 6 chunk 6 | GO | cerebro-runtime frontend: views/docs/* (2) + add-runtime-dialog (1). Removed views/package.json "./docs" export entry. apps/web docs/runtimes/page.tsx now imports from @multica/cerebro-runtime/views/docs.
+2026-05-06T06:22:00Z | Phase 6 chunk 7 | NO-GO_reverted | Attempted cmd_mcp*.go relocation to internal/cerebro/mcp/cli/. Build failed: 5 unexported helpers (resolveProfile, resolveToken, resolveServerURL, resolveWorkspaceID, version) defined in cmd_agent.go/cmd_auth.go and used 15+ places in package main. Reverted cleanly (git checkout HEAD --).
+2026-05-06T06:25:00Z | Phase 6 chunk 13 | NO-GO | Validation merge upstream/main: 201 conflict files (UNCHANGED from Phase 5). Plan's hypothesis was wrong: net-new fork files don't conflict. The real source is upstream-modified files where cerebro also patches. Loop STOPPED per user instruction; Phase 6 still produced 37 file relocations + 5 NEW packages (cerebro-profile, cerebro-chat, cerebro-budgets, cerebro-preferences, cerebro-runtime/views) as durable wins.
 ```
 
 ## Eval results (most recent per phase)
