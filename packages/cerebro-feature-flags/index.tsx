@@ -1,8 +1,17 @@
 "use client";
 
 import { Flag } from "lucide-react";
-import type { ExtraSettingsTab } from "@multica/views/settings";
 import { CerebroFeatureFlagsTab } from "./settings-tab";
+
+// Mirrors @multica/views ExtraSettingsTab. Defined locally to avoid the
+// cerebro-feature-flags ↔ views dependency cycle that would otherwise force
+// pnpm to topo-sort us into the same task graph as views/typecheck.
+interface ExtraSettingsTab {
+  value: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  content: React.ReactNode;
+}
 
 export {
   useFeatureFlag,

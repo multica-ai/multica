@@ -748,9 +748,6 @@ importers:
       '@multica/ui':
         specifier: workspace:*
         version: link:../ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -782,18 +779,9 @@ importers:
 
   packages/cerebro-inbox:
     dependencies:
-      '@dnd-kit/core':
-        specifier: ^6.3.1
-        version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@multica/core':
         specifier: workspace:*
         version: link:../core
-      '@multica/ui':
-        specifier: workspace:*
-        version: link:../ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -803,12 +791,6 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
-      react-resizable-panels:
-        specifier: ^4.7.5
-        version: 4.7.5(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      sonner:
-        specifier: ^2.0.7
-        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*

@@ -23,6 +23,12 @@ vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: mockToastError },
 }));
 
+// CEREBRO-PATCH(web-push-flag-gate-test): bypass the cerebro_web_push gate so
+// the test renders the inner subscription UI without needing a QueryClient.
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
+}));
+
 import { PushNotificationsSection } from "./push-notifications-section";
 
 // 88-char string passes the VAPID_KEY_LENGTH_HINT defensive check.

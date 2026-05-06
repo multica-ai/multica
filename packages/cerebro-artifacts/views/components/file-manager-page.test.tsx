@@ -23,7 +23,7 @@ const updateArtifactMutateAsync = vi.hoisted(() =>
   vi.fn().mockResolvedValue(undefined),
 );
 
-vi.mock("@multica/core/artifacts/mutations", () => ({
+vi.mock("@multica/cerebro-artifacts/core/mutations", () => ({
   useCreateArtifactFolder: () => ({
     mutateAsync: createFolderMutateAsync,
     isPending: false,
@@ -74,14 +74,15 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
-vi.mock("../../navigation", () => ({
+vi.mock("@multica/views/navigation", () => ({
   useNavigation: () => ({
     push: vi.fn(),
     openInNewTab: vi.fn(),
   }),
+  AppLink: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock("../../common/actor-avatar", () => ({
+vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
@@ -127,7 +128,7 @@ const artifacts: Artifact[] = [
   },
 ];
 
-vi.mock("@multica/core/artifacts/queries", () => ({
+vi.mock("@multica/cerebro-artifacts/core/queries", () => ({
   artifactFoldersOptions: () => ({
     queryKey: ["artifact-folders"],
     queryFn: () => Promise.resolve(folders),

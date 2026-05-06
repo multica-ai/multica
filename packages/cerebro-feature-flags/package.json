@@ -14,7 +14,6 @@
   "dependencies": {
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
     "sonner": "^2.0.7"
   },
   "peerDependencies": {

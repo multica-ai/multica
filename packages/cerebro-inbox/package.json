@@ -13,12 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@multica/core": "workspace:*",
-    "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
-    "react-resizable-panels": "^4.7.5",
-    "sonner": "^2.0.7"
+    "@multica/core": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
