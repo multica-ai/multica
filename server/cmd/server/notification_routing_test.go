@@ -12,18 +12,27 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// setUserNotifPrefs replaces the user's preferences.notifications block
-// wholesale. Each test should clear via t.Cleanup so prefs don't leak.
-func setUserNotifPrefs(t *testing.T, userID string, notif map[string]string) {
+// setUserChannelPrefs replaces preferences.notifications with the
+// channel-first shape (one map per channel + optional channels transport).
+// Used by the resolveChannelChoice / resolveChannelTransport tests.
+func setUserChannelPrefs(t *testing.T, userID string, channels map[string]map[string]string, transport map[string]map[string]any) {
 	t.Helper()
-	blob := map[string]any{}
-	if len(notif) > 0 {
+	notif := map[string]any{}
+	for ch, m := range channels {
 		nm := map[string]any{}
-		for k, v := range notif {
+		for k, v := range m {
 			nm[k] = v
 		}
-		blob["notifications"] = nm
+		notif[ch] = nm
 	}
+	if len(transport) > 0 {
+		ch := map[string]any{}
+		for k, v := range transport {
+			ch[k] = v
+		}
+		notif["channels"] = ch
+	}
+	blob := map[string]any{"notifications": notif}
 	raw, err := json.Marshal(blob)
 	if err != nil {
 		t.Fatalf("marshal prefs: %v", err)
@@ -35,6 +44,40 @@ func setUserNotifPrefs(t *testing.T, userID string, notif map[string]string) {
 	); err != nil {
 		t.Fatalf("set prefs: %v", err)
 	}
+}
+
+// setUserNotifPrefs replaces the user's preferences.notifications block
+// using the legacy single-route input shape (inbox/notifications/off per key)
+// translated into the channel-first storage format. Tests written before
+// channel-first stays readable; the translation is exactly what migration
+// 9011 does for live data:
+//   "inbox"         -> inbox.<key>=on,  notifications.<key>=off
+//   "notifications" -> inbox.<key>=off, notifications.<key>=on
+//   "off"           -> inbox.<key>=off, notifications.<key>=off
+//
+// Mobile/desktop/mail are left to the resolver's default tables. Tests that
+// need to touch those channels should use setUserChannelPrefs instead.
+func setUserNotifPrefs(t *testing.T, userID string, notif map[string]string) {
+	t.Helper()
+	channels := map[string]map[string]string{
+		channelInbox:         {},
+		channelNotifications: {},
+	}
+	for k, v := range notif {
+		switch v {
+		case "inbox":
+			channels[channelInbox][k] = "on"
+			channels[channelNotifications][k] = "off"
+		case "notifications":
+			channels[channelInbox][k] = "off"
+			channels[channelNotifications][k] = "on"
+		case "off":
+			channels[channelInbox][k] = "off"
+			channels[channelNotifications][k] = "off"
+		}
+		// Unrecognised values fall through, leaving the resolver's default.
+	}
+	setUserChannelPrefs(t, userID, channels, nil)
 }
 
 func clearUserPrefs(t *testing.T, userID string) {
@@ -77,117 +120,132 @@ func inboxItemsByRoute(t *testing.T, recipientID, route string) []struct {
 	return out
 }
 
-// ----------- resolveRoute unit tests ------------
+// ----------- channel-first resolver tests ------------
 
-func TestResolveRoute_DefaultsForNonSplitTypes(t *testing.T) {
+func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
 	queries := db.New(testPool)
 	clearUserPrefs(t, testUserID)
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
 	cases := []struct {
-		notifType string
-		want      string
+		channel string
+		key     string
+		want    bool
 	}{
-		{"issue_assigned", routeInbox},
-		{"mentioned", routeInbox},
-		{"task_failed", routeInbox},
-		{"unassigned", routeNotifications},
-		{"reaction_added", routeNotifications},
-		{"new_comment", routeNotifications},
-		{"assignee_changed", routeNotifications},
-		{"status_changed", routeNotifications},
+		// Inbox defaults: strong personal signals on, low-noise off.
+		{channelInbox, "issue_assigned", true},
+		{channelInbox, "mentioned", true},
+		{channelInbox, "new_comment", false},
+		// Notifications defaults: low-noise on, strong signals off.
+		{channelNotifications, "new_comment", true},
+		{channelNotifications, "issue_assigned", false},
+		// Mobile defaults: only conservative pushes.
+		{channelMobile, "mentioned", true},
+		{channelMobile, "task_failed", false},
+		{channelMobile, "new_comment", false},
+		// Desktop defaults: more permissive than mobile but still focused.
+		{channelDesktop, "task_failed", true},
+		{channelDesktop, "new_comment", false},
+		// Mail: nothing by default until transport is built.
+		{channelMail, "issue_assigned", false},
 	}
 	for _, tc := range cases {
-		got := resolveRoute(context.Background(), queries, "member", testUserID, tc.notifType, false)
+		got := resolveChannelChoice(context.Background(), queries, "member", testUserID, tc.channel, tc.key)
 		if got != tc.want {
-			t.Errorf("resolveRoute(%q) = %q, want %q", tc.notifType, got, tc.want)
+			t.Errorf("resolveChannelChoice(%q, %q) = %v, want %v", tc.channel, tc.key, got, tc.want)
 		}
 	}
 }
 
-func TestResolveRoute_DefaultsForSplitTypes(t *testing.T) {
+func TestResolveChannelChoice_HonoursOverride(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	// User flips mobile.new_comment on (default is off) and inbox.issue_assigned
+	// off (default is on).
+	setUserChannelPrefs(t, testUserID, map[string]map[string]string{
+		channelMobile: {"new_comment": "on"},
+		channelInbox:  {"issue_assigned": "off"},
+	}, nil)
+
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); !got {
+		t.Errorf("override mobile.new_comment=on: got false, want true")
+	}
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelInbox, "issue_assigned"); got {
+		t.Errorf("override inbox.issue_assigned=off: got true, want false")
+	}
+	// Untouched channel/key still falls back to default.
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelInbox, "mentioned"); !got {
+		t.Errorf("untouched key fall-through: got false, want true (default)")
+	}
+}
+
+func TestResolveChannelChoice_AgentsOnlyInbox(t *testing.T) {
+	queries := db.New(testPool)
+
+	// Agents have no preferences UI; they should only see inbox channel as on,
+	// regardless of the routing key or default tables.
+	if got := resolveChannelChoice(context.Background(), queries, "agent", testUserID, channelInbox, "new_comment"); !got {
+		t.Errorf("agent channelInbox.new_comment: got false, want true")
+	}
+	for _, ch := range []string{channelNotifications, channelMobile, channelDesktop, channelMail} {
+		if got := resolveChannelChoice(context.Background(), queries, "agent", testUserID, ch, "issue_assigned"); got {
+			t.Errorf("agent channel %q.issue_assigned: got true, want false", ch)
+		}
+	}
+}
+
+func TestResolveChannelChoice_InvalidValueFallsBackToDefault(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	setUserChannelPrefs(t, testUserID, map[string]map[string]string{
+		channelMobile: {"mentioned": "garbage"},
+	}, nil)
+
+	got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "mentioned")
+	if !got {
+		t.Errorf("invalid mobile.mentioned override should fall back to default (true), got false")
+	}
+}
+
+func TestResolveChannelTransport_DefaultsWhenNoPrefs(t *testing.T) {
 	queries := db.New(testPool)
 	clearUserPrefs(t, testUserID)
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
-	cases := []struct {
-		notifType  string
-		isAssignee bool
-		want       string
-	}{
-		{"due_date_changed", true, routeInbox},
-		{"due_date_changed", false, routeNotifications},
-		{"priority_changed", true, routeInbox},
-		{"priority_changed", false, routeNotifications},
+	mob := resolveChannelTransport(context.Background(), queries, "member", testUserID, channelMobile)
+	if !mob.Badge || !mob.Sound {
+		t.Errorf("mobile default transport: got %+v, want Badge+Sound on", mob)
 	}
-	for _, tc := range cases {
-		got := resolveRoute(context.Background(), queries, "member", testUserID, tc.notifType, tc.isAssignee)
-		if got != tc.want {
-			t.Errorf("resolveRoute(%q, isAssignee=%v) = %q, want %q",
-				tc.notifType, tc.isAssignee, got, tc.want)
-		}
+
+	desk := resolveChannelTransport(context.Background(), queries, "member", testUserID, channelDesktop)
+	if !desk.Badge || !desk.Banner || desk.Sound {
+		t.Errorf("desktop default transport: got %+v, want Badge+Banner on, Sound off", desk)
 	}
 }
 
-func TestResolveRoute_HonoursUserOverride(t *testing.T) {
+func TestResolveChannelTransport_HonoursOverride(t *testing.T) {
 	queries := db.New(testPool)
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
-	setUserNotifPrefs(t, testUserID, map[string]string{
-		"reaction_added":            "off",
-		"new_comment":               "inbox",
-		"due_date_changed.assignee": "notifications",
-		"due_date_changed.follower": "off",
+	setUserChannelPrefs(t, testUserID, nil, map[string]map[string]any{
+		channelMobile:  {"badge": false, "sound": false},
+		channelDesktop: {"banner": false},
 	})
 
-	cases := []struct {
-		notifType  string
-		isAssignee bool
-		want       string
-	}{
-		{"reaction_added", false, routeOff},
-		{"new_comment", false, routeInbox},
-		{"due_date_changed", true, routeNotifications},
-		{"due_date_changed", false, routeOff},
-		// Untouched type still falls back to default.
-		{"status_changed", false, routeNotifications},
+	mob := resolveChannelTransport(context.Background(), queries, "member", testUserID, channelMobile)
+	if mob.Badge || mob.Sound {
+		t.Errorf("mobile override: got %+v, want Badge+Sound off", mob)
 	}
-	for _, tc := range cases {
-		got := resolveRoute(context.Background(), queries, "member", testUserID, tc.notifType, tc.isAssignee)
-		if got != tc.want {
-			t.Errorf("resolveRoute(%q, isAssignee=%v) = %q, want %q",
-				tc.notifType, tc.isAssignee, got, tc.want)
-		}
+
+	desk := resolveChannelTransport(context.Background(), queries, "member", testUserID, channelDesktop)
+	if desk.Banner {
+		t.Errorf("desktop banner override: got banner=true, want false")
 	}
-}
-
-func TestResolveRoute_AgentsAlwaysInbox(t *testing.T) {
-	queries := db.New(testPool)
-	clearUserPrefs(t, testUserID)
-	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
-
-	// Even types whose default is "notifications" should land in inbox for
-	// agent recipients — agents have no preferences UI and inbox is the only
-	// surface they read from.
-	for _, notifType := range []string{"new_comment", "status_changed", "issue_assigned"} {
-		got := resolveRoute(context.Background(), queries, "agent", testUserID, notifType, false)
-		if got != routeInbox {
-			t.Errorf("agent route for %q = %q, want %q", notifType, got, routeInbox)
-		}
-	}
-}
-
-func TestResolveRoute_InvalidOverrideFallsBackToDefault(t *testing.T) {
-	queries := db.New(testPool)
-	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
-
-	setUserNotifPrefs(t, testUserID, map[string]string{
-		"new_comment": "garbage-value",
-	})
-
-	got := resolveRoute(context.Background(), queries, "member", testUserID, "new_comment", false)
-	if got != routeNotifications {
-		t.Errorf("invalid override fall-through: got %q, want %q (default)", got, routeNotifications)
+	// Badge wasn't overridden — default still applies.
+	if !desk.Badge {
+		t.Errorf("desktop badge default leak: got badge=false, want true")
 	}
 }
 

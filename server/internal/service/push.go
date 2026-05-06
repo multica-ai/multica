@@ -78,6 +78,11 @@ func (s *PushService) Enabled() bool {
 // recipient's total unread inbox items across every workspace, used by the
 // service worker to drive the PWA app badge (`navigator.setAppBadge`). The
 // sender on a notify-* path leaves it zero; SendToUser overwrites it.
+//
+// Badge / Silent reflect the recipient's per-channel transport preferences
+// for the mobile channel (preferences.notifications.channels.mobile.{badge,
+// sound}). The caller fills them; SendToUser uses Badge to decide whether to
+// stamp UnreadCount, and the SW reads Silent to skip sound on display.
 type Payload struct {
 	Title       string `json:"title"`
 	Body        string `json:"body,omitempty"`
@@ -86,6 +91,11 @@ type Payload struct {
 	IssueID     string `json:"issueId,omitempty"`
 	Type        string `json:"type,omitempty"`
 	UnreadCount int64  `json:"unreadCount"`
+	Silent      bool   `json:"silent,omitempty"`
+	// Badge is the caller's intent — true means stamp UnreadCount, false
+	// means leave it at zero so the OS clears the icon badge. Not
+	// serialised; it controls the count read.
+	Badge bool `json:"-"`
 }
 
 // SendToUser fans the payload out to every device the user has subscribed.
@@ -109,11 +119,17 @@ func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) 
 	// the user's workspaces because the badge is single-icon and OS-level.
 	// On error we leave the count at zero — the SW will simply clear the
 	// badge, which is preferable to crashing the broadcast.
-	count, err := s.queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(userID))
-	if err != nil {
-		slog.Warn("push: unread count failed", "user_id", userID, "error", err)
-	} else {
-		p.UnreadCount = count
+	//
+	// When the recipient has opted out of the badge (Badge=false), keep
+	// the count at zero so the SW clears the icon. The next push after
+	// the user re-enables badge will reflect the true count.
+	if p.Badge {
+		count, err := s.queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(userID))
+		if err != nil {
+			slog.Warn("push: unread count failed", "user_id", userID, "error", err)
+		} else {
+			p.UnreadCount = count
+		}
 	}
 
 	body, err := json.Marshal(p)

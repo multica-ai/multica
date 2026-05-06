@@ -45,6 +45,9 @@ interface PushPayload {
   // Drives the OS-level PWA app-icon badge via the Badging API. Always set
   // by the server on real pushes; absent only on fallback/empty payloads.
   unreadCount?: number;
+  // Server-side echo of preferences.notifications.channels.mobile.sound=off.
+  // When true the SW shows the notification without sound/vibration.
+  silent?: boolean;
 }
 
 // Badging API is available on iOS 16.4+ Safari (installed PWA), Android
@@ -86,6 +89,7 @@ self.addEventListener("push", (event) => {
     tag: payload.tag,
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
+    silent: payload.silent === true,
     data: { url, issueId: payload.issueId, type: payload.type },
   };
   if (payload.tag) {
