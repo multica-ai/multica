@@ -563,7 +563,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         features: [
           "Create sub-issue directly from selected text in the editor bubble menu",
           "Self-hosted instance gating — `ALLOW_SIGNUP` and `ALLOWED_EMAIL_*` env vars to restrict account creation",
-          "Per-agent `mcp_config` field to restore MCP access",
+          "Per-agent `mcp_config` field and Agent MCP tab to configure Claude Code MCP servers from the UI",
           "Desktop app hourly update poll with manual check button in settings",
         ],
         fixes: [
