@@ -209,7 +209,7 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", "dontAsk",
 	}
 
 	if len(args) != len(expected) {
@@ -543,14 +543,17 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	// Fake claude binary: drains stdin so writeClaudeInput succeeds, writes a
-	// canonical V8-abort line to stderr, then exits non-zero before emitting
-	// any stream-json to stdout. This is the exact failure mode that motivated
-	// PR #1674 — without sampling stderrBuf.Tail() after cmd.Wait() returns,
-	// Result.Error would be a useless "exit status 3".
+	// Fake claude binary: reads one line of stream-json (the prompt) so
+	// writeClaudeInput succeeds, writes a canonical V8-abort line to stderr,
+	// then exits non-zero before emitting any stream-json to stdout. This is
+	// the exact failure mode that motivated PR #1674 — without sampling
+	// stderrBuf.Tail() after cmd.Wait() returns, Result.Error would be a
+	// useless "exit status 3". We use `head -n 1` instead of draining the full
+	// stream so the fixture exits even though the daemon now keeps stdin open
+	// across the run (to support stream-json control_response writes).
 	fakePath := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
-		"cat >/dev/null\n" +
+		"head -n 1 >/dev/null\n" +
 		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))

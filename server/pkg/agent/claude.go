@@ -109,7 +109,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_ = cmd.Wait()
 		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 	}
-	closeStdin()
+	// Keep stdin open: under managed permission policies (Jamf, etc.) the CLI
+	// downgrades bypassPermissions/auto to default and emits stream-json
+	// control_request messages for every tool use. handleControlRequest writes
+	// the auto-allow control_response back through stdin, so the pipe must stay
+	// open until "result" is observed (or the run is cancelled).
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -135,9 +139,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// Also close stdin so the CLI sees EOF and exits cleanly instead of
+		// waiting for further stream-json input (we now keep stdin open across
+		// the run to support control_response writes).
 		go func() {
 			<-runCtx.Done()
 			_ = stdout.Close()
+			closeStdin()
 		}()
 
 		scanner := bufio.NewScanner(stdout)
@@ -183,6 +191,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Content: msg.Log.Message,
 					})
 				}
+			case "control_request":
+				b.handleControlRequest(msg, stdin)
 			}
 		}
 
@@ -409,7 +419,7 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"-p":                blockedStandalone, // non-interactive mode
 	"--output-format":   blockedWithValue,  // stream-json protocol
 	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
+	"--permission-mode": blockedWithValue,  // dontAsk for autonomous operation under managed policies
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
@@ -420,7 +430,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", "dontAsk",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
