@@ -23,8 +23,7 @@ import {
   Calendar as RBCalendar,
   type CalendarProps,
 } from "react-big-calendar";
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const dndModule = require("react-big-calendar/lib/addons/dragAndDrop");
+import dndModule from "react-big-calendar/lib/addons/dragAndDrop";
 import type {
   withDragAndDropProps,
   EventInteractionArgs,
