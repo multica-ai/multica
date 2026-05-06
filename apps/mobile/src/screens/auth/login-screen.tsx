@@ -1,8 +1,8 @@
 import "react-native-get-random-values";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import Svg, { Circle, Path } from "react-native-svg";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
@@ -14,7 +14,6 @@ import { colors, radii, spacing } from "../../theme/tokens";
 type AuthConfig = {
   googleClientId?: string;
   googleIosClientId?: string;
-  dingtalkClientId?: string;
   hideEmailLogin?: boolean;
 };
 
@@ -39,7 +38,6 @@ export function LoginScreen() {
         setAuthConfig({
           googleClientId: cfg.google_client_id || undefined,
           googleIosClientId: cfg.google_ios_client_id || MOBILE_ENV.googleIosClientId || undefined,
-          dingtalkClientId: cfg.dingtalk_client_id || undefined,
           hideEmailLogin: cfg.hide_email_login,
         });
       })
@@ -89,23 +87,6 @@ export function LoginScreen() {
     }
   }
 
-  async function handleOAuthLogin(provider: "dingtalk" | "google") {
-    if (provider === "google") {
-      await handleGoogleLogin();
-      return;
-    }
-
-    setError(null);
-    try {
-      const url = new URL("/login", MOBILE_ENV.webBaseUrl);
-      url.searchParams.set("platform", "mobile");
-      url.searchParams.set("provider", provider);
-      await Linking.openURL(url.toString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to open login");
-    }
-  }
-
   async function handleGoogleLogin() {
     if (!authConfig.googleClientId) return;
 
@@ -144,7 +125,6 @@ export function LoginScreen() {
   }
 
   const showEmailLogin = !authConfig.hideEmailLogin;
-  const showDingTalk = Boolean(authConfig.dingtalkClientId);
   const showGoogle = Boolean(authConfig.googleClientId);
 
   return (
@@ -181,26 +161,17 @@ export function LoginScreen() {
             </Button>
           </>
         ) : null}
-        {showDingTalk || showGoogle ? (
+        {showGoogle ? (
           <View style={styles.oauthGroup}>
-            {showDingTalk ? (
-              <OAuthButton
-                icon={<DingTalkIcon />}
-                label="Continue with DingTalk"
-                onPress={() => void handleOAuthLogin("dingtalk")}
-              />
-            ) : null}
-            {showGoogle ? (
-              <OAuthButton
-                icon={<GoogleIcon />}
-                label="Continue with Google"
-                disabled={submitting}
-                onPress={() => void handleOAuthLogin("google")}
-              />
-            ) : null}
+            <OAuthButton
+              icon={<GoogleIcon />}
+              label="Continue with Google"
+              disabled={submitting}
+              onPress={() => void handleGoogleLogin()}
+            />
           </View>
         ) : null}
-        {!showEmailLogin && !showDingTalk && !showGoogle ? (
+        {!showEmailLogin && !showGoogle ? (
           <Text style={styles.error}>No login methods are configured.</Text>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -243,18 +214,6 @@ function isGoogleSignInCode(err: unknown, code: string) {
     err !== null &&
     "code" in err &&
     (err as { code?: unknown }).code === code
-  );
-}
-
-function DingTalkIcon() {
-  return (
-    <Svg height={22} viewBox="0 0 24 24" width={22}>
-      <Circle cx={12} cy={12} fill="#1677ff" r={11} />
-      <Path
-        d="M7.1 6.9c3.7 1.1 6.9 1.2 9.8.4.3-.1.6.2.4.5l-1.1 2.1c-.1.2-.1.4.1.5l1.2.7c.3.2.3.6-.1.7l-2.1.8c-.2.1-.3.2-.4.4-1 2.4-2.9 4-5.7 4.7-.4.1-.7-.3-.4-.6l2.4-2.8c.2-.2.1-.5-.2-.5l-3.4-.4c-.4 0-.5-.5-.2-.7l2.5-1.7c.3-.2.2-.6-.1-.7L6.8 9.5c-.4-.1-.5-.6-.1-.8l1.8-.8-1.6-.4c-.4-.1-.3-.7.2-.6z"
-        fill="#ffffff"
-      />
-    </Svg>
   );
 }
 
