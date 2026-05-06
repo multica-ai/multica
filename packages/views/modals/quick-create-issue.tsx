@@ -278,7 +278,7 @@ export function AgentCreatePanel({
                 }
               />
               <TooltipContent side="bottom">
-                {isExpanded ? "Collapse" : "Expand"}
+                {isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -293,7 +293,7 @@ export function AgentCreatePanel({
                   </button>
                 }
               />
-              <TooltipContent side="bottom">Close</TooltipContent>
+              <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
             </Tooltip>
           </div>        </div>
 
