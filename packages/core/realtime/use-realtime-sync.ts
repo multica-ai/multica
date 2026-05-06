@@ -33,7 +33,6 @@ import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
-import { invalidateChatQueriesOnReconnect } from "./chat-reconnect";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -564,7 +563,6 @@ export function useRealtimeSync(
       // Clear pending-task cache immediately so the live-timeline-vs-assistant
       // race window collapses to zero — the subsequent refetch will confirm.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.removeQueries({ queryKey: chatKeys.taskMessages(payload.task_id) });
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -627,7 +625,6 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.removeQueries({ queryKey: chatKeys.taskMessages(payload.task_id) });
       invalidatePendingAggregate();
     });
 
@@ -639,7 +636,6 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.removeQueries({ queryKey: chatKeys.taskMessages(payload.task_id) });
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -659,7 +655,6 @@ export function useRealtimeSync(
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.removeQueries({ queryKey: chatKeys.taskMessages(payload.task_id) });
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -757,7 +752,6 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
         }
-        invalidateChatQueriesOnReconnect(qc, wsId);
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       } catch (e) {
         logger.error("reconnect refetch failed", e);

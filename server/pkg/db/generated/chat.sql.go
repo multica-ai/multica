@@ -49,24 +49,6 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 	return i, err
 }
 
-const attachTaskToChatMessage = `-- name: AttachTaskToChatMessage :exec
-UPDATE chat_message SET task_id = $2 WHERE id = $1 AND chat_session_id = $3
-`
-
-type AttachTaskToChatMessageParams struct {
-	ID            pgtype.UUID `json:"id"`
-	TaskID        pgtype.UUID `json:"task_id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-}
-
-// Links the triggering user utterance to the chat task row for traceability and
-// post-send cache reconciliation. Streaming-stop state remains server-owned via
-// pending-task queries and terminal task lifecycle events.
-func (q *Queries) AttachTaskToChatMessage(ctx context.Context, arg AttachTaskToChatMessageParams) error {
-	_, err := q.db.Exec(ctx, attachTaskToChatMessage, arg.ID, arg.TaskID, arg.ChatSessionID)
-	return err
-}
-
 const createChatSession = `-- name: CreateChatSession :one
 INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
 VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
