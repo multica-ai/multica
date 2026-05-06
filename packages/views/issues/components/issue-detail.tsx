@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -17,6 +17,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Settings,
   Trash2,
   UserMinus,
   Users,
@@ -64,7 +65,7 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, Issue } from "@multica/core/types";
+import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, Issue, IssueSubscriber } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -315,6 +316,62 @@ function IssuePickerDialog({
 }
 
 // ---------------------------------------------------------------------------
+// ParticipantGroup
+// ---------------------------------------------------------------------------
+
+function ParticipantGroup({
+  heading,
+  subscribers,
+  getActorName,
+  ownerType,
+  ownerId,
+}: {
+  heading: string;
+  subscribers: IssueSubscriber[];
+  getActorName: (type: string, id: string) => string;
+  /** When set, the row matching {ownerType, ownerId} gets an "Owner" tag.
+   *  This is how the channel's assignee surfaces in the participant list,
+   *  per mockup-skærm 1's "Jesper Hvejsel · Owner". */
+  ownerType?: string | null;
+  ownerId?: string | null;
+}) {
+  if (subscribers.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
+        {heading}{" "}
+        <span className="text-muted-foreground/60">· {subscribers.length}</span>
+      </div>
+      <ul className="space-y-1">
+        {subscribers.map((sub) => {
+          const isOwner =
+            ownerType === sub.user_type && ownerId === sub.user_id;
+          return (
+            <li
+              key={`${sub.user_type}-${sub.user_id}`}
+              className="flex items-center gap-2 text-xs"
+            >
+              <ActorAvatar actorType={sub.user_type} actorId={sub.user_id} size={20} />
+              <span className="truncate flex-1">
+                {getActorName(sub.user_type, sub.user_id)}
+              </span>
+              {isOwner && (
+                <span
+                  className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                  data-testid="owner-tag"
+                >
+                  Owner
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -510,6 +567,21 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     [uploadWithToast],
   );
 
+  // Channel/DM-aware rendering. Computed before any early returns so the
+  // hook order stays stable when issue is still loading.
+  const issueKind = issue?.kind ?? "issue";
+  const isChannel = issueKind === "channel";
+  const isDM = issueKind === "dm";
+  const isChat = isChannel || isDM;
+  const dmTitle = useMemo(() => {
+    if (!isDM) return null;
+    const others = subscribers.filter(
+      (s) => s.user_type === "member" && s.user_id !== userId,
+    );
+    const names = others.map((s) => getActorName("member", s.user_id));
+    return names.join(", ") || "Direct message";
+  }, [isDM, subscribers, userId, getActorName]);
+
   const deleteIssueMutation = useDeleteIssue();
   const handleDelete = async () => {
     setDeleting(true);
@@ -588,10 +660,96 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     );
   }
 
+  // Channels and DMs reuse the issue table but hide task chrome
+  // (status/priority/assignee/due-date) and present participants in their
+  // place. DMs additionally lock the title — it's computed from the
+  // participant list rather than being user-editable. The flags used here
+  // were computed above (so the hook order stays consistent across
+  // loading/loaded renders).
+  const displayTitle = dmTitle ?? issue.title;
+
+  const participantPopover = (
+    <Popover>
+      <PopoverTrigger
+        className="cursor-pointer hover:opacity-80 transition-opacity"
+        aria-label="Participants"
+        data-testid="participants-trigger"
+      >
+        {subscribers.length > 0 ? (
+          <AvatarGroup>
+            {subscribers.slice(0, 4).map((sub) => (
+              <ActorAvatar
+                key={`${sub.user_type}-${sub.user_id}`}
+                actorType={sub.user_type}
+                actorId={sub.user_id}
+                size={24}
+              />
+            ))}
+            {subscribers.length > 4 && (
+              <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
+            )}
+          </AvatarGroup>
+        ) : (
+          <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
+            <Users className="h-3 w-3" />
+          </span>
+        )}
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-0" data-testid="participants-panel">
+        <Command>
+          <CommandInput placeholder={isChat ? "Add participants..." : "Change subscribers..."} />
+          <CommandList className="max-h-64">
+            <CommandEmpty>No results found</CommandEmpty>
+            {members.length > 0 && (
+              <CommandGroup heading="Members">
+                {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
+                  const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
+                  const isSubbed = !!sub;
+                  return (
+                    <CommandItem
+                      key={`member-${m.user_id}`}
+                      onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
+                      className="flex items-center gap-2.5"
+                    >
+                      <Checkbox checked={isSubbed} className="pointer-events-none" />
+                      <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                      <span className="truncate flex-1">{m.name}</span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            )}
+            {agents.filter((a) => !a.archived_at).length > 0 && (
+              <CommandGroup heading="Agents">
+                {agents.filter((a) => !a.archived_at).map((a) => {
+                  const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
+                  const isSubbed = !!sub;
+                  return (
+                    <CommandItem
+                      key={`agent-${a.id}`}
+                      onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
+                      className="flex items-center gap-2.5"
+                    >
+                      <Checkbox checked={isSubbed} className="pointer-events-none" />
+                      <ActorAvatar actorType="agent" actorId={a.id} size={22} />
+                      <span className="truncate flex-1">{a.name}</span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+
   const sidebarContent = (
     <div className="space-y-5">
-      {/* Properties */}
-      <div>
+      {/* Properties — task-only. Hidden for channels/DMs since status,
+          priority, assignee and due-date are concepts that don't apply
+          to a chat thread. */}
+      {!isChat && <div>
         <button
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
@@ -624,7 +782,34 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </PropRow>
           )}
         </div>}
-      </div>
+      </div>}
+
+      {/* Participants — chat-only. Mirrors mockup-skærm 1: members and
+          agents split into two groups with an inline add button. */}
+      {isChat && (
+        <div>
+          <div className="flex items-center justify-between px-2 py-1 mb-2">
+            <span className="text-xs font-medium">Participants</span>
+            {participantPopover}
+          </div>
+          <div className="space-y-3 pl-2">
+            <ParticipantGroup
+              heading="Members"
+              subscribers={subscribers.filter((s) => s.user_type === "member")}
+              getActorName={getActorName}
+              ownerType={issue.assignee_type}
+              ownerId={issue.assignee_id}
+            />
+            <ParticipantGroup
+              heading="Agents"
+              subscribers={subscribers.filter((s) => s.user_type === "agent")}
+              getActorName={getActorName}
+              ownerType={issue.assignee_type}
+              ownerId={issue.assignee_id}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Parent issue */}
       {(parentIssue || parentIsRestricted) && (
@@ -750,24 +935,40 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             )}
             {linkSelfInBreadcrumb ? (
               <AppLink
-                href={paths.issueDetail(issue.id)}
+                href={isChat ? paths.channelDetail(issue.id) : paths.issueDetail(issue.id)}
                 className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
               >
-                <span className="shrink-0 text-muted-foreground">
-                  {issue.identifier}
-                </span>
-                <span className="truncate font-medium text-foreground">
-                  {issue.title}
-                </span>
+                {isChat ? (
+                  <span className="truncate font-medium text-foreground">
+                    {isChannel ? `# ${displayTitle}` : displayTitle}
+                  </span>
+                ) : (
+                  <>
+                    <span className="shrink-0 text-muted-foreground">
+                      {issue.identifier}
+                    </span>
+                    <span className="truncate font-medium text-foreground">
+                      {displayTitle}
+                    </span>
+                  </>
+                )}
               </AppLink>
             ) : (
               <>
-                <span className="shrink-0 text-muted-foreground">
-                  {issue.identifier}
-                </span>
-                <span className="truncate font-medium text-foreground">
-                  {issue.title}
-                </span>
+                {isChat ? (
+                  <span className="truncate font-medium text-foreground">
+                    {isChannel ? `# ${displayTitle}` : displayTitle}
+                  </span>
+                ) : (
+                  <>
+                    <span className="shrink-0 text-muted-foreground">
+                      {issue.identifier}
+                    </span>
+                    <span className="truncate font-medium text-foreground">
+                      {displayTitle}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -802,142 +1003,149 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 }
               />
               <DropdownMenuContent align="end" className="w-auto">
-                {/* Status */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                    Status
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {ALL_STATUSES.map((s) => (
-                      <DropdownMenuItem
-                        key={s}
-                        onClick={() => handleUpdateField({ status: s })}
-                      >
-                        <StatusIcon status={s} className="h-3.5 w-3.5" />
-                        {STATUS_CONFIG[s].label}
-                        {issue.status === s && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                {/* Status / Priority / Assignee / Due date / Sub-issues —
+                    all task-only. The dropdown collapses to just pin /
+                    copy / delete for chat threads. */}
+                {!isChat && (
+                  <>
+                    {/* Status */}
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+                        Status
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {ALL_STATUSES.map((s) => (
+                          <DropdownMenuItem
+                            key={s}
+                            onClick={() => handleUpdateField({ status: s })}
+                          >
+                            <StatusIcon status={s} className="h-3.5 w-3.5" />
+                            {STATUS_CONFIG[s].label}
+                            {issue.status === s && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
 
-                {/* Priority */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <PriorityIcon priority={issue.priority} />
-                    Priority
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {PRIORITY_ORDER.map((p) => (
-                      <DropdownMenuItem
-                        key={p}
-                        onClick={() => handleUpdateField({ priority: p })}
-                      >
-                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
-                          <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                          {PRIORITY_CONFIG[p].label}
-                        </span>
-                        {issue.priority === p && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                    {/* Priority */}
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <PriorityIcon priority={issue.priority} />
+                        Priority
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {PRIORITY_ORDER.map((p) => (
+                          <DropdownMenuItem
+                            key={p}
+                            onClick={() => handleUpdateField({ priority: p })}
+                          >
+                            <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}>
+                              <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
+                              {PRIORITY_CONFIG[p].label}
+                            </span>
+                            {issue.priority === p && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
 
-                {/* Assignee */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <UserMinus className="h-3.5 w-3.5" />
-                    Assignee
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem
-                      onClick={() => handleUpdateField({ assignee_type: null, assignee_id: null })}
-                    >
-                      <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                      Unassigned
-                      {!issue.assignee_type && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                    </DropdownMenuItem>
-                    {members.map((m) => (
-                      <DropdownMenuItem
-                        key={m.user_id}
-                        onClick={() => handleUpdateField({ assignee_type: "member", assignee_id: m.user_id })}
-                      >
-                        <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-                        {m.name}
-                        {issue.assignee_type === "member" && issue.assignee_id === m.user_id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                    {agents.filter((a) => !a.archived_at && canAssignAgent(a, user?.id, currentMemberRole)).map((a) => (
-                      <DropdownMenuItem
-                        key={a.id}
-                        onClick={() => handleUpdateField({ assignee_type: "agent", assignee_id: a.id })}
-                      >
-                        <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-                        {a.name}
-                        {issue.assignee_type === "agent" && issue.assignee_id === a.id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                {/* Due date */}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <Calendar className="h-3.5 w-3.5" />
-                    Due date
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem onClick={() => handleUpdateField({ due_date: new Date().toISOString() })}>
-                      Today
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const d = new Date(); d.setDate(d.getDate() + 1);
-                      handleUpdateField({ due_date: d.toISOString() });
-                    }}>
-                      Tomorrow
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const d = new Date(); d.setDate(d.getDate() + 7);
-                      handleUpdateField({ due_date: d.toISOString() });
-                    }}>
-                      Next week
-                    </DropdownMenuItem>
-                    {issue.due_date && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: null })}>
-                          Clear date
+                    {/* Assignee */}
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <UserMinus className="h-3.5 w-3.5" />
+                        Assignee
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem
+                          onClick={() => handleUpdateField({ assignee_type: null, assignee_id: null })}
+                        >
+                          <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+                          Unassigned
+                          {!issue.assignee_type && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
                         </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                        {members.map((m) => (
+                          <DropdownMenuItem
+                            key={m.user_id}
+                            onClick={() => handleUpdateField({ assignee_type: "member", assignee_id: m.user_id })}
+                          >
+                            <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                            {m.name}
+                            {issue.assignee_type === "member" && issue.assignee_id === m.user_id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
+                          </DropdownMenuItem>
+                        ))}
+                        {agents.filter((a) => !a.archived_at && canAssignAgent(a, user?.id, currentMemberRole)).map((a) => (
+                          <DropdownMenuItem
+                            key={a.id}
+                            onClick={() => handleUpdateField({ assignee_type: "agent", assignee_id: a.id })}
+                          >
+                            <ActorAvatar actorType="agent" actorId={a.id} size={16} />
+                            {a.name}
+                            {issue.assignee_type === "agent" && issue.assignee_id === a.id && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
 
-                <DropdownMenuSeparator />
+                    {/* Due date */}
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Calendar className="h-3.5 w-3.5" />
+                        Due date
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: new Date().toISOString() })}>
+                          Today
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {
+                          const d = new Date(); d.setDate(d.getDate() + 1);
+                          handleUpdateField({ due_date: d.toISOString() });
+                        }}>
+                          Tomorrow
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {
+                          const d = new Date(); d.setDate(d.getDate() + 7);
+                          handleUpdateField({ due_date: d.toISOString() });
+                        }}>
+                          Next week
+                        </DropdownMenuItem>
+                        {issue.due_date && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => handleUpdateField({ due_date: null })}>
+                              Clear date
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
 
-                {/* Create sub-issue */}
-                <DropdownMenuItem onClick={() => {
-                  useModalStore.getState().open("create-issue", {
-                    parent_issue_id: issue.id,
-                    parent_issue_identifier: issue.identifier,
-                  });
-                }}>
-                  <Plus className="h-3.5 w-3.5" />
-                  Create sub-issue
-                </DropdownMenuItem>
+                    <DropdownMenuSeparator />
 
-                {/* Add as sub-issue of another issue */}
-                <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
-                  <ArrowUp className="h-3.5 w-3.5" />
-                  Set parent issue...
-                </DropdownMenuItem>
+                    {/* Create sub-issue */}
+                    <DropdownMenuItem onClick={() => {
+                      useModalStore.getState().open("create-issue", {
+                        parent_issue_id: issue.id,
+                        parent_issue_identifier: issue.identifier,
+                      });
+                    }}>
+                      <Plus className="h-3.5 w-3.5" />
+                      Create sub-issue
+                    </DropdownMenuItem>
 
-                {/* Add another issue as sub-issue */}
-                <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
-                  <ArrowDown className="h-3.5 w-3.5" />
-                  Add sub-issue...
-                </DropdownMenuItem>
+                    {/* Add as sub-issue of another issue */}
+                    <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
+                      <ArrowUp className="h-3.5 w-3.5" />
+                      Set parent issue...
+                    </DropdownMenuItem>
+
+                    {/* Add another issue as sub-issue */}
+                    <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
+                      <ArrowDown className="h-3.5 w-3.5" />
+                      Add sub-issue...
+                    </DropdownMenuItem>
+                  </>
+                )}
 
                 {/* Pin / Unpin */}
                 <DropdownMenuItem onClick={() => {
@@ -1001,6 +1209,82 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </Tooltip>
           </div>
         </PageHeader>
+
+        {/* Channel-header bar — chat-only. Sits directly under the page
+            breadcrumb and matches mockup-skærm 1: hash + name on row1,
+            description as topic-strip on row2, participant avatar stack +
+            settings icon on the right. DMs collapse to just the
+            participant-derived title — no hash, no topic-strip, no
+            settings icon — per the "Mail-stil reading-pane" spec. */}
+        {isChat && (
+          <div
+            className="flex items-start justify-between gap-4 border-b px-4 sm:px-6 md:px-8 py-3"
+            data-testid="channel-header"
+          >
+            <div className="min-w-0 flex-1">
+              {isChannel ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-base font-medium text-muted-foreground"
+                      aria-hidden
+                    >
+                      #
+                    </span>
+                    <TitleEditor
+                      key={`title-${id}`}
+                      defaultValue={issue.title}
+                      placeholder="Channel name"
+                      className="text-base font-semibold leading-snug tracking-tight min-w-0 flex-1"
+                      onBlur={(value) => {
+                        const trimmed = value.trim();
+                        if (trimmed && trimmed !== issue.title)
+                          handleUpdateField({ title: trimmed });
+                      }}
+                    />
+                  </div>
+                  {issue.description && (
+                    <div
+                      className="mt-1 truncate text-xs text-muted-foreground"
+                      data-testid="channel-topic"
+                    >
+                      {issue.description}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <h2
+                  className="text-base font-semibold leading-snug tracking-tight truncate"
+                  data-testid="dm-title"
+                >
+                  {displayTitle}
+                </h2>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <div data-testid="header-participants">{participantPopover}</div>
+              {isChannel && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        aria-label="Channel settings"
+                        data-testid="channel-settings"
+                        onClick={() => setSidebarOpen(true)}
+                      >
+                        <Settings />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">Channel settings</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        )}
 
             {/* Delete confirmation dialog (controlled by state) */}
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -1073,18 +1357,23 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         <div className="relative flex-1 min-h-0">
         <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-3 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder="Issue title"
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          {/* For chat threads (channels + DMs) the title and topic are
+              rendered in the channel-header bar above. The main content
+              area starts directly with the message stream. */}
+          {!isChat && (
+            <TitleEditor
+              key={`title-${id}`}
+              defaultValue={issue.title}
+              placeholder="Issue title"
+              className="w-full text-2xl font-bold leading-snug tracking-tight"
+              onBlur={(value) => {
+                const trimmed = value.trim();
+                if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+              }}
+            />
+          )}
 
-          {parentIssue && (
+          {!isChat && parentIssue && (
             <AppLink
               href={paths.issueDetail(parentIssue.id)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
@@ -1109,43 +1398,52 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </AppLink>
           )}
 
-          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder="Add description..."
-              onUpdate={(md) => handleUpdateField({ description: md })}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={id}
-            />
+          {/* Description editor — task-only. Channels render the
+              description as a small topic-strip in the channel-header bar
+              instead, so the rich-text editor would be a duplicate. */}
+          {!isChat && (
+            <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder="Add description..."
+                onUpdate={(md) => handleUpdateField({ description: md })}
+                onUploadFile={handleDescriptionUpload}
+                debounceMs={1500}
+                currentIssueId={id}
+              />
 
-            <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
-              <FileUploadButton
-                size="sm"
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
+              <div className="flex items-center gap-1 mt-3">
+                <ReactionBar
+                  reactions={issueReactions}
+                  currentUserId={user?.id}
+                  onToggle={handleToggleIssueReaction}
+                  getActorName={getActorName}
+                />
+                <FileUploadButton
+                  size="sm"
+                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                />
+              </div>
+              {descDragOver && <FileDropOverlay />}
             </div>
-            {descDragOver && <FileDropOverlay />}
-          </div>
+          )}
 
-          <AttachmentList
-            attachments={issue.attachments}
-            content={issue.description ?? ""}
-            className="mt-3"
-          />
+          {!isChat && (
+            <AttachmentList
+              attachments={issue.attachments}
+              content={issue.description ?? ""}
+              className="mt-3"
+            />
+          )}
 
-          <ArtifactList issueId={issue.id} className="mt-3" />
+          {!isChat && <ArtifactList issueId={issue.id} className="mt-3" />}
 
-          {/* Sub-issues — Linear-style */}
-          {childIssues.length === 0 && (
+          {/* Sub-issues — task-only. Channels and DMs don't carry the
+              hierarchical breakdown that issues do, so skip both the
+              empty-state CTA and the populated list. */}
+          {!isChat && childIssues.length === 0 && (
             <div className="mt-6">
               <button
                 type="button"
@@ -1162,7 +1460,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </button>
             </div>
           )}
-          {childIssues.length > 0 && (() => {
+          {!isChat && childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
               <div className="mt-10">
@@ -1262,115 +1560,57 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
           <div className="my-8 border-t" />
 
-          {/* Activity / Comments */}
+          {/* Activity / Comments — relabeled as "Messages" for chat. The
+              avatar stack and subscribe button are duplicated in the page
+              header for chat (see participantPopover above), so we omit
+              them from this row in chat mode and rely on the header. */}
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">Activity</h2>
+                <h2 className="text-base font-semibold">{isChat ? "Messages" : "Activity"}</h2>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleToggleSubscribe}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {isSubscribed ? "Unsubscribe" : "Subscribe"}
-                </button>
-                <Popover>
-                  <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
-                    {subscribers.length > 0 ? (
-                      <AvatarGroup>
-                        {subscribers.slice(0, 4).map((sub) => (
-                          <ActorAvatar
-                            key={`${sub.user_type}-${sub.user_id}`}
-                            actorType={sub.user_type}
-                            actorId={sub.user_id}
-                            size={24}
-                          />
-                        ))}
-                        {subscribers.length > 4 && (
-                          <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
-                        )}
-                      </AvatarGroup>
-                    ) : (
-                      <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
-                        <Users className="h-3 w-3" />
-                      </span>
-                    )}
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <Command>
-                      <CommandInput placeholder="Change subscribers..." />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>No results found</CommandEmpty>
-                        {members.length > 0 && (
-                          <CommandGroup heading="Members">
-                            {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
-                              const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`member-${m.user_id}`}
-                                  onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                                  <span className="truncate flex-1">{m.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                        {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading="Agents">
-                            {agents.filter((a) => !a.archived_at).map((a) => {
-                              const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`agent-${a.id}`}
-                                  onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} />
-                                  <span className="truncate flex-1">{a.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
+              {!isChat && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleToggleSubscribe}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {isSubscribed ? "Unsubscribe" : "Subscribe"}
+                  </button>
+                  {participantPopover}
+                </div>
+              )}
             </div>
 
-            {/* Agent live output — sticky inside the Activity section so it
-                stays pinned while scrolling through TaskRunHistory + comments. */}
-            <AgentLiveCard issueId={id} />
+            {/* Agent live output and run/session tabs are task-only. Chat
+                threads run conversationally — there is no agent-run
+                history to surface here. */}
+            {!isChat && <AgentLiveCard issueId={id} />}
 
             <Tabs defaultValue="comments" className="mt-3">
-              <TabsList variant="line">
-                <TabsTrigger value="comments">Comments</TabsTrigger>
-                <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
-                <TabsTrigger value="sessions">Sessions</TabsTrigger>
-              </TabsList>
+              {!isChat && (
+                <TabsList variant="line">
+                  <TabsTrigger value="comments">Comments</TabsTrigger>
+                  <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
+                  <TabsTrigger value="sessions">Sessions</TabsTrigger>
+                </TabsList>
+              )}
 
-              <TabsContent value="agent-runs">
-                <div className="mt-2">
-                  <TaskRunHistory issueId={id} />
-                </div>
-              </TabsContent>
+              {!isChat && (
+                <TabsContent value="agent-runs">
+                  <div className="mt-2">
+                    <TaskRunHistory issueId={id} />
+                  </div>
+                </TabsContent>
+              )}
 
-              <TabsContent value="sessions">
-                <div className="mt-2">
-                  <WorkSessionHistory issueId={id} />
-                </div>
-              </TabsContent>
+              {!isChat && (
+                <TabsContent value="sessions">
+                  <div className="mt-2">
+                    <WorkSessionHistory issueId={id} />
+                  </div>
+                </TabsContent>
+              )}
 
               <TabsContent value="comments">
             {/* Timeline entries */}

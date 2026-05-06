@@ -13,6 +13,8 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
 
+export type IssueKind = "issue" | "channel" | "dm";
+
 export interface IssueReaction {
   id: string;
   issue_id: string;
@@ -27,6 +29,7 @@ export interface Issue {
   workspace_id: string;
   number: number;
   identifier: string;
+  kind: IssueKind;
   title: string;
   description: string | null;
   status: IssueStatus;
