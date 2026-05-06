@@ -122,6 +122,7 @@
     "members_group": "Members",
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
+    "archive_tooltip": "Archive",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",

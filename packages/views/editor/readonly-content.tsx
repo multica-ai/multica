@@ -330,6 +330,7 @@ function MermaidLightbox({
 }
 
 function MermaidDiagram({ chart }: { chart: string }) {
+  const { t } = useT("editor");
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const diagramId = useMemo(
@@ -386,7 +387,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
   if (error) {
     return (
       <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
-        <p>Unable to render Mermaid diagram.</p>
+        <p>{t(($) => $.mermaid.render_error)}</p>
         <pre>
           <code>{chart}</code>
         </pre>
@@ -426,7 +427,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
           )}
         </>
       ) : (
-        <div className="mermaid-diagram-loading">Rendering diagram…</div>
+        <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
       )}
     </div>
   );

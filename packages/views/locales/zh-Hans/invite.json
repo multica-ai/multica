@@ -33,5 +33,21 @@
   "errors": {
     "accept_failed": "接受邀请失败",
     "decline_failed": "拒绝邀请失败"
+  },
+  "batch": {
+    "log_out": "退出登录",
+    "empty_title": "没有待处理的邀请",
+    "empty_hint": "继续创建你自己的工作区。",
+    "empty_continue": "继续创建",
+    "title": "你被邀请加入工作区",
+    "subtitle": "选择你想加入的工作区。其余的可以之后在侧边栏处理。",
+    "submit_skip": "跳过，创建我自己的工作区",
+    "submit_join_other": "加入 {{count}} 个工作区",
+    "joining": "加入中...",
+    "error_generic": "处理邀请失败，请重试。",
+    "row_workspace_fallback": "工作区",
+    "row_inviter_fallback": "某人",
+    "row_invited_admin": "{{inviter}} 邀请你以管理员身份加入",
+    "row_invited_member": "{{inviter}} 邀请你以成员身份加入"
   }
 }

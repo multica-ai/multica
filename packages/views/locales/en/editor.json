@@ -54,5 +54,9 @@
   },
   "title_editor": {
     "title_aria_label": "Title"
+  },
+  "mermaid": {
+    "render_error": "Unable to render Mermaid diagram.",
+    "rendering": "Rendering diagram…"
   }
 }

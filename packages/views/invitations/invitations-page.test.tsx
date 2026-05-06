@@ -56,13 +56,20 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enInvite from "../locales/en/invite.json";
 import { InvitationsPage } from "./invitations-page";
+
+const TEST_RESOURCES = { en: { common: enCommon, invite: enInvite } };
 
 function renderWithClient(client: QueryClient = new QueryClient()) {
   return render(
-    <QueryClientProvider client={client}>
-      <InvitationsPage />
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={client}>
+        <InvitationsPage />
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 
