@@ -48,6 +48,19 @@ func (q *Queries) DeleteExpiredVerificationCodes(ctx context.Context) error {
 	return err
 }
 
+const getFixedVerificationCodeByEmail = `-- name: GetFixedVerificationCodeByEmail :one
+SELECT email, code_hash, created_at FROM fixed_verification_code
+WHERE email = $1
+LIMIT 1
+`
+
+func (q *Queries) GetFixedVerificationCodeByEmail(ctx context.Context, email string) (FixedVerificationCode, error) {
+	row := q.db.QueryRow(ctx, getFixedVerificationCodeByEmail, email)
+	var i FixedVerificationCode
+	err := row.Scan(&i.Email, &i.CodeHash, &i.CreatedAt)
+	return i, err
+}
+
 const getLatestCodeByEmail = `-- name: GetLatestCodeByEmail :one
 SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
 WHERE email = $1

@@ -87,6 +87,9 @@ type AgentTaskQueue struct {
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
 	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
+	TriggerSource    pgtype.Text        `json:"trigger_source"`
+	TriggerActorType pgtype.Text        `json:"trigger_actor_type"`
+	TriggerActorID   pgtype.UUID        `json:"trigger_actor_id"`
 }
 
 type Attachment struct {
@@ -231,6 +234,12 @@ type ExternalAccountBinding struct {
 	Metadata              []byte             `json:"metadata"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FixedVerificationCode struct {
+	Email     string             `json:"email"`
+	CodeHash  string             `json:"code_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type InboxItem struct {
@@ -490,6 +499,7 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	WikiContent  pgtype.Text        `json:"wiki_content"`
 }
 
 type WorkspaceInvitation struct {

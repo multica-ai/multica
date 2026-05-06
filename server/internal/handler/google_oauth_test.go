@@ -9,6 +9,9 @@ import (
 )
 
 func TestExchangeGoogleCodeUsesConfiguredTokenURL(t *testing.T) {
+	resetGoogleHTTPClient()
+	defer resetGoogleHTTPClient()
+
 	var sawRequest bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawRequest = true
@@ -52,6 +55,9 @@ func TestExchangeGoogleCodeUsesConfiguredTokenURL(t *testing.T) {
 }
 
 func TestFetchGoogleUserInfoUsesConfiguredUserInfoURL(t *testing.T) {
+	resetGoogleHTTPClient()
+	defer resetGoogleHTTPClient()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer access-token-123" {
 			t.Fatalf("expected bearer token, got %q", got)
@@ -72,5 +78,50 @@ func TestFetchGoogleUserInfoUsesConfiguredUserInfoURL(t *testing.T) {
 	}
 	if user.ID != "google-user-id" || user.Email != "user@example.com" || !strings.Contains(user.Picture, "avatar") {
 		t.Fatalf("unexpected userinfo: %+v", user)
+	}
+}
+
+func TestGoogleHTTPClient_WithProxy(t *testing.T) {
+	resetGoogleHTTPClient()
+	defer resetGoogleHTTPClient()
+
+	// Start a mock "target" server
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"access_token":"proxied","id_token":"","token_type":"Bearer"}`))
+	}))
+	defer target.Close()
+
+	// When GOOGLE_OAUTH_PROXY is set, the client should use it
+	t.Setenv("GOOGLE_OAUTH_PROXY", "http://invalid-proxy-that-wont-be-used:9999")
+	t.Setenv("GOOGLE_TOKEN_URL", target.URL)
+
+	client := googleHTTPClient()
+	if client == http.DefaultClient {
+		t.Fatal("expected a custom client when GOOGLE_OAUTH_PROXY is set")
+	}
+}
+
+func TestGoogleHTTPClient_NoProxy(t *testing.T) {
+	resetGoogleHTTPClient()
+	defer resetGoogleHTTPClient()
+
+	t.Setenv("GOOGLE_OAUTH_PROXY", "")
+
+	client := googleHTTPClient()
+	if client != http.DefaultClient {
+		t.Fatal("expected http.DefaultClient when no proxy is configured")
+	}
+}
+
+func TestGoogleHTTPClient_InvalidProxy(t *testing.T) {
+	resetGoogleHTTPClient()
+	defer resetGoogleHTTPClient()
+
+	t.Setenv("GOOGLE_OAUTH_PROXY", "://bad-url")
+
+	client := googleHTTPClient()
+	if client != http.DefaultClient {
+		t.Fatal("expected fallback to http.DefaultClient for invalid proxy URL")
 	}
 }

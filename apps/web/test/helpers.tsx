@@ -25,6 +25,7 @@ export const mockWorkspace: Workspace = {
   slug: "test-ws",
   description: "A test workspace",
   context: null,
+  wiki_content: null,
   settings: {},
   repos: [],
   issue_prefix: "TES",

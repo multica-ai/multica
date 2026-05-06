@@ -38,6 +38,7 @@ type WorkspaceResponse struct {
 	Slug        string  `json:"slug"`
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
+	WikiContent *string `json:"wiki_content"`
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
@@ -66,6 +67,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Slug:        w.Slug,
 		Description: textToPtr(w.Description),
 		Context:     textToPtr(w.Context),
+		WikiContent: textToPtr(w.WikiContent),
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
@@ -216,6 +218,7 @@ type UpdateWorkspaceRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
+	WikiContent *string `json:"wiki_content"`
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
@@ -246,6 +249,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Context != nil {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
+	}
+	if req.WikiContent != nil {
+		params.WikiContent = pgtype.Text{String: *req.WikiContent, Valid: true}
 	}
 	if req.Settings != nil {
 		s, _ := json.Marshal(req.Settings)
