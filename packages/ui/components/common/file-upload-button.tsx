@@ -3,12 +3,18 @@
 import { useRef } from "react";
 import { ImagePlus, Paperclip } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 
 interface FileUploadButtonProps {
   /** Default attach handler — called with any file the user picks. */
   onSelect: (file: File) => void;
-  /** Optional embed-as-image handler. When provided, a second button is
-   *  rendered that opens an image-only picker and routes to this callback. */
+  /** Optional embed-as-image handler. When provided, the button shows a
+   *  menu so the user can pick attach vs embed-as-image. */
   onEmbedImage?: (file: File) => void;
   disabled?: boolean;
   className?: string;
@@ -44,45 +50,66 @@ function FileUploadButton({
   const btnClass = cn(
     "inline-flex items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none",
     btnSize,
+    className,
   );
+
+  // No embed handler → just a single attach button.
+  if (!onEmbedImage) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => attachInputRef.current?.click()}
+          disabled={disabled}
+          title="Attach file"
+          className={btnClass}
+        >
+          <Paperclip className={iconSize} />
+        </button>
+        <input
+          ref={attachInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleAttach}
+        />
+      </>
+    );
+  }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => attachInputRef.current?.click()}
-        disabled={disabled}
-        title="Attach file"
-        className={cn(btnClass, className)}
-      >
-        <Paperclip className={iconSize} />
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={disabled}
+          title="Add file"
+          className={btnClass}
+        >
+          <Paperclip className={iconSize} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem onClick={() => attachInputRef.current?.click()}>
+            <Paperclip />
+            <span>Attach file</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => embedInputRef.current?.click()}>
+            <ImagePlus />
+            <span>Embed image</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <input
         ref={attachInputRef}
         type="file"
         className="hidden"
         onChange={handleAttach}
       />
-      {onEmbedImage && (
-        <>
-          <button
-            type="button"
-            onClick={() => embedInputRef.current?.click()}
-            disabled={disabled}
-            title="Embed image"
-            className={btnClass}
-          >
-            <ImagePlus className={iconSize} />
-          </button>
-          <input
-            ref={embedInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleEmbed}
-          />
-        </>
-      )}
+      <input
+        ref={embedInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleEmbed}
+      />
     </>
   );
 }
