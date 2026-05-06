@@ -35,16 +35,16 @@ var defaultOrigins = []string{
 }
 
 func allowedOrigins() []string {
-	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	raw := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	}
 	if raw == "" {
 		raw = strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	}
-	if raw == "" {
-		return defaultOrigins
-	}
 
 	parts := strings.Split(raw, ",")
-	origins := make([]string, 0, len(parts))
+	origins := make([]string, 0, len(parts)+len(defaultOrigins))
 	for _, part := range parts {
 		origin := strings.TrimSpace(part)
 		if origin != "" {
@@ -54,6 +54,8 @@ func allowedOrigins() []string {
 	if len(origins) == 0 {
 		return defaultOrigins
 	}
+	// Always include localhost dev origins for self-hosting convenience.
+	origins = append(origins, defaultOrigins...)
 	return origins
 }
 
