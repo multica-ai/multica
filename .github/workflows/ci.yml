@@ -29,6 +29,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Verify reserved-slugs.ts is up to date
+        # Re-runs the generator and fails on any drift from the
+        # checked-in TypeScript output. The Go side embeds the JSON
+        # source directly, so a passing diff here proves both sides
+        # share one source of truth.
+        run: |
+          pnpm generate:reserved-slugs
+          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
       - name: Build, type check, lint, and test
         run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
 
