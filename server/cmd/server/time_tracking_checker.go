@@ -165,7 +165,7 @@ func checkWorkspaceTimeTracking(
 			continue
 		}
 
-		// Create inbox notification.
+		// Build notification content.
 		loggedHours := float64(totalMinutes) / 60.0
 		title := fmt.Sprintf("Time not logged: %.1fh of %.1fh logged today", loggedHours, requiredHours)
 		body := fmt.Sprintf(
@@ -179,23 +179,47 @@ func checkWorkspaceTimeTracking(
 			"date":             today,
 		})
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   ws.ID,
-			RecipientType: "member",
-			RecipientID:   member.UserID,
-			Type:          "time_not_logged",
-			Severity:      "attention",
-			IssueID:       pgtype.UUID{Valid: false},
-			Title:         title,
-			Body:          pgtype.Text{String: body, Valid: true},
-			ActorType:     pgtype.Text{Valid: false}, // system notification
-			ActorID:       pgtype.UUID{Valid: false},
-			Details:       details,
+		// Check if a notification already exists for this user/date to avoid duplicates.
+		existing, err := queries.GetTimeNotLoggedItemForDate(ctx, db.GetTimeNotLoggedItemForDateParams{
+			WorkspaceID: ws.ID,
+			RecipientID: member.UserID,
+			Column3:     today,
 		})
-		if err != nil {
-			slog.Error("time tracking checker: failed to create inbox item",
-				"workspace_id", wsID, "user_id", memberUserID, "error", err)
-			continue
+
+		var item db.InboxItem
+		if err == nil {
+			// Update the existing notification with the latest logged time.
+			item, err = queries.UpdateTimeNotLoggedItem(ctx, db.UpdateTimeNotLoggedItemParams{
+				ID:      existing.ID,
+				Title:   title,
+				Body:    pgtype.Text{String: body, Valid: true},
+				Details: details,
+			})
+			if err != nil {
+				slog.Error("time tracking checker: failed to update inbox item",
+					"workspace_id", wsID, "user_id", memberUserID, "error", err)
+				continue
+			}
+		} else {
+			// No existing notification — create a new one.
+			item, err = queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+				WorkspaceID:   ws.ID,
+				RecipientType: "member",
+				RecipientID:   member.UserID,
+				Type:          "time_not_logged",
+				Severity:      "attention",
+				IssueID:       pgtype.UUID{Valid: false},
+				Title:         title,
+				Body:          pgtype.Text{String: body, Valid: true},
+				ActorType:     pgtype.Text{Valid: false}, // system notification
+				ActorID:       pgtype.UUID{Valid: false},
+				Details:       details,
+			})
+			if err != nil {
+				slog.Error("time tracking checker: failed to create inbox item",
+					"workspace_id", wsID, "user_id", memberUserID, "error", err)
+				continue
+			}
 		}
 
 		resp := inboxItemToResponse(item)

@@ -257,6 +257,46 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 	return i, err
 }
 
+const getTimeNotLoggedItemForDate = `-- name: GetTimeNotLoggedItemForDate :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'time_not_logged'
+  AND archived = false
+  AND details->>'date' = $3::text
+LIMIT 1
+`
+
+type GetTimeNotLoggedItemForDateParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Column3     string      `json:"column_3"`
+}
+
+func (q *Queries) GetTimeNotLoggedItemForDate(ctx context.Context, arg GetTimeNotLoggedItemForDateParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, getTimeNotLoggedItemForDate, arg.WorkspaceID, arg.RecipientID, arg.Column3)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
        iss.status as issue_status
@@ -354,6 +394,48 @@ RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const updateTimeNotLoggedItem = `-- name: UpdateTimeNotLoggedItem :one
+UPDATE inbox_item
+SET title = $2, body = $3, details = $4, read = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+type UpdateTimeNotLoggedItemParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Title   string      `json:"title"`
+	Body    pgtype.Text `json:"body"`
+	Details []byte      `json:"details"`
+}
+
+func (q *Queries) UpdateTimeNotLoggedItem(ctx context.Context, arg UpdateTimeNotLoggedItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, updateTimeNotLoggedItem,
+		arg.ID,
+		arg.Title,
+		arg.Body,
+		arg.Details,
+	)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

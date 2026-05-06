@@ -56,3 +56,19 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND 
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
   AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'));
+
+-- name: GetTimeNotLoggedItemForDate :one
+SELECT * FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'time_not_logged'
+  AND archived = false
+  AND details->>'date' = $3::text
+LIMIT 1;
+
+-- name: UpdateTimeNotLoggedItem :one
+UPDATE inbox_item
+SET title = $2, body = $3, details = $4, read = false
+WHERE id = $1
+RETURNING *;
