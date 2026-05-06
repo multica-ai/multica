@@ -1,3 +1,5 @@
+"use client";
+
 import { Flag } from "lucide-react";
 import type { ExtraSettingsTab } from "@multica/views/settings";
 import { CerebroFeatureFlagsTab } from "./settings-tab";
