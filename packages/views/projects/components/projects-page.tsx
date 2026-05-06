@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
@@ -71,16 +71,114 @@ function ProjectRow({ project }: { project: Project }) {
     [project.id, updateProject],
   );
 
+  // Inline-rename state. Single-click on the title still navigates via the
+  // AppLink (default browser behavior); double-click flips into edit mode.
+  // Enter / blur commits; Escape cancels and reverts.
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(project.title);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep the draft in sync if the project is renamed elsewhere (e.g. detail
+  // page or a real-time event from another client) while we're not actively
+  // editing.
+  useEffect(() => {
+    if (!isEditingTitle) setTitleDraft(project.title);
+  }, [project.title, isEditingTitle]);
+
+  // Auto-focus + select-all when entering edit mode so the user can type
+  // immediately or extend the existing name without an extra click.
+  useEffect(() => {
+    if (isEditingTitle) {
+      const el = titleInputRef.current;
+      el?.focus();
+      el?.select();
+    }
+  }, [isEditingTitle]);
+
+  const commitTitle = useCallback(() => {
+    const trimmed = titleDraft.trim();
+    setIsEditingTitle(false);
+    if (!trimmed) {
+      // Empty input — revert silently rather than wiping the project name.
+      setTitleDraft(project.title);
+      return;
+    }
+    if (trimmed !== project.title) {
+      handleUpdate({ title: trimmed });
+    }
+  }, [titleDraft, project.title, handleUpdate]);
+
+  const cancelTitleEdit = useCallback(() => {
+    setTitleDraft(project.title);
+    setIsEditingTitle(false);
+  }, [project.title]);
+
   return (
     <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
-      {/* Icon + Name (navigates to detail) */}
-      <AppLink
-        href={wsPaths.projectDetail(project.id)}
-        className="flex min-w-0 flex-1 items-center gap-2"
-      >
-        <ProjectIcon project={project} size="md" />
-        <span className="min-w-0 flex-1 truncate font-medium">{project.title}</span>
-      </AppLink>
+      {/* Icon + Name. Single-click navigates (AppLink). Double-click flips
+          into inline rename mode. While editing, the AppLink is replaced
+          with an <input> so clicks don't navigate. */}
+      {isEditingTitle ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <ProjectIcon project={project} size="md" />
+          <input
+            ref={titleInputRef}
+            type="text"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitTitle();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelTitleEdit();
+              }
+            }}
+            aria-label="Project name"
+            className="min-w-0 flex-1 bg-transparent border-b border-primary/40 font-medium outline-none focus:border-primary"
+          />
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <AppLink
+            href={wsPaths.projectDetail(project.id)}
+            className="flex min-w-0 flex-1 items-center gap-2"
+          >
+            <ProjectIcon project={project} size="md" />
+            <span
+              className="min-w-0 flex-1 truncate font-medium"
+              // Double-click also flips into edit mode for power users —
+              // the visible pencil button is the discoverable affordance,
+              // but dblclick is the muscle-memory shortcut.
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsEditingTitle(true);
+              }}
+            >
+              {project.title}
+            </span>
+          </AppLink>
+          {/* Hover-revealed rename button. Sibling of AppLink so a click
+              doesn't trigger navigation. Visible on row hover (and always
+              visible to keyboard focus). */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditingTitle(true);
+            }}
+            className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-60 hover:opacity-100"
+            aria-label={`Rename ${project.title}`}
+            title="Rename project"
+          >
+            <Pencil className="size-3" />
+          </button>
+        </div>
+      )}
 
       {/* Priority — dropdown */}
       <DropdownMenu>
