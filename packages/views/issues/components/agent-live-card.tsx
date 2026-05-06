@@ -14,6 +14,7 @@ import {
   buildTimeline,
   type TimelineItem,
 } from "../../common/task-transcript";
+import { useT } from "../../i18n";
 
 // AgentLiveCard renders a sticky banner at the top of the issue's main
 // column for every active task. Each banner shows "agent X is working",
@@ -49,6 +50,7 @@ interface AgentLiveCardProps {
 }
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
@@ -185,7 +187,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           task={firstEntry.task}
           items={firstEntry.items}
           issueId={issueId}
-          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "Agent"}
+          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
         />
       </div>
       {/* Additional agents — non-sticky, scroll with the page */}
@@ -197,7 +199,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               task={task}
               items={items}
               issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+              agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
             />
           ))}
         </div>
@@ -216,6 +218,7 @@ interface SingleAgentLiveCardProps {
 }
 
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
+  const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
   const [cancelling, setCancelling] = useState(false);
 
@@ -234,10 +237,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     try {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : t(($) => $.agent_live.cancel_failed));
       setCancelling(false);
     }
-  }, [task.id, issueId, cancelling]);
+  }, [task.id, issueId, cancelling, t]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
@@ -253,10 +256,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="font-medium text-foreground truncate">{t(($) => $.agent_live.is_working, { name: agentName })}</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
@@ -265,16 +268,16 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             agentName={agentName}
             items={items}
             isLive
-            title="View transcript"
+            title={t(($) => $.agent_live.transcript_button)}
           />
           <button
             onClick={handleCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            title="Stop agent"
+            title={t(($) => $.agent_live.stop_tooltip)}
           >
             {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>Stop</span>
+            <span>{t(($) => $.agent_live.stop_button)}</span>
           </button>
         </div>
       </div>

@@ -15,6 +15,7 @@ import { sortIssues } from "../utils/sort";
 import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
@@ -103,6 +104,7 @@ function StatusAccordionItem({
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
+  const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
@@ -158,7 +160,7 @@ function StatusAccordionItem({
             >
               <Plus className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.list.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </Accordion.Header>
@@ -174,7 +176,7 @@ function StatusAccordionItem({
           </>
         ) : (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.list.empty_status)}
           </p>
         )}
       </Accordion.Panel>

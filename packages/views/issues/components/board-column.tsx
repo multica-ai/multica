@@ -19,6 +19,7 @@ import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context"
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
+import { useT } from "../../i18n";
 
 export function BoardColumn({
   status,
@@ -38,6 +39,7 @@ export function BoardColumn({
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
+  const { t } = useT("issues");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -67,7 +69,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                {t(($) => $.board.hide_column)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -84,7 +86,7 @@ export function BoardColumn({
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -101,7 +103,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.board.empty_column)}
           </p>
         )}
         {footer}

@@ -21,6 +21,7 @@ import {
 } from "@multica/core/issues/mutations";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
+import { useT } from "../../i18n";
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -39,6 +40,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
 }
 
 export function useIssueTimeline(issueId: string, userId?: string) {
+  const { t } = useT("issues");
   const qc = useQueryClient();
   const { data: timeline = [], isLoading: loading } = useQuery(
     issueTimelineOptions(issueId),
@@ -218,12 +220,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send comment");
+        toast.error(t(($) => $.comment.send_failed));
       } finally {
         setSubmitting(false);
       }
     },
-    [userId, submitting, createCommentMutation],
+    [userId, submitting, createCommentMutation, t],
   );
 
   const submitReply = useCallback(
@@ -237,10 +239,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
         });
       } catch {
-        toast.error("Failed to send reply");
+        toast.error(t(($) => $.comment.send_reply_failed));
       }
     },
-    [userId, createCommentMutation],
+    [userId, createCommentMutation, t],
   );
 
   const editComment = useCallback(
@@ -248,10 +250,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await updateCommentMutation.mutateAsync({ commentId, content });
       } catch {
-        toast.error("Failed to update comment");
+        toast.error(t(($) => $.comment.update_failed));
       }
     },
-    [updateCommentMutation],
+    [updateCommentMutation, t],
   );
 
   const deleteComment = useCallback(
@@ -259,10 +261,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await deleteCommentMutation.mutateAsync(commentId);
       } catch {
-        toast.error("Failed to delete comment");
+        toast.error(t(($) => $.comment.delete_failed));
       }
     },
-    [deleteCommentMutation],
+    [deleteCommentMutation, t],
   );
 
   // --- Optimistic UI derivation for comment reactions ---

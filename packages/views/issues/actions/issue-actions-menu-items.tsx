@@ -15,7 +15,6 @@ import {
 import type { Issue } from "@multica/core/types";
 import {
   ALL_STATUSES,
-  STATUS_CONFIG,
   PRIORITY_ORDER,
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
@@ -37,6 +36,7 @@ import {
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
 import type { UseIssueActionsResult } from "./use-issue-actions";
+import { useT } from "../../i18n";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
 // (variant, inset, onClick, etc.). We bundle the primitives we need into a
@@ -82,6 +82,7 @@ export function IssueActionsMenuItems({
   primitives: P,
   onDeletedNavigateTo,
 }: IssueActionsMenuItemsProps) {
+  const { t } = useT("issues");
   const {
     members,
     agents,
@@ -108,15 +109,15 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-          Status
+          {t(($) => $.actions.status)}
         </P.SubTrigger>
         <P.SubContent>
           {ALL_STATUSES.map((s) => (
             <P.Item key={s} onClick={() => updateField({ status: s })}>
               <StatusIcon status={s} className="h-3.5 w-3.5" />
-              {STATUS_CONFIG[s].label}
+              {t(($) => $.status[s])}
               {issue.status === s && (
-                <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -127,7 +128,7 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <PriorityIcon priority={issue.priority} />
-          Priority
+          {t(($) => $.actions.priority)}
         </P.SubTrigger>
         <P.SubContent>
           {PRIORITY_ORDER.map((p) => (
@@ -136,10 +137,10 @@ export function IssueActionsMenuItems({
                 className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-                {PRIORITY_CONFIG[p].label}
+                {t(($) => $.priority[p])}
               </span>
               {issue.priority === p && (
-                <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -150,7 +151,7 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <UserMinus className="h-3.5 w-3.5" />
-          Assignee
+          {t(($) => $.actions.assignee)}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item
@@ -159,9 +160,9 @@ export function IssueActionsMenuItems({
             }
           >
             <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-            Unassigned
+            {t(($) => $.actions.unassigned)}
             {!issue.assignee_type && (
-              <span className="ml-auto text-xs text-muted-foreground">✓</span>
+              <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
             )}
           </P.Item>
           {members.map((m) => (
@@ -175,7 +176,7 @@ export function IssueActionsMenuItems({
               {m.name}
               {issue.assignee_type === "member" &&
                 issue.assignee_id === m.user_id && (
-                  <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
                 )}
             </P.Item>
           ))}
@@ -189,7 +190,7 @@ export function IssueActionsMenuItems({
               <ActorAvatar actorType="agent" actorId={a.id} size={16} />
               {a.name}
               {issue.assignee_type === "agent" && issue.assignee_id === a.id && (
-                <span className="ml-auto text-xs text-muted-foreground">✓</span>
+                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -200,23 +201,23 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <Calendar className="h-3.5 w-3.5" />
-          Due date
+          {t(($) => $.actions.due_date)}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item onClick={() => updateField({ due_date: now().toISOString() })}>
-            Today
+            {t(($) => $.actions.due_today)}
           </P.Item>
           <P.Item onClick={() => updateField({ due_date: inDays(1) })}>
-            Tomorrow
+            {t(($) => $.actions.due_tomorrow)}
           </P.Item>
           <P.Item onClick={() => updateField({ due_date: inDays(7) })}>
-            Next week
+            {t(($) => $.actions.due_next_week)}
           </P.Item>
           {issue.due_date && (
             <>
               <P.Separator />
               <P.Item onClick={() => updateField({ due_date: null })}>
-                Clear date
+                {t(($) => $.actions.due_clear)}
               </P.Item>
             </>
           )}
@@ -231,11 +232,11 @@ export function IssueActionsMenuItems({
         ) : (
           <Pin className="h-3.5 w-3.5" />
         )}
-        {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+        {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />
-        Copy link
+        {t(($) => $.actions.copy_link)}
       </P.Item>
 
       <P.Separator />
@@ -245,20 +246,20 @@ export function IssueActionsMenuItems({
       <P.Sub>
         <P.SubTrigger>
           <MoreHorizontal className="h-3.5 w-3.5" />
-          More
+          {t(($) => $.actions.more)}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item onClick={openCreateSubIssue}>
             <Plus className="h-3.5 w-3.5" />
-            Create sub-issue
+            {t(($) => $.actions.create_sub_issue)}
           </P.Item>
           <P.Item onClick={openSetParent}>
             <ArrowUp className="h-3.5 w-3.5" />
-            Set parent issue...
+            {t(($) => $.actions.set_parent_issue)}
           </P.Item>
           <P.Item onClick={openAddChild}>
             <ArrowDown className="h-3.5 w-3.5" />
-            Add sub-issue...
+            {t(($) => $.actions.add_sub_issue)}
           </P.Item>
         </P.SubContent>
       </P.Sub>
@@ -270,7 +271,7 @@ export function IssueActionsMenuItems({
         onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
       >
         <Trash2 className="h-3.5 w-3.5" />
-        Delete issue
+        {t(($) => $.actions.delete_issue)}
       </P.Item>
     </>
   );

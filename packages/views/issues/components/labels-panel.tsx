@@ -21,6 +21,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { labelListOptions, useCreateLabel, useUpdateLabel, useDeleteLabel } from "@multica/core/labels";
 import type { Label } from "@multica/core/types";
 import { LabelChip } from "../../labels/label-chip";
+import { useT } from "../../i18n";
 
 /** Default color for brand-new labels. Everything else goes through the native picker. */
 const DEFAULT_COLOR_DEFAULT = "#3b82f6";
@@ -30,6 +31,7 @@ const DEFAULT_COLOR_DEFAULT = "#3b82f6";
  * footer in the label picker.
  */
 export function LabelsPanel() {
+  const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: labels = [], isLoading } = useQuery(labelListOptions(wsId));
 
@@ -58,7 +60,7 @@ export function LabelsPanel() {
           setNewColor(DEFAULT_COLOR_DEFAULT);
         },
         onError: (err: unknown) => {
-          toast.error(err instanceof Error ? err.message : "Failed to create label");
+          toast.error(err instanceof Error ? err.message : t(($) => $.labels_panel.create_failed));
         },
       },
     );
@@ -84,7 +86,7 @@ export function LabelsPanel() {
       // Surface the reason the save didn't happen — previously this was a
       // silent no-op. Button is also disabled (below) but a visible message
       // beats a greyed-out button for telling the user WHY.
-      setEditError("Label name is required.");
+      setEditError(t(($) => $.labels_panel.name_required));
       return;
     }
     setEditError("");
@@ -93,7 +95,7 @@ export function LabelsPanel() {
       {
         onSuccess: cancelEdit,
         onError: (err: unknown) => {
-          toast.error(err instanceof Error ? err.message : "Failed to update label");
+          toast.error(err instanceof Error ? err.message : t(($) => $.labels_panel.update_failed));
         },
       },
     );
@@ -102,7 +104,7 @@ export function LabelsPanel() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Create and manage labels to categorize issues across your workspace.
+        {t(($) => $.labels_panel.intro)}
       </p>
 
       {/* Create form — color swatch, name, Add button all in one row */}
@@ -110,7 +112,7 @@ export function LabelsPanel() {
         <ColorPalette value={newColor} onChange={setNewColor} compact />
         <Input
           id="label-new-name"
-          placeholder="New label name…"
+          placeholder={t(($) => $.labels_panel.new_placeholder)}
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => {
@@ -118,19 +120,19 @@ export function LabelsPanel() {
           }}
           className="flex-1"
           maxLength={32}
-          aria-label="New label name"
+          aria-label={t(($) => $.labels_panel.new_aria)}
         />
         <Button onClick={handleCreate} disabled={!newName.trim() || create.isPending}>
           <Plus className="h-4 w-4 mr-1" />
-          Add
+          {t(($) => $.labels_panel.add_action)}
         </Button>
       </div>
 
       {/* List — scrolls when labels exceed viewport */}
       <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isLoading && <p className="text-sm text-muted-foreground">{t(($) => $.labels_panel.loading)}</p>}
         {!isLoading && labels.length === 0 && (
-          <p className="text-sm text-muted-foreground">No labels yet.</p>
+          <p className="text-sm text-muted-foreground">{t(($) => $.labels_panel.empty)}</p>
         )}
         {labels.map((label) => {
           const isEditing = editingId === label.id;
@@ -169,11 +171,11 @@ export function LabelsPanel() {
                       variant="ghost"
                       onClick={() => saveEdit(label.id)}
                       disabled={editNameEmpty || update.isPending}
-                      aria-label="Save"
+                      aria-label={t(($) => $.labels_panel.save_aria)}
                     >
                       <Check className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={cancelEdit} aria-label="Cancel">
+                    <Button size="sm" variant="ghost" onClick={cancelEdit} aria-label={t(($) => $.labels_panel.cancel_aria)}>
                       <X className="h-4 w-4" />
                     </Button>
                   </>
@@ -191,7 +193,7 @@ export function LabelsPanel() {
                       size="sm"
                       variant="ghost"
                       onClick={() => startEdit(label)}
-                      aria-label={`Edit ${label.name}`}
+                      aria-label={t(($) => $.labels_panel.edit_aria, { name: label.name })}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -199,7 +201,7 @@ export function LabelsPanel() {
                       size="sm"
                       variant="ghost"
                       onClick={() => setPendingDeletion(label)}
-                      aria-label={`Delete ${label.name}`}
+                      aria-label={t(($) => $.labels_panel.delete_aria, { name: label.name })}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -223,26 +225,25 @@ export function LabelsPanel() {
       <AlertDialog open={!!pendingDeletion} onOpenChange={(o) => !o && setPendingDeletion(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete label?</AlertDialogTitle>
+            <AlertDialogTitle>{t(($) => $.labels_panel.delete_dialog_title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              The label <strong>{pendingDeletion?.name}</strong> will be removed from all
-              issues. This cannot be undone.
+              {t(($) => $.labels_panel.delete_dialog_desc_prefix)}<strong>{pendingDeletion?.name}</strong>{t(($) => $.labels_panel.delete_dialog_desc_suffix)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t(($) => $.labels_panel.delete_dialog_cancel)}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (!pendingDeletion) return;
                 del.mutate(pendingDeletion.id, {
                   onSuccess: () => setPendingDeletion(null),
                   onError: (err: unknown) => {
-                    toast.error(err instanceof Error ? err.message : "Failed to delete label");
+                    toast.error(err instanceof Error ? err.message : t(($) => $.labels_panel.delete_failed));
                   },
                 });
               }}
             >
-              Delete
+              {t(($) => $.labels_panel.delete_dialog_confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -265,14 +266,15 @@ function ColorPalette({
   onChange: (c: string) => void;
   compact?: boolean;
 }) {
+  const { t } = useT("issues");
   const size = compact ? "h-7 w-7" : "h-9 w-9";
   return (
     <div className={compact ? "flex items-center" : "flex items-center gap-3"}>
-      {!compact && <UILabel className="text-xs text-muted-foreground">Color</UILabel>}
+      {!compact && <UILabel className="text-xs text-muted-foreground">{t(($) => $.labels_panel.color_label)}</UILabel>}
       <label
         className={`relative inline-flex ${size} cursor-pointer items-center justify-center rounded-full border border-border shadow-sm transition-transform hover:scale-105 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 focus-within:ring-offset-background`}
         style={{ backgroundColor: value }}
-        aria-label="Pick a color"
+        aria-label={t(($) => $.labels_panel.pick_color_aria)}
         title={value}
       >
         <input
