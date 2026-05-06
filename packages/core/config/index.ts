@@ -1,6 +1,8 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 
+export * from "./local-product";
+
 interface ConfigState {
   cdnDomain: string;
   allowSignup: boolean;
