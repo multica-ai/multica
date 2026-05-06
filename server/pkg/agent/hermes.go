@@ -194,8 +194,16 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
+			sessionID = extractACPSessionID(result)
+			if sessionID == "" {
+				finalStatus = "failed"
+				finalError = "hermes session/resume returned no session ID"
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			if sessionID != opts.ResumeSessionID {
+				b.cfg.Logger.Info("hermes resume returned replacement session", "requested_session_id", opts.ResumeSessionID, "session_id", sessionID)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
