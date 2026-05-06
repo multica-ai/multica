@@ -1,7 +1,14 @@
 # Phase 6 — Plan: flyt 126 fork-filer til cerebro-zoner
 
-**Status:** Ikke startet. Anbefalet før næste upstream-sync.
-**Forudsætning:** chore/upstream-sync-analysis er landet til main.
+**Status:** Ikke startet.
+**Forudsætning:** Ingen. Phase 6 sker PÅ samme sidegren som Phase 1-5 (chore/upstream-sync-analysis). Intet skal til main før hele featuren er færdig + testet + bekræftet.
+
+**Land-rækkefølge (eksplicit):**
+1. Phase 6 — flyt de 126 filer
+2. Test merge mod upstream — konflikt-tal skal være acceptabelt
+3. Manuel funktionstest af apps (web + desktop)
+4. Bruger bekræfter at alt virker
+5. **Først derefter** land til main
 
 ## Hvorfor Phase 6 overhovedet?
 
