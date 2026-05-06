@@ -41,6 +41,7 @@ type notificationEventPayload struct {
 	Body            string `json:"body"`
 	Link            string `json:"link"`
 	IssueIdentifier string `json:"issue_identifier"`
+	ActorName       string `json:"actor_name,omitempty"`
 }
 
 type dingTalkBindingMetadata struct {
@@ -134,6 +135,7 @@ func processDingTalkDelivery(ctx context.Context, queries *db.Queries, cfg notif
 		finalizeFailedDelivery(ctx, queries, claimed, err)
 		return
 	}
+	eventPayload = hydrateNotificationActorName(ctx, queries, claimed, eventPayload)
 
 	var metadata dingTalkBindingMetadata
 	if len(binding.Metadata) > 0 {
@@ -212,6 +214,7 @@ func processEmailDelivery(ctx context.Context, queries *db.Queries, emailSvc *se
 			return
 		}
 	}
+	eventPayload = hydrateNotificationActorName(ctx, queries, claimed, eventPayload)
 
 	title := strings.TrimSpace(eventPayload.Title)
 	if title == "" {
@@ -220,7 +223,7 @@ func processEmailDelivery(ctx context.Context, queries *db.Queries, emailSvc *se
 	body := strings.TrimSpace(eventPayload.Body)
 	link := strings.TrimSpace(eventPayload.Link)
 
-	if err := emailSvc.SendNotificationEmail(recipientEmail, title, body, link); err != nil {
+	if err := emailSvc.SendNotificationEmail(recipientEmail, title, body, link, eventPayload.ActorName); err != nil {
 		finalizeFailedEmailDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -293,6 +296,24 @@ func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, deliv
 	}
 
 	return payload, eventPayload, binding, nil
+}
+
+func hydrateNotificationActorName(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, event notificationEventPayload) notificationEventPayload {
+	if strings.TrimSpace(event.ActorName) != "" {
+		return event
+	}
+
+	notificationEvent, err := queries.GetNotificationEvent(ctx, delivery.NotificationEventID)
+	if err != nil {
+		return event
+	}
+
+	actorType := ""
+	if notificationEvent.ActorType.Valid {
+		actorType = notificationEvent.ActorType.String
+	}
+	event.ActorName = resolveNotificationActorName(ctx, queries, actorType, util.UUIDToString(notificationEvent.ActorID))
+	return event
 }
 
 func backfillDingTalkBindingUserID(ctx context.Context, queries *db.Queries, cfg notifyutil.DingTalkConfig, binding db.ExternalAccountBinding, metadata dingTalkBindingMetadata) (string, error) {
@@ -409,6 +430,9 @@ func buildDingTalkDeliveryText(event notificationEventPayload) string {
 	if title := strings.TrimSpace(event.Title); title != "" {
 		parts = append(parts, title)
 	}
+	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
+		parts = append(parts, "From: "+actorName)
+	}
 	if body := strings.TrimSpace(event.Body); body != "" {
 		parts = append(parts, body)
 	}
@@ -425,6 +449,9 @@ func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.Di
 	parts := []string{"### Multica Notification"}
 	if title != "" {
 		parts = append(parts, "**Issue**\n"+title)
+	}
+	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
+		parts = append(parts, "**From**\n"+actorName)
 	}
 	if body != "" {
 		parts = append(parts, "**Message**\n"+body)

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -438,59 +437,29 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
 	}
 
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"code":          {req.Code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	})
+	gToken, err := exchangeGoogleCode(r.Context(), req.Code, clientID, clientSecret, redirectURI)
 	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google oauth token exchange returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+			return
+		}
 		slog.Error("google oauth token exchange failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
 		return
 	}
-	defer tokenResp.Body.Close()
 
-	tokenBody, err := io.ReadAll(tokenResp.Body)
+	gUser, err := fetchGoogleUserInfo(r.Context(), gToken.AccessToken)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to read Google token response")
-		return
-	}
-
-	if tokenResp.StatusCode != http.StatusOK {
-		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
-		return
-	}
-
-	var gToken googleTokenResponse
-	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
-
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google userinfo returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+			return
+		}
 		slog.Error("google userinfo fetch failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
 		return
 	}
 
