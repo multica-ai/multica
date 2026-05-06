@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -174,11 +176,11 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
 }
 
-// DeleteChatSession hard-deletes a chat session owned by the caller. Pending
-// tasks for the session are cancelled first so the daemon doesn't keep
-// running work whose result has nowhere to land. chat_message rows cascade
-// out via FK; agent_task_queue.chat_session_id is set NULL by FK so
-// completed/failed task history survives.
+// DeleteChatSession hard-deletes a chat session owned by the caller. The
+// row lock + cancel + delete run inside a single tx so a concurrent
+// SendChatMessage cannot enqueue a task that would later be orphaned by
+// the FK ON DELETE SET NULL on agent_task_queue.chat_session_id. Cancel
+// failure aborts the delete; events fire only after commit.
 func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -192,17 +194,48 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel in-flight tasks BEFORE deleting the session — once the row is
-	// gone the FK ON DELETE SET NULL strips chat_session_id and we can no
-	// longer reach those tasks to cancel them.
-	if err := h.TaskService.CancelTasksByChatSession(r.Context(), session.ID); err != nil {
-		slog.Warn("cancel tasks for deleted chat session failed", "session_id", sessionID, "error", err)
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// FOR UPDATE on the chat_session row blocks any concurrent INSERT into
+	// agent_task_queue that references it (the FK validation needs a
+	// KEY SHARE lock). After we commit the delete, the blocked INSERT
+	// fails its FK check, so it can't land an orphaned task.
+	if _, err := qtx.LockChatSessionForDelete(r.Context(), session.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Already gone — treat as idempotent success.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
 	}
 
-	if err := h.Queries.DeleteChatSession(r.Context(), session.ID); err != nil {
+	cancelled, err := qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
+		return
+	}
+
+	if err := qtx.DeleteChatSession(r.Context(), session.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
 		return
 	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit chat session delete failed", "session_id", sessionID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to commit chat session delete")
+		return
+	}
+
+	// Post-commit broadcasts. Subscribers should never observe events for a
+	// tx that didn't actually persist.
+	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
 
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
@@ -252,6 +285,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Load chat session.
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	// New archive flow doesn't exist anymore, but legacy rows with
+	// status='archived' may still be in the DB from before the feature
+	// was removed. Refuse to enqueue new agent work for them — frontend
+	// surfaces these as read-only.
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
 	}
 

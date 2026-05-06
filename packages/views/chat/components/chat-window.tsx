@@ -26,6 +26,7 @@ import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
   chatSessionsOptions,
+  allChatSessionsOptions,
   chatMessagesOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
@@ -61,6 +62,7 @@ export function ChatWindow() {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId ?? ""),
   );
@@ -80,6 +82,15 @@ export function ChatWindow() {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
+
+  // Legacy archived sessions (the old soft-archive feature was removed but
+  // pre-existing rows with status='archived' may still exist) render as
+  // read-only: history list keeps showing them, but ChatInput is disabled
+  // and the server still rejects POST /messages for them.
+  const currentSession = activeSessionId
+    ? allSessions.find((s) => s.id === activeSessionId)
+    : null;
+  const isSessionArchived = currentSession?.status === "archived";
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
@@ -462,12 +473,13 @@ export function ChatWindow() {
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
-      {/* Input — locked out entirely when there's no agent (the EmptyState
-       *  above carries the CTA). */}
+      {/* Input — disabled for legacy archived sessions; locked out entirely
+       *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
+        disabled={isSessionArchived}
         noAgent={noAgent}
         agentName={activeAgent?.name}
         topSlot={<ContextAnchorCard />}
