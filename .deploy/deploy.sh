@@ -102,42 +102,57 @@ fi
 echo "Running migrations…"
 make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 
-echo "Building Next.js frontend…"
-# Next.js 16 sometimes leaves stale client-reference-manifest entries
-# when an incremental build runs over a previous build with route-group
-# changes — pages then 500 in production with InvariantError. Clean
-# .next first so every deploy is a from-scratch build.
+echo "Building Next.js frontend (out-of-tree)…"
+# Build into apps/web/.next.new while the live next-server keeps serving
+# from apps/web/.next. After a successful build we stop the frontend,
+# atomically rename .next -> .next.old and .next.new -> .next, restart,
+# then delete .next.old. Frontend downtime ~1-3 sec per deploy regardless
+# of build duration; failed builds leave the live frontend untouched.
 #
-# CRITICAL: stop the running next-server BEFORE removing .next/ —
-# otherwise the live process keeps reading from a directory the build
-# is rewriting under it, and serves 500s with "client reference
-# manifest does not exist" until the new build finishes (and even then
-# only for users whose connection lands on a fresh next-server, not on
-# an orphan hanging onto a stale .next/). Symptom: JEH-599 frontend
-# spam after #80 mutex landed.
-echo "Stopping frontend before .next reset…"
-launchctl bootout gui/$(id -u)/com.multica.frontend 2>/dev/null || true
-# Reap any next-server still around — webhook restarts can leave orphans
-# from earlier deploys that bootout didn't catch.
-pkill -f next-server 2>/dev/null || true
-# Give the OS a moment to release port 4200 so the new launchd start
-# below doesn't race a half-dead listener.
-sleep 1
+# Replaces the old "stop-then-build-into-.next" pattern that put the
+# whole build window (3-4 min) on the user-visible downtime budget.
+# Safety from JEH-599 (client-reference-manifest tear) is preserved:
+# the running server never sees a half-rewritten .next/.
+NEXT_NEW=apps/web/.next.new
+NEXT_LIVE=apps/web/.next
+NEXT_OLD=apps/web/.next.old
 
-rm -rf apps/web/.next
-if ! pnpm --filter @multica/web build; then
-  echo "ERROR: Next.js build failed — frontend is currently DOWN (bootout above)." >&2
-  echo "       Roll back manually: cd $REPO && git reset --hard $OLD_SHA && rerun deploy." >&2
+rm -rf "$NEXT_NEW"
+if ! NEXT_DIST_DIR=.next.new pnpm --filter @multica/web build; then
+  echo "ERROR: Next.js build failed — live frontend untouched." >&2
+  rm -rf "$NEXT_NEW"
   exit 1
 fi
 
+# Refuse to swap in an empty/half-built directory. BUILD_ID is the last
+# file `next build` writes on success; if it's missing, abort.
+if [ ! -f "$NEXT_NEW/BUILD_ID" ]; then
+  echo "ERROR: $NEXT_NEW/BUILD_ID missing — build did not finish cleanly. Aborting swap." >&2
+  rm -rf "$NEXT_NEW"
+  exit 1
+fi
+
+echo "Atomic swap: stopping frontend, renaming .next, restarting…"
+launchctl bootout gui/$(id -u)/com.multica.frontend 2>/dev/null || true
+pkill -f next-server 2>/dev/null || true
+sleep 1
+
+rm -rf "$NEXT_OLD"
+if [ -e "$NEXT_LIVE" ]; then
+  mv "$NEXT_LIVE" "$NEXT_OLD"
+fi
+mv "$NEXT_NEW" "$NEXT_LIVE"
+
 echo "Restarting launchd jobs…"
 launchctl kickstart -k gui/$(id -u)/com.multica.backend
-# Bring the frontend back up on the freshly built .next/. bootstrap is
-# idempotent — bootout above may have already torn the job out, so we
-# load it back before kickstart can act on it.
+# Bring the frontend back up on the freshly swapped .next/. bootstrap
+# is idempotent — bootout above tore the job out, so we load it back
+# before kickstart can act on it.
 launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.multica.frontend.plist" 2>/dev/null || true
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
+
+# Async cleanup — frontend is already up, this is just disk hygiene.
+rm -rf "$NEXT_OLD" &
 
 echo "=== deploy finished: $(date -Iseconds) ==="
 echo "Deployed: $OLD_SHA -> $NEW_SHA"
