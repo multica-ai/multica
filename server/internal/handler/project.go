@@ -26,6 +26,8 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	ArchivedAt  *string `json:"archived_at"`
+	ArchivedBy  *string `json:"archived_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 	IssueCount  int64   `json:"issue_count"`
@@ -43,6 +45,8 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
+		ArchivedAt:  timestampToPtr(p.ArchivedAt),
+		ArchivedBy:  uuidToPtr(p.ArchivedBy),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
@@ -101,10 +105,15 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
+	// Default: hide archived projects from the list. Set
+	// ?include_archived=true to surface them (used by the "Show
+	// archived" toggle in the projects list page).
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
+		WorkspaceID:     wsUUID,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		IncludeArchived: includeArchived,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
@@ -442,6 +451,95 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ArchiveProject soft-deletes a project: stamps archived_at + archived_by.
+// Issue rows that point at the project keep doing so — the FK is preserved.
+// Project resources stay attached. Restore reverses all of this in one
+// UPDATE.
+//
+// Permission: any workspace member (mirrors the existing DeleteProject
+// permission gate, which only requires `RequireWorkspaceMember`).
+func (h *Handler) ArchiveProject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if project.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "project is already archived")
+		return
+	}
+	archived, err := h.Queries.ArchiveProject(r.Context(), db.ArchiveProjectParams{
+		ID:         project.ID,
+		ArchivedBy: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive project")
+		return
+	}
+	resp := projectToResponse(archived)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), archived.ID)
+	// Reuse EventProjectUpdated — clients re-render the row in/out of the
+	// archived list based on archived_at, no new event type needed.
+	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// RestoreProject reverses ArchiveProject. The row's archived_at and
+// archived_by are cleared and the project shows up in the default list
+// again.
+func (h *Handler) RestoreProject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !project.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "project is not archived")
+		return
+	}
+	restored, err := h.Queries.RestoreProject(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore project")
+		return
+	}
+	resp := projectToResponse(restored)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), restored.ID)
+	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // SearchProjectResponse extends ProjectResponse with search metadata.
