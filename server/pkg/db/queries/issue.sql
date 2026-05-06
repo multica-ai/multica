@@ -9,10 +9,11 @@
 SELECT i.id, i.workspace_id, i.title, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-       i.number, i.project_id
+       i.number, i.project_id, i.kind
 FROM issue i
 LEFT JOIN project p ON p.id = i.project_id
 WHERE i.workspace_id = $1
+  AND i.kind = 'issue'
   AND (
     sqlc.arg('is_admin')::boolean
     OR (
@@ -52,9 +53,10 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id
+    parent_issue_id, position, due_date, number, project_id, kind
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    COALESCE(sqlc.narg('kind')::text, 'issue')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -90,10 +92,11 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, due_date, number, project_id,
-    origin_type, origin_id
+    origin_type, origin_id, kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'),
+    COALESCE(sqlc.narg('kind')::text, 'issue')
 ) RETURNING *;
 
 -- name: DeleteIssue :exec
@@ -102,9 +105,10 @@ DELETE FROM issue WHERE id = $1;
 -- name: ListOpenIssues :many
 SELECT id, workspace_id, title, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id, kind
 FROM issue
 WHERE workspace_id = $1
+  AND kind = 'issue'
   AND status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
@@ -116,6 +120,7 @@ ORDER BY position ASC, created_at DESC;
 -- name: CountIssues :one
 SELECT count(*) FROM issue
 WHERE workspace_id = $1
+  AND kind = 'issue'
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))

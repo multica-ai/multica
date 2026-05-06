@@ -339,6 +339,7 @@ type Issue struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
+	Kind               string             `json:"kind"`
 	IsPrivate          bool               `json:"is_private"`
 }
 
