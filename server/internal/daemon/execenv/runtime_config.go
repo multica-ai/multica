@@ -101,6 +101,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject peer agents — every other non-archived agent in the workspace.
+	// Orchestrator-style agents (the picker, Hermes, etc.) need to know who
+	// the other agents are so they can route work by name (`multica issue
+	// assign --to <name>` or `--assignee <name>` on create) instead of self-
+	// assigning because they don't realise other agents exist. The block is
+	// agent-name-agnostic — it lists peers as data, never hardcodes which
+	// peer to pick; the agent's own instructions decide the routing policy.
+	if len(ctx.PeerAgents) > 0 {
+		b.WriteString("## Peer Agents in this Workspace\n\n")
+		b.WriteString("Other agents are available in this workspace. When delegating work (creating issues for others, reassigning, picking an assignee), refer to them by name. Do not assume you are the only agent — if a task is outside your role, route it to a peer instead of self-assigning.\n\n")
+		for _, p := range ctx.PeerAgents {
+			fmt.Fprintf(&b, "- **%s** (id: `%s`)", p.Name, p.ID)
+			if trimmed := strings.TrimSpace(p.Instructions); trimmed != "" {
+				// First non-empty line of the peer's instructions —
+				// usually their role/persona one-liner.
+				if idx := strings.IndexByte(trimmed, '\n'); idx > 0 {
+					trimmed = trimmed[:idx]
+				}
+				fmt.Fprintf(&b, " — %s", trimmed)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nUse `multica issue assign <issue-id> --to <name>` to reassign, or `--assignee <name>` on `multica issue create` to dispatch a new issue to a peer.\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
