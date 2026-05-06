@@ -26,6 +26,11 @@ func TestVerifyCodeRejectsMasterCode(t *testing.T) {
 
 	// Even with APP_ENV unset (the previously-vulnerable case), 888888 must fail.
 	t.Setenv("APP_ENV", "")
+	// And even when the local dev master code escape hatch is unset (the
+	// production posture), 888888 must fail. The escape hatch (commit
+	// b116107e) is opt-in via this env var; tests must simulate production
+	// by clearing it so they don't inherit a developer's local .env value.
+	t.Setenv("MULTICA_DEV_MASTER_CODE", "")
 
 	// Issue a real verification code so there's a row in the table.
 	w := httptest.NewRecorder()
