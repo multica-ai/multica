@@ -14,6 +14,11 @@ export {
   type MyIssuesScope,
 } from "./my-issues-view-store";
 export {
+  useMobileIssuesFilterStore,
+  useRehydrateMobileIssuesFilters,
+  type MobileIssuesFilterState,
+} from "./mobile-issues-filter-store";
+export {
   useIssueViewStore,
   createIssueViewStore,
   viewStoreSlice,

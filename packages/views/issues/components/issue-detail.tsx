@@ -424,7 +424,7 @@ export function IssueDetail({
   const {
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(issueResourceId, user?.id);
+  } = useIssueTimeline(wsId, issueResourceId, user?.id);
 
   const commentById = useMemo(() => {
     const m = new Map<string, TimelineEntry>();
@@ -439,14 +439,14 @@ export function IssueDetail({
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(issueResourceId, user?.id);
+  } = useIssueReactions(wsId, issueResourceId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(issueResourceId, user?.id);
+  } = useIssueSubscribers(wsId, issueResourceId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(issueResourceId));
+  const { data: usage } = useQuery(issueUsageOptions(wsId, issueResourceId));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
@@ -1379,31 +1379,32 @@ export function IssueDetail({
                       }
                     }
 
-                    return groups.map((group) => {
-                      if (group.type === "comment") {
-                        const entry = group.entries[0]!;
-                        return (
-                          <div key={entry.id} id={`comment-${entry.id}`}>
-                            <CommentCard
-                              issueId={issue.id}
-                              entry={entry}
-                              allReplies={repliesByParent}
-                              commentById={commentById}
-                              agents={agents}
-                              isWorkspaceAdmin={isWorkspaceAdmin}
-                              issueOpen={
-                                !!issue && issue.status !== "done" && issue.status !== "cancelled"
-                              }
-                              currentUserId={user?.id}
-                              onReply={submitReply}
-                              onEdit={editComment}
-                              onDelete={deleteComment}
-                              onToggleReaction={handleToggleReaction}
-                              highlightedCommentId={highlightedId}
-                            />
-                          </div>
-                        );
-                      }
+                return groups.map((group) => {
+                  if (group.type === "comment") {
+                    const entry = group.entries[0]!;
+                    return (
+                      <div key={entry.id} id={`comment-${entry.id}`}>
+                        <CommentCard
+                          wsId={wsId}
+                          issueId={issue.id}
+                          entry={entry}
+                          allReplies={repliesByParent}
+                          commentById={commentById}
+                          agents={agents}
+                          isWorkspaceAdmin={isWorkspaceAdmin}
+                          issueOpen={
+                            !!issue && issue.status !== "done" && issue.status !== "cancelled"
+                          }
+                          currentUserId={user?.id}
+                          onReply={submitReply}
+                          onEdit={editComment}
+                          onDelete={deleteComment}
+                          onToggleReaction={handleToggleReaction}
+                          highlightedCommentId={highlightedId}
+                        />
+                      </div>
+                    );
+                  }
 
                       return (
                         <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">

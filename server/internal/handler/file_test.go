@@ -17,10 +17,10 @@ func (m *mockStorage) Upload(_ context.Context, key string, _ []byte, _ string, 
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
 }
 
-func (m *mockStorage) Delete(_ context.Context, _ string)        {}
-func (m *mockStorage) DeleteKeys(_ context.Context, _ []string)  {}
-func (m *mockStorage) KeyFromURL(rawURL string) string            { return rawURL }
-func (m *mockStorage) CdnDomain() string                         { return "cdn.example.com" }
+func (m *mockStorage) Delete(_ context.Context, _ string)       {}
+func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) KeyFromURL(rawURL string) string          { return rawURL }
+func (m *mockStorage) CdnDomain() string                        { return "cdn.example.com" }
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
@@ -158,5 +158,67 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 		"uuid-upload.txt",
 	); err != nil {
 		t.Fatalf("cleanup attachment: %v", err)
+	}
+}
+
+func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		VALUES ($1, 'attachment list scope test', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'comment with attachment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO attachment (
+			workspace_id, issue_id, comment_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		)
+		VALUES
+			($1, $2, NULL, 'member', $3, 'issue-only.txt', 'https://cdn.example.com/issue-only.txt', 'text/plain', 10),
+			($1, $2, $4, 'member', $3, 'comment-linked.txt', 'https://cdn.example.com/comment-linked.txt', 'text/plain', 20)
+	`, testWorkspaceID, issueID, testUserID, commentID); err != nil {
+		t.Fatalf("create attachments: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/issues/"+issueID+"/attachments", nil)
+	req = withURLParam(req, "id", issueID)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.ListAttachments(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected only issue-level attachment, got %d: %#v", len(resp), resp)
+	}
+	if resp[0].Filename != "issue-only.txt" {
+		t.Fatalf("expected issue-only attachment, got %q", resp[0].Filename)
+	}
+	if resp[0].CommentID != nil {
+		t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
 	}
 }

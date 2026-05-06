@@ -26,12 +26,14 @@ export function AuthInitializer({
   onLogout,
   storage = defaultStorage,
   cookieAuth,
+  fetchConfig = true,
 }: {
   children: ReactNode;
   onLogin?: () => void;
   onLogout?: () => void;
   storage?: StorageAdapter;
   cookieAuth?: boolean;
+  fetchConfig?: boolean;
 }) {
   const qc = useQueryClient();
 
@@ -42,18 +44,20 @@ export function AuthInitializer({
     // reads this cookie, so it has to be present before the user hits submit.
     captureSignupSource();
 
-    // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
-    api
-      .getConfig()
-      .then((cfg) => {
-        if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
-        if (cfg.posthog_key) {
-          initAnalytics({ key: cfg.posthog_key, host: cfg.posthog_host || "" });
-        }
-      })
-      .catch(() => {
-        /* config is optional — legacy file card matching degrades gracefully */
-      });
+    if (fetchConfig) {
+      // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
+      api
+        .getConfig()
+        .then((cfg) => {
+          if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+          if (cfg.posthog_key) {
+            initAnalytics({ key: cfg.posthog_key, host: cfg.posthog_host || "" });
+          }
+        })
+        .catch(() => {
+          /* config is optional — legacy file card matching degrades gracefully */
+        });
+    }
 
     const onAuthSuccess = (user: User) => {
       onLogin?.();

@@ -1,4 +1,5 @@
 export { projectKeys, projectListOptions, projectDetailOptions } from "./queries";
+export { useProjectList } from "./hooks";
 export { useCreateProject, useUpdateProject, useDeleteProject } from "./mutations";
 export {
   PROJECT_SORT_DEFAULT_DIRECTION,

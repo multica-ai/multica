@@ -9,6 +9,7 @@ import (
 type AppConfig struct {
 	CdnDomain          string `json:"cdn_domain"`
 	GoogleClientID     string `json:"google_client_id"`
+	GoogleIOSClientID  string `json:"google_ios_client_id"`
 	DingTalkClientID   string `json:"dingtalk_client_id"`
 	DingTalkOAuthScope string `json:"dingtalk_oauth_scope"`
 	HideEmailLogin     bool   `json:"hide_email_login"`
@@ -25,6 +26,7 @@ type AppConfig struct {
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
 		GoogleClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		GoogleIOSClientID:  strings.TrimSpace(os.Getenv("GOOGLE_IOS_CLIENT_ID")),
 		DingTalkClientID:   strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
 		DingTalkOAuthScope: strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
 		HideEmailLogin:     os.Getenv("NEXT_PUBLIC_HIDE_EMAIL_LOGIN") == "true",

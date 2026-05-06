@@ -1,0 +1,53 @@
+{
+  "name": "@multica/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "scripts": {
+    "dev": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:android": "eas build --platform android --profile production",
+    "build:android:apk": "eas build --platform android --profile production-apk",
+    "build:ios": "eas build --platform ios --profile production",
+    "submit:ios": "eas submit --platform ios --profile production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-google-signin/google-signin": "^16.1.2",
+    "@react-navigation/bottom-tabs": "catalog:",
+    "@react-navigation/core": "catalog:",
+    "@react-navigation/native": "catalog:",
+    "@react-navigation/native-stack": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "expo": "^55.0.17",
+    "expo-constants": "^55.0.15",
+    "expo-document-picker": "^55.0.13",
+    "expo-image-picker": "^55.0.19",
+    "expo-linking": "^55.0.14",
+    "expo-notifications": "^55.0.20",
+    "expo-router": "~55.0.13",
+    "expo-secure-store": "^55.0.13",
+    "expo-updates": "~55.0.21",
+    "lucide-react-native": "catalog:",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-get-random-values": "^1.11.0",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-svg": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "eas-cli": "^18.11.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
