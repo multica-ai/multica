@@ -24,6 +24,7 @@ import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
 import { StepAgent } from "./steps/step-agent";
 import { StepFirstIssue } from "./steps/step-first-issue";
+import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   team_size: null,
@@ -55,6 +56,7 @@ export function OnboardingFlow({
   onComplete: (workspace?: Workspace) => void;
   runtimeInstructions?: React.ReactNode;
 }) {
+  const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
@@ -114,7 +116,7 @@ export function OnboardingFlow({
       await completeOnboarding("skip_existing");
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to finish onboarding",
+        err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
       );
       return;
     }

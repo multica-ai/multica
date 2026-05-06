@@ -1,0 +1,349 @@
+{
+  "page": {
+    "title": "智能体",
+    "tagline": "能领取 issue、留下评论、推进状态的 AI 队友。",
+    "learn_more": "了解更多 →",
+    "new_agent": "新建智能体",
+    "search_placeholder": "搜索智能体...",
+    "show_archived": "显示已归档（{{count}}）→",
+    "of_total": "{{visible}} / {{total}}",
+    "list_load_failed": "无法加载智能体列表",
+    "list_load_failed_default": "获取智能体列表时出错。",
+    "try_again": "重试"
+  },
+  "scope": {
+    "mine": "我的",
+    "all": "全部"
+  },
+  "sort": {
+    "label_recent": "最近活跃",
+    "label_name": "名称",
+    "label_runs": "运行最多",
+    "label_created": "最近创建"
+  },
+  "availability": {
+    "all": "全部",
+    "online": "在线",
+    "unstable": "不稳定",
+    "offline": "离线"
+  },
+  "workload": {
+    "working": "处理中",
+    "queued": "排队中",
+    "idle": "空闲"
+  },
+  "archived": {
+    "active_link": "活跃智能体",
+    "title": "已归档智能体"
+  },
+  "empty": {
+    "title": "还没有智能体",
+    "description": "创建一个智能体，像分配给同事那样把 issue 交给它。本地智能体在你的机器上运行，云智能体在 Multica 运行时上运行。"
+  },
+  "no_matches": {
+    "title": "无匹配项",
+    "search_archived": "没有已归档智能体匹配\"{{query}}\"。",
+    "no_archived": "还没有已归档智能体。",
+    "search_active": "没有智能体匹配\"{{query}}\"。",
+    "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
+    "no_filter_match": "该筛选下没有匹配的智能体。"
+  },
+  "columns": {
+    "agent": "智能体",
+    "status": "状态",
+    "workload": "工作负载",
+    "runtime": "运行时",
+    "activity_7d": "活动（7 天）",
+    "runs": "运行次数"
+  },
+  "row": {
+    "you": "你",
+    "archived": "已归档",
+    "no_description": "暂无描述",
+    "fallback_runtime_cloud": "云端",
+    "fallback_runtime_local": "本地",
+    "actions_aria": "行操作"
+  },
+  "activity_tooltip": {
+    "created_today": "今天创建",
+    "created_days_ago_other": "{{count}} 天前创建",
+    "last_7_days": "近 7 天",
+    "no_activity": "无活动",
+    "runs_other": "{{count}} 次运行",
+    "failed_suffix": " · {{count}} 次失败（{{percent}}%）"
+  },
+  "row_actions": {
+    "cancel_all_tasks": "取消全部 task",
+    "duplicate": "复制",
+    "restore": "恢复",
+    "archive": "归档",
+    "agent_archived_toast": "已归档智能体",
+    "archive_failed_toast": "归档智能体失败",
+    "agent_restored_toast": "已恢复智能体",
+    "restore_failed_toast": "恢复智能体失败",
+    "no_tasks_to_cancel_toast": "没有要取消的活动 task",
+    "cancelled_tasks_toast_other": "已取消 {{count}} 个 task",
+    "cancel_failed_toast": "取消 task 失败",
+    "cancel_dialog_title": "取消\"{{name}}\"的全部 task？",
+    "cancel_dialog_no_tasks": "没有要取消的活动 task。",
+    "cancel_dialog_running_one": "{{count}} 个进行中",
+    "cancel_dialog_queued_one": "{{count}} 个排队中",
+    "cancel_dialog_impact_other": "将取消 {{summary}} 个 task。",
+    "cancel_dialog_running_note": " 进行中的 task 最多需要 5 秒才能完全停止。",
+    "cancel_dialog_irreversible": " 已取消的 task 无法恢复。",
+    "cancel_dialog_keep": "保留",
+    "cancel_dialog_confirm": "取消全部 task",
+    "archive_dialog_title": "归档\"{{name}}\"？",
+    "archive_dialog_description": "归档后这个智能体将无法被分配或提及，进行中的 task 会被取消。所有历史会被保留，可以稍后恢复。",
+    "archive_dialog_cancel": "取消",
+    "archive_dialog_confirm": "归档"
+  },
+  "detail": {
+    "back_to_agents": "智能体",
+    "back_to_agents_full": "返回智能体列表",
+    "not_found_title": "未找到该智能体",
+    "not_found_default": "该智能体可能已被归档或删除。",
+    "try_again": "重试",
+    "archived_banner": "该智能体已归档，无法被分配或提及。",
+    "restore": "恢复",
+    "archive_dialog_title": "归档智能体？",
+    "archive_dialog_description": "\"{{name}}\"将被归档，无法被分配或提及，但所有历史会被保留。可以稍后恢复。",
+    "archive_dialog_cancel": "取消",
+    "archive_dialog_confirm": "归档",
+    "more_archive": "归档智能体",
+    "agent_updated_toast": "已更新智能体",
+    "update_failed_toast": "更新智能体失败",
+    "agent_archived_toast": "已归档智能体",
+    "archive_failed_toast": "归档智能体失败",
+    "agent_restored_toast": "已恢复智能体",
+    "restore_failed_toast": "恢复智能体失败"
+  },
+  "inspector": {
+    "section_properties": "属性",
+    "section_details": "详情",
+    "section_skills": "skill",
+    "prop_runtime": "运行时",
+    "prop_model": "模型",
+    "prop_visibility": "可见性",
+    "prop_concurrency": "并发",
+    "prop_owner": "所有者",
+    "prop_created": "创建时间",
+    "prop_updated": "更新时间",
+    "no_description_placeholder": "暂无描述",
+    "change_avatar_aria": "更换头像",
+    "avatar_updated_toast": "已更新头像",
+    "avatar_upload_failed_toast": "头像上传失败",
+    "rename_title": "重命名智能体",
+    "rename_placeholder": "智能体名称",
+    "rename_required": "名称必填",
+    "edit_description_title": "编辑描述",
+    "description_placeholder": "这个智能体做什么？",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "skill_attach": {
+    "trigger_aria": "附加工作区 skill",
+    "trigger_label": "附加"
+  },
+  "pickers": {
+    "concurrency_tooltip": "并发 · 最多 {{value}} 个并行 task",
+    "concurrency_range": "最大并行 task 数（{{min}}–{{max}}）",
+    "runtime_none": "无运行时",
+    "runtime_tooltip": "运行时 · {{name}} · {{status}}",
+    "runtime_tooltip_none": "运行时 · 未选择",
+    "runtime_online": "在线",
+    "runtime_offline": "离线",
+    "runtime_owned_by": "{{name}} 的",
+    "runtime_empty": "暂无运行时",
+    "model_default": "默认",
+    "model_tooltip": "模型 · {{value}}",
+    "model_managed_by_runtime": "由运行时管理",
+    "model_search_placeholder": "搜索或输入模型 ID",
+    "model_discovering": "正在发现模型...",
+    "model_default_badge": "默认",
+    "model_empty": "暂无可用模型",
+    "model_empty_with_dot": "暂无可用模型。",
+    "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
+    "model_custom_use": "使用\"{{value}}\"",
+    "model_clear": "清除（使用提供方默认）",
+    "model_clear_title": "清除并回退到运行时的提供方默认"
+  },
+  "model_dropdown": {
+    "label": "模型",
+    "select_runtime_first": "请先选择运行时",
+    "default_provider": "默认（提供方）",
+    "runtime_offline_manual": "运行时离线 —— 请手动输入",
+    "managed_by_runtime_title": "模型选择由该运行时管理。",
+    "managed_by_runtime_hint": "请在运行时主机上配置模型（例如 Hermes 会从自身配置文件读取）。",
+    "discovery_failed": "发现失败",
+    "clear_full": "清除选择（使用提供方默认）"
+  },
+  "tabs": {
+    "activity": "动态",
+    "instructions": "指令",
+    "skills": "skill",
+    "environment": "环境变量",
+    "custom_args": "自定义参数",
+    "discard_dialog_title": "放弃未保存的修改？",
+    "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
+    "discard_keep": "继续编辑",
+    "discard_confirm": "放弃修改"
+  },
+  "create_dialog": {
+    "title_create": "创建智能体",
+    "title_duplicate": "复制智能体",
+    "description_create": "为工作区创建一个新的 AI 智能体。",
+    "description_duplicate": "基于\"{{name}}\"创建一个新智能体。指令、环境变量和 skill 会一并复制。",
+    "name_label": "名称",
+    "name_placeholder": "例如：深度研究智能体",
+    "description_label": "描述",
+    "description_placeholder": "这个智能体做什么？",
+    "visibility_label": "可见性",
+    "runtime_label": "运行时",
+    "runtime_filter_mine": "我的",
+    "runtime_filter_all": "全部",
+    "runtime_loading": "加载运行时...",
+    "runtime_none": "暂无可用运行时",
+    "runtime_register_first": "请先注册一个运行时再创建智能体",
+    "runtime_cloud_badge": "云端",
+    "duplicate_copy_suffix": "（副本）",
+    "create": "创建",
+    "creating": "创建中...",
+    "cancel": "取消",
+    "create_failed_toast": "创建智能体失败"
+  },
+  "tab_body": {
+    "common": {
+      "save": "保存",
+      "add": "添加",
+      "unsaved_changes": "未保存的修改"
+    },
+    "instructions": {
+      "intro": "定义这个智能体的身份和工作风格。会注入到每个 task 的上下文。支持 Markdown。",
+      "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
+    },
+    "env": {
+      "intro_readonly": "在智能体进程启动时注入。值已隐藏 —— 只有智能体所有者或工作区管理员可以查看和编辑。",
+      "empty_readonly": "尚未配置环境变量。",
+      "intro_prefix": "在智能体进程启动时注入（例如 ",
+      "intro_separator": "、",
+      "intro_suffix": "）。",
+      "key_placeholder": "KEY",
+      "value_placeholder": "值",
+      "show_value_aria": "显示值",
+      "hide_value_aria": "隐藏值",
+      "remove_aria": "移除变量",
+      "duplicate_keys_toast": "环境变量 key 重复",
+      "saved_toast": "已保存环境变量",
+      "save_failed_toast": "保存环境变量失败"
+    },
+    "custom_args": {
+      "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",
+      "launch_mode_prefix": "启动方式： ",
+      "launch_mode_args_placeholder": "<你的参数>",
+      "input_placeholder": "--flag 值",
+      "remove_aria": "移除参数",
+      "saved_toast": "已保存自定义参数",
+      "save_failed_toast": "保存自定义参数失败"
+    },
+    "skills": {
+      "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
+      "add_action": "添加 skill",
+      "import_hint": "导入会在工作区创建一份副本，团队可以编辑和复用。",
+      "empty_title": "尚未分配 skill",
+      "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
+      "remove_failed_toast": "移除 skill 失败",
+      "add_dialog_title": "添加 skill",
+      "add_dialog_description": "选择一个工作区 skill 分配给该智能体。",
+      "add_dialog_empty": "全部工作区 skill 都已分配。",
+      "add_dialog_cancel": "取消",
+      "add_failed_toast": "添加 skill 失败"
+    },
+    "activity": {
+      "section_now": "当前",
+      "section_last_30d": "近 30 天",
+      "section_recent": "最近工作",
+      "subtitle_no_active": "无进行中的工作",
+      "subtitle_active_other": "{{count}} 个进行中的 task",
+      "subtitle_performance": "表现",
+      "subtitle_no_recent": "还没有完成的 task",
+      "subtitle_recent_progress": "{{shown}} / {{total}}",
+      "subtitle_recent_latest": "最近 {{count}} 条",
+      "empty_now": "这个智能体当前没有在跑任何 task。",
+      "empty_30d": "近 30 天没有任何完成记录。",
+      "empty_recent": "这个智能体还没有完成过任何 task。",
+      "show_more": "查看更多 →",
+      "runs_other": "次运行",
+      "success_pct": "{{percent}}% 成功",
+      "avg_duration": "平均 {{value}}",
+      "failed_count": "{{count}} 次失败",
+      "source_issue": "issue",
+      "source_chat": "聊天",
+      "source_autopilot": "自动化",
+      "source_untracked": "未追踪",
+      "source_quick_create": "快速创建",
+      "source_creating_issue": "正在创建 issue",
+      "source_chat_session": "聊天会话",
+      "source_autopilot_run": "自动化运行",
+      "issue_short_fallback": "issue {{prefix}}...",
+      "triggered_by": "触发来源",
+      "open_issue_aria": "打开 issue",
+      "open_issue_tooltip": "打开 issue",
+      "transcript_tooltip": "查看记录",
+      "cancel_task_aria": "取消 task",
+      "cancel_task_tooltip": "取消 task",
+      "cancelling_tooltip": "正在取消...",
+      "cancel_failed_toast": "取消 task 失败",
+      "started_prefix": "{{when}}启动",
+      "dispatched_prefix": "{{when}}派发",
+      "queued_prefix": "{{when}}排队"
+    }
+  },
+  "char_counter": {
+    "over_limit": " · 超出 {{count}} 字"
+  },
+  "presence": {
+    "queue_badge": "+{{count}} 排队"
+  },
+  "visibility": {
+    "private": {
+      "label": "个人",
+      "tooltip": "个人 · 仅你和工作区管理员可以使用该智能体"
+    },
+    "workspace": {
+      "label": "工作区",
+      "tooltip": "工作区 · 工作区内所有人都可以使用该智能体"
+    }
+  },
+  "profile_card": {
+    "unavailable": "智能体不可用",
+    "detail_link": "详情 →",
+    "runtime_label": "运行时",
+    "skills_label": "skill",
+    "owner_label": "所有者",
+    "unknown_runtime": "未知运行时"
+  },
+  "transcript": {
+    "dialog_title": "智能体执行记录",
+    "status_running": "进行中",
+    "status_completed": "已完成",
+    "status_failed": "失败",
+    "filter": "筛选",
+    "clear_filters": "清除筛选",
+    "tool_calls_other": "{{count}} 次工具调用",
+    "events_other": "{{count}} 个事件",
+    "events_filtered": "{{shown}} / {{total}} 个事件",
+    "copy_all": "全部复制",
+    "copy_filtered": "复制筛选结果",
+    "copied": "已复制",
+    "waiting_events": "等待事件中...",
+    "no_data": "未记录执行数据。"
+  },
+  "task_failure": {
+    "agent_error": "智能体执行出错",
+    "timeout": "task 超时",
+    "runtime_offline": "守护进程离线",
+    "runtime_recovery": "守护进程已重启",
+    "manual": "用户取消"
+  }
+}

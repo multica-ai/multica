@@ -2,6 +2,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AgentRuntime } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enOnboarding from "../../locales/en/onboarding.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 // Mock the core onboarding module BEFORE the SUT imports it.
 const mocks = vi.hoisted(() => ({
@@ -59,12 +64,14 @@ function renderFork(
 ) {
   const onNext = vi.fn();
   render(
-    <StepPlatformFork
-      wsId="ws_test"
-      onNext={onNext}
-      cliInstructions={<div data-testid="cli-instructions">install me</div>}
-      {...overrides}
-    />,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <StepPlatformFork
+        wsId="ws_test"
+        onNext={onNext}
+        cliInstructions={<div data-testid="cli-instructions">install me</div>}
+        {...overrides}
+      />
+    </I18nProvider>,
   );
   return { onNext };
 }

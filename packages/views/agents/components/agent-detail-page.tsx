@@ -47,12 +47,14 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewPane } from "./agent-overview-pane";
+import { useT } from "../../i18n";
 
 interface AgentDetailPageProps {
   agentId: string;
 }
 
 export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -88,9 +90,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent updated");
+      toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update agent");
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
       throw e;
     }
   };
@@ -99,9 +101,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent archived");
+      toast.success(t(($) => $.detail.agent_archived_toast));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.archive_failed_toast));
     }
   };
 
@@ -109,9 +111,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Agent restored");
+      toast.success(t(($) => $.detail.agent_restored_toast));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.restore_failed_toast));
     }
   };
 
@@ -124,15 +126,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   if (!agent) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <BackHeader paths={paths.agents()} title="Agents" />
+        <BackHeader paths={paths.agents()} title={t(($) => $.detail.back_to_agents)} />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-sm font-medium">Agent not found</p>
+            <p className="text-sm font-medium">{t(($) => $.detail.not_found_title)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {agentsError instanceof Error
                 ? agentsError.message
-                : "This agent may have been archived or deleted."}
+                : t(($) => $.detail.not_found_default)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -142,14 +144,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               size="sm"
               onClick={() => refetchAgents()}
             >
-              Try again
+              {t(($) => $.detail.try_again)}
             </Button>
             <Button
               type="button"
               size="sm"
               onClick={() => navigation.push(paths.agents())}
             >
-              Back to agents
+              {t(($) => $.detail.back_to_agents_full)}
             </Button>
           </div>
         </div>
@@ -189,7 +191,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         <div className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-6 py-2 text-xs text-muted-foreground">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1">
-            This agent is archived. It cannot be assigned or mentioned.
+            {t(($) => $.detail.archived_banner)}
           </span>
           {canEdit.allowed && (
             <Button
@@ -198,7 +200,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               className="h-6 text-xs"
               onClick={() => handleRestore(agent.id)}
             >
-              Restore
+              {t(($) => $.detail.restore)}
             </Button>
           )}
         </div>
@@ -238,12 +240,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               </div>
               <DialogHeader className="flex-1 gap-1">
                 <DialogTitle className="text-sm font-semibold">
-                  Archive agent?
+                  {t(($) => $.detail.archive_dialog_title)}
                 </DialogTitle>
                 <DialogDescription className="text-xs">
-                  &quot;{agent.name}&quot; will be archived. It won&apos;t be
-                  assignable or mentionable, but all history is preserved. You
-                  can restore it later.
+                  {t(($) => $.detail.archive_dialog_description, { name: agent.name })}
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -252,7 +252,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                 variant="ghost"
                 onClick={() => setConfirmArchive(false)}
               >
-                Cancel
+                {t(($) => $.detail.archive_dialog_cancel)}
               </Button>
               <Button
                 variant="destructive"
@@ -262,7 +262,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
                   navigation.push(paths.agents());
                 }}
               >
-                Archive
+                {t(($) => $.detail.archive_dialog_confirm)}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -285,8 +285,11 @@ function DetailHeader({
   canArchive: boolean;
   onArchive: () => void;
 }) {
+  const { t } = useT("agents");
   const isArchived = !!agent.archived_at;
-  const av = presence ? availabilityConfig[presence.availability] : null;
+  const av = presence
+    ? { ...availabilityConfig[presence.availability], label: t(($) => $.availability[presence.availability]) }
+    : null;
   // Last-task state is intentionally not surfaced in the header — the
   // Recent work section on this page already shows the same information
   // (and richer: titles, timestamps, error messages). Showing "Completed"
@@ -300,7 +303,7 @@ function DetailHeader({
           className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Agents
+          {t(($) => $.detail.back_to_agents)}
         </AppLink>
         <span className="text-muted-foreground/40">/</span>
         <h1 className="truncate text-sm font-medium">{agent.name}</h1>
@@ -327,7 +330,7 @@ function DetailHeader({
               onClick={onArchive}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Archive Agent
+              {t(($) => $.detail.more_archive)}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

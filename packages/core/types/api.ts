@@ -86,6 +86,7 @@ export interface SearchProjectsResponse {
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
+  language?: string;
 }
 
 export interface CreateMemberRequest {

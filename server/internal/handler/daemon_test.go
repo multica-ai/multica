@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
@@ -320,6 +323,50 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	testHandler.GetTaskStatus(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetTaskStatus with correct workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetTaskStatus_TransientDBError_Returns500 verifies that a transient DB
+// error from GetAgentTask is reported as 500 rather than 404. The daemon
+// uses 404+"task not found" as a hard cancel signal; a transient lookup
+// failure must therefore not be smuggled into that body, otherwise a single
+// DB hiccup would kill an in-flight agent.
+func TestGetTaskStatus_TransientDBError_Returns500(t *testing.T) {
+	h := &Handler{}
+	h.Queries = db.New(&mockDB{getUserErr: errors.New("connection reset by peer")})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
+		"00000000-0000-0000-0000-000000000000", "test-daemon")
+	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
+
+	h.GetTaskStatus(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("transient DB error: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "task not found") {
+		t.Fatalf("transient DB error must not surface as %q (daemon treats that as a deletion): %s", "task not found", w.Body.String())
+	}
+}
+
+// TestGetTaskStatus_ErrNoRows_Returns404 verifies that an actually-missing
+// task row still returns the 404+"task not found" body the daemon relies on
+// to interrupt the running agent.
+func TestGetTaskStatus_ErrNoRows_Returns404(t *testing.T) {
+	h := &Handler{}
+	h.Queries = db.New(&mockDB{getUserErr: pgx.ErrNoRows})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
+		"00000000-0000-0000-0000-000000000000", "test-daemon")
+	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
+
+	h.GetTaskStatus(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ErrNoRows: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "task not found") {
+		t.Fatalf("ErrNoRows: expected body to contain %q, got %s", "task not found", w.Body.String())
 	}
 }
 

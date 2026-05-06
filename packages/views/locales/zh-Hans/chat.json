@@ -1,0 +1,115 @@
+{
+  "fab": {
+    "running": "Multica 正在工作...",
+    "unread_other": "{{count}} 条未读对话",
+    "default": "问 Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "创建一个智能体后才能开始对话",
+    "placeholder_archived": "此会话已归档",
+    "placeholder_named": "告诉 {{name}} 该做什么...",
+    "placeholder_default": "告诉我该做什么..."
+  },
+  "message_list": {
+    "show_details": "查看详情",
+    "replied_in": "{{elapsed}} 内回复",
+    "failed_after": "{{elapsed}} 后失败",
+    "task_failed_fallback": "task 失败",
+    "tools_other": "{{count}} 个工具",
+    "tool_result_named": "{{tool}} 结果：",
+    "tool_result_unnamed": "结果：",
+    "process_steps_other": "{{count}} 步",
+    "copy_action": "复制",
+    "copied_toast": "已复制",
+    "copy_failed_toast": "复制失败"
+  },
+  "session_history": {
+    "back_tooltip": "返回",
+    "header": "对话历史",
+    "empty": "还没有对话记录",
+    "untitled": "无标题",
+    "time": {
+      "just_now": "刚刚",
+      "minutes": "{{count}} 分钟前",
+      "hours": "{{count}} 小时前",
+      "days": "{{count}} 天前"
+    },
+    "row_delete_aria": "删除对话",
+    "row_delete_tooltip": "删除",
+    "delete_dialog": {
+      "title": "删除对话",
+      "description_with_title": "\"{{title}}\" 及其消息会被永久删除，无法撤销。",
+      "description_default": "此对话及其消息会被永久删除，无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "confirming": "删除中..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "新对话",
+    "restore_tooltip": "还原",
+    "expand_tooltip": "展开",
+    "minimize_tooltip": "最小化",
+    "another_running": "另一个对话正在运行",
+    "another_unread": "另一个对话有未读回复",
+    "running": "运行中",
+    "unread": "未读",
+    "no_previous": "暂无历史对话",
+    "untitled": "新对话",
+    "my_agents": "我的智能体",
+    "others": "其他",
+    "no_agents": "暂无智能体",
+    "history_show_tooltip": "对话历史",
+    "history_back_tooltip": "返回对话"
+  },
+  "empty_state": {
+    "first_time_title": "和你的智能体对话",
+    "first_time_intro": "✨ 它们了解你的工作区——",
+    "first_time_pillars": "issue、项目、skill",
+    "first_time_pillars_suffix": "。",
+    "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
+    "returning_title_named": "你好，我是 {{name}}",
+    "returning_title_default": "欢迎使用 Multica",
+    "returning_subtitle": "试试问"
+  },
+  "starter_prompts": {
+    "list_open": "按优先级列出我未完成的任务",
+    "summarize_today": "总结一下我今天做了什么",
+    "plan_next": "规划接下来该做什么"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "当前页面没有可以共享给 Multica 的内容",
+    "tooltip_off": "让 Multica 知道你正在看的内容",
+    "tooltip_on_issue": "Multica 知道你正在看 {{label}}，点击关闭",
+    "tooltip_on_project": "Multica 知道你正在看项目 \"{{label}}\"，点击关闭",
+    "card_tooltip_issue_with_subtitle": "Multica 知道你正在看 {{label}} —— {{subtitle}}",
+    "card_tooltip_issue": "Multica 知道你正在看 {{label}}",
+    "card_tooltip_project": "Multica 知道你正在看项目 \"{{label}}\"",
+    "aria_stop": "停止共享当前页面",
+    "aria_start": "把当前页面共享给 Multica"
+  },
+  "no_agent_banner": "需要先有一个智能体才能开始对话。",
+  "offline_banner": {
+    "fallback_name": "智能体",
+    "unstable": "{{name}} 的连接不稳定——回复可能延迟。",
+    "offline": "{{name}} 离线——你的消息将在它上线后发送。"
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "离线",
+      "reconnecting": "重连中",
+      "queued": "排队中",
+      "starting_up": "启动中",
+      "thinking": "思考中",
+      "typing": "输入中"
+    },
+    "tools": {
+      "running_command": "执行命令",
+      "reading_files": "读取文件",
+      "searching_code": "搜索代码",
+      "making_edits": "修改文件",
+      "searching_web": "搜索网页",
+      "fallback": "处理中"
+    }
+  }
+}

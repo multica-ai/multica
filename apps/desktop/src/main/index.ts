@@ -78,7 +78,25 @@ function handleDeepLink(url: string): void {
 
 // --- Window creation -----------------------------------------------------
 
+// Tracks the OS-preferred language as last seen by the running process.
+// Updated on each window-focus check so we can emit a `locale:system-changed`
+// event to the renderer when the user changes their OS language without
+// quitting the app — without restart, app.getPreferredSystemLanguages()
+// would still report the boot value forever.
+let lastKnownSystemLocale = "en";
+
+function getSystemLocale(): string {
+  return app.getPreferredSystemLanguages()[0] ?? "en";
+}
+
 function createWindow(): void {
+  // Pass the OS-preferred language to the renderer via additionalArguments
+  // instead of a sync IPC call. process.argv is available to the preload
+  // script before the first network request, so the renderer's i18next
+  // instance can initialize with the right locale on the very first paint.
+  const systemLocale = getSystemLocale();
+  lastKnownSystemLocale = systemLocale;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -95,6 +113,7 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
 
@@ -110,6 +129,18 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  // Detect OS language changes while the app is running. Electron has no
+  // dedicated event for this on any platform, so we poll on focus regain —
+  // catches the common case where users switch System Settings → Language
+  // and bring the app back. The renderer decides whether to act (it ignores
+  // the signal when the user has an explicit Settings choice).
+  mainWindow.on("focus", () => {
+    const current = getSystemLocale();
+    if (current === lastKnownSystemLocale) return;
+    lastKnownSystemLocale = current;
+    mainWindow?.webContents.send("locale:system-changed", current);
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

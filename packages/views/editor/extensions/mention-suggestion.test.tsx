@@ -1,10 +1,27 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_STATUSES } from "@multica/core/issues/queries";
+import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
+import enCommon from "../../locales/en/common.json";
+import enAuth from "../../locales/en/auth.json";
+import enSettings from "../../locales/en/settings.json";
+import enEditor from "../../locales/en/editor.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, auth: enAuth, settings: enSettings, editor: enEditor },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 // Mock the workspace id singleton — items() reads it imperatively.
 vi.mock("@multica/core/platform", () => ({
@@ -107,7 +124,7 @@ describe("createMentionSuggestion", () => {
       total: 1,
     });
 
-    render(<MentionList items={[]} query="协作" command={vi.fn()} />);
+    render(<I18nWrapper><MentionList items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
 
     expect(screen.getByText("Searching...")).toBeInTheDocument();
 
@@ -125,7 +142,7 @@ describe("createMentionSuggestion", () => {
   });
 
   it("does not call searchIssues for an empty query", () => {
-    render(<MentionList items={[]} query="" command={vi.fn()} />);
+    render(<I18nWrapper><MentionList items={[]} query="" command={vi.fn()} /></I18nWrapper>);
 
     expect(searchIssuesMock).not.toHaveBeenCalled();
   });
@@ -133,7 +150,7 @@ describe("createMentionSuggestion", () => {
   it("captures Enter while the popup has no selectable items", () => {
     const ref = createRef<MentionListRef>();
 
-    render(<MentionList ref={ref} items={[]} query="协作" command={vi.fn()} />);
+    render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
 
     expect(
       ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),

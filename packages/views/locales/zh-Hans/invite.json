@@ -1,0 +1,53 @@
+{
+  "header": {
+    "back": "返回",
+    "log_out": "退出登录"
+  },
+  "not_found": {
+    "title": "未找到邀请",
+    "description": "此邀请可能已过期、已被撤销，或不属于你的账号。",
+    "go_to_dashboard": "前往主页"
+  },
+  "accepted": {
+    "title": "你已加入 {{workspace_name}}！",
+    "redirecting": "正在跳转到 工作区..."
+  },
+  "declined": {
+    "title": "已拒绝邀请",
+    "description": "你将不会加入此 工作区。",
+    "go_to_dashboard": "前往主页"
+  },
+  "main": {
+    "join_title": "加入 {{workspace_name}}",
+    "fallback_workspace_name": "工作区",
+    "invited_role_admin": "邀请你以管理员身份加入。",
+    "invited_role_member": "邀请你以成员身份加入。",
+    "already_handled_accepted": "此邀请已被接受。",
+    "already_handled_declined": "此邀请已被拒绝。",
+    "expired": "此邀请已过期。",
+    "decline": "拒绝",
+    "declining": "拒绝中...",
+    "accept": "接受并加入",
+    "joining": "加入中..."
+  },
+  "errors": {
+    "accept_failed": "接受邀请失败",
+    "decline_failed": "拒绝邀请失败"
+  },
+  "batch": {
+    "log_out": "退出登录",
+    "empty_title": "没有待处理的邀请",
+    "empty_hint": "继续创建你自己的工作区。",
+    "empty_continue": "继续创建",
+    "title": "你被邀请加入工作区",
+    "subtitle": "选择你想加入的工作区。其余的可以之后在侧边栏处理。",
+    "submit_skip": "跳过，创建我自己的工作区",
+    "submit_join_other": "加入 {{count}} 个工作区",
+    "joining": "加入中...",
+    "error_generic": "处理邀请失败，请重试。",
+    "row_workspace_fallback": "工作区",
+    "row_inviter_fallback": "某人",
+    "row_invited_admin": "{{inviter}} 邀请你以管理员身份加入",
+    "row_invited_member": "{{inviter}} 邀请你以成员身份加入"
+  }
+}
