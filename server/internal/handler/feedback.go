@@ -30,6 +30,19 @@ const (
 	feedbackBodyLimit = 64 * 1024
 )
 
+// rejectFeedbackInLocalMode short-circuits feedback submissions when the
+// server is running in local-only product mode. Remote feedback delivery
+// requires the cloud backend; the UI swap to a local diagnostics flow is
+// tracked separately. Returns true to continue, false if the request was
+// rejected (response already written).
+func (h *Handler) rejectFeedbackInLocalMode(w http.ResponseWriter) bool {
+	if h.LocalMode.Enabled() {
+		writeError(w, http.StatusForbidden, "remote feedback is unavailable in local mode; local diagnostics only")
+		return false
+	}
+	return true
+}
+
 type CreateFeedbackRequest struct {
 	Message     string  `json:"message"`
 	URL         string  `json:"url"`
@@ -42,6 +55,10 @@ type FeedbackResponse struct {
 }
 
 func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectFeedbackInLocalMode(w) {
+		return
+	}
+
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

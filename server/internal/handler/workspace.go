@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/localmode"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -17,6 +18,18 @@ import (
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// rejectLeaveInLocalMode forbids leaving a workspace when running in local
+// product mode — the local user is always sole owner and there is nowhere
+// to leave to. Returns true if the request may proceed; writes the 403 and
+// returns false otherwise.
+func (h *Handler) rejectLeaveInLocalMode(w http.ResponseWriter) bool {
+	if h.LocalMode.Enabled() {
+		writeError(w, http.StatusForbidden, "leaving a workspace is unavailable in local mode")
+		return false
+	}
+	return true
+}
 
 // generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
 // Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
@@ -590,6 +603,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectLeaveInLocalMode(w) {
+		return
+	}
+
 	workspaceID := workspaceIDFromURL(r, "id")
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -639,6 +656,22 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if requester.Role != "owner" {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
+	}
+
+	// In local mode the seeded "local" workspace is the user's only space and
+	// must not vanish through the ordinary delete path. A future explicit
+	// "reset local data" flow will live elsewhere; the 400 here distinguishes
+	// "not allowed via this endpoint" from "you lack permission" (403).
+	if h.LocalMode.Enabled() {
+		ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+			return
+		}
+		if ws.Slug == localmode.LocalWorkspaceSlug {
+			writeError(w, http.StatusBadRequest, "the local workspace cannot be deleted")
+			return
+		}
 	}
 
 	// At this point workspaceMember has resolved → workspaceID is a valid UUID

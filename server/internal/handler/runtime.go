@@ -393,6 +393,21 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// rejectCloudRuntimeInLocalMode writes a 403 and returns false when the handler
+// is running in local product mode and the supplied runtime_mode is anything
+// other than "local". Returns true (caller continues) otherwise.
+//
+// Local-only product mode must never let users mutate or interact with cloud
+// runtime rows that may already exist in the database (e.g. seeded by tests
+// or carried over from a prior cloud-mode run).
+func (h *Handler) rejectCloudRuntimeInLocalMode(w http.ResponseWriter, runtimeMode string) bool {
+	if h.LocalMode.Enabled() && runtimeMode != "local" {
+		writeError(w, http.StatusForbidden, "cloud runtimes are unavailable in local mode")
+		return false
+	}
+	return true
+}
+
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.
 func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -404,6 +419,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	// Defense-in-depth: in local product mode, refuse to mutate any non-local
+	// runtime row. Daemon registration only ever creates runtime_mode='local'
+	// rows today, but cloud-mode rows may exist (test fixtures, prior cloud
+	// deployments) and must remain untouched while local mode is active.
+	if !h.rejectCloudRuntimeInLocalMode(w, rt.RuntimeMode) {
 		return
 	}
 

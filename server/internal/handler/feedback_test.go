@@ -6,8 +6,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/localmode"
 )
+
+func newLocalFeedbackHandler(localEnabled bool) *Handler {
+	h := *testHandler
+	if localEnabled {
+		h.LocalMode = localmode.Config{ProductMode: "local"}
+	} else {
+		h.LocalMode = localmode.Config{}
+	}
+	return &h
+}
 
 func TestCreateFeedbackHappyPath(t *testing.T) {
 	clearFeedbackForTestUser(t)
@@ -57,6 +70,64 @@ func TestCreateFeedbackRateLimit(t *testing.T) {
 	testHandler.CreateFeedback(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLocalGuardFeedback_CreateRejectedInLocalMode(t *testing.T) {
+	clearFeedbackForTestUser(t)
+
+	h := newLocalFeedbackHandler(true)
+
+	req := newRequest("POST", "/api/feedback", CreateFeedbackRequest{Message: "test"})
+	w := httptest.NewRecorder()
+	h.CreateFeedback(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	body := strings.TrimSpace(w.Body.String())
+	const want = `{"error":"remote feedback is unavailable in local mode; local diagnostics only"}`
+	if body != want {
+		t.Fatalf("unexpected body:\n got: %s\nwant: %s", body, want)
+	}
+
+	var count int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT COUNT(*) FROM feedback WHERE user_id = $1`,
+		parseUUID(testUserID),
+	).Scan(&count); err != nil {
+		t.Fatalf("count feedback: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no feedback rows in local mode, found %d", count)
+	}
+}
+
+func TestLocalGuardFeedback_CreateAllowedOutsideLocalMode(t *testing.T) {
+	clearFeedbackForTestUser(t)
+
+	h := newLocalFeedbackHandler(false)
+
+	const message = "non-local-mode feedback message unique-token-xyz"
+	req := newRequest("POST", "/api/feedback", CreateFeedbackRequest{Message: message})
+	w := httptest.NewRecorder()
+	h.CreateFeedback(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT COUNT(*) FROM feedback WHERE user_id = $1`,
+		parseUUID(testUserID),
+	).Scan(&count); err != nil {
+		t.Fatalf("count feedback: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one feedback row, got %d", count)
 	}
 }
 

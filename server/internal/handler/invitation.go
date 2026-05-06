@@ -33,6 +33,20 @@ type InvitationResponse struct {
 	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
+// rejectInvitationInLocalMode short-circuits invitation handlers when the
+// server runs in local product mode. Local mode is single-user — invitations
+// have no meaning. Returning 403 with a stable error body before any DB read
+// or write avoids both side effects and existence-leak via differing 4xx
+// codes. Returns true when the request may proceed; returns false (after
+// writing the 403 response) when the caller must return immediately.
+func (h *Handler) rejectInvitationInLocalMode(w http.ResponseWriter) bool {
+	if h.LocalMode.Enabled() {
+		writeError(w, http.StatusForbidden, "invitations are unavailable in local mode")
+		return false
+	}
+	return true
+}
+
 func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 	return InvitationResponse{
 		ID:            uuidToString(inv.ID),
@@ -54,6 +68,9 @@ func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 	requester, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -184,6 +201,9 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
@@ -223,6 +243,9 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 // ---------------------------------------------------------------------------
 
 func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 	invitationID := chi.URLParam(r, "invitationId")
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -263,6 +286,9 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -310,6 +336,9 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -358,6 +387,9 @@ func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -481,6 +513,9 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
+	if !h.rejectInvitationInLocalMode(w) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

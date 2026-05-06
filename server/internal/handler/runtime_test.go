@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/localmode"
 )
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
@@ -171,5 +174,158 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	// when ?days=N is interpreted as a rolling window instead of calendar days.
 	if byDate[yesterdayKey] != 2000 {
 		t.Errorf("yesterday morning task: yesterday bucket expected 2000 input tokens, got %d (full map: %v)", byDate[yesterdayKey], byDate)
+	}
+}
+
+// newLocalRuntimeHandler returns a shallow clone of testHandler with LocalMode
+// flipped on or off. Cloning avoids mutating shared global state across tests
+// running in the same package.
+func newLocalRuntimeHandler(localEnabled bool) *Handler {
+	h := *testHandler
+	if localEnabled {
+		h.LocalMode = localmode.Config{ProductMode: "local"}
+	} else {
+		h.LocalMode = localmode.Config{}
+	}
+	return &h
+}
+
+func TestLocalGuardRuntime_HelperRejectsCloudInLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	h := newLocalRuntimeHandler(true)
+
+	w := httptest.NewRecorder()
+	if h.rejectCloudRuntimeInLocalMode(w, "cloud") {
+		t.Fatalf("expected helper to return false for cloud runtime in local mode")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cloud runtimes are unavailable") {
+		t.Fatalf("expected error body to mention cloud runtimes, got %s", w.Body.String())
+	}
+}
+
+func TestLocalGuardRuntime_HelperAllowsLocalInLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	h := newLocalRuntimeHandler(true)
+
+	w := httptest.NewRecorder()
+	if !h.rejectCloudRuntimeInLocalMode(w, "local") {
+		t.Fatalf("expected helper to return true for local runtime in local mode")
+	}
+	// Recorder default is 200 and body untouched.
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected recorder code untouched (200), got %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got %s", w.Body.String())
+	}
+}
+
+func TestLocalGuardRuntime_HelperAllowsCloudOutsideLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	h := newLocalRuntimeHandler(false)
+
+	w := httptest.NewRecorder()
+	if !h.rejectCloudRuntimeInLocalMode(w, "cloud") {
+		t.Fatalf("expected helper to return true when local mode is disabled")
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected recorder code untouched (200), got %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected empty body, got %s", w.Body.String())
+	}
+}
+
+// seedLocalGuardRuntime inserts a runtime row in the test workspace with the
+// supplied runtime_mode and provider. The provider is taken from the caller so
+// concurrent tests don't collide on the (workspace_id, daemon_id, provider)
+// unique constraint. The row is automatically deleted at test end.
+func seedLocalGuardRuntime(t *testing.T, runtimeMode, provider string) string {
+	t.Helper()
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, $3, $4, 'online', $5, '{}'::jsonb, now(), $6)
+		RETURNING id
+	`, testWorkspaceID, "Local Guard Test Runtime", runtimeMode, provider, "Local guard test runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("seed runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func TestLocalGuardRuntime_DeleteCloudRuntimeRejectedInLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := seedLocalGuardRuntime(t, "cloud", "local_guard_test_delete_cloud")
+	h := newLocalRuntimeHandler(true)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	h.DeleteAgentRuntime(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cloud runtimes are unavailable") {
+		t.Fatalf("expected error body to mention cloud runtimes, got %s", w.Body.String())
+	}
+
+	// The runtime row must still exist.
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&count); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected runtime row to remain, count=%d", count)
+	}
+}
+
+func TestLocalGuardRuntime_DeleteLocalRuntimeAllowedInLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := seedLocalGuardRuntime(t, "local", "local_guard_test_delete_local")
+	h := newLocalRuntimeHandler(true)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	h.DeleteAgentRuntime(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"ok"`) {
+		t.Fatalf("expected ok status body, got %s", w.Body.String())
+	}
+
+	// The runtime row must be gone.
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&count); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected runtime row deleted, count=%d", count)
 	}
 }
