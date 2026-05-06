@@ -43,6 +43,19 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
+		// AWS SDK v2 service/s3 v1.73.0 (2025-01-15) started auto-computing
+		// a CRC32 payload checksum and shipping it via the aws-chunked
+		// trailer. Non-AWS S3-compatible backends (MinIO, Ceph, 移动云 EOS,
+		// Yandex Object Storage, etc.) reject these requests with
+		// XAmzContentSHA256Mismatch because they don't speak the trailer
+		// protocol. Downgrading back to "checksum only when the API
+		// actually needs one" restores compatibility — we still sign the
+		// whole request with SigV4; we just don't add the optional CRC32
+		// header/trailer. See aws/aws-sdk-go-v2#1689 and the GitLab
+		// workaround note for 18.2. Override via S3_CHECKSUM_MODE=aws
+		// if you actually want the new default (real AWS, newer MinIO).
+		config.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
+		config.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
 	}
 
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
@@ -62,15 +75,28 @@ func NewS3StorageFromEnv() *S3Storage {
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
 	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	// Path-style vs virtual-hosted-style addressing. Default is path-style
+	// (e.g. https://endpoint/bucket/key) because that's the most common
+	// interop mode for self-hosted S3 alternatives (MinIO, Ceph). Set
+	// S3_FORCE_PATH_STYLE=false to use virtual-hosted-style (bucket as
+	// subdomain, e.g. https://multica.eos.chengdu-7-internal.cmecloud.cn/key)
+	// which is what some cloud providers (e.g. 移动云 EOS) require.
+	usePathStyle := os.Getenv("S3_FORCE_PATH_STYLE") != "false"
 	s3Opts := []func(*s3.Options){}
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			o.UsePathStyle = usePathStyle
 		})
 	}
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
+	slog.Info("S3 storage initialized",
+		"bucket", bucket,
+		"region", region,
+		"cdn_domain", cdnDomain,
+		"endpoint_url", endpointURL,
+		"use_path_style", usePathStyle,
+	)
 	return &S3Storage{
 		client:      s3.NewFromConfig(cfg, s3Opts...),
 		bucket:      bucket,
@@ -83,11 +109,19 @@ func (s *S3Storage) CdnDomain() string {
 	return s.cdnDomain
 }
 
-// storageClass returns the appropriate S3 storage class.
-// Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
+// storageClass returns the S3 storage class for PutObject / PresignPutObject
+// calls. Real AWS defaults to INTELLIGENT_TIERING. Self-hosted backends
+// (MinIO, Ceph, Chinese cloud EOS) sometimes reject the x-amz-storage-class
+// header entirely, so when a custom endpoint is configured we omit it
+// by returning "" (the SDK drops empty StorageClass from the request).
+// Override via S3_STORAGE_CLASS env if you know your backend accepts a
+// specific value (e.g. "STANDARD_IA" on AWS).
 func (s *S3Storage) storageClass() types.StorageClass {
+	if override := os.Getenv("S3_STORAGE_CLASS"); override != "" {
+		return types.StorageClass(override)
+	}
 	if s.endpointURL != "" {
-		return types.StorageClassStandard
+		return "" // let backend default
 	}
 	return types.StorageClassIntelligentTiering
 }
