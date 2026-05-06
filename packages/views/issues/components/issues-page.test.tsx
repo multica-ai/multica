@@ -79,14 +79,15 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked", "cancelled"],
+  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked"],
+  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+    review: { label: "Review", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -396,9 +397,9 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Backlog");
-    expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
+    await screen.findByText("Design");
+    expect(screen.getAllByText("Not started").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Developing").length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows workspace breadcrumb with 'Issues' label", async () => {
