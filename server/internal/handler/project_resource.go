@@ -185,10 +185,11 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Project repos must be picked from the workspace's approved list. This
-	// is what makes the workspace settings page the single source of truth
-	// for which repos can ever flow into agents.
-	if req.ResourceType == "github_repo" {
+	// When REPO_APPROVAL_REQUIRED is on, project repos must be picked from
+	// the workspace's approved list — workspace settings is the single
+	// source of truth. When off, any valid URL is allowed (URL/domain
+	// validation already ran in validateAndNormalizeResourceRef).
+	if req.ResourceType == "github_repo" && h.cfg.RepoApprovalRequired {
 		if err := h.requireApprovedWorkspaceRepo(r.Context(), uuidToString(project.WorkspaceID), normalizedRef); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

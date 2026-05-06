@@ -237,7 +237,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
 			return
 		}
-		if res.ResourceType == "github_repo" {
+		if res.ResourceType == "github_repo" && h.cfg.RepoApprovalRequired {
 			if approvedRepoSet == nil {
 				approvedRepoSet, err = h.loadApprovedWorkspaceRepoURLs(r.Context(), workspaceID)
 				if err != nil {
