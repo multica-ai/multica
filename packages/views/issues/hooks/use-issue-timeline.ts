@@ -95,7 +95,11 @@ export function useIssueTimeline(
   // isAtLatest is the cache-invariant we use to decide where WS-delivered
   // entries belong. It's true when the FIRST loaded page reports no newer
   // entries on the server — i.e. the user is looking at the live tail.
-  const isAtLatest = data?.pages[0]?.has_more_after === false;
+  //
+  // Same shape-guard as the timeline memo below: a malformed `data.pages`
+  // (not an array) previously crashed `data.pages[0]` and white-screened the
+  // whole issue route (upstream#2143 / #2147).
+  const isAtLatest = Array.isArray(data?.pages) && data!.pages[0]?.has_more_after === false;
 
   const [submitting, setSubmitting] = useState(false);
   const [newEntriesBelowCount, setNewEntriesBelowCount] = useState(0);
@@ -103,10 +107,19 @@ export function useIssueTimeline(
   // Flatten pages → ASC array for the legacy UI consumer. pages are DESC
   // newest-first; the consumer (issue-detail.tsx) renders chronologically
   // (oldest at top). Concat → DESC; reverse once at the end → ASC.
+  //
+  // Defensive on pages / entries shape: consumers like `issue-detail.tsx`
+  // call `timeline.filter(...)` directly. A malformed cache entry (stale
+  // shape from a persisted older build, gzip/proxy mishap, hand-written
+  // setQueryData in a future caller) would otherwise white-screen the whole
+  // tab (see upstream#2143 / #2147: `timeline.filter is not a function`).
+  // Coerce to `[]` on any unexpected shape so the UI degrades to empty
+  // instead of crashing the route.
   const timeline = useMemo<TimelineEntry[]>(() => {
-    if (!data) return [];
+    if (!data || !Array.isArray(data.pages)) return [];
     const flat: TimelineEntry[] = [];
     for (const page of data.pages) {
+      if (!page || !Array.isArray(page.entries)) continue;
       for (const entry of page.entries) flat.push(entry);
     }
     return flat.reverse();
@@ -425,11 +438,13 @@ export function useIssueTimeline(
   // (DESC pages → ASC flat), so the offset within page[0] becomes
   // (totalEntries - 1) - target_index.
   const targetFlatIndex = useMemo(() => {
-    if (!data || data.pages.length === 0) return null;
+    if (!data || !Array.isArray(data.pages) || data.pages.length === 0) return null;
     const first = data.pages[0];
-    if (!first || first.target_index == null) return null;
+    if (!first || !Array.isArray(first.entries) || first.target_index == null) return null;
     let total = 0;
-    for (const p of data.pages) total += p.entries.length;
+    for (const p of data.pages) {
+      if (p && Array.isArray(p.entries)) total += p.entries.length;
+    }
     return total - 1 - first.target_index;
   }, [data]);
 

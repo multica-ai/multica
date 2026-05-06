@@ -315,4 +315,51 @@ describe("useIssueTimeline", () => {
     });
     expect(result.current.newEntriesBelowCount).toBe(0);
   });
+
+  // Regression: upstream#2143 / #2147 — `timeline.filter is not a function`.
+  // A malformed cache entry (non-array pages / entries) used to crash the
+  // render tree because consumers call `timeline.filter(...)` directly on
+  // the returned value. The flattening memo now coerces to an empty array
+  // on any unexpected shape.
+  describe("malformed cache data → empty timeline (no crash)", () => {
+    it("returns [] when data.pages is not an array", () => {
+      queryState.data = { pages: null, pageParams: [] };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+      // Consumer pattern that previously crashed — proves it no longer does.
+      expect(() => result.current.timeline.filter(() => true)).not.toThrow();
+    });
+
+    it("returns [] when data is a bare object without pages (legacy shape)", () => {
+      queryState.data = {};
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+    });
+
+    it("skips pages whose entries is not an array, keeps well-formed pages", () => {
+      queryState.data = {
+        pages: [
+          { ...emptyPage(), entries: null, has_more_after: false },
+          {
+            ...emptyPage(),
+            entries: [
+              { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
+            ],
+          },
+        ],
+        pageParams: [{ mode: "latest" }, { mode: "before", cursor: "x" }],
+      };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline.map((e) => e.id)).toEqual(["c1"]);
+    });
+
+    it("returns [] when a single page is null", () => {
+      queryState.data = {
+        pages: [null],
+        pageParams: [{ mode: "latest" }],
+      };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+    });
+  });
 });

@@ -11,14 +11,19 @@ export type TimelineCacheData = InfiniteData<TimelinePage, TimelinePageParam>;
 
 /** Map fn over every entry across every page, preserving page identity for
  *  any page whose entries don't change so React.memo on CommentCard isn't
- *  defeated by gratuitous reference churn. */
+ *  defeated by gratuitous reference churn.
+ *
+ *  Defensive on shape: pages / entries may be non-arrays if a malformed
+ *  entry was ever written to the cache. Return unchanged in that case so
+ *  downstream consumers don't inherit a corrupted cache. */
 export function mapAllEntries(
   data: TimelineCacheData | undefined,
   fn: (e: TimelineEntry) => TimelineEntry,
 ): TimelineCacheData | undefined {
-  if (!data) return data;
+  if (!data || !Array.isArray(data.pages)) return data;
   let pagesChanged = false;
   const pages = data.pages.map((page) => {
+    if (!page || !Array.isArray(page.entries)) return page;
     let entriesChanged = false;
     const entries = page.entries.map((e) => {
       const next = fn(e);
@@ -38,9 +43,10 @@ export function filterAllEntries(
   data: TimelineCacheData | undefined,
   predicate: (e: TimelineEntry) => boolean,
 ): TimelineCacheData | undefined {
-  if (!data) return data;
+  if (!data || !Array.isArray(data.pages)) return data;
   let pagesChanged = false;
   const pages = data.pages.map((page) => {
+    if (!page || !Array.isArray(page.entries)) return page;
     const entries = page.entries.filter((e) => !predicate(e));
     if (entries.length === page.entries.length) return page;
     pagesChanged = true;
@@ -58,9 +64,9 @@ export function prependToLatestPage(
   data: TimelineCacheData | undefined,
   entry: TimelineEntry,
 ): TimelineCacheData | undefined {
-  if (!data || data.pages.length === 0) return data;
+  if (!data || !Array.isArray(data.pages) || data.pages.length === 0) return data;
   const first = data.pages[0];
-  if (!first) return data;
+  if (!first || !Array.isArray(first.entries)) return data;
   if (first.has_more_after) return data; // not at latest; skip silently
   if (first.entries.some((e) => e.id === entry.id)) return data;
   return {
