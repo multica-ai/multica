@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,13 +61,18 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	// openclaw writes its --json output to stderr, not stdout.
+	// OpenClaw versions differ on which stream carries the final --json
+	// result, so parse both stdout and stderr while still tolerating log lines.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("openclaw stderr pipe: %w", err)
 	}
-	cmd.Stdout = newLogWriter(b.cfg.Logger, "[openclaw:stdout] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -78,9 +84,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stderr when the context is cancelled so the scanner unblocks.
+	// Close pipes when the context is cancelled so the scanner unblocks.
 	go func() {
 		<-runCtx.Done()
+		_ = stdout.Close()
 		_ = stderr.Close()
 	}()
 
@@ -90,7 +97,23 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processOutput(stderr, msgCh)
+		outputReader, outputWriter := io.Pipe()
+		var copyWG sync.WaitGroup
+		copyStream := func(name string, r io.Reader) {
+			defer copyWG.Done()
+			if _, err := io.Copy(outputWriter, r); err != nil && runCtx.Err() == nil {
+				b.cfg.Logger.Debug("openclaw output copy failed", "stream", name, "error", err)
+			}
+		}
+		copyWG.Add(2)
+		go copyStream("stdout", stdout)
+		go copyStream("stderr", stderr)
+		go func() {
+			copyWG.Wait()
+			_ = outputWriter.Close()
+		}()
+
+		scanResult := b.processOutput(outputReader, msgCh)
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
@@ -202,13 +225,14 @@ type openclawEventResult struct {
 	model string
 }
 
-// processOutput reads the JSON output from openclaw --json stderr and returns
-// the parsed result. OpenClaw writes its JSON output to stderr, which may also
-// contain non-JSON log lines. The stream may contain:
+// processOutput reads the JSON output from openclaw --json and returns the
+// parsed result. OpenClaw versions have written JSON to stderr and stdout; both
+// streams may also contain non-JSON log lines. The combined stream may contain:
 //
 //   - NDJSON streaming events (type: "text", "tool_use", "tool_result", "error",
 //     "step_start", "step_finish") — emitted in real time as the agent works
-//   - A final result JSON (with payloads + meta) — the legacy single-blob format
+//   - A final result JSON (with payloads + meta) — either the legacy
+//     single-blob format or the wrapped OpenClaw 2026.5 result shape
 //
 // We scan line-by-line, emitting messages as events arrive so streaming
 // consumers get real-time feedback instead of waiting for the final blob.
@@ -290,7 +314,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			continue
 		}
 
-		// Try parsing as a final result blob (legacy format).
+		// Try parsing as a final result blob.
 		if result, ok := tryParseOpenclawResult(line); ok {
 			gotEvents = true
 			res := b.buildOpenclawEventResult(result, ch, &output)
@@ -314,7 +338,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	}
 
 	if err := scanner.Err(); err != nil {
-		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stderr: %v", err)}
+		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read openclaw output: %v", err)}
 	}
 
 	// If we got no events at all, fall back to raw output.
@@ -332,13 +356,13 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			for i, line := range rawLines {
 				if len(line) > 0 && line[0] == '{' {
 					candidate := strings.TrimSpace(strings.Join(rawLines[i:], "\n"))
-					if result, ok := tryParseOpenclawResult(candidate); ok {
+					if result, ok := tryParseOpenclawResultPrefix(candidate); ok {
 						return b.buildOpenclawEventResult(result, ch, &output)
 					}
 					break
 				}
 			}
-			return openclawEventResult{status: "completed", output: trimmed}
+			return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
 		}
 		return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
 	}
@@ -369,10 +393,11 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 	return event, true
 }
 
-// tryParseOpenclawResult attempts to parse a line as a final result blob
-// (the legacy format with payloads + meta). Lines must start with '{' to be
-// considered — we no longer scan for braces at arbitrary positions, which
-// avoids false matches on log lines containing JSON fragments.
+// tryParseOpenclawResult attempts to parse a line as a final result blob. It
+// accepts the legacy format with payloads + meta and the OpenClaw 2026.5
+// wrapper shape with result.payloads + result.meta. Lines must start with '{'
+// to be considered — we no longer scan for braces at arbitrary positions,
+// which avoids false matches on log lines containing JSON fragments.
 func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return openclawResult{}, false
@@ -381,10 +406,36 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return openclawResult{}, false
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
+	if isOpenclawResult(result) {
+		return result, true
+	}
+
+	var wrapped openclawWrappedResult
+	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
 		return openclawResult{}, false
 	}
-	return result, true
+	if wrapped.Result == nil || !isOpenclawResult(*wrapped.Result) {
+		return openclawResult{}, false
+	}
+	return *wrapped.Result, true
+}
+
+// tryParseOpenclawResultPrefix parses the first JSON object in raw as an
+// OpenClaw result. This handles pretty-printed results followed by diagnostics.
+func tryParseOpenclawResultPrefix(raw string) (openclawResult, bool) {
+	if len(raw) == 0 || raw[0] != '{' {
+		return openclawResult{}, false
+	}
+	var first json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&first); err != nil {
+		return openclawResult{}, false
+	}
+	return tryParseOpenclawResult(string(first))
+}
+
+func isOpenclawResult(result openclawResult) bool {
+	return result.Payloads != nil || result.Meta.DurationMs != 0 || result.Meta.AgentMeta != nil
 }
 
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
@@ -400,6 +451,9 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 	var sessionID string
 	var model string
 	var usage TokenUsage
+	if result.Meta.SessionID != "" {
+		sessionID = result.Meta.SessionID
+	}
 	if result.Meta.AgentMeta != nil {
 		if sid, ok := result.Meta.AgentMeta["sessionId"].(string); ok {
 			sessionID = sid
@@ -543,11 +597,18 @@ type openclawResult struct {
 	Meta     openclawMeta      `json:"meta"`
 }
 
+type openclawWrappedResult struct {
+	RunID  string          `json:"runId"`
+	Status string          `json:"status"`
+	Result *openclawResult `json:"result"`
+}
+
 type openclawPayload struct {
 	Text string `json:"text"`
 }
 
 type openclawMeta struct {
 	DurationMs int64          `json:"durationMs"`
+	SessionID  string         `json:"sessionId"`
 	AgentMeta  map[string]any `json:"agentMeta"`
 }
