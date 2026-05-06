@@ -9,8 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // review caught a paste-duplicate of `<ChatStatusLine />` in this file, and
 // no test guarded against it. This test exists to make that regression loud.
 
-vi.mock("./chat-status-line", () => ({
+vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => <div data-testid="chat-status-line" />,
+  getToolSummary: () => null,
 }));
 
 vi.mock("./chat-message-list", () => ({

@@ -19,7 +19,8 @@ import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { getToolSummary } from "./tool-summary";
+// CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
+import { getToolSummary } from "@multica/cerebro-chat/views";
 
 // ─── Public component ────────────────────────────────────────────────────
 

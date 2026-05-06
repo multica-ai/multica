@@ -32,7 +32,8 @@ import {
 import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
-import { ChatStatusLine } from "./chat-status-line";
+// CEREBRO-PATCH(chat-window-cerebro): import from cerebro-chat after Phase 6 relocation
+import { ChatStatusLine } from "@multica/cerebro-chat/views";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";

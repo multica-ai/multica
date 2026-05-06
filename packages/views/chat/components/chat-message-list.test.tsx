@@ -19,7 +19,7 @@ vi.mock("@multica/ui/hooks/use-sticky-bottom", () => ({
 }));
 
 import { ChatMessageList } from "./chat-message-list";
-import { ChatStatusLine } from "./chat-status-line";
+import { ChatStatusLine } from "@multica/cerebro-chat/views";
 
 const TASK_ID = "task-live-1";
 const COMPLETED_TASK_ID = "task-done-1";
