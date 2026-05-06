@@ -1,7 +1,9 @@
 "use client";
 
 // CEREBRO-PATCH(issue-detail-cerebro-extras): re-routes 6 upstream imports to cerebro-* packages where files were relocated in Phase 6
+// CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -578,9 +580,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
 
   // Channel/DM-aware rendering. Computed before any early returns so the
   // hook order stays stable when issue is still loading.
+  // CEREBRO-PATCH(channels-flag-gate): when feature is disabled, fall back to
+  // plain issue rendering so direct URLs still resolve, just without channel chrome.
+  const channelsEnabled = useFeatureFlag("cerebro_channels");
   const issueKind = issue?.kind ?? "issue";
-  const isChannel = issueKind === "channel";
-  const isDM = issueKind === "dm";
+  const isChannel = channelsEnabled && issueKind === "channel";
+  const isDM = channelsEnabled && issueKind === "dm";
   const isChat = isChannel || isDM;
   const dmTitle = useMemo(() => {
     if (!isDM) return null;

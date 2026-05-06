@@ -41,6 +41,8 @@ import {
   useSetInboxFolderParent,
 // CEREBRO-PATCH(inbox-page-folders): inbox folders moved to @multica/cerebro-inbox in Phase 6
 } from "@multica/cerebro-inbox/core/folders";
+// CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { ChannelDetail, NewMessageModal } from "../../channels";
@@ -245,9 +247,11 @@ export function InboxPage() {
 
   // Channels (multi-party + DMs) — these are issues with kind != 'issue', so
   // any inbox row with the same issue_id is folded into the channel row.
+  // CEREBRO-PATCH(channels-flag-gate): channelsEnabledHere skips the fetch when feature is disabled
+  const channelsEnabledForFetch = useFeatureFlag("cerebro_channels");
   const { data: channels = [] } = useQuery({
     ...channelListOptions(wsId),
-    enabled: !isArchivedView && !isFolderView,
+    enabled: channelsEnabledForFetch && !isArchivedView && !isFolderView,
   });
   const channelMap = useMemo(
     () => new Map(channels.map((c) => [c.id, c])),
@@ -257,6 +261,22 @@ export function InboxPage() {
   const view = useInboxViewStore((s) => s.view);
   const setView = useInboxViewStore((s) => s.setView);
   const [showNewMessage, setShowNewMessage] = useState(false);
+
+  // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options when disabled,
+  // and snap any persisted "channels"/"dms" view back to "all" when the user toggles off.
+  const channelsEnabled = useFeatureFlag("cerebro_channels");
+  const inboxViewOptions = useMemo(
+    () =>
+      channelsEnabled
+        ? INBOX_VIEW_OPTIONS
+        : INBOX_VIEW_OPTIONS.filter((o) => o.value !== "channels" && o.value !== "dms"),
+    [channelsEnabled],
+  );
+  useEffect(() => {
+    if (!channelsEnabled && (view === "channels" || view === "dms")) {
+      setView("all");
+    }
+  }, [channelsEnabled, view, setView]);
 
   const createFolder = useCreateInboxFolder();
   const renameFolder = useRenameInboxFolder();
@@ -382,7 +402,9 @@ export function InboxPage() {
   // Cmd/Ctrl+Shift+M opens the new-message modal globally. Shift is added
   // because plain Cmd+M is the macOS minimize-window shortcut and Cmd+N
   // collides with new-window/new-doc bindings in the desktop app.
+  // CEREBRO-PATCH(channels-flag-gate): no-op when channels are disabled.
   useEffect(() => {
+    if (!channelsEnabled) return;
     const handler = (e: KeyboardEvent) => {
       if (
         e.key.toLowerCase() === "m" &&
@@ -395,7 +417,7 @@ export function InboxPage() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [channelsEnabled]);
 
   // -- Drag and drop ---------------------------------------------------------
 
@@ -557,7 +579,7 @@ export function InboxPage() {
               <ChevronDown className="size-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-auto">
-              {INBOX_VIEW_OPTIONS.map((opt) => (
+              {inboxViewOptions.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => setView(opt.value as InboxView)}
@@ -590,11 +612,13 @@ export function InboxPage() {
             <Plus className="h-4 w-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem onClick={() => setShowNewMessage(true)}>
-              <MessageSquarePlus className="h-4 w-4" />
-              New message…
-              <span className="ml-2 text-xs text-muted-foreground">⌘⇧M</span>
-            </DropdownMenuItem>
+            {channelsEnabled && (
+              <DropdownMenuItem onClick={() => setShowNewMessage(true)}>
+                <MessageSquarePlus className="h-4 w-4" />
+                New message…
+                <span className="ml-2 text-xs text-muted-foreground">⌘⇧M</span>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={handleNewChat}>
               <Bot className="h-4 w-4" />
               Chat with agent

@@ -70,6 +70,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+// CEREBRO-PATCH(channels-flag-gate): hide channel/dm pins when cerebro_channels is OFF
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -295,10 +297,19 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => projects.filter((p: Project) => p.status !== "completed" && p.status !== "cancelled"),
     [projects],
   );
-  const { data: pinnedItems = EMPTY_PINS } = useQuery({
+  const { data: pinnedItemsRaw = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  // CEREBRO-PATCH(channels-flag-gate): filter channel/dm pins when feature is disabled
+  const channelsEnabled = useFeatureFlag("cerebro_channels");
+  const pinnedItems = React.useMemo(
+    () =>
+      channelsEnabled
+        ? pinnedItemsRaw
+        : pinnedItemsRaw.filter((p: PinnedItem) => p.item_type !== "channel" && p.item_type !== "dm"),
+    [pinnedItemsRaw, channelsEnabled],
+  );
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
