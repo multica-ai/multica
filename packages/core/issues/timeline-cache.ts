@@ -56,6 +56,41 @@ export function filterAllEntries(
   return { ...data, pages };
 }
 
+/** Collect the root id plus every descendant (by parent_id chain) across a
+ *  set of paginated cache snapshots. Used by useDeleteComment.onMutate to
+ *  cascade a delete through every open timeline window atomically.
+ *
+ *  Defensive on shape: same contract as the other helpers here — bad pages
+ *  or entries are skipped silently so a malformed cache can't throw on the
+ *  write path (upstream#2143 / #2147). */
+export function collectDeletedCommentIds(
+  snapshots: Iterable<readonly [unknown, TimelineCacheData | undefined]>,
+  rootId: string,
+): Set<string> {
+  const toRemove = new Set<string>([rootId]);
+  for (const [, data] of snapshots) {
+    if (!data || !Array.isArray(data.pages)) continue;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const page of data.pages) {
+        if (!page || !Array.isArray(page.entries)) continue;
+        for (const e of page.entries) {
+          if (
+            e.parent_id &&
+            toRemove.has(e.parent_id) &&
+            !toRemove.has(e.id)
+          ) {
+            toRemove.add(e.id);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  return toRemove;
+}
+
 /** Prepend a new entry to the latest page (pages[0]). Caller must verify
  *  the cache is at-latest before calling — otherwise the entry is hidden
  *  behind a "show newer" gap and shouldn't be injected. Returns the data
