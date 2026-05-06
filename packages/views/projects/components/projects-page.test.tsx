@@ -145,46 +145,6 @@ vi.mock("../../layout/page-header", () => ({
   PageHeader: ({ children, ...rest }: any) => <header {...rest}>{children}</header>,
 }));
 
-// dnd-kit is heavy to instantiate in jsdom and the real PointerSensor needs
-// pointer events that are awkward to forge. Capture the DndContext handlers
-// so tests can fire synthetic drag-end events directly — this proves the
-// handler logic without depending on the sensor pipeline. Same pattern used
-// by issues/components/list-view.test.tsx.
-type CapturedHandlers = {
-  onDragEnd: ((e: any) => void) | null;
-};
-const dndHandlers: CapturedHandlers = vi.hoisted(() => ({ onDragEnd: null }));
-
-vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragEnd }: any) => {
-    dndHandlers.onDragEnd = onDragEnd ?? null;
-    return <div data-testid="dnd-context">{children}</div>;
-  },
-  PointerSensor: class {},
-  useSensor: () => ({}),
-  useSensors: () => [],
-  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
-  pointerWithin: vi.fn(),
-  closestCenter: vi.fn(),
-}));
-
-vi.mock("@dnd-kit/sortable", () => ({
-  SortableContext: ({ children }: any) => children,
-  verticalListSortingStrategy: {},
-  useSortable: () => ({
-    attributes: {},
-    listeners: {},
-    setNodeRef: vi.fn(),
-    transform: null,
-    transition: null,
-    isDragging: false,
-  }),
-}));
-
-vi.mock("@dnd-kit/utilities", () => ({
-  CSS: { Transform: { toString: () => undefined } },
-}));
-
 // ---------------------------------------------------------------------------
 // Imports under test
 // ---------------------------------------------------------------------------
@@ -207,7 +167,6 @@ beforeEach(() => {
   // titles are testing the rename UI, not the round-trip back into the
   // query cache (that's covered by the mutations layer).
   mockProjects[0]!.title = "Original Title";
-  dndHandlers.onDragEnd = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -325,113 +284,5 @@ describe("ProjectsPage — inline title rename", () => {
     // Display mode again, original title visible.
     await screen.findByText("Original Title");
     expect(screen.queryByLabelText("Project name")).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Drag-to-move tests
-//
-// Strategy mirrors issues/list-view: the @dnd-kit/core mock above captures
-// the DndContext's onDragEnd handler so tests can fire synthetic drag
-// events directly. This proves the handler logic without depending on
-// the dnd-kit sensor pipeline.
-// ---------------------------------------------------------------------------
-
-describe("ProjectsPage — drag to move", () => {
-  it("renders status section headers grouped by PROJECT_STATUS_ORDER", async () => {
-    renderWithQuery(<ProjectsPage />);
-    // The single mock project is in_progress; all status headers still
-    // render (empty groups serve as drop targets), so every status label
-    // appears at least once. "In Progress" appears twice — once in the
-    // section header, once in the row's inline status dropdown — so we
-    // use getAllByText and assert ≥1, which is sufficient to prove the
-    // group header rendered.
-    await screen.findByText("Original Title");
-    expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
-    // Empty status groups have a header but no row dropdown — exact-match.
-    expect(screen.getByText("Planned")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("Cancelled")).toBeInTheDocument();
-    expect(screen.getByText("Paused")).toBeInTheDocument();
-  });
-
-  it("mounts a single DndContext for the active view", async () => {
-    renderWithQuery(<ProjectsPage />);
-    await screen.findByText("Original Title");
-    expect(screen.getByTestId("dnd-context")).toBeInTheDocument();
-  });
-
-  it("calls updateProject with new status when dropped on a different status section", async () => {
-    renderWithQuery(<ProjectsPage />);
-    await screen.findByText("Original Title");
-
-    // Synthetic drop: drag the "in_progress" project onto the
-    // "completed" status section. The id encoding mirrors the production
-    // STATUS_DROPPABLE_PREFIX from projects-page.tsx.
-    dndHandlers.onDragEnd?.({
-      active: { id: "p-1" },
-      over: { id: "projects-status:completed" },
-    });
-
-    expect(mockMutate).toHaveBeenCalledTimes(1);
-    expect(mockMutate).toHaveBeenCalledWith({ id: "p-1", status: "completed" });
-  });
-
-  it("calls updateProject with target status when dropped on a row in another status", async () => {
-    // Add a second project in a different status so we can drop ONTO it.
-    mockProjects.push({
-      id: "p-2",
-      workspace_id: "ws-1",
-      title: "Other Project",
-      description: null,
-      icon: "📦",
-      status: "completed",
-      priority: "low",
-      lead_type: null,
-      lead_id: null,
-      target_date: null,
-      issue_count: 0,
-      done_count: 0,
-      created_at: "2026-01-02T00:00:00Z",
-      updated_at: "2026-01-02T00:00:00Z",
-    } as unknown as Project);
-
-    renderWithQuery(<ProjectsPage />);
-    await screen.findByText("Original Title");
-
-    // Drop p-1 (in_progress) onto p-2's row (completed) — the handler
-    // should resolve the destination via p-2's status, not the row id.
-    dndHandlers.onDragEnd?.({
-      active: { id: "p-1" },
-      over: { id: "p-2" },
-    });
-
-    expect(mockMutate).toHaveBeenCalledWith({ id: "p-1", status: "completed" });
-
-    mockProjects.pop();
-  });
-
-  it("does NOT call updateProject when dropped within the same status (no position column)", async () => {
-    renderWithQuery(<ProjectsPage />);
-    await screen.findByText("Original Title");
-
-    // Drop in_progress project onto its own status section — same status,
-    // so the cross-status branch doesn't fire and (with no position
-    // column on the project table) reorder is a no-op.
-    dndHandlers.onDragEnd?.({
-      active: { id: "p-1" },
-      over: { id: "projects-status:in_progress" },
-    });
-
-    expect(mockMutate).not.toHaveBeenCalled();
-  });
-
-  it("does NOT call updateProject when the drag is cancelled (over=null)", async () => {
-    renderWithQuery(<ProjectsPage />);
-    await screen.findByText("Original Title");
-
-    dndHandlers.onDragEnd?.({ active: { id: "p-1" }, over: null });
-
-    expect(mockMutate).not.toHaveBeenCalled();
   });
 });

@@ -1,21 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, GripVertical, Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  DndContext,
-  PointerSensor,
-  useDroppable,
-  useSensor,
-  useSensors,
-  closestCenter,
-  pointerWithin,
-  type CollisionDetection,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { projectListOptions, archivedProjectListOptions } from "@multica/core/projects/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import {
@@ -51,30 +38,6 @@ import { PageHeader } from "../../layout/page-header";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectIcon } from "./project-icon";
 
-// Status droppable id prefix — mirrors the issues list-view pattern. Used to
-// distinguish "dropped on a status section" (header / empty body) from
-// "dropped between rows" (sortable row id) inside handleDragEnd.
-const STATUS_DROPPABLE_PREFIX = "projects-status:";
-
-const STATUS_DROPPABLE_IDS = new Set<string>(
-  PROJECT_STATUS_ORDER.map((s) => `${STATUS_DROPPABLE_PREFIX}${s}`),
-);
-
-/**
- * Custom collision detection that prefers row sortables over status
- * droppables when both overlap the pointer. Without this, the wider
- * section drop target wins even when the user is clearly dropping on a
- * specific row, making cross-status drops feel imprecise.
- */
-const projectsCollision: CollisionDetection = (args) => {
-  const pointer = pointerWithin(args);
-  if (pointer.length > 0) {
-    const rows = pointer.filter((c) => !STATUS_DROPPABLE_IDS.has(c.id as string));
-    if (rows.length > 0) return rows;
-  }
-  return closestCenter(args);
-};
-
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -85,19 +48,7 @@ function formatRelativeDate(date: string): string {
   return `${months}mo ago`;
 }
 
-function ProjectRow({
-  project,
-  isSortable = false,
-}: {
-  project: Project;
-  /**
-   * When true, the row participates in the parent SortableContext: a
-   * grip handle becomes draggable on hover, and dnd-kit's transform/
-   * transition wires onto the row container. When false (e.g. archived
-   * view), the row renders identically minus the drag handle slot.
-   */
-  isSortable?: boolean;
-}) {
+function ProjectRow({ project }: { project: Project }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
@@ -106,17 +57,6 @@ function ProjectRow({
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
-
-  // Hooks must be unconditional. useSortable accepts disabled=true and
-  // short-circuits internally — see the same pattern in issues/list-row.
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: project.id, disabled: !isSortable });
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -173,38 +113,8 @@ function ProjectRow({
     setIsEditingTitle(false);
   }, [project.title]);
 
-  const dragStyle = isSortable
-    ? { transform: CSS.Transform.toString(transform), transition }
-    : undefined;
-
   return (
-    <div
-      ref={isSortable ? setNodeRef : undefined}
-      style={dragStyle}
-      className={cn(
-        "group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40",
-        isDragging && "opacity-40",
-      )}
-    >
-      {/* Drag handle column — reserves the same 16px slot whether or not
-          the row is sortable, so the title alignment is identical to the
-          archived-view (which renders rows with isSortable=false). The
-          handle reveals on hover and stops the AppLink's navigation when
-          the user grabs it to start a drag. */}
-      {isSortable ? (
-        <span
-          {...attributes}
-          {...listeners}
-          className="flex shrink-0 items-center justify-center w-4 h-4 cursor-grab opacity-0 group-hover/row:opacity-60 hover:opacity-100 active:cursor-grabbing text-muted-foreground"
-          aria-label={`Drag ${project.title}`}
-          onClick={(e) => e.preventDefault()}
-        >
-          <GripVertical className="size-3.5" />
-        </span>
-      ) : (
-        <span aria-hidden className="shrink-0 w-4 h-4" />
-      )}
-
+    <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
       {/* Icon + Name. Single-click navigates (AppLink). Double-click flips
           into inline rename mode. While editing, the AppLink is replaced
           with an <input> so clicks don't navigate. */}
@@ -416,89 +326,6 @@ function ProjectRow({
 }
 
 
-// StatusSection renders one status group with a collapsible header.
-// Acts as a useDroppable target so users can drop a project onto an empty
-// or collapsed status — without this, the only landing zone would be a
-// row, and empty statuses would be unreachable by drag.
-function StatusSection({
-  status,
-  projects,
-  collapsed,
-  onToggleCollapsed,
-  isSortable,
-}: {
-  status: ProjectStatus;
-  projects: Project[];
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  /** False during archived view — header still renders but rows aren't draggable. */
-  isSortable: boolean;
-}) {
-  const cfg = PROJECT_STATUS_CONFIG[status];
-  const droppableId = `${STATUS_DROPPABLE_PREFIX}${status}`;
-  const { setNodeRef, isOver } = useDroppable({ id: droppableId, disabled: !isSortable });
-
-  return (
-    <div className="border-b last:border-b-0">
-      {/*
-       * Status header — clickable to collapse. Doubles as a drop target via
-       * setNodeRef on the wrapping section below; hover state is forwarded
-       * via the isOver flag. Empty groups still render so users can drag
-       * INTO an empty status (e.g. moving the first project to "Completed").
-       */}
-      <button
-        type="button"
-        onClick={onToggleCollapsed}
-        className={cn(
-          "flex h-9 w-full items-center gap-2 px-5 text-xs font-medium text-muted-foreground transition-colors",
-          "hover:bg-accent/40",
-          isOver && isSortable && "bg-accent/60",
-        )}
-        aria-expanded={!collapsed}
-      >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-transform",
-            !collapsed && "rotate-90",
-          )}
-        />
-        <span className={cn("size-2 rounded-full shrink-0", cfg.dotColor)} />
-        <span className="font-semibold text-foreground">{cfg.label}</span>
-        <span className="text-muted-foreground tabular-nums">{projects.length}</span>
-      </button>
-      {/*
-       * Section body — also a drop target so a project dropped in the empty
-       * area below the last row in this status still lands here. We bind
-       * setNodeRef on the body container (not the header button) because
-       * dnd-kit treats clicks-inside-droppable as starting from that node;
-       * binding to the button would block the toggle's own click handler.
-       */}
-      <div
-        ref={isSortable ? setNodeRef : undefined}
-        className={cn(
-          "transition-colors",
-          // Provide a visible empty drop zone when a status has zero
-          // projects — otherwise the section would collapse to zero height
-          // and a drag couldn't land there.
-          projects.length === 0 && !collapsed && "h-12 bg-muted/20",
-          isOver && isSortable && "bg-accent/30",
-        )}
-      >
-        {!collapsed && (
-          <SortableContext
-            items={projects.map((p) => p.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            {projects.map((project) => (
-              <ProjectRow key={project.id} project={project} isSortable={isSortable} />
-            ))}
-          </SortableContext>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function ProjectsPage() {
   const wsId = useWorkspaceId();
   // Two parallel cached lists — active (default) and archived. We always
@@ -516,80 +343,6 @@ export function ProjectsPage() {
     : activeQuery.data ?? [];
   const isLoading = showArchived ? archivedQuery.isLoading : activeQuery.isLoading;
   const openCreateProject = () => useModalStore.getState().open("create-project");
-
-  // Local collapse state per status. Defaults to all expanded; we don't
-  // persist this to the workspace store yet because per-user prefs for
-  // the projects view aren't in scope for the drag-to-move work.
-  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<ProjectStatus>>(
-    () => new Set(),
-  );
-  const toggleStatus = useCallback((s: ProjectStatus) => {
-    setCollapsedStatuses((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  }, []);
-
-  // Group projects by status. Status order follows PROJECT_STATUS_ORDER so
-  // new projects ("planned") top the list and finished work sinks to the
-  // bottom — matching the canonical order used elsewhere in the UI.
-  const projectsByStatus = useMemo(() => {
-    const groups = new Map<ProjectStatus, Project[]>();
-    for (const status of PROJECT_STATUS_ORDER) groups.set(status, []);
-    for (const p of projects) {
-      const list = groups.get(p.status);
-      if (list) list.push(p);
-    }
-    return groups;
-  }, [projects]);
-
-  const updateProject = useUpdateProject();
-
-  // Drag-to-move: only cross-status drops are persisted (the project's
-  // `status` flips). The `project` table has no `position` column today,
-  // so within-status reorder is intentionally a no-op rather than a
-  // visual lie. If/when we add positions, the reorder branch lives here.
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over) return;
-      const activeId = String(active.id);
-      const overId = String(over.id);
-
-      // Resolve the destination status. A drop on a status section yields
-      // its prefix-encoded id; a drop on a row uses the row's project id
-      // and we look up that project's current status.
-      let destStatus: ProjectStatus | null = null;
-      if (overId.startsWith(STATUS_DROPPABLE_PREFIX)) {
-        destStatus = overId.slice(STATUS_DROPPABLE_PREFIX.length) as ProjectStatus;
-      } else {
-        const overProject = projects.find((p) => p.id === overId);
-        if (overProject) destStatus = overProject.status;
-      }
-      if (!destStatus) return;
-
-      const dragged = projects.find((p) => p.id === activeId);
-      if (!dragged || dragged.status === destStatus) return;
-
-      updateProject.mutate({ id: activeId, status: destStatus });
-    },
-    [projects, updateProject],
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      // 5px threshold prevents accidental drags when the user is just
-      // mousing over the grip handle.
-      activationConstraint: { distance: 5 },
-    }),
-  );
-
-  // Drag is only meaningful in the active view — archived projects can't
-  // change status (the user must restore first). isSortable propagates
-  // through the section + row tree.
-  const isSortable = !showArchived;
 
   return (
     <div className="flex h-full flex-col">
@@ -656,11 +409,9 @@ export function ProjectsPage() {
           </div>
         ) : (
           <>
-            {/* Column headers — kept for visual continuity with the row
-                layout. The drag-handle column adds a 16px spacer at the
-                start so titles stay aligned with the first ProjectRow. */}
+            {/* Column headers */}
             <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
-              <span aria-hidden className="shrink-0 w-4" />
+              {/* Icon spacer + Name */}
               <span className="shrink-0 w-[24px]" />
               <span className="min-w-0 flex-1">Name</span>
               <span className="w-24 text-center shrink-0">Priority</span>
@@ -669,32 +420,10 @@ export function ProjectsPage() {
               <span className="w-10 text-center shrink-0">Lead</span>
               <span className="w-20 text-right shrink-0">Created</span>
             </div>
-            {/* Status-grouped rows. Drag a row's grip handle, drop on
-                another status's header / body / row to change status.
-                Same-status drops are no-ops because projects have no
-                position column today. */}
-            <DndContext
-              sensors={sensors}
-              collisionDetection={projectsCollision}
-              onDragEnd={handleDragEnd}
-            >
-              {PROJECT_STATUS_ORDER.map((status) => {
-                const list = projectsByStatus.get(status) ?? [];
-                // Hide empty groups in the archived view to avoid a wall
-                // of empty drop zones the user can't even drag into.
-                if (showArchived && list.length === 0) return null;
-                return (
-                  <StatusSection
-                    key={status}
-                    status={status}
-                    projects={list}
-                    collapsed={collapsedStatuses.has(status)}
-                    onToggleCollapsed={() => toggleStatus(status)}
-                    isSortable={isSortable}
-                  />
-                );
-              })}
-            </DndContext>
+            {/* Rows */}
+            {projects.map((project) => (
+              <ProjectRow key={project.id} project={project} />
+            ))}
           </>
         )}
       </div>
