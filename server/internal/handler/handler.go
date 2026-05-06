@@ -250,7 +250,7 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 			return "member", userID
 		}
 		task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-		if err != nil || uuidToString(task.AgentID) != agentID {
+		if err != nil || task.AgentID != agentUUID {
 			slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
 			return "member", userID
 		}

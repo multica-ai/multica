@@ -224,6 +224,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	if h.denyAgentMentionIfNeeded(w, r, uuidToString(issue.WorkspaceID), authorType, authorID, req.Content) {
+		return
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same
