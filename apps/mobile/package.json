@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "expo start",
     "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:ios": "eas build --platform ios --profile production",
+    "submit:ios": "eas submit --platform ios --profile production",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint ."

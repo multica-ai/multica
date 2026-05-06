@@ -6,12 +6,18 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "preview": {
       "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
       "android": {
         "buildType": "apk"
       }
@@ -23,8 +29,20 @@
       }
     },
     "production": {
+      "ios": {
+        "autoIncrement": "buildNumber"
+      },
       "android": {
         "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "airthor@163.com",
+        "appleId": "6766756591",
+        "appleTeamId": "BLSLB9GA43"
       }
     }
   }

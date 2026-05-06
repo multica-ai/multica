@@ -17,6 +17,17 @@
         "backgroundColor": "#111111"
       }
     },
+    "ios": {
+      "bundleIdentifier": "com.wujieai.multica",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Multica needs photo library access so you can attach images to issues and comments.",
+        "NSDocumentsFolderUsageDescription": "Multica needs document access so you can attach files to issues and comments."
+      }
+    },
     "extra": {
       "apiBaseUrl": "https://multica.wujieai.com",
       "wsUrl": "wss://multica.wujieai.com/ws",
