@@ -1217,12 +1217,27 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// TaskWorktreeMetadata describes a single worktree the agent operated against
+// during a task. The daemon collects these from its repo cache and forwards
+// them on completion so the server can record provenance (which repo, which
+// branch, which base commit) alongside the task result. Persisted as part of
+// agent_task_queue.result JSONB; no dedicated column.
+type TaskWorktreeMetadata struct {
+	RepoURL      string `json:"repo_url"`
+	Path         string `json:"path"`
+	BranchName   string `json:"branch_name"`
+	RequestedRef string `json:"requested_ref"`
+	BaseRef      string `json:"base_ref,omitempty"`
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL      string                 `json:"pr_url"`
+	Output     string                 `json:"output"`
+	SessionID  string                 `json:"session_id"` // Claude session ID for future resumption
+	WorkDir    string                 `json:"work_dir"`   // working directory used during execution
+	BranchName string                 `json:"branch_name,omitempty"`
+	Worktrees  []TaskWorktreeMetadata `json:"worktrees,omitempty"`
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {

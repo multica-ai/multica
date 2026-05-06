@@ -1797,6 +1797,123 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 }
 
+// TestDaemonCompleteTask_PreservesWorktreeMetadata verifies that the
+// /api/daemon/tasks/{id}/complete endpoint persists the new worktree-related
+// metadata fields (branch_name, worktrees[]) into agent_task_queue.result so
+// downstream consumers (UI, follow-up tasks) can recover provenance about
+// where the agent actually ran. The result column is JSONB and already
+// round-trips arbitrary fields, so the test asserts every key/value lands.
+func TestDaemonCompleteTask_PreservesWorktreeMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'worktree metadata fixture', 'in_progress', 'none', $2, 'member', 91201, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, started_at
+		)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	body := map[string]any{
+		"pr_url":      "https://example/pr/1",
+		"output":      "done",
+		"session_id":  "sess-1",
+		"work_dir":    "/tmp/work",
+		"branch_name": "feature/agent-x",
+		"worktrees": []map[string]any{
+			{
+				"repo_url":      "git@github.com:org/repo.git",
+				"path":          "/tmp/work/repo",
+				"branch_name":   "feature/agent-x",
+				"requested_ref": "main",
+				"base_ref":      "main",
+			},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+		body, testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.CompleteTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resultRaw []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT result FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&resultRaw); err != nil {
+		t.Fatalf("read result column: %v", err)
+	}
+	if len(resultRaw) == 0 {
+		t.Fatalf("result column is empty; expected JSON metadata")
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(resultRaw, &got); err != nil {
+		t.Fatalf("decode result JSON: %v (raw=%s)", err, resultRaw)
+	}
+
+	for _, key := range []string{"pr_url", "output", "session_id", "work_dir", "branch_name", "worktrees"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("result JSON missing key %q; got %v", key, got)
+		}
+	}
+	if got["branch_name"] != "feature/agent-x" {
+		t.Fatalf("branch_name = %v, want %q", got["branch_name"], "feature/agent-x")
+	}
+
+	wts, ok := got["worktrees"].([]any)
+	if !ok || len(wts) != 1 {
+		t.Fatalf("worktrees = %v (type %T), want a 1-element slice", got["worktrees"], got["worktrees"])
+	}
+	wt, ok := wts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("worktrees[0] = %v, want object", wts[0])
+	}
+	expectedWT := map[string]string{
+		"repo_url":      "git@github.com:org/repo.git",
+		"path":          "/tmp/work/repo",
+		"branch_name":   "feature/agent-x",
+		"requested_ref": "main",
+		"base_ref":      "main",
+	}
+	for k, v := range expectedWT {
+		if wt[k] != v {
+			t.Fatalf("worktrees[0].%s = %v, want %q", k, wt[k], v)
+		}
+	}
+}
+
 type claimRuntimeGuardTask struct {
 	PriorSessionID string `json:"prior_session_id"`
 	PriorWorkDir   string `json:"prior_work_dir"`

@@ -144,7 +144,20 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
+// TaskWorktreeMetadata mirrors handler.TaskWorktreeMetadata as a wire-format
+// type local to the daemon package. Declaring it here (rather than importing
+// the handler type) keeps the daemon -> handler dependency direction one-way
+// and avoids a cyclic import. JSON tags must stay in sync with the handler
+// definition.
+type TaskWorktreeMetadata struct {
+	RepoURL      string `json:"repo_url"`
+	Path         string `json:"path"`
+	BranchName   string `json:"branch_name"`
+	RequestedRef string `json:"requested_ref"`
+	BaseRef      string `json:"base_ref,omitempty"`
+}
+
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, worktrees []TaskWorktreeMetadata) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -154,6 +167,9 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if len(worktrees) > 0 {
+		body["worktrees"] = worktrees
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
 }
