@@ -52,11 +52,11 @@
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },
-  "mermaid": {
-    "render_failed": "无法渲染 Mermaid 图表。",
-    "rendering": "正在渲染图表..."
-  },
   "title_editor": {
     "title_aria_label": "标题"
+  },
+  "mermaid": {
+    "render_error": "无法渲染 Mermaid 图。",
+    "rendering": "渲染中…"
   }
 }

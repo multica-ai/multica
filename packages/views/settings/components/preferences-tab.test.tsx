@@ -55,7 +55,7 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
-import { AppearanceTab } from "./appearance-tab";
+import { PreferencesTab } from "./preferences-tab";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -69,7 +69,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-describe("AppearanceTab — Language switcher", () => {
+describe("PreferencesTab — Language switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
@@ -87,7 +87,7 @@ describe("AppearanceTab — Language switcher", () => {
 
   it("does nothing when clicking the current locale", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<AppearanceTab />, { wrapper: I18nWrapper });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("radio", { name: "English" }));
 
@@ -98,7 +98,7 @@ describe("AppearanceTab — Language switcher", () => {
 
   it("when not logged in: persists + reloads, no PATCH", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<AppearanceTab />, { wrapper: I18nWrapper });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("radio", { name: "中文" }));
 
@@ -112,7 +112,7 @@ describe("AppearanceTab — Language switcher", () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<AppearanceTab />, { wrapper: I18nWrapper });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("radio", { name: "中文" }));
 
@@ -126,7 +126,7 @@ describe("AppearanceTab — Language switcher", () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockRejectedValueOnce(new Error("network"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<AppearanceTab />, { wrapper: I18nWrapper });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("radio", { name: "中文" }));
 

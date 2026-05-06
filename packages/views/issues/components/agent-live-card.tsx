@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Bot, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
-import { useWSEvent } from "@multica/core/realtime";
+import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import type { AgentTask } from "@multica/core/types/agent";
 import { toast } from "sonner";
@@ -54,51 +54,96 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
-
-  // Fetch active tasks on mount
+  const hydratedTaskIds = useRef(new Set<string>());
+  const mountedRef = useRef(true);
+  // Monotonic counter — each reconcile() call captures its issued seq and
+  // only applies its response if it's still the latest issued. This stops
+  // a slow getActiveTasksForIssue response from clobbering newer truth
+  // (e.g. a stale "task is active" payload re-adding a banner that a
+  // newer "tasks: []" response just cleared).
+  const reconcileSeq = useRef(0);
   useEffect(() => {
-    let cancelled = false;
-    api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
-      if (cancelled || tasks.length === 0) return;
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-      // Show cards immediately with empty timeline
+  // Reconcile local state to server truth. Replaces taskStates with the
+  // server's active set: tasks no longer active are dropped (this is what
+  // self-heals a stale "is working" banner when a task:completed/failed/
+  // cancelled event was lost during a WS reconnect window), and tasks
+  // still active keep their accumulated TimelineItems so the live
+  // TranscriptButton doesn't lose history. New tasks get a one-shot
+  // listTaskMessages hydration to backfill any messages that landed
+  // before the WS subscription saw them.
+  const reconcile = useCallback(() => {
+    const mySeq = ++reconcileSeq.current;
+    api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
+      if (!mountedRef.current) return;
+      // A newer reconcile was issued after this one — drop this response
+      // unconditionally and let the latest request win, regardless of
+      // resolution order. Without this guard, a slow A then a fast B can
+      // resolve in B-then-A order and A re-adds tasks B already cleared.
+      if (mySeq !== reconcileSeq.current) return;
+      const activeIds = new Set(tasks.map((t) => t.id));
+
       setTaskStates((prev) => {
-        const next = new Map(prev);
+        const next = new Map<string, TaskState>();
         for (const task of tasks) {
-          if (!next.has(task.id)) {
-            next.set(task.id, { task, items: [] });
-          }
+          const existing = prev.get(task.id);
+          next.set(task.id, existing
+            ? { task, items: existing.items }
+            : { task, items: [] });
         }
         return next;
       });
 
-      // Load messages per task in the background — these feed the live
-      // TranscriptButton, not an inline timeline (timeline UI moved to
-      // the right panel).
+      // Drop bookkeeping for tasks that vanished, so a future re-dispatch
+      // of the same id (very rare, but possible) re-hydrates cleanly.
+      for (const key of Array.from(seenSeqs.current)) {
+        const taskId = key.slice(0, key.indexOf(":"));
+        if (!activeIds.has(taskId)) seenSeqs.current.delete(key);
+      }
+      for (const id of Array.from(hydratedTaskIds.current)) {
+        if (!activeIds.has(id)) hydratedTaskIds.current.delete(id);
+      }
+
+      // Hydrate messages for tasks we haven't fetched yet. Per-task guard
+      // prevents duplicate fetches when reconcile fires repeatedly (mount
+      // + reconnect + queued/dispatch can stack within a single tick).
       for (const task of tasks) {
+        if (hydratedTaskIds.current.has(task.id)) continue;
+        hydratedTaskIds.current.add(task.id);
         api.listTaskMessages(task.id).then((msgs) => {
-          if (cancelled) return;
+          if (!mountedRef.current) return;
           const timeline = buildTimeline(msgs);
           for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
           setTaskStates((prev) => {
             const next = new Map(prev);
             const existing = next.get(task.id);
-            if (existing) {
-              const loadedSeqs = new Set(timeline.map((i) => i.seq));
-              const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
-              const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
-              next.set(task.id, { task: existing.task, items: merged });
-            } else {
-              next.set(task.id, { task, items: timeline });
-            }
+            if (!existing) return prev;
+            const loadedSeqs = new Set(timeline.map((i) => i.seq));
+            const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
+            const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
+            next.set(task.id, { task: existing.task, items: merged });
             return next;
           });
-        }).catch(console.error);
+        }).catch((e) => {
+          hydratedTaskIds.current.delete(task.id);
+          console.error(e);
+        });
       }
     }).catch(console.error);
-
-    return () => { cancelled = true; };
   }, [issueId]);
+
+  // Initial fetch on mount / issueId change.
+  useEffect(() => {
+    reconcile();
+  }, [reconcile]);
+
+  // WS reconnect — anything that happened while we were offline (most
+  // notably task:completed / task:failed / task:cancelled) won't replay,
+  // so re-pull the truth and let reconcile drop any stale banners.
+  useWSReconnect(reconcile);
 
   // Real-time messages — route by task_id and dedupe by seq.
   useWSEvent(
@@ -131,18 +176,21 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     }, [issueId]),
   );
 
-  // Task end — drop the banner. The right-panel ExecutionLogSection
-  // will pick the same task back up under "Past runs" via its own WS
-  // invalidate path.
+  // Task end — optimistically drop the banner for snappy UX, then
+  // reconcile to also clean up sibling tasks whose own end events may
+  // have been missed (e.g. a sequence of tasks all ending during a WS
+  // reconnect window will only replay this one event when we resubscribe).
   const handleTaskEnd = useCallback((payload: unknown) => {
     const p = payload as { task_id: string; issue_id: string };
     if (p.issue_id !== issueId) return;
     setTaskStates((prev) => {
+      if (!prev.has(p.task_id)) return prev;
       const next = new Map(prev);
       next.delete(p.task_id);
       return next;
     });
-  }, [issueId]);
+    reconcile();
+  }, [issueId, reconcile]);
 
   useWSEvent("task:completed", handleTaskEnd);
   useWSEvent("task:failed", handleTaskEnd);
@@ -152,23 +200,13 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   // to both events matters because retry creates a queued child without
   // emitting task:dispatch (only the daemon's claim does), so listening
   // to dispatch alone leaves the banner stale during the queued window.
-  // The handler is idempotent (only inserts unseen task IDs), so it's
-  // safe to fire once per event even when both arrive in quick succession.
+  // reconcile is idempotent (per-task hydration guard) and also drops
+  // stale tasks, so it's safe to fire once per event.
   const handleTaskActive = useCallback((payload: unknown) => {
     const p = payload as { issue_id?: string };
     if (p.issue_id && p.issue_id !== issueId) return;
-    api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
-      setTaskStates((prev) => {
-        const next = new Map(prev);
-        for (const task of tasks) {
-          if (!next.has(task.id)) {
-            next.set(task.id, { task, items: [] });
-          }
-        }
-        return next;
-      });
-    }).catch(console.error);
-  }, [issueId]);
+    reconcile();
+  }, [issueId, reconcile]);
 
   useWSEvent("task:queued", handleTaskActive);
   useWSEvent("task:dispatch", handleTaskActive);

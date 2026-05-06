@@ -387,7 +387,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
   if (error) {
     return (
       <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
-        <p>{t(($) => $.mermaid.render_failed)}</p>
+        <p>{t(($) => $.mermaid.render_error)}</p>
         <pre>
           <code>{chart}</code>
         </pre>
@@ -427,9 +427,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
           )}
         </>
       ) : (
-        <div className="mermaid-diagram-loading">
-          {t(($) => $.mermaid.rendering)}
-        </div>
+        <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
       )}
     </div>
   );

@@ -152,6 +152,23 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function TimelineSkeleton() {
+  return (
+    <div className="mt-4 flex flex-col gap-3">
+      {[0, 1].map((i) => (
+        <div key={i} className="flex gap-3 p-4">
+          <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -260,9 +277,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, submitComment, submitReply,
+    timeline, loading: timelineLoading,
+    submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id);
+    hasMoreOlder, hasMoreNewer,
+    isFetchingOlder, isFetchingNewer,
+    fetchOlder, fetchNewer, jumpToLatest,
+    isAtLatest, newEntriesBelowCount,
+  } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
 
   // Memoized timeline grouping. The same Map / groups references are reused
   // across re-renders that don't change `timeline`, so React.memo on
@@ -974,6 +996,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <AgentLiveCard key={id} issueId={id} />
 
             {/* Timeline entries */}
+            {timelineLoading && timelineView.groups.length === 0 ? (
+              <TimelineSkeleton />
+            ) : (
+            <>
+            {hasMoreOlder && (
+              <div className="my-4 flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <button
+                  onClick={fetchOlder}
+                  disabled={isFetchingOlder}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {isFetchingOlder
+                    ? t(($) => $.timeline.loading)
+                    : t(($) => $.timeline.show_older)}
+                </button>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+            )}
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
@@ -1043,6 +1084,35 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
+            {(hasMoreNewer || !isAtLatest) && (
+              <div className="mt-4 flex items-center justify-center gap-4">
+                {hasMoreNewer && (
+                  <button
+                    onClick={fetchNewer}
+                    disabled={isFetchingNewer}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {isFetchingNewer
+                      ? t(($) => $.timeline.loading)
+                      : t(($) => $.timeline.show_newer)}
+                  </button>
+                )}
+                {!isAtLatest && (
+                  <button
+                    onClick={jumpToLatest}
+                    className="text-xs font-medium text-foreground hover:text-foreground/80 transition-colors"
+                  >
+                    {newEntriesBelowCount > 0
+                      ? t(($) => $.timeline.jump_to_latest_with_count, {
+                          count: newEntriesBelowCount,
+                        })
+                      : t(($) => $.timeline.jump_to_latest)}
+                  </button>
+                )}
+              </div>
+            )}
+            </>
+            )}
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">

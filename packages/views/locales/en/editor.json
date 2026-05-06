@@ -52,11 +52,11 @@
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
-  "mermaid": {
-    "render_failed": "Unable to render Mermaid diagram.",
-    "rendering": "Rendering diagram..."
-  },
   "title_editor": {
     "title_aria_label": "Title"
+  },
+  "mermaid": {
+    "render_error": "Unable to render Mermaid diagram.",
+    "rendering": "Rendering diagram…"
   }
 }

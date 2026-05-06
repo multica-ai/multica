@@ -129,6 +129,13 @@
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败"
   },
+  "timeline": {
+    "show_older": "显示更早",
+    "show_newer": "显示更晚",
+    "loading": "加载中…",
+    "jump_to_latest": "跳到最新",
+    "jump_to_latest_with_count": "跳到最新 · {{count}} 条新动态"
+  },
   "activity": {
     "created": "创建了这个 issue",
     "self_assigned": "把这个 issue 分配给了自己",

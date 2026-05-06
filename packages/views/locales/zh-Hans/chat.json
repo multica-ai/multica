@@ -17,7 +17,11 @@
     "task_failed_fallback": "task 失败",
     "tools_other": "{{count}} 个工具",
     "tool_result_named": "{{tool}} 结果：",
-    "tool_result_unnamed": "结果："
+    "tool_result_unnamed": "结果：",
+    "process_steps_other": "{{count}} 步",
+    "copy_action": "复制",
+    "copied_toast": "已复制",
+    "copy_failed_toast": "复制失败"
   },
   "session_history": {
     "back_tooltip": "返回",

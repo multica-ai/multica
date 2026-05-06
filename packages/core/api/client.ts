@@ -42,7 +42,8 @@ import type {
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
-  TimelineEntry,
+  TimelinePage,
+  TimelinePageParam,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -494,8 +495,17 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    return this.fetch(`/api/issues/${issueId}/timeline`);
+  async listTimeline(
+    issueId: string,
+    pageParam: TimelinePageParam = { mode: "latest" },
+    limit = 50,
+  ): Promise<TimelinePage> {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (pageParam.mode === "before") params.set("before", pageParam.cursor);
+    else if (pageParam.mode === "after") params.set("after", pageParam.cursor);
+    else if (pageParam.mode === "around") params.set("around", pageParam.id);
+    return this.fetch(`/api/issues/${issueId}/timeline?${params.toString()}`);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {

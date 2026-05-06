@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useQuery, useQueryClient, useMutationState } from "@tanstack/react-query";
-import type { Comment, TimelineEntry, Reaction } from "@multica/core/types";
+import {
+  useInfiniteQuery,
+  useQueryClient,
+  useMutationState,
+} from "@tanstack/react-query";
+import type {
+  Comment,
+  TimelineEntry,
+  Reaction,
+} from "@multica/core/types";
 import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -11,7 +19,16 @@ import type {
   ReactionAddedPayload,
   ReactionRemovedPayload,
 } from "@multica/core/types";
-import { issueTimelineOptions, issueKeys } from "@multica/core/issues/queries";
+import {
+  issueTimelineInfiniteOptions,
+  issueKeys,
+} from "@multica/core/issues/queries";
+import {
+  mapAllEntries,
+  filterAllEntries,
+  prependToLatestPage,
+  type TimelineCacheData,
+} from "@multica/core/issues/timeline-cache";
 import {
   useCreateComment,
   useUpdateComment,
@@ -22,6 +39,8 @@ import {
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+
+type TLData = TimelineCacheData;
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -39,29 +58,77 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
   };
 }
 
-export function useIssueTimeline(issueId: string, userId?: string) {
+export interface UseIssueTimelineOptions {
+  /** Anchor the initial fetch on this entry id (Inbox jump path). When set,
+   *  the first page is centered on the target instead of the latest 50. */
+  around?: string | null;
+}
+
+export function useIssueTimeline(
+  issueId: string,
+  userId?: string,
+  options: UseIssueTimelineOptions = {},
+) {
   const { t } = useT("issues");
   const qc = useQueryClient();
-  const { data: timeline = [], isLoading: loading } = useQuery(
-    issueTimelineOptions(issueId),
-  );
-  const [submitting, setSubmitting] = useState(false);
 
-  // TanStack Query v5 returns a fresh result wrapper from useMutation on
-  // every render, but the mutate / mutateAsync functions inside are stable
-  // across renders. Pull just the stable handles so the useCallback
-  // identities below do not flip on every parent re-render — listing the
-  // whole mutation object would defeat React.memo on CommentCard.
+  // Internal anchor state. Starts as the caller's around prop; jumpToLatest
+  // clears it. A new around prop (e.g. user clicks a different inbox item)
+  // resets it via the effect below.
+  const [around, setAround] = useState<string | null>(options.around ?? null);
+  useEffect(() => {
+    if (options.around) setAround(options.around);
+  }, [options.around]);
+
+  const query = useInfiniteQuery(issueTimelineInfiniteOptions(issueId, around));
+  const {
+    data,
+    isLoading: loading,
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage,
+    hasPreviousPage,
+    isFetchingNextPage,
+    isFetchingPreviousPage,
+  } = query;
+
+  // isAtLatest is the cache-invariant we use to decide where WS-delivered
+  // entries belong. It's true when the FIRST loaded page reports no newer
+  // entries on the server — i.e. the user is looking at the live tail.
+  const isAtLatest = data?.pages[0]?.has_more_after === false;
+
+  const [submitting, setSubmitting] = useState(false);
+  const [newEntriesBelowCount, setNewEntriesBelowCount] = useState(0);
+
+  // Flatten pages → ASC array for the legacy UI consumer. pages are DESC
+  // newest-first; the consumer (issue-detail.tsx) renders chronologically
+  // (oldest at top). Concat → DESC; reverse once at the end → ASC.
+  const timeline = useMemo<TimelineEntry[]>(() => {
+    if (!data) return [];
+    const flat: TimelineEntry[] = [];
+    for (const page of data.pages) {
+      for (const entry of page.entries) flat.push(entry);
+    }
+    return flat.reverse();
+  }, [data]);
+
+  // Stable mutation handles. TanStack v5 returns a fresh result wrapper from
+  // useMutation per render, but the inner mutateAsync / mutate functions are
+  // stable. Pull just those so the useCallback identities downstream don't
+  // flip on every parent re-render — listing the whole mutation object would
+  // defeat React.memo on CommentCard.
   const { mutateAsync: createComment } = useCreateComment(issueId);
   const { mutateAsync: updateComment } = useUpdateComment(issueId);
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
   const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
-  // Reconnect recovery
+  // Reconnect recovery: drop the cache so the next render refetches the
+  // latest page from scratch. We don't try to reconcile diffs over a
+  // possibly-long disconnect — easier to start fresh.
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    }, [qc, issueId]),
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId, around) });
+    }, [qc, issueId, around]),
   );
 
   // --- WS event handlers ---
@@ -72,18 +139,17 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
-          (old) => {
-            if (!old) return old;
-            if (old.some((e) => e.id === comment.id)) return old;
-            return [...old, commentToTimelineEntry(comment)].sort(
-              (a, b) => a.created_at.localeCompare(b.created_at),
-            );
-          },
-        );
+        if (isAtLatest) {
+          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
+            prependToLatestPage(old, commentToTimelineEntry(comment)),
+          );
+        } else {
+          // Reading older history — don't yank scroll position. Surface a
+          // counter so the UI can offer "jump to latest (N new)".
+          setNewEntriesBelowCount((c) => c + 1);
+        }
       },
-      [qc, issueId],
+      [qc, issueId, around, isAtLatest],
     ),
   );
 
@@ -92,17 +158,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     useCallback(
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
-        if (comment.issue_id === issueId) {
-          qc.setQueryData<TimelineEntry[]>(
-            issueKeys.timeline(issueId),
-            (old) =>
-              old?.map((e) =>
-                e.id === comment.id ? commentToTimelineEntry(comment) : e,
-              ),
-          );
-        }
+        if (comment.issue_id !== issueId) return;
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
+          mapAllEntries(old, (e) =>
+            e.id === comment.id ? commentToTimelineEntry(comment) : e,
+          ),
+        );
       },
-      [qc, issueId],
+      [qc, issueId, around],
     ),
   );
 
@@ -111,32 +174,32 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     useCallback(
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
-        if (issue_id === issueId) {
-          qc.setQueryData<TimelineEntry[]>(
-            issueKeys.timeline(issueId),
-            (old) => {
-              if (!old) return old;
-              const idsToRemove = new Set<string>([comment_id]);
-              let added = true;
-              while (added) {
-                added = false;
-                for (const e of old) {
-                  if (
-                    e.parent_id &&
-                    idsToRemove.has(e.parent_id) &&
-                    !idsToRemove.has(e.id)
-                  ) {
-                    idsToRemove.add(e.id);
-                    added = true;
-                  }
+        if (issue_id !== issueId) return;
+        // Cascade through replies. Walk pages collectively; a reply may live
+        // on a different page than its parent.
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+          if (!old) return old;
+          const idsToRemove = new Set<string>([comment_id]);
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (const page of old.pages) {
+              for (const e of page.entries) {
+                if (
+                  e.parent_id &&
+                  idsToRemove.has(e.parent_id) &&
+                  !idsToRemove.has(e.id)
+                ) {
+                  idsToRemove.add(e.id);
+                  changed = true;
                 }
               }
-              return old.filter((e) => !idsToRemove.has(e.id));
-            },
-          );
-        }
+            }
+          }
+          return filterAllEntries(old, (e) => idsToRemove.has(e.id));
+        });
       },
-      [qc, issueId],
+      [qc, issueId, around],
     ),
   );
 
@@ -148,18 +211,15 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
-          (old) => {
-            if (!old) return old;
-            if (old.some((e) => e.id === entry.id)) return old;
-            return [...old, entry].sort(
-              (a, b) => a.created_at.localeCompare(b.created_at),
-            );
-          },
-        );
+        if (isAtLatest) {
+          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
+            prependToLatestPage(old, entry),
+          );
+        } else {
+          setNewEntriesBelowCount((c) => c + 1);
+        }
       },
-      [qc, issueId],
+      [qc, issueId, around, isAtLatest],
     ),
   );
 
@@ -169,18 +229,16 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
-          (old) =>
-            old?.map((e) => {
-              if (e.id !== reaction.comment_id) return e;
-              const existing = e.reactions ?? [];
-              if (existing.some((r) => r.id === reaction.id)) return e;
-              return { ...e, reactions: [...existing, reaction] };
-            }),
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
+          mapAllEntries(old, (e) => {
+            if (e.id !== reaction.comment_id) return e;
+            const existing = e.reactions ?? [];
+            if (existing.some((r) => r.id === reaction.id)) return e;
+            return { ...e, reactions: [...existing, reaction] };
+          }),
         );
       },
-      [qc, issueId],
+      [qc, issueId, around],
     ),
   );
 
@@ -190,28 +248,44 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
-        qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
-          (old) =>
-            old?.map((e) => {
-              if (e.id !== p.comment_id) return e;
-              return {
-                ...e,
-                reactions: (e.reactions ?? []).filter(
-                  (r) =>
-                    !(
-                      r.emoji === p.emoji &&
-                      r.actor_type === p.actor_type &&
-                      r.actor_id === p.actor_id
-                    ),
-                ),
-              };
-            }),
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
+          mapAllEntries(old, (e) => {
+            if (e.id !== p.comment_id) return e;
+            return {
+              ...e,
+              reactions: (e.reactions ?? []).filter(
+                (r) =>
+                  !(
+                    r.emoji === p.emoji &&
+                    r.actor_type === p.actor_type &&
+                    r.actor_id === p.actor_id
+                  ),
+              ),
+            };
+          }),
         );
       },
-      [qc, issueId],
+      [qc, issueId, around],
     ),
   );
+
+  // --- Page navigation ---
+
+  const fetchOlder = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const fetchNewer = useCallback(() => {
+    if (hasPreviousPage && !isFetchingPreviousPage) fetchPreviousPage();
+  }, [hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage]);
+
+  const jumpToLatest = useCallback(() => {
+    // Drop any anchor + prefetched windows. The latest cache (around=null)
+    // may be cold; an invalidate forces a fresh fetch on next render.
+    setAround(null);
+    setNewEntriesBelowCount(0);
+    qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId, null) });
+  }, [qc, issueId]);
 
   // --- Mutation functions ---
 
@@ -269,9 +343,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     [deleteCommentAsync, t],
   );
 
-  // --- Optimistic UI derivation for comment reactions ---
-  // Instead of writing temp data into the cache (which races with WS events),
-  // derive optimistic state at render time from pending mutation variables.
+  // --- Optimistic UI for comment reactions ---
+  // Derive at render time from pending mutation variables instead of writing
+  // temp data into the cache (which would race with WS events).
 
   const pendingReactionVars = useMutationState({
     filters: {
@@ -295,10 +369,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       for (const vars of pendingForEntry) {
         if (!vars) continue;
         if (vars.existing) {
-          // Pending removal
           reactions = reactions.filter((r) => r.id !== vars.existing!.id);
         } else {
-          // Pending add — skip if server already has it (WS arrived first)
           const alreadyExists = reactions.some(
             (r) =>
               r.emoji === vars.emoji &&
@@ -324,10 +396,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     });
   }, [timeline, pendingReactionVars, userId]);
 
-  // Read timeline through a ref so toggleReaction's identity does not change
-  // on every WS event. Without this, every memoized CommentCard down-tree
-  // would re-render on each timeline mutation, defeating the React.memo cost
-  // savings on long timelines (see Inbox-freeze fix).
+  // toggleReaction reads from a ref so its identity does not change with
+  // every WS event. Without this every memoized CommentCard down-tree would
+  // re-render on each timeline mutation, defeating the React.memo cost
+  // savings on long timelines (#1968).
   const timelineRef = useRef(timeline);
   useEffect(() => {
     timelineRef.current = timeline;
@@ -336,7 +408,6 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const toggleReaction = useCallback(
     async (commentId: string, emoji: string) => {
       if (!userId) return;
-      // Read from server timeline (not optimistic) to find the real reaction
       const entry = timelineRef.current.find((e) => e.id === commentId);
       const existing: Reaction | undefined = (entry?.reactions ?? []).find(
         (r) =>
@@ -349,6 +420,19 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     [userId, toggleCommentReaction],
   );
 
+  // Around-mode anchor index (target_index from server, applied within the
+  // first page). Translated to a flat-array index: the array is reversed
+  // (DESC pages → ASC flat), so the offset within page[0] becomes
+  // (totalEntries - 1) - target_index.
+  const targetFlatIndex = useMemo(() => {
+    if (!data || data.pages.length === 0) return null;
+    const first = data.pages[0];
+    if (!first || first.target_index == null) return null;
+    let total = 0;
+    for (const p of data.pages) total += p.entries.length;
+    return total - 1 - first.target_index;
+  }, [data]);
+
   return {
     timeline: optimisticTimeline,
     loading,
@@ -358,5 +442,16 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     editComment,
     deleteComment,
     toggleReaction,
+    // Pagination controls (new)
+    hasMoreOlder: hasNextPage,
+    hasMoreNewer: hasPreviousPage,
+    isFetchingOlder: isFetchingNextPage,
+    isFetchingNewer: isFetchingPreviousPage,
+    fetchOlder,
+    fetchNewer,
+    jumpToLatest,
+    isAtLatest: isAtLatest === true,
+    newEntriesBelowCount,
+    targetFlatIndex,
   };
 }

@@ -19,7 +19,12 @@
     "tools_one": "{{count}} tool",
     "tools_other": "{{count}} tools",
     "tool_result_named": "{{tool}} result: ",
-    "tool_result_unnamed": "result: "
+    "tool_result_unnamed": "result: ",
+    "process_steps_one": "{{count}} step",
+    "process_steps_other": "{{count}} steps",
+    "copy_action": "Copy",
+    "copied_toast": "Copied",
+    "copy_failed_toast": "Copy failed"
   },
   "session_history": {
     "back_tooltip": "Back",

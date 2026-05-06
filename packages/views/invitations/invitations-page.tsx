@@ -14,12 +14,12 @@ import type { Invitation } from "@multica/core/types";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
+import { useT } from "../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { LogOut, Mail, Users } from "lucide-react";
-import { useT } from "../i18n";
 
 /**
  * Batch invitation handling page for first-contact users who land here
@@ -114,7 +114,7 @@ export function InvitationsPage() {
       setError(
         e instanceof Error
           ? e.message
-          : t(($) => $.batch.process_failed),
+          : t(($) => $.batch.error_generic),
       );
       // Partial success: any accepts that landed before the failure ALREADY
       // set onboarded_at on the backend (the AcceptInvitation transaction
@@ -159,14 +159,12 @@ export function InvitationsPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Mail className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">
-              {t(($) => $.batch.empty_title)}
-            </h2>
+            <h2 className="text-lg font-semibold">{t(($) => $.batch.empty_title)}</h2>
             <p className="text-sm text-muted-foreground text-center">
-              {t(($) => $.batch.empty_description)}
+              {t(($) => $.batch.empty_hint)}
             </p>
             <Button onClick={() => push(paths.onboarding())}>
-              {t(($) => $.batch.empty_action)}
+              {t(($) => $.batch.empty_continue)}
             </Button>
           </CardContent>
         </Card>
@@ -177,7 +175,7 @@ export function InvitationsPage() {
   const submitLabel =
     selected.size === 0
       ? t(($) => $.batch.submit_skip)
-      : t(($) => $.batch.submit, { count: selected.size });
+      : t(($) => $.batch.submit_join, { count: selected.size });
 
   return (
     <InvitationsShell>
@@ -192,7 +190,7 @@ export function InvitationsPage() {
                 {t(($) => $.batch.title)}
               </h2>
               <p className="text-sm text-muted-foreground">
-                {t(($) => $.batch.description)}
+                {t(($) => $.batch.subtitle)}
               </p>
             </div>
           </div>
@@ -235,7 +233,14 @@ function InvitationRow({
   onToggle: () => void;
 }) {
   const { t } = useT("invite");
-  const inviter = invitation.inviter_name || invitation.inviter_email || t(($) => $.batch.someone);
+  const inviter =
+    invitation.inviter_name ||
+    invitation.inviter_email ||
+    t(($) => $.batch.row_inviter_fallback);
+  const roleLine =
+    invitation.role === "admin"
+      ? t(($) => $.batch.row_invited_admin, { inviter })
+      : t(($) => $.batch.row_invited_member, { inviter });
   return (
     <li>
       <label
@@ -248,16 +253,10 @@ function InvitationRow({
         />
         <div className="flex-1 min-w-0 space-y-1">
           <div className="font-medium truncate">
-            {invitation.workspace_name ?? t(($) => $.main.fallback_workspace_name)}
+            {invitation.workspace_name ?? t(($) => $.batch.row_workspace_fallback)}
           </div>
           <div className="text-xs text-muted-foreground truncate">
-            {t(($) => $.batch.invited_as, {
-              inviter,
-              role:
-                invitation.role === "admin"
-                  ? t(($) => $.batch.role_admin)
-                  : t(($) => $.batch.role_member),
-            })}
+            {roleLine}
           </div>
         </div>
       </label>
@@ -278,7 +277,7 @@ function InvitationsShell({ children }: { children: ReactNode }) {
         onClick={logout}
       >
         <LogOut />
-        {t(($) => $.header.log_out)}
+        {t(($) => $.batch.log_out)}
       </Button>
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         {children}

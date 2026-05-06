@@ -35,19 +35,20 @@
     "decline_failed": "Failed to decline invitation"
   },
   "batch": {
-    "process_failed": "Failed to process invitations. Please try again.",
+    "log_out": "Log out",
     "empty_title": "No pending invitations",
-    "empty_description": "Continue to set up your own workspace.",
-    "empty_action": "Continue to setup",
-    "submit_skip": "Skip and set up my own workspace",
-    "submit_one": "Join 1 workspace",
-    "submit_many": "Join {{count}} workspaces",
+    "empty_hint": "Continue to set up your own workspace.",
+    "empty_continue": "Continue to setup",
     "title": "You've been invited",
-    "description": "Pick the workspaces you want to join. You can always handle the rest later from the sidebar.",
+    "subtitle": "Pick the workspaces you want to join. You can always handle the rest later from the sidebar.",
+    "submit_skip": "Skip and set up my own workspace",
+    "submit_join_one": "Join 1 workspace",
+    "submit_join_other": "Join {{count}} workspaces",
     "joining": "Joining...",
-    "someone": "Someone",
-    "role_admin": "an admin",
-    "role_member": "a member",
-    "invited_as": "{{inviter}} invited you as {{role}}"
+    "error_generic": "Failed to process invitations. Please try again.",
+    "row_workspace_fallback": "Workspace",
+    "row_inviter_fallback": "Someone",
+    "row_invited_admin": "{{inviter}} invited you as an admin",
+    "row_invited_member": "{{inviter}} invited you as a member"
   }
 }

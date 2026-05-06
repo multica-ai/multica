@@ -130,6 +130,13 @@
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link"
   },
+  "timeline": {
+    "show_older": "Show older",
+    "show_newer": "Show newer",
+    "loading": "Loading...",
+    "jump_to_latest": "Jump to latest",
+    "jump_to_latest_with_count": "Jump to latest · {{count}} new"
+  },
   "activity": {
     "created": "created this issue",
     "self_assigned": "self-assigned this issue",

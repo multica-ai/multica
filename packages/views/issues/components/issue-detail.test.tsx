@@ -175,7 +175,13 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
-  listTimeline: vi.fn().mockResolvedValue([]),
+  listTimeline: vi.fn().mockResolvedValue({
+    entries: [],
+    next_cursor: null,
+    prev_cursor: null,
+    has_more_before: false,
+    has_more_after: false,
+  }),
   listComments: vi.fn().mockResolvedValue([]),
   createComment: vi.fn(),
   updateComment: vi.fn(),
@@ -381,7 +387,18 @@ describe("IssueDetail (shared)", () => {
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
-    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    // Cursor-paginated timeline endpoint returns a TimelinePage. The DESC
+    // order is required because the hook reverses pages → ASC for the UI.
+    const descTimeline = [...mockTimeline].sort((a, b) =>
+      b.created_at.localeCompare(a.created_at),
+    );
+    mockApiObj.listTimeline.mockResolvedValue({
+      entries: descTimeline,
+      next_cursor: null,
+      prev_cursor: null,
+      has_more_before: false,
+      has_more_after: false,
+    });
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
