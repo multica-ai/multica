@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 )
 
 const (
@@ -40,6 +42,46 @@ func googleUserInfoURL() string {
 	return defaultGoogleUserInfoURL
 }
 
+// googleHTTPClientOnce lazily builds a *http.Client with proxy support.
+// GOOGLE_OAUTH_PROXY takes precedence, then falls back to standard
+// HTTP_PROXY/HTTPS_PROXY (http.ProxyFromEnvironment).
+var (
+	googleHTTPClientOnce sync.Once
+	googleHTTPClientVal  *http.Client
+)
+
+func googleHTTPClient() *http.Client {
+	googleHTTPClientOnce.Do(func() {
+		proxyRaw := strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_PROXY"))
+		if proxyRaw == "" {
+			// Fall back to default client which honours HTTPS_PROXY / HTTP_PROXY
+			googleHTTPClientVal = http.DefaultClient
+			return
+		}
+
+		proxyURL, err := url.Parse(proxyRaw)
+		if err != nil {
+			slog.Error("invalid GOOGLE_OAUTH_PROXY, falling back to default", "value", proxyRaw, "error", err)
+			googleHTTPClientVal = http.DefaultClient
+			return
+		}
+
+		slog.Info("google oauth using proxy", "proxy", proxyRaw)
+		googleHTTPClientVal = &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			},
+		}
+	})
+	return googleHTTPClientVal
+}
+
+// resetGoogleHTTPClient clears the cached client (for tests only).
+func resetGoogleHTTPClient() {
+	googleHTTPClientOnce = sync.Once{}
+	googleHTTPClientVal = nil
+}
+
 func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret, redirectURI string) (googleTokenResponse, error) {
 	values := url.Values{
 		"code":          {strings.TrimSpace(code)},
@@ -56,7 +98,7 @@ func exchangeGoogleCode(ctx context.Context, code, clientID, clientSecret, redir
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := googleHTTPClient().Do(req)
 	if err != nil {
 		return googleTokenResponse{}, err
 	}
@@ -89,7 +131,7 @@ func fetchGoogleUserInfo(ctx context.Context, accessToken string) (googleUserInf
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := googleHTTPClient().Do(req)
 	if err != nil {
 		return googleUserInfo{}, err
 	}
