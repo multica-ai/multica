@@ -313,11 +313,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := projectToResponse(project)
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {
 		resourceResp[i] = projectResourceToResponse(row)
 	}
+	resp := projectToResponse(project)
+	resp.ResourceCount = int64(len(resourceResp))
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 	for _, rr := range resourceResp {
 		h.publish(protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
@@ -325,22 +326,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			"project_id": resp.ID,
 		})
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":             resp.ID,
-		"workspace_id":   resp.WorkspaceID,
-		"title":          resp.Title,
-		"description":    resp.Description,
-		"icon":           resp.Icon,
-		"status":         resp.Status,
-		"priority":       resp.Priority,
-		"lead_type":      resp.LeadType,
-		"lead_id":        resp.LeadID,
-		"created_at":     resp.CreatedAt,
-		"updated_at":     resp.UpdatedAt,
-		"issue_count":    resp.IssueCount,
-		"done_count":     resp.DoneCount,
-		"resource_count": int64(len(resourceResp)),
-		"resources":      resourceResp,
+	// One-shot create echo: the parent ProjectResponse fields plus the just-
+	// created resources. This is a transient creation echo, not a contract for
+	// reads — GET /projects/{id} stays metadata-only with resource_count.
+	writeJSON(w, http.StatusCreated, struct {
+		ProjectResponse
+		Resources []ProjectResourceResponse `json:"resources"`
+	}{
+		ProjectResponse: resp,
+		Resources:       resourceResp,
 	})
 }
 
@@ -433,6 +427,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := projectToResponse(project)
+	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }

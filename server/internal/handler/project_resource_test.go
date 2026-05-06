@@ -248,6 +248,61 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 	if !found {
 		t.Fatalf("project %s not found in ListProjects response", project.ID)
 	}
+
+	// UpdateProject must preserve the breadcrumb. A title-only PUT used to
+	// reset resource_count to 0 because UpdateProject didn't reload the count.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"title": "Resource count breadcrumb (updated)",
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateProject: %d %s", w.Code, w.Body.String())
+	}
+	var updated ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode UpdateProject: %v", err)
+	}
+	if updated.ResourceCount != 1 {
+		t.Errorf("UpdateProject ResourceCount = %d, want 1", updated.ResourceCount)
+	}
+}
+
+// TestCreateProjectWithResourcesEchoesCount asserts the create-with-resources
+// echo carries resource_count matching the attached resources, so the HTTP
+// response and the published project:created event agree.
+func TestCreateProjectWithResourcesEchoesCount(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Create echo with resource_count",
+		"resources": []map[string]any{
+			{
+				"resource_type": "github_repo",
+				"resource_ref":  map[string]any{"url": "https://github.com/multica-ai/echo-count"},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject with resources: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ID            string                    `json:"id"`
+		ResourceCount int64                     `json:"resource_count"`
+		Resources     []ProjectResourceResponse `json:"resources"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+resp.ID, nil)
+		r = withURLParam(r, "id", resp.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
+	if resp.ResourceCount != 1 || len(resp.Resources) != 1 {
+		t.Errorf("CreateProject echo: resource_count=%d resources=%d, want 1/1", resp.ResourceCount, len(resp.Resources))
+	}
 }
 
 func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
