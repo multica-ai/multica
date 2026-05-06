@@ -150,6 +150,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	}
 
 	if !isNew {
+		h.EnsureLazyInviteMembership(ctx, user, false)
 		return user, false, nil
 	}
 
@@ -165,6 +166,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	if err != nil {
 		return db.User{}, false, err
 	}
+	h.EnsureLazyInviteMembership(ctx, created, true)
 	return created, true, nil
 }
 
@@ -203,6 +205,13 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 	}
 
 	email = strings.ToLower(email)
+
+	// Lazy-invite domains are themselves an allowlist; let them through
+	// regardless of ALLOW_SIGNUP / ALLOWED_EMAILS / ALLOWED_EMAIL_DOMAINS.
+	if h.LazyInvite.IsAllowedDomain(email) {
+		return nil
+	}
+
 	domain := ""
 	if at := strings.Index(email, "@"); at > 0 {
 		domain = email[at+1:]
@@ -447,6 +456,7 @@ func (h *Handler) findOrCreateUserByGoogle(ctx context.Context, ident auth.Googl
 
 	// 1. Match by google_id.
 	if u, err := h.Queries.GetUserByGoogleID(ctx, pgtype.Text{String: ident.Sub, Valid: true}); err == nil {
+		h.EnsureLazyInviteMembership(ctx, u, false)
 		return u, false, nil
 	} else if !isNotFound(err) {
 		return db.User{}, false, err
@@ -465,6 +475,7 @@ func (h *Handler) findOrCreateUserByGoogle(ctx context.Context, ident auth.Googl
 		if err != nil {
 			return db.User{}, false, err
 		}
+		h.EnsureLazyInviteMembership(ctx, linked, false)
 		return linked, false, nil
 	}
 
@@ -490,6 +501,7 @@ func (h *Handler) findOrCreateUserByGoogle(ctx context.Context, ident auth.Googl
 	if err != nil {
 		return db.User{}, false, err
 	}
+	h.EnsureLazyInviteMembership(ctx, created, true)
 	return created, true, nil
 }
 

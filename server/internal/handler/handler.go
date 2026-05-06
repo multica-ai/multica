@@ -71,6 +71,7 @@ type Handler struct {
 	DaemonTokenCache      *auth.DaemonTokenCache
 	GoogleVerifier        *auth.GoogleVerifier
 	googleTokenURL        string // overridable in tests; defaults to Google
+	LazyInvite            auth.LazyInviteRules
 	cfg                   Config
 }
 

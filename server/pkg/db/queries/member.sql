@@ -24,6 +24,9 @@ RETURNING *;
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;
 
+-- name: CountMembershipsByUser :one
+SELECT COUNT(*) FROM member WHERE user_id = $1;
+
 -- name: ListMembersWithUser :many
 SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url

@@ -137,6 +137,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	}
 
+	// Lazy-invite rules: <domain>:<workspace-slug> pairs. Empty -> feature off.
+	// Misconfiguration is fatal — operators must fix the env before users hit
+	// the auth flow. Pass the queries handle so slugs are validated up front.
+	if spec := os.Getenv("LAZY_INVITE_RULES"); spec != "" {
+		parseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		rules, err := auth.ParseLazyInviteRules(parseCtx, spec, queries)
+		cancel()
+		if err != nil {
+			slog.Error("LAZY_INVITE_RULES: invalid configuration", "error", err)
+			os.Exit(1)
+		}
+		h.LazyInvite = rules
+		slog.Info("lazy-invite: rules loaded", "count", len(rules))
+	}
+
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
 	// task. Returns nil when rdb is nil — TaskService treats that
