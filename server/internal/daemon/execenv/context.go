@@ -20,6 +20,7 @@ import (
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:     skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
+// CodeBuddy: skills → {workDir}/.codebuddy/skills/{name}/SKILL.md  (native discovery)
 // Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
@@ -147,6 +148,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "codebuddy":
+		// CodeBuddy natively discovers project-level skills from .codebuddy/skills/
+		// in the workdir.
+		skillsDir = filepath.Join(workDir, ".codebuddy", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
