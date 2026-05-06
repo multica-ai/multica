@@ -1380,6 +1380,51 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 }
 
+// Regression for issue #2081: when the per-task auth.json is a stale regular
+// file (e.g. left behind from an earlier Windows copy fallback), a subsequent
+// Reuse() / prepareCodexHome must refresh it from the shared source rather
+// than preserve the stale copy. Without this, Codex would keep retrying with
+// a refresh token the OAuth server has already revoked, surfacing as
+// `refresh_token_reused` / `token_expired` until the user manually nukes the
+// workspace directory.
+func TestPrepareCodexHome_RefreshesStaleAuthCopyOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"v1"}`), 0o644)
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+
+	// Pre-seed the per-task home with a stale regular-file auth.json,
+	// simulating a previous run where os.Symlink failed and createFileLink
+	// fell back to copying.
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	stalePath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(stalePath, []byte(`{"refresh_token":"v0_stale"}`), 0o644); err != nil {
+		t.Fatalf("seed stale auth: %v", err)
+	}
+
+	// Shared source rotates to v2 while the per-task copy is still stuck on v0.
+	os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"v2"}`), 0o644)
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	// After Reuse, dst should mirror the current shared source — either as a
+	// fresh symlink (preferred) or as a fresh copy (Windows fallback).
+	data, err := os.ReadFile(stalePath)
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if string(data) != `{"refresh_token":"v2"}` {
+		t.Errorf("auth.json content = %q, want refreshed v2 contents", data)
+	}
+}
+
 func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
