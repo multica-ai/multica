@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -121,6 +122,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+
+	// Google OIDC verifier: built once at startup so JWKs discovery and the
+	// resulting key cache are shared by every login. Nil when GOOGLE_CLIENT_ID
+	// is unset — GoogleLogin returns 503 in that case.
+	if cid := os.Getenv("GOOGLE_CLIENT_ID"); cid != "" {
+		oidcCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		gv, err := auth.NewGoogleVerifier(oidcCtx, cid)
+		cancel()
+		if err != nil {
+			slog.Warn("google verifier init failed; google login will be unavailable", "error", err)
+		} else {
+			h.GoogleVerifier = gv
+		}
+	}
 
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued

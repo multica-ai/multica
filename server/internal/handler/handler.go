@@ -69,6 +69,8 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	GoogleVerifier        *auth.GoogleVerifier
+	googleTokenURL        string // overridable in tests; defaults to Google
 	cfg                   Config
 }
 

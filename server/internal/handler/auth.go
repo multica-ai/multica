@@ -426,10 +426,71 @@ type googleTokenResponse struct {
 	TokenType   string `json:"token_type"`
 }
 
-type googleUserInfo struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+// findOrCreateUserByGoogle resolves a verified Google identity to a user row.
+// Precedence:
+//  1. Match by google_id (already linked) -> log in.
+//  2. Match by email (verified by Google) -> link the google_id.
+//  3. New user -> create with google_id set.
+//
+// Step 2 is gated by ident.EmailVerified to defeat the unverified-email
+// takeover attack: an attacker who points an unverified Google account at a
+// victim's email would otherwise hijack the existing row. The caller MUST get
+// ident from a verified ID token, never from userinfo.
+func (h *Handler) findOrCreateUserByGoogle(ctx context.Context, ident auth.GoogleIdentity) (db.User, bool, error) {
+	if ident.Sub == "" || ident.Email == "" {
+		return db.User{}, false, errors.New("google identity missing sub or email")
+	}
+	if !ident.EmailVerified {
+		return db.User{}, false, errors.New("google has not verified this email")
+	}
+	email := strings.ToLower(strings.TrimSpace(ident.Email))
+
+	// 1. Match by google_id.
+	if u, err := h.Queries.GetUserByGoogleID(ctx, pgtype.Text{String: ident.Sub, Valid: true}); err == nil {
+		return u, false, nil
+	} else if !isNotFound(err) {
+		return db.User{}, false, err
+	}
+
+	// 2. Match by email — link.
+	existing, err := h.Queries.GetUserByEmail(ctx, email)
+	if err != nil && !isNotFound(err) {
+		return db.User{}, false, err
+	}
+	if err == nil {
+		linked, err := h.Queries.LinkGoogleIdentity(ctx, db.LinkGoogleIdentityParams{
+			ID:       existing.ID,
+			GoogleID: pgtype.Text{String: ident.Sub, Valid: true},
+		})
+		if err != nil {
+			return db.User{}, false, err
+		}
+		return linked, false, nil
+	}
+
+	// 3. New user.
+	if err := h.checkSignupAllowed(email, true); err != nil {
+		return db.User{}, false, err
+	}
+	name := ident.Name
+	if name == "" {
+		name = strings.SplitN(email, "@", 2)[0]
+	}
+	avatar := pgtype.Text{}
+	if ident.Picture != "" {
+		avatar = pgtype.Text{String: ident.Picture, Valid: true}
+	}
+	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
+		Name:          name,
+		Email:         email,
+		AvatarUrl:     avatar,
+		GoogleID:      pgtype.Text{String: ident.Sub, Valid: true},
+		EmailVerified: true,
+	})
+	if err != nil {
+		return db.User{}, false, err
+	}
+	return created, true, nil
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -450,14 +511,23 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
 		return
 	}
+	if h.GoogleVerifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+		return
+	}
 
 	redirectURI := req.RedirectURI
 	if redirectURI == "" {
 		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
 	}
 
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
+	// Exchange authorization code for tokens. The token URL is overridable
+	// for tests via h.googleTokenURL — production always hits Google.
+	tokenURL := h.googleTokenURL
+	if tokenURL == "" {
+		tokenURL = "https://oauth2.googleapis.com/token"
+	}
+	tokenResp, err := http.PostForm(tokenURL, url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
@@ -488,45 +558,29 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
 		return
 	}
+	if gToken.IDToken == "" {
+		writeError(w, http.StatusBadGateway, "Google response missing id_token")
+		return
+	}
 
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	// Verify the ID token: signature against Google's JWKs, iss=accounts.google.com,
+	// aud=GOOGLE_CLIENT_ID, exp in the future. Identity is trusted only after this.
+	ident, err := h.GoogleVerifier.Verify(r.Context(), gToken.IDToken)
 	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
-		slog.Error("google userinfo fetch failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
+		slog.Warn("google id_token verification failed", "error", err)
+		writeError(w, http.StatusUnauthorized, "invalid Google identity")
 		return
 	}
 
-	if gUser.Email == "" {
-		writeError(w, http.StatusBadRequest, "Google account has no email")
-		return
-	}
-
-	email := strings.ToLower(strings.TrimSpace(gUser.Email))
-
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, err := h.findOrCreateUserByGoogle(r.Context(), ident)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
 			writeError(w, http.StatusForbidden, signupErr.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create user")
+		slog.Warn("google login user resolution failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to sign in")
 		return
 	}
 	if isNew {
@@ -535,35 +589,33 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		h.Analytics.Capture(evt)
 	}
 
-	// Update name and avatar from Google profile if the user was just created
-	// (default name is email prefix) or has no avatar yet.
+	// Refresh display name / avatar from Google when the user has a default
+	// placeholder. Same intent as the prior handler.
 	needsUpdate := false
 	newName := user.Name
 	newAvatar := user.AvatarUrl
-
-	if gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
-		newName = gUser.Name
+	emailLocal := strings.SplitN(strings.ToLower(user.Email), "@", 2)[0]
+	if ident.Name != "" && user.Name == emailLocal {
+		newName = ident.Name
 		needsUpdate = true
 	}
-	if gUser.Picture != "" && !user.AvatarUrl.Valid {
-		newAvatar = pgtype.Text{String: gUser.Picture, Valid: true}
+	if ident.Picture != "" && !user.AvatarUrl.Valid {
+		newAvatar = pgtype.Text{String: ident.Picture, Valid: true}
 		needsUpdate = true
 	}
-
 	if needsUpdate {
-		updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
+		if updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
 			ID:        user.ID,
 			Name:      newName,
 			AvatarUrl: newAvatar,
-		})
-		if err == nil {
+		}); err == nil {
 			user = updated
 		}
 	}
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", user.Email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
