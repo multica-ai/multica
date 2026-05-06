@@ -220,7 +220,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   return (
     <>
       {/* Primary agent — sticky at the top of the activity area */}
-      <div className="mt-4 sticky top-4 z-10">
+      <div className="mt-4 sticky top-4 z-10 rounded-xl bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
         <SingleAgentLiveCard
           task={firstEntry.task}
           items={firstEntry.items}
