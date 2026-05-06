@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail } from "lucide-react";
+import { Crown, Shield, User, MoreHorizontal, UserMinus, Users, Clock, X, Mail, Link, Copy } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
+import type { MemberWithUser, MemberRole, Invitation, InviteLink } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -40,7 +40,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { memberListOptions, invitationListOptions, inviteLinkListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
@@ -183,6 +183,72 @@ function InvitationRow({
   );
 }
 
+function InviteLinkRow({
+  inviteLink,
+  inviteURL,
+  canDelete,
+  onDelete,
+  onCopy,
+  busy,
+}: {
+  inviteLink: InviteLink;
+  inviteURL: string;
+  canDelete: boolean;
+  onDelete: () => void;
+  onCopy: () => void;
+  busy: boolean;
+}) {
+  const rc = roleConfig[inviteLink.role];
+  const statusLabel: Record<InviteLink["status"], string> = {
+    valid: "Active",
+    expired: "Expired",
+    revoked: "Revoked",
+    used_up: "Used up",
+  };
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+        <Link className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">Invite link</div>
+        <div className="text-xs text-muted-foreground truncate">
+          {inviteURL || "Link unavailable"}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span>{statusLabel[inviteLink.status]}</span>
+          <span>{inviteLink.used_count}/{inviteLink.max_uses} used</span>
+          {inviteLink.expires_at && <span>Expires {new Date(inviteLink.expires_at).toLocaleDateString()}</span>}
+        </div>
+      </div>
+      {inviteURL && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={busy}
+          onClick={onCopy}
+          title="Copy invite link"
+        >
+          <Copy className="h-4 w-4 text-muted-foreground" />
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={busy}
+          onClick={onDelete}
+          title="Delete invite link"
+        >
+          <X className="h-4 w-4 text-muted-foreground" />
+        </Button>
+      )}
+      <Badge variant="outline">{rc.label}</Badge>
+    </div>
+  );
+}
+
 export function MembersTab() {
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
@@ -190,10 +256,16 @@ export function MembersTab() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const { data: inviteLinks = [] } = useQuery(inviteLinkListOptions(wsId));
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [linkRole, setLinkRole] = useState<Exclude<MemberRole, "owner">>("member");
+  const [linkTTLHours, setLinkTTLHours] = useState("168");
+  const [linkMaxUses, setLinkMaxUses] = useState("1");
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState("");
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -206,6 +278,46 @@ export function MembersTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  const maxUsesValue = Number(linkMaxUses.trim());
+  const linkMaxUsesValid = /^\d+$/.test(linkMaxUses.trim()) && maxUsesValue >= 1 && maxUsesValue <= 100;
+
+  const inviteURLFor = (inviteLink: InviteLink) => {
+    const value = inviteLink.invite_url || (inviteLink.token ? `/invite/${encodeURIComponent(inviteLink.token)}` : `/invite/${encodeURIComponent(inviteLink.id)}`);
+    if (!value) return "";
+    return value.startsWith("http") ? value : `${window.location.origin}${value}`;
+  };
+
+  const handleCopyLink = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Invite link copied");
+    } catch {
+      toast.error("Failed to copy invite link");
+    }
+  };
+
+  const handleCreateInviteLink = async () => {
+    if (!workspace) return;
+    setLinkLoading(true);
+    try {
+      const inviteLink = await api.createInviteLink(workspace.id, {
+        role: linkRole,
+        ttl_hours: Number(linkTTLHours),
+        max_uses: maxUsesValue,
+      });
+      const url = inviteURLFor(inviteLink);
+      if (url) {
+        setGeneratedLink(url);
+        await handleCopyLink(url);
+      }
+      qc.invalidateQueries({ queryKey: workspaceKeys.inviteLinks(wsId) });
+      toast.success("Invite link generated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate invite link");
+    } finally {
+      setLinkLoading(false);
+    }
+  };
 
   const handleInviteMember = async () => {
     if (!workspace) return;
@@ -224,6 +336,27 @@ export function MembersTab() {
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const handleDeleteInviteLink = (inviteLink: InviteLink) => {
+    if (!workspace) return;
+    setConfirmAction({
+      title: "Delete invite link",
+      description: "Delete this invite link? Anyone with the link will no longer be able to join this workspace.",
+      variant: "destructive",
+      onConfirm: async () => {
+        setInvitationActionId(inviteLink.id);
+        try {
+          await api.revokeInviteLink(workspace.id, inviteLink.id);
+          qc.invalidateQueries({ queryKey: workspaceKeys.inviteLinks(wsId) });
+          toast.success("Invite link deleted");
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Failed to delete invite link");
+        } finally {
+          setInvitationActionId(null);
+        }
+      },
+    });
   };
 
   const handleRevokeInvitation = (invitation: Invitation) => {
@@ -293,11 +426,63 @@ export function MembersTab() {
         </div>
 
         {canManageWorkspace && (
-          <Card>
-            <CardContent className="space-y-3">
+          <div className="grid gap-3">
+            <Card>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Link className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-medium">Generate invite link</h3>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[120px_120px_140px_auto]">
+                  <Select value={linkRole} onValueChange={(value) => setLinkRole(value as Exclude<MemberRole, "owner">)}>
+                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">Member</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={linkTTLHours} onValueChange={(value) => { if (value) setLinkTTLHours(value); }}>
+                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="24">24 hours</SelectItem>
+                      <SelectItem value="72">3 days</SelectItem>
+                      <SelectItem value="168">7 days</SelectItem>
+                      <SelectItem value="720">30 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={linkMaxUses}
+                    onChange={(e) => setLinkMaxUses(e.target.value)}
+                    placeholder="Uses"
+                  />
+                  <Button onClick={handleCreateInviteLink} disabled={linkLoading || !linkMaxUsesValid}>
+                    {linkLoading ? "Generating..." : "Generate"}
+                  </Button>
+                </div>
+                {!linkMaxUsesValid && (
+                  <p className="text-xs text-destructive">Uses must be a whole number from 1 to 100.</p>
+                )}
+                {generatedLink && (
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <Input value={generatedLink} readOnly />
+                    <Button variant="outline" onClick={() => handleCopyLink(generatedLink)}>
+                      <Copy className="h-4 w-4" />
+                      Copy
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
-                <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Invite member</h3>
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-sm font-medium">Invite by email</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
@@ -323,8 +508,9 @@ export function MembersTab() {
                   {inviteLoading ? "Inviting..." : "Invite"}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {members.length > 0 ? (
@@ -347,6 +533,29 @@ export function MembersTab() {
           <p className="text-sm text-muted-foreground">No members found.</p>
         )}
       </section>
+
+      {inviteLinks.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Link className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Invite links ({inviteLinks.length})</h2>
+          </div>
+          <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
+            {inviteLinks.map((link, i) => (
+              <div key={link.id} className={i > 0 ? "border-t border-border/50" : ""}>
+                <InviteLinkRow
+                  inviteLink={link}
+                  inviteURL={inviteURLFor(link)}
+                  canDelete={isOwner}
+                  onDelete={() => handleDeleteInviteLink(link)}
+                  onCopy={() => handleCopyLink(inviteURLFor(link))}
+                  busy={invitationActionId === link.id}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {invitations.length > 0 && (
         <section className="space-y-4">

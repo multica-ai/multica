@@ -125,50 +125,20 @@ func (h *Handler) completeGoogleBinding(w http.ResponseWriter, r *http.Request, 
 		redirectURI = cfg.RedirectURL()
 	}
 
-	// Exchange the authorization code for tokens using Google's token endpoint.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
-		"code":          {strings.TrimSpace(req.Code)},
-		"client_id":     {cfg.ClientID},
-		"client_secret": {cfg.ClientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	})
+	gToken, err := exchangeGoogleCode(r.Context(), req.Code, cfg.ClientID, cfg.ClientSecret, redirectURI)
 	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			writeError(w, http.StatusBadGateway, "Google token exchange failed")
+			return
+		}
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
 		return
 	}
-	defer tokenResp.Body.Close()
 
-	if tokenResp.StatusCode != http.StatusOK {
-		writeError(w, http.StatusBadGateway, "Google token exchange failed")
-		return
-	}
-
-	var gToken googleTokenResponse
-	if err := json.NewDecoder(tokenResp.Body).Decode(&gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
-
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
-		"https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
+	gUser, err := fetchGoogleUserInfo(r.Context(), gToken.AccessToken)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
 		return
 	}
 

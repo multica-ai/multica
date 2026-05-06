@@ -227,14 +227,12 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 }
 
 // SendNotificationEmail sends a notification email (e.g. when a user is @mentioned).
-func (s *EmailService) SendNotificationEmail(to, title, body, link string) error {
+func (s *EmailService) SendNotificationEmail(to, title, body, link, senderName string) error {
 	safeTitle := html.EscapeString(title)
 	safeBody := html.EscapeString(body)
+	safeSenderName := html.EscapeString(strings.TrimSpace(senderName))
 
-	subject := sanitizeSubjectField(title)
-	if subject == "" {
-		subject = "Multica Notification"
-	}
+	subject := buildNotificationEmailSubject(title, senderName)
 
 	linkHTML := ""
 	if link != "" {
@@ -244,20 +242,49 @@ func (s *EmailService) SendNotificationEmail(to, title, body, link string) error
 			</p>`, html.EscapeString(link))
 	}
 
+	senderHTML := ""
+	if safeSenderName != "" {
+		senderHTML = fmt.Sprintf(
+			`<p style="margin: 0 0 16px 0; color: #333;"><strong>From:</strong> %s</p>`,
+			safeSenderName,
+		)
+	}
+
 	htmlBody := fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
 			<h2>%s</h2>
-			<p>%s</p>
+			%s
+			<p style="white-space: pre-wrap;">%s</p>
 			%s
 			<p style="color: #666; font-size: 14px;">You received this email because notifications are enabled in your Multica settings.</p>
-		</div>`, safeTitle, safeBody, linkHTML)
+		</div>`, safeTitle, senderHTML, safeBody, linkHTML)
 
 	if s.sender == nil {
-		fmt.Printf("[DEV] Notification email to %s: %s — %s\n", to, title, link)
+		if strings.TrimSpace(senderName) != "" {
+			fmt.Printf("[DEV] Notification email to %s from %s: %s — %s\n", to, strings.TrimSpace(senderName), title, link)
+		} else {
+			fmt.Printf("[DEV] Notification email to %s: %s — %s\n", to, title, link)
+		}
 		return nil
 	}
 
 	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
+}
+
+func buildNotificationEmailSubject(title, senderName string) string {
+	subjectTitle := sanitizeSubjectField(title)
+	subjectSender := sanitizeSubjectField(senderName)
+
+	if subjectSender != "" && subjectTitle != "" {
+		return fmt.Sprintf("%s mentioned you in %s", subjectSender, subjectTitle)
+	}
+	if subjectSender != "" {
+		return fmt.Sprintf("%s mentioned you on Multica", subjectSender)
+	}
+	if subjectTitle != "" {
+		return subjectTitle
+	}
+	return "Multica Notification"
 }
 
 // buildInvitationEmail assembles subject and HTML body for an invitation email.

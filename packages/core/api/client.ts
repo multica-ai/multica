@@ -56,6 +56,8 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  InviteLink,
+  CreateInviteLinkRequest,
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
@@ -838,6 +840,33 @@ export class ApiClient {
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/invitations/${invitationId}`, {
       method: "DELETE",
+    });
+  }
+
+  async createInviteLink(workspaceId: string, data: CreateInviteLinkRequest): Promise<InviteLink> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listInviteLinks(workspaceId: string): Promise<InviteLink[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`);
+  }
+
+  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async validateInviteLink(token: string): Promise<InviteLink> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}`);
+  }
+
+  async acceptInviteLink(token: string): Promise<MemberWithUser> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
     });
   }
 
