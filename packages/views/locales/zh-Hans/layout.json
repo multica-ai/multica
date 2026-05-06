@@ -1,13 +1,13 @@
 {
   "nav": {
     "inbox": "收件箱",
-    "my_issues": "我的 issue",
-    "issues": "issue",
-    "projects": "project",
-    "autopilots": "autopilot",
+    "my_issues": "我的 Issue",
+    "issues": "Issue",
+    "projects": "项目",
+    "autopilots": "自动化",
     "agents": "智能体",
     "runtimes": "运行时",
-    "skills": "skill",
+    "skills": "Skill",
     "settings": "设置"
   },
   "help": {
@@ -17,7 +17,7 @@
     "feedback": "反馈"
   },
   "workspace_loader": {
-    "loading_workspace": "正在加载工作区…",
+    "loading_workspace": "正在加载工作区...",
     "loading_named_prefix": "正在加载"
   },
   "sidebar": {

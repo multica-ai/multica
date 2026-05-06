@@ -4,7 +4,7 @@
     "tagline": "为智能体跑 CLI 会话的机器和云端 worker。",
     "learn_more": "了解更多 →",
     "connect_remote": "连接远程机器",
-    "search_placeholder": "搜索运行时…",
+    "search_placeholder": "搜索运行时...",
     "scope_mine": "我的",
     "scope_all": "全部",
     "live": "实时",
@@ -23,7 +23,7 @@
       "try_widening": "试试放宽筛选或清除条件。"
     },
     "bootstrapping": {
-      "title": "正在启动本地运行时…",
+      "title": "正在启动本地运行时...",
       "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
     }
   },
@@ -102,7 +102,7 @@
     "trouble_remote_note_suffix": "。",
     "cancel": "取消",
     "started_daemon": "我已启动守护进程",
-    "waiting_title": "正在等待运行时…",
+    "waiting_title": "正在等待运行时...",
     "waiting_description": "正在监听远程守护进程的注册。此页面会自动更新，无需刷新。",
     "waiting_hint_prefix": "在远程机器上运行 ",
     "waiting_hint_suffix": " 来确认它在运行。",
@@ -124,9 +124,9 @@
     "unknown_error": "未知错误",
     "initiate_failed": "启动更新失败",
     "status": {
-      "pending": "等待守护进程…",
-      "running": "更新中…",
-      "completed": "更新完成。守护进程正在重启…",
+      "pending": "等待守护进程...",
+      "running": "更新中...",
+      "completed": "更新完成。守护进程正在重启...",
       "failed": "更新失败",
       "timeout": "超时"
     }

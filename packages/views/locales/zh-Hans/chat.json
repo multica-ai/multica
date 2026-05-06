@@ -7,8 +7,8 @@
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
-    "placeholder_named": "告诉 {{name}} 该做什么…",
-    "placeholder_default": "告诉我该做什么…"
+    "placeholder_named": "告诉 {{name}} 该做什么...",
+    "placeholder_default": "告诉我该做什么..."
   },
   "message_list": {
     "show_details": "查看详情",
@@ -49,7 +49,7 @@
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "issue、project、skill",
+    "first_time_pillars": "issue、项目、skill",
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
@@ -65,10 +65,10 @@
     "tooltip_disabled": "当前页面没有可以共享给 Multica 的内容",
     "tooltip_off": "让 Multica 知道你正在看的内容",
     "tooltip_on_issue": "Multica 知道你正在看 {{label}}，点击关闭",
-    "tooltip_on_project": "Multica 知道你正在看 project \"{{label}}\"，点击关闭",
+    "tooltip_on_project": "Multica 知道你正在看项目 \"{{label}}\"，点击关闭",
     "card_tooltip_issue_with_subtitle": "Multica 知道你正在看 {{label}} —— {{subtitle}}",
     "card_tooltip_issue": "Multica 知道你正在看 {{label}}",
-    "card_tooltip_project": "Multica 知道你正在看 project \"{{label}}\"",
+    "card_tooltip_project": "Multica 知道你正在看项目 \"{{label}}\"",
     "aria_stop": "停止共享当前页面",
     "aria_start": "把当前页面共享给 Multica"
   },

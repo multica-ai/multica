@@ -8,7 +8,7 @@
   },
   "create_workspace": {
     "title": "创建新工作区",
-    "description": "工作区是团队协作处理 project 和 issue 的共享空间。"
+    "description": "工作区是团队协作处理项目和 issue 的共享空间。"
   },
   "delete_issue": {
     "title": "删除 issue",
@@ -22,14 +22,14 @@
   },
   "feedback": {
     "title": "反馈",
-    "description": "告诉我们哪些好用、哪些不好用、或者你希望我们做什么。",
-    "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能…",
-    "toast_uploading": "请等待上传完成…",
+    "description": "告诉我们哪些好用、哪些不好用、希望接下来做什么。",
+    "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",
+    "toast_uploading": "请等待上传完成...",
     "toast_too_long": "内容过长",
     "toast_sent": "感谢反馈！",
     "toast_failed": "发送反馈失败",
     "send": "发送反馈",
-    "sending": "发送中…"
+    "sending": "发送中..."
   },
   "issue_picker": {
     "search_placeholder": "搜索 issue...",
@@ -53,10 +53,10 @@
     "toast_status_failed": "更新状态失败"
   },
   "create_project": {
-    "title": "新建 project",
-    "title_breadcrumb": "新建 project",
+    "title": "新建项目",
+    "title_breadcrumb": "新建项目",
     "icon_tooltip": "选择图标",
-    "title_placeholder": "project 标题",
+    "title_placeholder": "项目标题",
     "description_placeholder": "添加描述...",
     "lead": "负责人",
     "no_lead": "无负责人",
@@ -64,10 +64,10 @@
     "members_group": "成员",
     "agents_group": "智能体",
     "no_results": "未找到结果",
-    "submit": "创建 project",
+    "submit": "创建项目",
     "submitting": "创建中...",
-    "toast_created": "已创建 project",
-    "toast_failed": "创建 project 失败"
+    "toast_created": "已创建项目",
+    "toast_failed": "创建项目失败"
   },
   "create_issue": {
     "sr_manual": "新建 issue",
@@ -99,23 +99,23 @@
     "remove_parent": "移除父级",
     "set_parent_picker": {
       "title": "设置父 issue",
-      "description": "搜索一个 issue，作为新 issue 的父级"
+      "description": "搜索一个 issue 设为父级"
     },
     "add_subissue_picker": {
       "title": "添加子 issue",
-      "description": "搜索一个 issue，作为新 issue 的子级"
+      "description": "搜索一个 issue 设为子级"
     },
     "agent": {
       "created_by": "创建者",
       "select_agent_aria": "选择智能体",
-      "pick_an_agent": "选一个智能体…",
+      "pick_an_agent": "选一个智能体...",
       "no_agents": "暂无可用智能体。",
       "version_missing": "该智能体的 daemon 没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级 daemon 并重连，或切换到手动创建。",
       "version_below": "该智能体的 daemon CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级 daemon，或切换到手动创建。",
       "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
       "submit": "创建（⌘↵）",
-      "sending": "发送中…",
-      "uploading": "上传中…",
+      "sending": "发送中...",
+      "uploading": "上传中...",
       "sent_label": "已发送",
       "sent_count": "已发送 {{count}}",
       "version_blocked_tooltip": "daemon CLI 必须 ≥ {{min}}",

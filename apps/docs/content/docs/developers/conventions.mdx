@@ -100,10 +100,15 @@ This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the
 | Term | Render in Chinese | Example |
 | --- | --- | --- |
 | Issue | `issue` (lowercase) | "把 issue 分配给智能体"、"创建子 issue" |
-| Project | `project` (lowercase) | "归入某个 project" |
 | Skill | `skill` (lowercase) | "为智能体注入 skill" |
-| Autopilot | `autopilot` (lowercase) | "新建 autopilot" |
 | Task | `task` (lowercase) | "排队中的 task" |
+
+**Why `issue` / `skill` / `task` stay English while `project` / `autopilot` are translated**:
+
+- **`issue` / `task`**: dev teams talk in English. The Chinese candidates ("任务" — too vague, almost synonymous with "工作"; "工单" — IT ticket connotation; "议题" — GitHub-style but doesn't match the product feel) all read worse than `issue`.
+- **`skill`**: Multica-specific concept with no established Chinese term.
+- **`project` → "项目"**: settled mainstream Chinese word. Feishu / Tower / Teambition / PingCode / GitHub Projects — every Chinese product translates it. No product keeps `project` in Chinese context.
+- **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (run tasks on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.
 
 ### Don't translate — brands and acronyms
 
@@ -118,6 +123,8 @@ This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the
 | --- | --- |
 | Workspace | **工作区** |
 | Agent | **智能体** |
+| Project | **项目** |
+| Autopilot | **自动化** |
 | Daemon | **守护进程** |
 | Runtime | **运行时** |
 | Inbox | **收件箱** |

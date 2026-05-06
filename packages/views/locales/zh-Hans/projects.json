@@ -1,9 +1,9 @@
 {
   "page": {
-    "title": "project",
-    "new_project": "新建 project",
-    "empty": "还没有 project",
-    "create_first": "创建第一个 project"
+    "title": "项目",
+    "new_project": "新建项目",
+    "empty": "还没有项目",
+    "create_first": "创建第一个项目"
   },
   "table": {
     "name": "名称",
@@ -41,37 +41,37 @@
     "months_ago": "{{count}} 个月前"
   },
   "detail": {
-    "not_found": "未找到该 project",
-    "breadcrumb_fallback": "project",
-    "title_placeholder": "project 标题",
+    "not_found": "未找到该项目",
+    "breadcrumb_fallback": "项目",
+    "title_placeholder": "项目标题",
     "icon_tooltip": "更换图标",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
     "copy_link": "复制链接",
-    "delete_action": "删除 project",
+    "delete_action": "删除项目",
     "section_properties": "属性",
     "section_progress": "进度",
     "section_description": "描述",
     "description_placeholder": "添加描述...",
     "empty_issues_title": "还没有关联的 issue",
-    "empty_issues_hint": "在 issue 详情页将 issue 关联到这个 project。",
+    "empty_issues_hint": "在 issue 详情页将 issue 关联到这个项目。",
     "toast_link_copied": "已复制链接",
-    "toast_project_deleted": "已删除 project",
+    "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动 issue 失败"
   },
   "delete_dialog": {
-    "title": "删除 project",
-    "description": "将删除这个 project。issue 不会被删除，只会从 project 中解除关联。",
+    "title": "删除项目",
+    "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
     "cancel": "取消"
   },
   "picker": {
-    "no_project": "无 project",
-    "remove": "从 project 移除",
-    "empty": "还没有 project"
+    "no_project": "无项目",
+    "remove": "从项目移除",
+    "empty": "还没有项目"
   },
   "chip": {
-    "fallback_label": "project"
+    "fallback_label": "项目"
   }
 }
