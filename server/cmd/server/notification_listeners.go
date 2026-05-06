@@ -19,6 +19,30 @@ import (
 // per device, and not every deployment has VAPID keys configured.
 var pushNotifier *service.PushService
 
+// Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
+// After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
+// and full comment bodies routinely exceeded that, which made Apple reject
+// the message ("payload has exceeded the maximum length") and triggered
+// iOS Safari's silent-fallback behaviour: a generic "Multica" notification
+// AND an auto-incremented icon badge that the SW never got to fix. Cap
+// title and body to lock-screen-readable lengths so payloads stay well
+// under the limit.
+const (
+	pushTitleMaxRunes = 100
+	pushBodyMaxRunes  = 200
+)
+
+func truncateForPush(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
+}
+
 // pushItemToMember sends a Web Push to recipientID's subscribed devices
 // describing the just-created inbox item. Only members get pushes — agents
 // don't have devices.
@@ -35,8 +59,8 @@ func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, r
 	}
 	transport := resolveChannelTransport(ctx, queries, recipientType, recipientID, channelMobile)
 	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
-		Title:   title,
-		Body:    body,
+		Title:   truncateForPush(title, pushTitleMaxRunes),
+		Body:    truncateForPush(body, pushBodyMaxRunes),
 		URL:     "/?issue=" + issueID,
 		Tag:     "issue:" + issueID,
 		IssueID: issueID,

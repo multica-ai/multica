@@ -120,6 +120,31 @@ func inboxItemsByRoute(t *testing.T, recipientID, route string) []struct {
 	return out
 }
 
+// ----------- push payload truncation tests ------------
+
+func TestTruncateForPush(t *testing.T) {
+	cases := []struct {
+		name, in string
+		max      int
+		want     string
+	}{
+		{"empty", "", 200, ""},
+		{"under limit", "Hello world", 200, "Hello world"},
+		{"exact limit", "abcdef", 6, "abcdef"},
+		{"over limit appends ellipsis", "abcdefghij", 5, "abcd…"},
+		{"unicode-safe", "æøåabcdef", 5, "æøåa…"},
+		{"zero max returns empty", "anything", 0, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateForPush(tc.in, tc.max)
+			if got != tc.want {
+				t.Errorf("truncateForPush(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+			}
+		})
+	}
+}
+
 // ----------- channel-first resolver tests ------------
 
 func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
