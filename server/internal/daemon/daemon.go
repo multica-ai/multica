@@ -25,6 +25,11 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+var (
+	isBrewInstall = cli.IsBrewInstall
+	getBrewPrefix = cli.GetBrewPrefix
+)
+
 // workspaceState tracks registered runtimes for a single workspace.
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
@@ -1043,9 +1048,16 @@ func (d *Daemon) triggerRestart() {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
+	if isBrewInstall() {
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			newBin = filepath.Join(brewPrefix, "bin", "multica")
+		} else {
+			d.logger.Warn("brew install detected but brew prefix was unavailable; falling back to resolved executable path")
+			if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+				newBin = resolved
+			}
+		}
+	} else {
 		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
 			newBin = resolved
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -49,6 +50,33 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 	if got != "http://localhost:8080" {
 		t.Fatalf("expected http://localhost:8080, got %s", got)
+	}
+}
+
+func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+	})
+
+	prefix := filepath.Join(t.TempDir(), "home", "linuxbrew", ".linuxbrew")
+	deletedCellarPath := filepath.Join(prefix, "Cellar", "multica", "0.2.9", "bin", "multica")
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return prefix }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	want := filepath.Join(prefix, "bin", "multica")
+	if got := d.RestartBinary(); got != want {
+		t.Fatalf("restart binary = %q, want %q", got, want)
+	}
+	if got := d.RestartBinary(); got == deletedCellarPath {
+		t.Fatalf("restart binary used deleted Cellar path %q", got)
 	}
 }
 
