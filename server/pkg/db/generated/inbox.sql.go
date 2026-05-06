@@ -163,15 +163,30 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 }
 
 const countUnreadInboxForUserAllWorkspaces = `-- name: CountUnreadInboxForUserAllWorkspaces :one
-SELECT count(*) FROM inbox_item
-WHERE recipient_type = 'member' AND recipient_id = $1
-  AND read = false AND archived = false AND route = 'inbox'
+SELECT count(*) FROM (
+    SELECT DISTINCT ON (COALESCE(issue_id, id)) read
+    FROM inbox_item
+    WHERE recipient_type = 'member' AND recipient_id = $1
+      AND archived = false AND route = 'inbox'
+    ORDER BY COALESCE(issue_id, id), created_at DESC
+) latest
+WHERE read = false
 `
 
-// Total unread inbox items for a member across every workspace they belong to.
-// Drives the OS-level PWA app badge, which is single-icon and cannot reflect
-// workspace scope. recipient_type is fixed to 'member' because agents do not
-// carry an OS badge.
+// Number of unread inbox "threads" for a member across every workspace.
+// Drives the OS-level PWA app badge.
+//
+// Inbox items are exposed in the UI grouped by issue_id (one row per issue,
+// Linear-style — see deduplicateInboxItems on the frontend). A single issue
+// can carry several inbox_item rows for the same recipient (assignment +
+// comment + status change), but the user only sees one entry. Counting raw
+// rows here made the badge run several times higher than the sidebar — this
+// is the JEH-561 follow-up fix.
+//
+// The dedup mirrors the frontend exactly: group by COALESCE(issue_id, id),
+// pick the latest row by created_at within each group, count those whose
+// 'read' flag is false. recipient_type is fixed to 'member' — agents have
+// no OS badge.
 func (q *Queries) CountUnreadInboxForUserAllWorkspaces(ctx context.Context, recipientID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnreadInboxForUserAllWorkspaces, recipientID)
 	var count int64

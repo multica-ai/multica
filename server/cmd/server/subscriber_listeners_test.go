@@ -46,13 +46,20 @@ func setUserAutoSubscribePrefs(t *testing.T, userID string, autoSub map[string]b
 // (testPool, testUserID, testWorkspaceID are set in integration_test.go).
 
 // createTestIssue inserts a minimal issue and returns its UUID string.
+// Bumps the workspace's issue_counter atomically so the per-workspace
+// (workspace_id, number) unique constraint holds when a single test
+// creates several issues in the same workspace.
 func createTestIssue(t *testing.T, workspaceID, creatorID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position)
-		VALUES ($1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0)
+		WITH bump AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1 RETURNING issue_counter
+		)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
+		SELECT $1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0, issue_counter FROM bump
 		RETURNING id
 	`, workspaceID, creatorID).Scan(&issueID)
 	if err != nil {
