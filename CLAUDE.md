@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Conventions reference
+
+The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
+
+- **`apps/docs/content/docs/developers/conventions.mdx`** (English)
+- **`apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
+
+Read that page before:
+
+- Writing or editing translations (`packages/views/locales/`)
+- Naming a new route, package, file, DB column, or TS type
+- Writing Chinese product copy (UI strings, error messages, docs)
+
+The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
+
 ## Project Context
 
 Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.

@@ -1,0 +1,285 @@
+---
+title: Conventions
+description: Single source of truth for code naming, i18n translation glossary, and Chinese voice guide.
+---
+
+This page is the single source of truth for code naming, the i18n translation glossary, and the Chinese voice guide. Anything that used to live in `packages/views/locales/glossary.md` or in scattered comments now lives here.
+
+If you write Multica code, change a translation, or write Chinese product copy, this is the page to reference.
+
+---
+
+## 1. Code naming
+
+### Routes
+
+Pre-workspace routes (the routes that exist before the user is in a workspace) MUST use either a single word or the `/{noun}/{verb}` pattern.
+
+- ✅ `/login`, `/inbox`, `/workspaces/new`
+- ❌ `/new-workspace`, `/create-team`, `/accept-invite`
+
+Hyphenated word groups at the root collide with user-chosen workspace slugs and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
+
+### Workspace-scoped routes
+
+Always live under `/{slug}/{section}` — `/{slug}/issues`, `/{slug}/agents`, `/{slug}/settings`. Never duplicate workspace routing logic; use `useNavigation().push()` from shared code, never framework-specific link APIs.
+
+### Packages and modules
+
+The monorepo enforces strict package boundaries:
+
+| Package | May depend on | Must NOT depend on |
+| --- | --- | --- |
+| `packages/core` | nothing app-specific | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
+| `packages/ui` | nothing | `@multica/core`, business logic |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `apps/web/platform/` | `next/*` | other apps |
+| `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
+
+If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication.
+
+### Files and components
+
+- Files: `kebab-case.tsx` / `kebab-case.ts` (e.g. `agent-row-actions.tsx`)
+- Components: `PascalCase` (e.g. `AgentRowActions`)
+- Hooks: `useCamelCase` (e.g. `useWorkspaceId`)
+- Tests: colocated as `<file>.test.ts(x)`
+- Stores (Zustand): `<feature>-store.ts`, exported as `use<Feature>Store`
+
+### Database (Go + sqlc)
+
+- Tables: `snake_case` singular (`user`, `workspace`, `agent_runtime`)
+- Columns: `snake_case` (`workspace_id`, `created_at`, `last_seen_at`)
+- Foreign keys: `<table>_id`
+- Booleans: `is_<state>` or `<state>_at` (timestamp form preferred for state changes)
+- Migration files: `NNN_descriptive_name.up.sql` + `.down.sql` — always provide both directions
+
+### Go
+
+- Standard `gofmt` + `go vet`. No exceptions.
+- Handler files mirror domain: `agent.go`, `auth.go`, `runtime.go`
+- Tests: `<file>_test.go` colocated
+- For UUID parsing in handlers, follow the rule in the root `CLAUDE.md` — `parseUUIDOrBadRequest` for boundary input, `parseUUID` (panicking) for trusted round-trips, never `util.ParseUUID` directly without checking the error.
+
+### TypeScript
+
+- API responses on the wire are `snake_case`; the api client converts to `camelCase` at the boundary. Inside TS code, **always camelCase**.
+- Types: `PascalCase` (`Issue`, `AgentRuntime`); never `IPrefix`, never `_t` suffix.
+- Enums: prefer string literal unions; reserve `enum` for runtime-iterable cases.
+- TanStack Query keys: factory functions in `<feature>/queries.ts`, e.g. `issueKeys.detail(id)`.
+
+### Issue keys
+
+Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (3 letters, uppercase) + sequence number. The prefix is set at workspace creation and is never changed afterward.
+
+### Comments in code
+
+English only. The repo enforces this for both Go and TypeScript. If you find a Chinese comment in code, it's a bug — replace it.
+
+### Commit messages
+
+Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`. Atomic commits grouped by intent.
+
+---
+
+## 2. i18n translation glossary
+
+This is the **mandatory** glossary for every translation PR. It used to live at `packages/views/locales/glossary.md`; that file is now a stub pointing here.
+
+### The core distinction: entity vs concept
+
+Multica's product nouns split into two categories:
+
+- **Entity** — has a URL, a database row, an API type. In Chinese text, render as **lowercase English** so it visually reads like a type name and signals "this is a Multica system entity".
+- **Concept** — generic noun, not a database entity. **Translate fully** so Chinese users don't see jagged English embedded in flowing text.
+
+This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the de facto Chinese voice standard and have been battle-tested across 20+ pages.
+
+### Don't translate — entities (lowercase English)
+
+| Term | Render in Chinese | Example |
+| --- | --- | --- |
+| Issue | `issue` (lowercase) | "把 issue 分配给智能体"、"创建子 issue" |
+| Project | `project` (lowercase) | "归入某个 project" |
+| Skill | `skill` (lowercase) | "为智能体注入 skill" |
+| Autopilot | `autopilot` (lowercase) | "新建 autopilot" |
+| Task | `task` (lowercase) | "排队中的 task" |
+
+### Don't translate — brands and acronyms
+
+| Category | Terms |
+| --- | --- |
+| Brands | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
+| Acronyms | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL |
+
+### Translate fully — concepts
+
+| English | Chinese |
+| --- | --- |
+| Workspace | **工作区** |
+| Agent | **智能体** |
+| Daemon | **守护进程** |
+| Runtime | **运行时** |
+| Inbox | **收件箱** |
+| Comment | **评论** |
+| Reply | **回复** |
+| Notifications | **通知** |
+| Member | **成员** |
+| Label | **标签** |
+| Settings | **设置** |
+| Onboarding | **上手引导** |
+
+### Translate fully — generic UI words
+
+| English | Chinese |
+| --- | --- |
+| Invite / Invitation | 邀请 |
+| Search | 搜索 |
+| Email | 邮箱 (label) / 邮件 (action) |
+| Password | 密码 |
+| Sign in / Log in | 登录 |
+| Sign up | 注册 |
+| Sign out / Log out | 退出登录 |
+| Save / Cancel / Delete | 保存 / 取消 / 删除 |
+| Confirm / Continue / Back | 确认 / 继续 / 返回 |
+| Edit / New / Create / Add | 编辑 / 新建 / 创建 / 添加 |
+| Remove / Send / Open / Close | 移除 / 发送 / 打开 / 关闭 |
+| Done / Loading... | 完成 / 加载中... |
+| Profile / Account / Appearance | 个人资料 / 账号 / 外观 |
+| Theme / Language | 主题 / 语言 |
+| Light / Dark / System | 浅色 / 深色 / 跟随系统 |
+| Active / Archived | 活跃 (or 启用) / 已归档 |
+| Status / Priority | 状态 / 优先级 |
+| Assignee / Reporter | 负责人 / 报告人 |
+| Description / Title | 描述 / 标题 |
+| Date / Time | 日期 / 时间 |
+| Today / Yesterday / Tomorrow | 今天 / 昨天 / 明天 |
+| Empty / Failed / Success | 空 / 失败 / 成功 |
+| Error / Warning | 错误 / 警告 |
+
+### Roles and status enums (lowercase English, not translated)
+
+These are schema-level identifiers; render as lowercase English even in Chinese context.
+
+- Roles: `owner` / `admin` / `member`
+- Issue status: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+
+In UI, surface them in English (optionally `code-style` wrapped):
+
+- "你需要 owner 权限"
+- "已切换到 in_progress"
+
+### Word combination rules
+
+Always put **a single space** between an English word (entity / brand / acronym) and surrounding Chinese:
+
+- "Create new issue" → "新建 issue"
+- "Assign to agent" → "分配给智能体"
+- "Configure runtime" → "配置运行时"
+- "Stop daemon" → "停止守护进程"
+
+### Plurals and counts
+
+i18next uses `_one` / `_other`; Chinese has no grammatical number, only fill `_other`.
+
+```json
+// en/issues.json
+{
+  "issue_count_one": "{{count}} issue",
+  "issue_count_other": "{{count}} issues"
+}
+
+// zh-Hans/issues.json
+{
+  "issue_count_other": "{{count}} 个 issue"
+}
+```
+
+Common count formats:
+
+- `{{count}} issues` → `{{count}} 个 issue`
+- `{{count}} agents` → `{{count}} 个智能体`
+- `{{count}} workspaces` → `{{count}} 个工作区`
+- `{{count}} comments` → `{{count}} 条评论`
+- `{{count}} members` → `{{count}} 位成员`
+- `{{count}} skills` → `{{count}} 个 skill`
+
+### Interpolation
+
+Use `{{var}}`. Chinese translations may reorder for natural sentence flow.
+
+```json
+// en
+{ "welcome_message": "Welcome back, {{name}}!" }
+
+// zh-Hans
+{ "welcome_message": "欢迎回来，{{name}}！" }
+```
+
+### Translation key naming
+
+Three-level nesting: `feature.component.action`.
+
+```json
+{
+  "feature_or_component": {
+    "subcomponent_or_section": {
+      "action_or_label": "..."
+    }
+  }
+}
+```
+
+Examples:
+
+- `issues.toolbar.batch_update_success`
+- `issues.detail.comment_form.placeholder`
+- `inbox.empty.title`
+- `settings.appearance.language.title`
+
+### Web-only / desktop-only copy
+
+- Shared copy: top level of the namespace JSON
+- Web-only: `web` section
+- Desktop-only: `desktop` section
+
+See `auth.json` for the canonical example (the `web` section contains `prefer_desktop` / `desktop_handoff.*`).
+
+---
+
+## 3. Chinese voice and style
+
+### Punctuation
+
+- Full-width punctuation in Chinese: `，。：；！？`
+- Quotes: straight double quotes `"..."` to match the English source. Do not use `「」` or curly quotes.
+- Ellipsis: three dots `...` not the single character `…`. Match the English source.
+- Mixed Chinese-English: a single space on each side of the English word (see Word combination rules).
+
+### Style principles
+
+- **Concise and direct.** Avoid translation-ese: "对于 X 来说"、"作为 X"、"我们的"。
+- **Error messages**: gentle but clear. "无法保存修改" beats "保存修改失败了！".
+- **Buttons**: verb first, 2–4 characters. "取消"、"保存修改"、"立即同步".
+- **Tooltips**: full short sentence. "复制链接到剪贴板".
+- **Placeholders**: example-style. "输入 issue 标题...".
+
+### Where to look when in doubt
+
+When the glossary doesn't cover a term, look at:
+
+1. `apps/docs/content/docs/*.zh.mdx` — the de facto Chinese voice standard, 20+ pages of consistent translation
+2. `packages/views/locales/zh-Hans/auth.json` and `editor.json` — JSON structure + selector API patterns
+3. `packages/views/auth/login-page.tsx` — component-level selector API call site
+4. `packages/views/settings/components/appearance-tab.tsx` — language switcher reference
+
+---
+
+## Updating this page
+
+If you change a rule here, also:
+
+1. Apply it in the relevant locale JSONs / CLAUDE.md / docs page
+2. Note the change in the PR description so reviewers know to look for downstream sweep
+
+This page is the contract; nothing else overrides it.
