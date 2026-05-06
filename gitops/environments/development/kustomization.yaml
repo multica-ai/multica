@@ -32,6 +32,6 @@ patchesStrategicMerge:
   - patches/delete-cloudfront.yaml
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
-    newTag: "d8fde05f"
+    newTag: "b9af5b1a"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "d8fde05f"
