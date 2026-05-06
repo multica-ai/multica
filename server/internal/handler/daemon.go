@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/channel"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -68,6 +70,117 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 		return db.AgentRuntime{}, false
 	}
 	return rt, true
+}
+
+// channelAgentContextWindow returns how many recent messages to inject
+// into the agent's context for a channel-mention task. Reads
+// CHANNEL_AGENT_CONTEXT_MESSAGES at call time so operators can adjust
+// without a deploy. Default 50; capped at 200 (the channel list limit).
+func channelAgentContextWindow() int32 {
+	const defaultN = 50
+	const maxN = 200
+	v := os.Getenv("CHANNEL_AGENT_CONTEXT_MESSAGES")
+	if v == "" {
+		return defaultN
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultN
+	}
+	if int32(n) > maxN {
+		return maxN
+	}
+	return int32(n)
+}
+
+// loadChannelHistoryForTask fetches the last N messages in the channel
+// older than the triggering message and resolves author names. Returns
+// oldest-first so the rendered context reads naturally as a transcript.
+// Best-effort: any DB error returns an empty slice and the agent simply
+// gets less context, rather than failing the claim.
+func (h *Handler) loadChannelHistoryForTask(ctx context.Context, cm service.ChannelMentionContext) []ChannelHistoryMessage {
+	if cm.ChannelID == "" {
+		return nil
+	}
+	channelUUID, err := util.ParseUUID(cm.ChannelID)
+	if err != nil {
+		return nil
+	}
+
+	// Anchor on the triggering message's created_at — we want messages
+	// strictly older than it, so the agent doesn't see the trigger twice
+	// (it has its own dedicated section in the rendered context).
+	var before *pgtype.Timestamptz
+	if cm.MessageID != "" {
+		if msgUUID, err := util.ParseUUID(cm.MessageID); err == nil {
+			if msg, err := h.Queries.GetChannelMessage(ctx, msgUUID); err == nil {
+				ts := msg.CreatedAt
+				before = &ts
+			}
+		}
+	}
+
+	rows, err := h.ChannelMessageService.List(ctx, channel.ListMessagesParams{
+		ChannelID:       channelUUID,
+		BeforeCreatedAt: before,
+		Limit:           channelAgentContextWindow(),
+	})
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+
+	// Batch-resolve author display names so a 50-message context costs
+	// at most one query per unique author rather than one per row.
+	memberNames := map[string]string{}
+	agentNames := map[string]string{}
+	for _, m := range rows {
+		switch m.AuthorType {
+		case "member":
+			memberNames[uuidToString(m.AuthorID)] = ""
+		case "agent":
+			agentNames[uuidToString(m.AuthorID)] = ""
+		}
+	}
+	for id := range memberNames {
+		if uid, err := util.ParseUUID(id); err == nil {
+			if u, err := h.Queries.GetUser(ctx, uid); err == nil {
+				memberNames[id] = u.Name
+			}
+		}
+	}
+	for id := range agentNames {
+		if aid, err := util.ParseUUID(id); err == nil {
+			if a, err := h.Queries.GetAgent(ctx, aid); err == nil {
+				agentNames[id] = a.Name
+			}
+		}
+	}
+
+	out := make([]ChannelHistoryMessage, 0, len(rows))
+	// rows arrive newest-first from the timeline query; reverse so the
+	// agent sees a natural top-to-bottom transcript.
+	for i := len(rows) - 1; i >= 0; i-- {
+		m := rows[i]
+		authorID := uuidToString(m.AuthorID)
+		var name string
+		switch m.AuthorType {
+		case "member":
+			name = memberNames[authorID]
+		case "agent":
+			name = agentNames[authorID]
+		}
+		if name == "" {
+			name = m.AuthorType
+		}
+		out = append(out, ChannelHistoryMessage{
+			ID:         uuidToString(m.ID),
+			CreatedAt:  timestampToString(m.CreatedAt),
+			AuthorType: m.AuthorType,
+			AuthorName: name,
+			Content:    m.Content,
+		})
+	}
+	return out
 }
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
@@ -957,6 +1070,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Memory artifact injection — pull anything anchored to this
+			// issue, then to the issue's project (when present), then to
+			// the claiming agent (long-lived agent persona/preferences).
+			// Order is most-specific-first because the prompt builder
+			// renders them in this order and the agent reads top-down.
+			//
+			// Best-effort: a failed lookup logs and continues with no
+			// artifacts rather than failing the claim. Per-anchor limit caps
+			// the total payload — the agent can fetch more via the API if it
+			// needs to. Default 10 per anchor = at most 30 artifacts × the
+			// per-artifact content cap (100KB) = ~3MB worst case, but
+			// typical workspaces will have <5 anchored at any one time.
+			// Dedup in fetchMemoryArtifactsForTask handles artifacts pinned
+			// to multiple anchors.
+			const maxArtifactsPerAnchor = 10
+			resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+				r.Context(),
+				issue.WorkspaceID,
+				[]taskAnchor{
+					{Type: "issue", ID: issue.ID},
+					{Type: "project", ID: issue.ProjectID},
+					{Type: "agent", ID: task.AgentID},
+				},
+				maxArtifactsPerAnchor,
+			)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1090,17 +1229,99 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
+	hasChannelMention := false
 	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
-		var qc service.QuickCreateContext
-		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
-			hasQuickCreate = true
-			resp.QuickCreatePrompt = qc.Prompt
-			resp.WorkspaceID = qc.WorkspaceID
-			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+		// Lightweight type sniff before committing to a full unmarshal —
+		// we have two no-issue/no-chat task shapes today (quick-create and
+		// channel-mention) and a malformed payload shouldn't pollute either
+		// branch.
+		var probe struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(task.Context, &probe)
+		switch probe.Type {
+		case service.QuickCreateContextType:
+			var qc service.QuickCreateContext
+			if json.Unmarshal(task.Context, &qc) == nil {
+				hasQuickCreate = true
+				resp.QuickCreatePrompt = qc.Prompt
+				resp.WorkspaceID = qc.WorkspaceID
+				if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
 				}
+			}
+		case service.ChannelMentionContextType:
+			// Phase 3b: hydrate channel-mention fields onto the wire so
+			// the daemon's prompt + context renderers can see them. The
+			// recent-message window is intentionally NOT fetched here —
+			// the daemon pulls the latest 50 (configurable via
+			// CHANNEL_AGENT_CONTEXT_MESSAGES) at execution time so the
+			// window stays fresh between enqueue and claim.
+			var cm service.ChannelMentionContext
+			if json.Unmarshal(task.Context, &cm) == nil {
+				hasChannelMention = true
+				resp.WorkspaceID = cm.WorkspaceID
+				resp.ChannelID = cm.ChannelID
+				resp.ChannelName = cm.ChannelName
+				resp.ChannelKind = cm.ChannelKind
+				resp.ChannelMessageID = cm.MessageID
+				resp.ChannelMessageContent = cm.MessageContent
+				resp.TriggerAuthorType = cm.AuthorType
+				// Resolve author display name for the agent prompt.
+				if cm.AuthorID != "" {
+					authorUUID := parseUUID(cm.AuthorID)
+					switch cm.AuthorType {
+					case "member":
+						if u, err := h.Queries.GetUser(r.Context(), authorUUID); err == nil {
+							resp.TriggerAuthorName = u.Name
+						}
+					case "agent":
+						if a, err := h.Queries.GetAgent(r.Context(), authorUUID); err == nil {
+							resp.TriggerAuthorName = a.Name
+						}
+					}
+				}
+				// Channel-session continuity: cluster mentions in the
+				// same channel for this agent into a logical session and
+				// resume the prior agent CLI session_id (e.g. Claude Code
+				// --resume) so the agent recalls earlier messages without
+				// re-fetching channel history. Mirrors the chat-session
+				// pattern but keyed on (agent, channel) since channel
+				// tasks have no chat_session_id.
+				if !task.ForceFreshSession && cm.ChannelID != "" {
+					if prior, err := h.Queries.GetLastChannelMentionSession(r.Context(), db.GetLastChannelMentionSessionParams{
+						AgentID:   task.AgentID,
+						ChannelID: cm.ChannelID,
+					}); err == nil && prior.SessionID.Valid {
+						resp.PriorSessionID = prior.SessionID.String
+						if prior.WorkDir.Valid {
+							resp.PriorWorkDir = prior.WorkDir.String
+						}
+					}
+				}
+				// Inject recent channel history into the wire so the agent
+				// has conversational context without needing a tool call.
+				// Window size is configurable via CHANNEL_AGENT_CONTEXT_MESSAGES.
+				resp.ChannelHistory = h.loadChannelHistoryForTask(r.Context(), cm)
+
+				// Memory artifact injection for channel-mention tasks.
+				// Anchor order: channel (most specific to this conversation),
+				// then agent (for long-lived agent persona/preferences).
+				// No issue or project anchor here — channel-mention tasks
+				// don't have an issue context.
+				const maxArtifactsPerAnchor = 10
+				resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+					r.Context(),
+					parseUUID(cm.WorkspaceID),
+					[]taskAnchor{
+						{Type: "channel", ID: parseUUID(cm.ChannelID)},
+						{Type: "agent", ID: task.AgentID},
+					},
+					maxArtifactsPerAnchor,
+				)
 			}
 		}
 	}
@@ -1124,6 +1345,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_channel_mention", hasChannelMention,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",
@@ -1133,7 +1355,46 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
+	// Inject peer agents — every other non-archived agent in the workspace.
+	// Orchestrator agents (Hermes, picker patterns, etc.) need to know which
+	// peers exist so they can route work by name instead of self-assigning
+	// because they don't realise a coding agent is available. Best-effort:
+	// failure to list logs and continues with an empty list rather than
+	// failing the claim.
+	if workspaceUUID, err := util.ParseUUID(resp.WorkspaceID); err == nil {
+		if peers, err := h.Queries.ListAgents(r.Context(), workspaceUUID); err == nil {
+			out := make([]PeerAgentData, 0, len(peers))
+			for _, p := range peers {
+				if uuidToString(p.ID) == uuidToString(task.AgentID) {
+					continue // exclude the claiming agent
+				}
+				out = append(out, PeerAgentData{
+					ID:           uuidToString(p.ID),
+					Name:         p.Name,
+					Instructions: p.Instructions,
+				})
+			}
+			if len(out) > 0 {
+				resp.PeerAgents = out
+			}
+		} else {
+			slog.Warn("task claim: failed to list peer agents (continuing without)", "workspace_id", resp.WorkspaceID, "error", err)
+		}
+
+		// Decide whether this claim is an orchestrator wake: the claiming
+		// agent IS the workspace's configured orchestrator AND the
+		// triggering comment was authored by another agent. Best-effort —
+		// a workspace fetch failure or a missing orchestrator pointer just
+		// leaves the flag false (no behavior change).
+		if ws, err := h.Queries.GetWorkspace(r.Context(), workspaceUUID); err == nil &&
+			ws.OrchestratorAgentID.Valid &&
+			uuidToString(ws.OrchestratorAgentID) == uuidToString(task.AgentID) &&
+			resp.TriggerAuthorType == "agent" {
+			resp.IsOrchestratorWake = true
+		}
+	}
+
+	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID, "peer_agents", len(resp.PeerAgents))
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 

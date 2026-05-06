@@ -2,14 +2,19 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
+import { Archive, Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import {
+  useUpdateProject,
+  useDeleteProject,
+  useArchiveProject,
+  useRestoreProject,
+} from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
@@ -184,6 +189,14 @@ function ProjectIssuesContent({
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
+          // Drag-to-move parity with BoardView. Without this, the ListView
+          // renders rows in read-only mode (the prop being undefined is the
+          // signal to ListView to disable its sortable wiring), so users on
+          // the project detail's list tab couldn't drag issues between
+          // statuses even though the same UX works on /<slug>/issues. The
+          // handler itself is the same one BoardView uses two lines up —
+          // updateIssueMutation with status (and optional position).
+          onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
@@ -218,6 +231,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const archiveProject = useArchiveProject();
+  const restoreProject = useRestoreProject();
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -277,6 +292,31 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     });
   }, [project, deleteProject, router, wsPaths]);
 
+  const handleArchive = useCallback(() => {
+    if (!project) return;
+    archiveProject.mutate(project.id, {
+      onSuccess: () => {
+        toast.success("Project archived");
+        // Don't navigate away — leave the user on the detail page so the
+        // banner appears and they can hit Restore if they didn't mean it.
+        // The active projects list will refetch in the background.
+      },
+      onError: (e) => {
+        toast.error(e instanceof Error ? e.message : "Failed to archive project");
+      },
+    });
+  }, [project, archiveProject]);
+
+  const handleRestore = useCallback(() => {
+    if (!project) return;
+    restoreProject.mutate(project.id, {
+      onSuccess: () => toast.success("Project restored"),
+      onError: (e) => {
+        toast.error(e instanceof Error ? e.message : "Failed to restore project");
+      },
+    });
+  }, [project, restoreProject]);
+
   if (isLoading) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
@@ -331,6 +371,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
           }}
         />
+        {project.archived_at && (
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <Archive className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-amber-700 dark:text-amber-400">
+                Archived. Hidden from the projects list.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="font-medium text-amber-700 hover:underline dark:text-amber-400 disabled:opacity-50"
+              onClick={handleRestore}
+              disabled={restoreProject.isPending}
+            >
+              {restoreProject.isPending ? "Restoring..." : "Restore"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Properties */}
@@ -561,6 +619,35 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     Copy link
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
+                  {/*
+                   * Archive vs Delete:
+                   * - Archive (soft-delete): keeps the row and all issue
+                   *   references; reversible. The default for "I don't
+                   *   want to see this anymore."
+                   * - Delete: hard delete; cascades through resources;
+                   *   issue.project_id gets nulled out; irreversible.
+                   *
+                   * The menu item shown depends on current state — an
+                   * archived project shows Restore + Delete; an active
+                   * one shows Archive + Delete.
+                   */}
+                  {project.archived_at ? (
+                    <DropdownMenuItem
+                      onClick={handleRestore}
+                      disabled={restoreProject.isPending}
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                      Restore project
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem
+                      onClick={handleArchive}
+                      disabled={archiveProject.isPending}
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                      Archive project
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => setDeleteDialogOpen(true)}

@@ -1366,6 +1366,361 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 }
 
+// Memory artifacts anchored to the issue and to the issue's project should
+// both surface in the claim response. Issue-scoped artifacts come first
+// (more specific). The renderer in execenv groups by anchor_type, so this
+// test only verifies the wire-level payload — runtime_config rendering is
+// covered by TestInjectRuntimeConfigEmbedsMemoryArtifacts in execenv_test.go.
+func TestClaimTask_MemoryArtifactsAttached(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	// Project + issue.
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, "Memory injection test").Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, $2, 'memory injection issue', 'todo', 'medium', $3, 'member', 88002, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Two artifacts: one anchored to the issue, one to the project.
+	// Author is the test user (member). Tags exercise the array path.
+	for _, art := range []struct {
+		kind, title, content, anchorType, anchorID string
+		tags                                       []string
+	}{
+		{"runbook", "Issue runbook", "Step 1\nStep 2", "issue", issueID, []string{"deploy"}},
+		{"decision", "Project decision", "We picked JWT.", "project", projectID, nil},
+	} {
+		var tagArr any = art.tags
+		if art.tags == nil {
+			tagArr = []string{}
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO memory_artifact (
+				workspace_id, kind, title, content,
+				anchor_type, anchor_id, author_type, author_id, tags, metadata
+			) VALUES ($1, $2, $3, $4, $5, $6, 'member', $7, $8::text[], '{}')
+		`, testWorkspaceID, art.kind, art.title, art.content, art.anchorType, art.anchorID, testUserID, tagArr); err != nil {
+			t.Fatalf("create memory_artifact %s: %v", art.title, err)
+		}
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM memory_artifact WHERE workspace_id = $1 AND (anchor_id = $2 OR anchor_id = $3)`,
+			testWorkspaceID, issueID, projectID,
+		)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		) VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-memory")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ProjectID       string               `json:"project_id"`
+			MemoryArtifacts []MemoryArtifactData `json:"memory_artifacts"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if got := len(resp.Task.MemoryArtifacts); got != 2 {
+		t.Fatalf("expected 2 memory_artifacts, got %d: %+v", got, resp.Task.MemoryArtifacts)
+	}
+
+	// Wire-level invariant: issue-scoped artifact appears first because the
+	// fetch order is (issue, project) — see fetchMemoryArtifactsForTask.
+	first := resp.Task.MemoryArtifacts[0]
+	if first.AnchorType != "issue" {
+		t.Errorf("expected first artifact anchor_type=issue, got %q", first.AnchorType)
+	}
+	if first.Title != "Issue runbook" {
+		t.Errorf("expected first artifact title='Issue runbook', got %q", first.Title)
+	}
+	if len(first.Tags) != 1 || first.Tags[0] != "deploy" {
+		t.Errorf("expected first.tags=[deploy], got %v", first.Tags)
+	}
+
+	second := resp.Task.MemoryArtifacts[1]
+	if second.AnchorType != "project" {
+		t.Errorf("expected second artifact anchor_type=project, got %q", second.AnchorType)
+	}
+	if second.Title != "Project decision" {
+		t.Errorf("expected second artifact title='Project decision', got %q", second.Title)
+	}
+}
+
+// Pins the new (post-anchor-extension) wire-level invariant: artifacts
+// anchored to the *claiming agent* are also delivered alongside issue +
+// project anchors. Order is (issue, project, agent) — the prompt builder
+// renders most-specific-first.
+func TestClaimTask_MemoryArtifactsIncludesAgentAnchor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, 'agent-anchor injection issue', 'todo', 'medium', $2, 'member', 88003, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Two artifacts: one anchored to the issue, one to the agent itself.
+	// No project anchor on this issue, so the test isolates the new
+	// agent-anchor path without project-anchor noise.
+	for _, art := range []struct {
+		kind, title, content, anchorType, anchorID string
+	}{
+		{"runbook", "Issue runbook", "Step 1", "issue", issueID},
+		{"agent_note", "Agent persona note", "I prefer rebase over merge.", "agent", agentID},
+	} {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO memory_artifact (
+				workspace_id, kind, title, content,
+				anchor_type, anchor_id, author_type, author_id, tags, metadata
+			) VALUES ($1, $2, $3, $4, $5, $6, 'member', $7, '{}'::text[], '{}')
+		`, testWorkspaceID, art.kind, art.title, art.content, art.anchorType, art.anchorID, testUserID); err != nil {
+			t.Fatalf("create memory_artifact %s: %v", art.title, err)
+		}
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM memory_artifact WHERE workspace_id = $1 AND (anchor_id = $2 OR anchor_id = $3)`,
+			testWorkspaceID, issueID, agentID,
+		)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		) VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-agent-anchor")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			MemoryArtifacts []MemoryArtifactData `json:"memory_artifacts"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if got := len(resp.Task.MemoryArtifacts); got != 2 {
+		t.Fatalf("expected 2 memory_artifacts (issue + agent), got %d: %+v", got, resp.Task.MemoryArtifacts)
+	}
+
+	// Issue anchor first, agent anchor second — this is the contract the
+	// daemon's runtime config renderer relies on for ## Memory section
+	// ordering.
+	gotTypes := []string{
+		resp.Task.MemoryArtifacts[0].AnchorType,
+		resp.Task.MemoryArtifacts[1].AnchorType,
+	}
+	wantTypes := []string{"issue", "agent"}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Errorf("artifact[%d].anchor_type: got %q, want %q (full order: %v)", i, gotTypes[i], want, gotTypes)
+		}
+	}
+
+	if resp.Task.MemoryArtifacts[1].Title != "Agent persona note" {
+		t.Errorf("agent-anchored artifact title: got %q, want 'Agent persona note'",
+			resp.Task.MemoryArtifacts[1].Title)
+	}
+}
+
+// Pins the always-inject runtime path: artifacts flagged with
+// always_inject_at_runtime = true ride along on every claim, with
+// anchor_type="always" stamped on the wire so the renderer can group
+// them under their dedicated "Workspace knowledge (always-on)" heading.
+func TestClaimTask_MemoryArtifactsIncludesAlwaysInject(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, 'always-inject test issue', 'todo', 'medium', $2, 'member', 88004, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Two artifacts:
+	//   - One anchored to the issue (regular path).
+	//   - One free-floating but flagged always_inject_at_runtime — should
+	//     reach the wire with anchor_type="always".
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO memory_artifact (
+			workspace_id, kind, title, content,
+			anchor_type, anchor_id, author_type, author_id, tags, metadata,
+			always_inject_at_runtime
+		) VALUES
+			($1, 'runbook', 'Issue runbook', 'Step 1', 'issue', $2, 'member', $3, '{}'::text[], '{}', false),
+			($1, 'wiki_page', 'How we deploy', 'Always green-blue.', NULL, NULL, 'member', $3, '{}'::text[], '{}', true)
+	`, testWorkspaceID, issueID, testUserID); err != nil {
+		t.Fatalf("create memory_artifacts: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM memory_artifact WHERE workspace_id = $1 AND (anchor_id = $2 OR title IN ('How we deploy'))`,
+			testWorkspaceID, issueID,
+		)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		) VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-always-inject")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			MemoryArtifacts []MemoryArtifactData `json:"memory_artifacts"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+
+	var foundIssue, foundAlways bool
+	for _, a := range resp.Task.MemoryArtifacts {
+		switch a.AnchorType {
+		case "issue":
+			foundIssue = true
+			if a.Title != "Issue runbook" {
+				t.Errorf("issue artifact title: got %q want 'Issue runbook'", a.Title)
+			}
+		case "always":
+			foundAlways = true
+			if a.Title != "How we deploy" {
+				t.Errorf("always artifact title: got %q want 'How we deploy'", a.Title)
+			}
+		}
+	}
+	if !foundIssue {
+		t.Errorf("expected issue-anchored artifact in response, got: %+v", resp.Task.MemoryArtifacts)
+	}
+	if !foundAlways {
+		t.Errorf("expected always-inject artifact in response (with anchor_type='always'), got: %+v", resp.Task.MemoryArtifacts)
+	}
+
+	// Order invariant: anchored artifacts come before always-inject ones.
+	// The renderer relies on this — most-specific context first.
+	for i, a := range resp.Task.MemoryArtifacts {
+		if a.AnchorType == "always" {
+			for j := i + 1; j < len(resp.Task.MemoryArtifacts); j++ {
+				if resp.Task.MemoryArtifacts[j].AnchorType != "always" {
+					t.Errorf("always-inject artifact at %d preceded anchored artifact at %d (full: %+v)",
+						i, j, resp.Task.MemoryArtifacts)
+				}
+			}
+			break
+		}
+	}
+}
+
 // When the issue's project has no github_repo resources, the claim handler
 // must fall back to workspace repos (the pre-override behavior).
 func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {

@@ -219,6 +219,230 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
+// TestPrepareWithPeerAgents covers the orchestrator-routing fix: when the
+// claiming agent has peers in the same workspace, runtime_config.md
+// surfaces them by name + id so an orchestrator-style agent (e.g. one that
+// delegates coding work) can route to a peer instead of self-assigning
+// because it doesn't know other agents exist.
+func TestPrepareWithPeerAgents(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID: "44444444-5555-6666-7777-888888888888",
+		PeerAgents: []PeerAgentForEnv{
+			{
+				ID:           "aaaa1111-bbbb-2222-cccc-333344445555",
+				Name:         "Claude Code",
+				Instructions: "Coding agent. Implements features and fixes bugs in code.\nUse for any task that involves writing or modifying source files.",
+			},
+			{
+				ID:   "bbbb2222-cccc-3333-dddd-444455556666",
+				Name: "Reviewer",
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-peer-agents",
+		TaskID:         "44444444-5555-6666-7777-888888888888",
+		AgentName:      "Test Orchestrator",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Peer Agents in this Workspace",
+		"**Claude Code**",
+		"aaaa1111-bbbb-2222-cccc-333344445555",
+		// First non-empty line of multi-line instructions only — proves
+		// we're surfacing the role one-liner, not pasting the whole
+		// instruction block.
+		"Coding agent. Implements features and fixes bugs in code.",
+		"**Reviewer**",
+		// Reassignment hint — the actionable next step for an
+		// orchestrator that just decided to route to a peer.
+		"multica issue assign",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+	// Must NOT bleed the second line of the multi-line peer instructions.
+	if strings.Contains(s, "Use for any task that involves writing or modifying source files.") {
+		t.Errorf("CLAUDE.md leaked second line of peer instructions; should only show first line")
+	}
+}
+
+// TestPrimaryProjectRepoURL covers the helper that picks the project's
+// default repo for the runtime config "Primary repo" callout.
+func TestPrimaryProjectRepoURL(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		resources []ProjectResourceForEnv
+		want      string
+	}{
+		{
+			name:      "empty",
+			resources: nil,
+			want:      "",
+		},
+		{
+			name: "no github_repo (only docs)",
+			resources: []ProjectResourceForEnv{
+				{ResourceType: "notion_page", ResourceRef: json.RawMessage(`{"url":"https://notion.so/x"}`)},
+			},
+			want: "",
+		},
+		{
+			name: "first by position wins",
+			resources: []ProjectResourceForEnv{
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/owner/primary"}`)},
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/owner/secondary"}`)},
+			},
+			want: "https://github.com/owner/primary",
+		},
+		{
+			name: "non-repo resources before the first github_repo are skipped",
+			resources: []ProjectResourceForEnv{
+				{ResourceType: "notion_page", ResourceRef: json.RawMessage(`{"url":"https://notion.so/y"}`)},
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/owner/primary"}`)},
+			},
+			want: "https://github.com/owner/primary",
+		},
+		{
+			name: "malformed json falls through to next github_repo",
+			resources: []ProjectResourceForEnv{
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`not json`)},
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/owner/fallback"}`)},
+			},
+			want: "https://github.com/owner/fallback",
+		},
+		{
+			name: "empty url skipped",
+			resources: []ProjectResourceForEnv{
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":""}`)},
+				{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/owner/real"}`)},
+			},
+			want: "https://github.com/owner/real",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := primaryProjectRepoURL(tc.resources)
+			if got != tc.want {
+				t.Errorf("primaryProjectRepoURL: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrepareWithPrimaryProjectRepo — runtime_config.md should surface the
+// project's primary repo as a deterministic callout above the resource list.
+func TestPrepareWithPrimaryProjectRepo(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	taskCtx := TaskContextForEnv{
+		IssueID:      "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		ProjectID:    "77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+		ProjectTitle: "Multi-repo project",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "88888888-9999-aaaa-bbbb-cccccccccccc",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/owner/primary-app"}`),
+			},
+			{
+				ID:           "99999999-aaaa-bbbb-cccc-dddddddddddd",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/owner/secondary-lib"}`),
+			},
+		},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-primary-repo",
+		TaskID:         "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	if !strings.Contains(s, "**Primary repo:** https://github.com/owner/primary-app") {
+		t.Errorf("CLAUDE.md missing primary repo callout for primary-app")
+	}
+	// Both repos should still appear in the resource list — the primary
+	// callout is additive context, not a filter.
+	if !strings.Contains(s, "https://github.com/owner/primary-app") ||
+		!strings.Contains(s, "https://github.com/owner/secondary-lib") {
+		t.Errorf("CLAUDE.md missing one of the resource bullet entries")
+	}
+}
+
+// TestPrepareWithoutPeerAgents covers the negative path: a single-agent
+// workspace renders no Peer Agents section so we don't pollute the prompt
+// with an empty heading.
+func TestPrepareWithoutPeerAgents(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	taskCtx := TaskContextForEnv{
+		IssueID:    "55555555-6666-7777-8888-999999999999",
+		PeerAgents: nil,
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-no-peers",
+		TaskID:         "55555555-6666-7777-8888-999999999999",
+		AgentName:      "Solo Agent",
+		Provider:       "claude",
+		Task:           taskCtx,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(content), "Peer Agents in this Workspace") {
+		t.Errorf("CLAUDE.md unexpectedly rendered Peer Agents section with no peers")
+	}
+}
+
 // When the issue's project has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.
@@ -2023,4 +2247,251 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			}
 		}
 	})
+}
+
+// Memory artifacts anchored to the issue and its project should appear in
+// CLAUDE.md grouped by anchor_type so the agent can distinguish issue-
+// specific notes from project-wide ones. Verifies the kind label rendering,
+// tag formatting, and the artifact-id footer that lets follow-up tooling
+// reference back to specific entries.
+func TestInjectRuntimeConfigEmbedsMemoryArtifacts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:      "11111111-2222-3333-4444-555555555555",
+		ProjectID:    "22222222-3333-4444-5555-666666666666",
+		ProjectTitle: "Auth platform",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "runbook",
+				Title:      "Login deploy procedure",
+				Content:    "1. Drain green pool\n2. Push artifact\n3. Flip traffic",
+				Tags:       []string{"deploy", "auth"},
+				AnchorType: "issue",
+				AnchorID:   "11111111-2222-3333-4444-555555555555",
+				UpdatedAt:  "2026-05-01T12:00:00Z",
+			},
+			{
+				ID:         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "decision",
+				Title:      "Why JWT over sessions",
+				Content:    "We picked JWT because the mobile clients can't carry a session cookie cleanly.",
+				AnchorType: "project",
+				AnchorID:   "22222222-3333-4444-5555-666666666666",
+				UpdatedAt:  "2026-04-15T09:30:00Z",
+			},
+			{
+				ID:         "cccccccc-cccc-cccc-cccc-cccccccccccc",
+				Kind:       "wiki_page",
+				Title:      "Onboarding overview",
+				Content:    "General workspace orientation, no anchor.",
+				AnchorType: "", // free-floating — should land in the catch-all section
+				UpdatedAt:  "2026-03-20T14:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	// Top-level Memory section + the introductory framing.
+	for _, want := range []string{
+		"## Memory",
+		"Workspace knowledge anchored to this task",
+		// Group headings — order matters: issue first (most specific).
+		"### On this issue",
+		"### On the project",
+		// Free-floating (anchor_type == "") artifacts land under the "Other"
+		// catch-all because they have no specific anchor; the named anchor
+		// groups (issue/project/channel/agent) handle the typed cases.
+		"### Other",
+		// Issue-anchored artifact body and metadata.
+		"#### Runbook — Login deploy procedure",
+		"_Tags: deploy, auth_",
+		"1. Drain green pool",
+		"<sub>Memory artifact `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` · updated 2026-05-01T12:00:00Z</sub>",
+		// Project-anchored artifact.
+		"#### Decision — Why JWT over sessions",
+		"We picked JWT because the mobile clients can't carry a session cookie cleanly.",
+		// Free-floating artifact, now rendered under "Other".
+		"#### Wiki — Onboarding overview",
+		"General workspace orientation, no anchor.",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// "On this issue" must appear before "On the project" so issue-specific
+	// memory takes visual priority. The same heading-order assertion guards
+	// against future refactors that group by kind instead of anchor.
+	if idxIssue := strings.Index(s, "### On this issue"); idxIssue == -1 {
+		t.Fatal("missing issue heading")
+	} else if idxProject := strings.Index(s, "### On the project"); idxProject == -1 {
+		t.Fatal("missing project heading")
+	} else if idxIssue > idxProject {
+		t.Errorf("issue heading should precede project heading; issue=%d project=%d", idxIssue, idxProject)
+	}
+}
+
+// Pins the per-anchor headings introduced by the agent + channel anchor
+// extension. The renderer must surface "On this channel" and "Notes I've
+// kept (agent-anchored)" with content under each — the prompt builder
+// relies on these labels to scope agents' attention.
+func TestInjectRuntimeConfigRendersAgentAndChannelAnchorHeadings(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "agent_note",
+				Title:      "Prefer rebase over merge",
+				Content:    "I rebase by default; only use merge commits for shared branches.",
+				AnchorType: "agent",
+				AnchorID:   "33333333-3333-3333-3333-333333333333",
+				UpdatedAt:  "2026-05-04T10:00:00Z",
+			},
+			{
+				ID:         "22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "wiki_page",
+				Title:      "#deploys channel norms",
+				Content:    "Mention @release-bot for prod cuts; rollbacks need a thread.",
+				AnchorType: "channel",
+				AnchorID:   "44444444-4444-4444-4444-444444444444",
+				UpdatedAt:  "2026-05-03T08:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	for _, want := range []string{
+		"### On this channel",
+		"#### Wiki — #deploys channel norms",
+		"Mention @release-bot for prod cuts",
+		"### Notes I've kept (agent-anchored)",
+		"#### Agent note — Prefer rebase over merge",
+		"I rebase by default",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// Channel anchor (more specific to the active conversation) must
+	// precede agent anchor (long-lived persona) in the rendered output.
+	idxChan := strings.Index(s, "### On this channel")
+	idxAgent := strings.Index(s, "### Notes I've kept (agent-anchored)")
+	if idxChan == -1 || idxAgent == -1 {
+		t.Fatalf("expected both headings; chan=%d agent=%d", idxChan, idxAgent)
+	}
+	if idxChan > idxAgent {
+		t.Errorf("channel heading should precede agent heading; chan=%d agent=%d", idxChan, idxAgent)
+	}
+}
+
+// Pins the always-inject heading. Artifacts with anchor_type="always"
+// (synthetic — only the server stamps them on the wire when always_inject_at_runtime
+// is true on the underlying row) get their own dedicated heading,
+// distinct from anchored content. Renders AFTER all anchored artifacts
+// so the most-specific context still leads.
+func TestInjectRuntimeConfigRendersAlwaysInjectHeading(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		MemoryArtifacts: []MemoryArtifactForEnv{
+			{
+				ID:         "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				Kind:       "runbook",
+				Title:      "Issue runbook",
+				Content:    "Step 1",
+				AnchorType: "issue",
+				UpdatedAt:  "2026-05-01T12:00:00Z",
+			},
+			{
+				ID:         "22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Kind:       "wiki_page",
+				Title:      "How we deploy",
+				Content:    "Always green-blue.",
+				AnchorType: "always",
+				UpdatedAt:  "2026-05-04T10:00:00Z",
+			},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	for _, want := range []string{
+		"### On this issue",
+		"### Workspace knowledge (always-on)",
+		"#### Wiki — How we deploy",
+		"Always green-blue.",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("memory section missing %q", want)
+		}
+	}
+
+	// "On this issue" must appear before "Workspace knowledge (always-on)"
+	// — the per-task anchor is more specific than workspace-wide context.
+	idxIssue := strings.Index(s, "### On this issue")
+	idxAlways := strings.Index(s, "### Workspace knowledge (always-on)")
+	if idxIssue == -1 || idxAlways == -1 {
+		t.Fatalf("expected both headings; issue=%d always=%d", idxIssue, idxAlways)
+	}
+	if idxIssue > idxAlways {
+		t.Errorf("issue heading should precede always heading; issue=%d always=%d", idxIssue, idxAlways)
+	}
+}
+
+// When no memory artifacts are attached, the Memory section must not render
+// at all — empty section headers in CLAUDE.md add token noise without
+// signal and can confuse smaller models into hallucinating "memory".
+//
+// NOTE: We match the literal section heading `\n## Memory\n` rather than
+// the substring `"## Memory"` because the Available Commands prose
+// references the section name in inline backticks (e.g. "the `## Memory`
+// section above") and that's not the heading we're trying to suppress.
+func TestInjectRuntimeConfigOmitsEmptyMemorySection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+	}); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(content), "\n## Memory\n") {
+		t.Errorf("CLAUDE.md should not include the ## Memory section heading when MemoryArtifacts is empty")
+	}
 }

@@ -60,6 +60,13 @@ export interface IssueViewState {
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
+  /**
+   * IDs of parent issues whose sub-issue groups are currently collapsed in
+   * the list view. Default = expanded (matches the IssueDetail page's
+   * sub-issue section). Persisted so the user's open/closed state survives
+   * navigation and reload.
+   */
+  collapsedParentIds: string[];
   setViewMode: (mode: ViewMode) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
@@ -76,6 +83,7 @@ export interface IssueViewState {
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
+  toggleParentCollapsed: (parentId: string) => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -100,6 +108,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     labels: true,
   },
   listCollapsedStatuses: [],
+  collapsedParentIds: [],
 
   setViewMode: (mode) => set({ viewMode: mode }),
   toggleStatusFilter: (status) =>
@@ -198,6 +207,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
+  toggleParentCollapsed: (parentId) =>
+    set((state) => ({
+      collapsedParentIds: state.collapsedParentIds.includes(parentId)
+        ? state.collapsedParentIds.filter((id) => id !== parentId)
+        : [...state.collapsedParentIds, parentId],
+    })),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
@@ -217,6 +232,7 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
+    collapsedParentIds: state.collapsedParentIds,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is

@@ -90,13 +90,26 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               No resources attached.
             </p>
           )}
-          {resources.map((resource) => (
-            <ResourceRow
-              key={resource.id}
-              resource={resource}
-              onRemove={() => handleRemove(resource)}
-            />
-          ))}
+          {resources.map((resource, idx) => {
+            // The first `github_repo` (lowest position; resources arrive
+            // pre-sorted from the server) is the project's primary /
+            // default repo. The agent's runtime context renders it as
+            // the "Primary repo" callout, so we surface the same status
+            // here for the user. To change the primary, remove and re-add
+            // the resources in the desired order — explicit reordering
+            // is a follow-up.
+            const isPrimaryRepo =
+              resource.resource_type === "github_repo" &&
+              resources.findIndex((r) => r.resource_type === "github_repo") === idx;
+            return (
+              <ResourceRow
+                key={resource.id}
+                resource={resource}
+                isPrimary={isPrimaryRepo}
+                onRemove={() => handleRemove(resource)}
+              />
+            );
+          })}
           <Popover open={addOpen} onOpenChange={setAddOpen}>
             <PopoverTrigger
               render={
@@ -169,9 +182,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
 
 function ResourceRow({
   resource,
+  isPrimary = false,
   onRemove,
 }: {
   resource: ProjectResource;
+  isPrimary?: boolean;
   onRemove: () => void;
 }) {
   if (resource.resource_type === "github_repo") {
@@ -194,6 +209,14 @@ function ResourceRow({
           />
           <TooltipContent side="top">{ref.url}</TooltipContent>
         </Tooltip>
+        {isPrimary && (
+          <span
+            className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+            title="Primary repo — issues in this project default to working in this repo. To change, remove and re-add resources in the desired order."
+          >
+            Primary
+          </span>
+        )}
         <button
           type="button"
           onClick={onRemove}

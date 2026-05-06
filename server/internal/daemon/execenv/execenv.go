@@ -29,6 +29,33 @@ type ProjectResourceForEnv struct {
 	Label        string          // optional user-supplied label
 }
 
+// PeerAgentForEnv describes another non-archived agent in the same workspace
+// as the claiming agent. The runtime config renders a "Peer Agents" section
+// listing them by name and id, so orchestrators that select an assignee
+// (e.g. via `multica issue assign --to <name>`) can resolve a real peer
+// instead of self-assigning because they don't know other agents exist.
+type PeerAgentForEnv struct {
+	ID           string
+	Name         string
+	Instructions string // short description / role; surfaced as a one-liner
+}
+
+// MemoryArtifactForEnv describes a memory artifact anchored to the issue or
+// its project, delivered into the agent's runtime context as part of
+// CLAUDE.md / AGENTS.md. The meta-skill renderer groups by anchor_type so
+// the agent can tell "this is about THIS issue" vs "this is about the
+// surrounding project."
+type MemoryArtifactForEnv struct {
+	ID         string   // server-assigned UUID
+	Kind       string   // wiki_page | agent_note | runbook | decision
+	Title      string   // short header
+	Content    string   // markdown body — already trimmed by the server side cap
+	Tags       []string // free-form labels (e.g. "auth", "deploy")
+	AnchorType string   // "issue" | "project" — used for section grouping
+	AnchorID   string   // for fetch-more-via-CLI suggestions
+	UpdatedAt  string   // ISO8601 — surfaced so agent can reason about freshness
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string            // base path for all envs (e.g., ~/multica_workspaces)
@@ -52,6 +79,8 @@ type TaskContextForEnv struct {
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	PeerAgents              []PeerAgentForEnv       // other non-archived agents in this workspace, surfaced to orchestrators so they can route by name
+	MemoryArtifacts         []MemoryArtifactForEnv  // wiki/notes/runbooks/decisions anchored to this issue or its project
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string              // non-empty for autopilot run_only tasks
 	AutopilotID             string
@@ -60,6 +89,29 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	// Channel-mention task fields (Phase 3b). Mutually exclusive with the
+	// other variants — populated by the daemon when ChannelID is non-empty
+	// on the wire Task.
+	ChannelID             string
+	ChannelName           string
+	ChannelKind           string
+	ChannelMessageID      string
+	ChannelMessageContent string
+	ChannelAuthorType     string
+	ChannelAuthorName     string
+	// ChannelHistory is recent messages older than the trigger, oldest
+	// first. renderChannelMentionContext embeds these so the agent has a
+	// transcript without needing to fetch.
+	ChannelHistory []ChannelHistoryEntry
+}
+
+// ChannelHistoryEntry is the daemon-side rendering shape for one message.
+type ChannelHistoryEntry struct {
+	ID         string
+	CreatedAt  string
+	AuthorType string
+	AuthorName string
+	Content    string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

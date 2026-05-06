@@ -8,6 +8,48 @@ import (
 	"strings"
 )
 
+// primaryProjectRepoURL returns the URL of the first `github_repo` resource
+// in the list — by convention, the project's primary / default repo. The
+// daemon receives resources already ordered by the server's `position ASC,
+// created_at ASC`, so "first" is deterministic. Returns "" when the project
+// has no github_repo resources (e.g. it only attaches docs or notion pages).
+func primaryProjectRepoURL(resources []ProjectResourceForEnv) string {
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(r.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if payload.URL != "" {
+			return payload.URL
+		}
+	}
+	return ""
+}
+
+// formatMemoryKindLabel renders a memory_artifact.kind as a short, human-
+// readable badge for the meta-skill heading. Unknown kinds fall back to the
+// raw string so future kinds (added on the server side) are still legible
+// without a daemon update.
+func formatMemoryKindLabel(kind string) string {
+	switch kind {
+	case "wiki_page":
+		return "Wiki"
+	case "agent_note":
+		return "Agent note"
+	case "runbook":
+		return "Runbook"
+	case "decision":
+		return "Decision"
+	default:
+		return kind
+	}
+}
+
 // formatProjectResource renders a single resource as a human-readable bullet.
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
@@ -101,6 +143,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject peer agents — every other non-archived agent in the workspace.
+	// Orchestrator-style agents (the picker, Hermes, etc.) need to know who
+	// the other agents are so they can route work by name (`multica issue
+	// assign --to <name>` or `--assignee <name>` on create) instead of self-
+	// assigning because they don't realise other agents exist. The block is
+	// agent-name-agnostic — it lists peers as data, never hardcodes which
+	// peer to pick; the agent's own instructions decide the routing policy.
+	if len(ctx.PeerAgents) > 0 {
+		b.WriteString("## Peer Agents in this Workspace\n\n")
+		b.WriteString("Other agents are available in this workspace. When delegating work (creating issues for others, reassigning, picking an assignee), refer to them by name. Do not assume you are the only agent — if a task is outside your role, route it to a peer instead of self-assigning.\n\n")
+		for _, p := range ctx.PeerAgents {
+			fmt.Fprintf(&b, "- **%s** (id: `%s`)", p.Name, p.ID)
+			if trimmed := strings.TrimSpace(p.Instructions); trimmed != "" {
+				// First non-empty line of the peer's instructions —
+				// usually their role/persona one-liner.
+				if idx := strings.IndexByte(trimmed, '\n'); idx > 0 {
+					trimmed = trimmed[:idx]
+				}
+				fmt.Fprintf(&b, " — %s", trimmed)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\nUse `multica issue assign <issue-id> --to <name>` to reassign, or `--assignee <name>` on `multica issue create` to dispatch a new issue to a peer.\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
@@ -119,7 +186,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
 	b.WriteString("- `multica autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
 	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
-	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n\n")
+	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n")
+	b.WriteString("- `multica memory list [--kind X] [--limit N] --output json` — List memory artifacts (wiki/runbook/decision/agent_note) in the workspace. The runtime context above already includes artifacts anchored to the current task; use this to browse the wider library.\n")
+	b.WriteString("- `multica memory get <id> --output json` — Get a memory artifact's full content. Use the IDs from the `## Memory` section above to fetch updated copies if you suspect the embedded content is stale.\n")
+	b.WriteString("- `multica memory search --q \"...\" [--kind X] --output json` — Full-text search memory artifacts via tsvector. Use this to find runbooks/decisions on a topic before duplicating one.\n")
+	b.WriteString("- `multica memory by-anchor <type> <id> --output json` — List artifacts anchored to a specific entity (e.g. `multica memory by-anchor issue <issue-id>`). Anchor types: issue | project | agent | channel.\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
@@ -147,7 +218,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
+	b.WriteString("- `multica memory create --kind <kind> --title \"...\" --content-file - [--anchor type:id] [--tags a,b,c] [--always-inject]` — Create a memory artifact. Use `--content-file -` to pipe markdown via stdin (HEREDOC pattern as for comments). Anchor it to the current issue/project/channel — or to your own agent id — so the next agent on a similar task picks it up via runtime injection. Use `--always-inject` only for workspace-wide rules (e.g. \"How we deploy\", \"Brand voice\") that every agent should see; the runtime caps these to 5 per workspace. Recommended kinds: `agent_note` for findings during work; `runbook` for procedures; `decision` for architectural choices; `wiki_page` for general knowledge.\n")
+	b.WriteString("- `multica memory update <id> [--title X] [--content-file -] [--tags ...] [--anchor type:id|none] [--always-inject=true|false]` — Partial update; only fields you pass are changed. Pass `--anchor none` to clear the anchor; `--always-inject=false` to remove from always-on.\n")
+	b.WriteString("- `multica memory archive <id>` — Soft-delete (reversible via `restore`). Prefer over `delete` so the history isn't lost.\n")
+	b.WriteString("- `multica memory restore <id>` — Restore an archived artifact.\n")
+	b.WriteString("- `multica memory delete <id>` — Hard-delete (irreversible — prefer `archive`).\n\n")
+	b.WriteString("**When to write memory:** if you discover something non-obvious during a task — a footgun, a constraint, a workaround — write a short `agent_note` artifact anchored to the issue or project (or to your own agent id for cross-task notes). The next agent dispatched to similar work will read it through the `## Memory` section automatically. Keep notes terse — one or two paragraphs, focused on the surprise.\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
@@ -176,6 +253,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
 		if len(ctx.ProjectResources) > 0 {
+			// The first `github_repo` resource (lowest position) is the project's
+			// primary / default repo. Surface it explicitly so the agent has a
+			// deterministic answer to "which repo do I work in?" instead of having
+			// to guess from the issue description. Falls back to no callout when
+			// the project has no github_repo resources at all (e.g. only docs or
+			// notion pages attached).
+			if primaryRepo := primaryProjectRepoURL(ctx.ProjectResources); primaryRepo != "" {
+				fmt.Fprintf(&b, "**Primary repo:** %s — when an issue under this project doesn't say otherwise, work in this repo. Use `multica repo checkout %s` to fetch it.\n\n", primaryRepo, primaryRepo)
+			}
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
@@ -185,6 +271,70 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
+	}
+
+	// Inject memory artifacts anchored to this issue (and its parent project,
+	// if any). The server-side claim handler caps the count and ordering so
+	// the renderer here is purely presentation: group by anchor_type so the
+	// agent can tell "about THIS issue" vs "about the surrounding project."
+	//
+	// Title/content render verbatim — the artifacts ARE the content the user
+	// or another agent curated, so we don't paraphrase or compress. Each
+	// artifact gets a stable ID footer so the agent can reference it back
+	// (and we'll wire `multica memory get <id>` in a follow-up so the agent
+	// can pull updated content if it suspects staleness).
+	if len(ctx.MemoryArtifacts) > 0 {
+		b.WriteString("## Memory\n\n")
+		b.WriteString("Workspace knowledge anchored to this task. ")
+		b.WriteString("Treat as authoritative context — these are runbooks, decisions, and notes the team has explicitly attached. ")
+		b.WriteString("Read what's relevant; don't blindly act on every artifact.\n\n")
+
+		// Group by anchor type. Issue and project anchors come from the
+		// issue-claim path; agent anchors carry long-lived agent persona/
+		// preferences and ride along on every task; channel anchors come
+		// from the channel-mention claim path. Order matches the per-task
+		// fetch order: most-specific anchor first.
+		byAnchor := make(map[string][]MemoryArtifactForEnv)
+		for _, a := range ctx.MemoryArtifacts {
+			byAnchor[a.AnchorType] = append(byAnchor[a.AnchorType], a)
+		}
+
+		writeArtifacts := func(header string, list []MemoryArtifactForEnv) {
+			if len(list) == 0 {
+				return
+			}
+			fmt.Fprintf(&b, "### %s\n\n", header)
+			for _, a := range list {
+				fmt.Fprintf(&b, "#### %s — %s\n\n", formatMemoryKindLabel(a.Kind), a.Title)
+				if len(a.Tags) > 0 {
+					fmt.Fprintf(&b, "_Tags: %s_\n\n", strings.Join(a.Tags, ", "))
+				}
+				b.WriteString(strings.TrimSpace(a.Content))
+				b.WriteString("\n\n")
+				fmt.Fprintf(&b, "<sub>Memory artifact `%s` · updated %s</sub>\n\n", a.ID, a.UpdatedAt)
+			}
+		}
+
+		// Render in fixed order. Anchor types not in the known set get
+		// dropped into a generic "Other" bucket — better than silently
+		// hiding them when a future anchor type is added on the server.
+		// "always" is a synthetic anchor_type the server stamps on
+		// always_inject_at_runtime artifacts so they get their own
+		// heading rather than merging with anchored content.
+		writeArtifacts("On this issue", byAnchor["issue"])
+		writeArtifacts("On the project", byAnchor["project"])
+		writeArtifacts("On this channel", byAnchor["channel"])
+		writeArtifacts("Notes I've kept (agent-anchored)", byAnchor["agent"])
+		writeArtifacts("Workspace knowledge (always-on)", byAnchor["always"])
+		var unknown []MemoryArtifactForEnv
+		for kind, list := range byAnchor {
+			switch kind {
+			case "issue", "project", "channel", "agent", "always":
+				continue
+			}
+			unknown = append(unknown, list...)
+		}
+		writeArtifacts("Other", unknown)
 	}
 
 	b.WriteString("### Workflow\n\n")

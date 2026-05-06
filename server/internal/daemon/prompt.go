@@ -11,6 +11,13 @@ import (
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig.
 func BuildPrompt(task Task) string {
+	// Channel-mention check goes FIRST: a channel-mention task has neither
+	// IssueID nor ChatSessionID, but it shouldn't fall through to the
+	// quick-create or default-issue branches. The hydrator on the server
+	// only populates ChannelID when context.type == "channel_mention".
+	if task.ChannelID != "" {
+		return buildChannelMentionPrompt(task)
+	}
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -70,7 +77,24 @@ func buildQuickCreatePrompt(task Task) string {
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
-	if agentName != "" {
+	// Two regimes for the "user didn't name an assignee" default:
+	//
+	//  - Single-agent workspace (no peers): the picker is the only agent
+	//    available; self-assign is the only sensible default and matches
+	//    today's behavior.
+	//
+	//  - Workspace has peer agents: orchestrator-style pickers (Hermes,
+	//    routing patterns, etc.) need to be allowed to delegate by name
+	//    instead of forced to self-assign. The Agent Identity / Peer
+	//    Agents sections in CLAUDE.md already tell the agent who exists
+	//    and what their role is; we just stop the prompt from overriding
+	//    the persona's routing logic. Coding-agent personas will still
+	//    self-assign (their instructions tell them so); orchestrator
+	//    personas will route. The decision lives in the persona.
+	hasPeers := len(task.PeerAgents) > 0
+	if agentName != "" && hasPeers {
+		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, decide based on the work AND your role described in the Agent Identity section. If your persona delegates this kind of task to a peer (peers are listed in the \"Peer Agents in this Workspace\" section above, with each peer's role one-liner), pass `--assignee \"<peer name>\"`. Otherwise keep it yourself: pass `--assignee %q`. Never leave the issue unassigned. Pick exactly one assignee.\n\n", agentName)
+	} else if agentName != "" {
 		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned.\n\n", agentName)
 	} else {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
@@ -111,7 +135,21 @@ func buildCommentPrompt(task Task) string {
 		}
 		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
-		if task.TriggerAuthorType == "agent" {
+		switch {
+		case task.IsOrchestratorWake:
+			// The orchestrator pattern — this agent is configured as the
+			// workspace's orchestrator and was woken because a peer agent
+			// posted on this issue. Different default than the generic
+			// agent-to-agent case: the orchestrator is SUPPOSED to react.
+			// "Silence is the preferred way to end agent-to-agent threads"
+			// would defeat the whole point.
+			b.WriteString("**You are this workspace's orchestrator.** A peer agent just posted on an issue — review it, decide on the next step, and act. Common moves:\n\n")
+			b.WriteString("- **Acknowledge + change status**: e.g. when a peer reports work complete, update the issue status (`multica issue status <id> in_review` or `done`) and post a brief acknowledgment.\n")
+			b.WriteString("- **Reassign**: if the comment indicates the work belongs to a different agent (e.g. \"this needs the reviewer\"), `multica issue assign <id> --to <peer-name>` and post a one-liner explaining the handoff.\n")
+			b.WriteString("- **Ping a human**: when a peer asks for clarification or flags a blocker that needs human input, @mention the appropriate workspace member in your reply so they get notified.\n")
+			b.WriteString("- **Drive forward**: if the work is mid-flight and you have context the peer is missing, post a directive comment on the same thread.\n\n")
+			b.WriteString("Do NOT do nothing. Do NOT post \"acknowledged\" with no follow-up — silence isn't your job here. If you genuinely have no action to take, post a one-liner explaining why (the user will read it).\n\n")
+		case task.TriggerAuthorType == "agent":
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}
 	}
@@ -162,5 +200,76 @@ func buildAutopilotPrompt(task Task) string {
 		b.WriteString("Complete the instructions above.\n")
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	return b.String()
+}
+
+// buildChannelMentionPrompt constructs a prompt for tasks triggered by an
+// @-mention in a channel message. The agent is acting as a conversational
+// participant — there is NO issue, NO branch, NO commit; the agent's
+// reply is posted back as a `channel_message` from its identity.
+//
+// The triggering message is embedded inline so the agent doesn't have to
+// re-fetch it; recent message history is fetchable via
+// `multica channel history` (CLI extension TBD; for now the agent has the
+// triggering message and channel name only).
+func buildChannelMentionPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a chat participant in a Multica workspace channel.\n\n")
+	if task.ChannelName != "" {
+		fmt.Fprintf(&b, "**Channel:** #%s\n", task.ChannelName)
+	}
+	if task.ChannelID != "" {
+		fmt.Fprintf(&b, "**Channel ID:** `%s`\n", task.ChannelID)
+	}
+	if task.Agent != nil && task.Agent.Name != "" {
+		fmt.Fprintf(&b, "**You are:** %s\n", task.Agent.Name)
+	}
+	if task.TriggerAuthorName != "" {
+		who := task.TriggerAuthorName
+		if task.TriggerAuthorType == "agent" {
+			who += " (agent)"
+		}
+		fmt.Fprintf(&b, "**Mentioned by:** %s\n", who)
+	}
+	b.WriteString("\n")
+	// Include recent channel history directly in the user prompt — not just
+	// in CLAUDE.md — because resumed Claude Code sessions tend to trust
+	// their conversation memory over re-read context files. With history in
+	// the per-turn prompt the model sees a fresh snapshot it can't miss.
+	if len(task.ChannelHistory) > 0 {
+		b.WriteString("Recent channel history (oldest first; triggering message is below this section):\n\n")
+		for _, m := range task.ChannelHistory {
+			who := m.AuthorName
+			if m.AuthorType == "agent" {
+				who += " (agent)"
+			}
+			ts := m.CreatedAt
+			if len(ts) >= 19 {
+				ts = ts[:19] + "Z"
+			}
+			fmt.Fprintf(&b, "[%s] %s:\n", ts, who)
+			b.WriteString("> ")
+			b.WriteString(strings.ReplaceAll(m.Content, "\n", "\n> "))
+			b.WriteString("\n\n")
+		}
+	}
+	if task.ChannelMessageContent != "" {
+		b.WriteString("Triggering message:\n\n> ")
+		b.WriteString(strings.ReplaceAll(task.ChannelMessageContent, "\n", "\n> "))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Respond conversationally as if you were a teammate in the channel. ")
+	b.WriteString("Your reply will be posted as a single `channel_message` from your agent identity ")
+	b.WriteString("once you finish — there is no separate `multica` command to call. Just produce ")
+	b.WriteString("your reply as your final output and exit.\n\n")
+	b.WriteString("Constraints:\n")
+	b.WriteString("- This is NOT an issue task. Do not call `multica issue ...` commands.\n")
+	b.WriteString("- Do not @-mention other agents in your reply unless absolutely necessary — repeated cross-agent mentions can produce notification storms.\n")
+	b.WriteString("- Keep replies concise. Markdown (code blocks, lists, links) renders correctly in the channel.\n")
+	b.WriteString("- If the request is ambiguous, ask one clarifying question rather than guessing.\n")
+	b.WriteString("- When the user asks about earlier messages in this channel, treat the Recent channel history above as the source of truth — your conversation memory only covers prior @-mentions of you, not other people's chatter.\n")
+	if task.ChannelID != "" {
+		fmt.Fprintf(&b, "- If the user references a message older than the window above, run `multica channel history %s --before <oldest-timestamp-you-have> --output json` to fetch more.\n", task.ChannelID)
+	}
 	return b.String()
 }

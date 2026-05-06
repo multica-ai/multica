@@ -133,6 +133,23 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// MemoryArtifactData is the wire shape for a memory_artifact (wiki page,
+// agent note, runbook, decision) injected into the agent's runtime context
+// at task claim. Only fields the meta-skill renderer needs travel across
+// the wire — content is the substantive payload, the rest is presentation
+// metadata. Anchor fields are emitted so the renderer can group artifacts
+// by "this issue" vs "the parent project".
+type MemoryArtifactData struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	Tags       []string `json:"tags,omitempty"`
+	AnchorType string   `json:"anchor_type,omitempty"`
+	AnchorID   string   `json:"anchor_id,omitempty"`
+	UpdatedAt  string   `json:"updated_at"`
+}
+
 type AgentTaskResponse struct {
 	ID                      string          `json:"id"`
 	AgentID                 string          `json:"agent_id"`
@@ -155,6 +172,9 @@ type AgentTaskResponse struct {
 	ProjectID               string                `json:"project_id,omitempty"`         // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`      // for surfacing in agent context
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`  // resources attached to the project
+	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`        // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
+	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // true when the claiming agent is the workspace's configured orchestrator AND the trigger was an agent-authored comment. Tells the prompt builder to render the orchestrator review-and-act block instead of the generic "decide whether to reply" block.
+	MemoryArtifacts         []MemoryArtifactData  `json:"memory_artifacts,omitempty"`   // wiki/note/runbook/decision artifacts anchored to this issue or its project
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
@@ -172,7 +192,32 @@ type AgentTaskResponse struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// Channels Phase 3b — populated when the daemon claims a task whose
+	// JSONB context.type == "channel_mention". Hydrated by ClaimTaskByRuntime
+	// from service.ChannelMentionContext.
+	ChannelID             string `json:"channel_id,omitempty"`
+	ChannelName           string `json:"channel_name,omitempty"`
+	ChannelKind           string `json:"channel_kind,omitempty"`
+	ChannelMessageID      string `json:"channel_message_id,omitempty"`
+	ChannelMessageContent string `json:"channel_message_content,omitempty"`
+	// ChannelHistory carries the most recent N messages from the channel
+	// (oldest first, excluding the triggering message itself) so the agent
+	// has conversational context without an extra round-trip. N defaults
+	// to 50 and is overridable via CHANNEL_AGENT_CONTEXT_MESSAGES on the
+	// server. The daemon renders these into issue_context.md.
+	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
+	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "channel_mention" | "direct" — used by the activity row to label tasks that have no linked issue
+}
+
+// ChannelHistoryMessage is the minimal shape the daemon needs to render
+// recent channel history into the agent's context. Author names are
+// pre-resolved server-side so the daemon doesn't need DB access.
+type ChannelHistoryMessage struct {
+	ID         string `json:"id"`
+	CreatedAt  string `json:"created_at"`
+	AuthorType string `json:"author_type"` // "member" | "agent"
+	AuthorName string `json:"author_name"`
+	Content    string `json:"content"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -186,6 +231,15 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+}
+
+// PeerAgentData is a lightweight projection of another agent in the same
+// workspace, sent to the claiming agent so orchestrators can route work to
+// peers by name. Excludes the claiming agent itself and archived agents.
+type PeerAgentData struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Instructions string `json:"instructions,omitempty"` // short description / role; useful for orchestrators picking the right peer
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
