@@ -7,6 +7,33 @@ REPO=/Users/sara/code/firtal-cerebro
 LOG_DIR="$REPO/.deploy/logs"
 mkdir -p "$LOG_DIR"
 
+# Serialize concurrent invocations. Webhook can fire multiple times
+# back-to-back (e.g. several merges in quick succession). Without a
+# mutex, parallel `next build` runs clobber each other's `.next/`
+# output and the frontend ends up serving 500s with missing
+# client-reference-manifest entries. macOS has no `flock`, so we
+# use atomic `mkdir` and break stale locks left behind by SIGKILL.
+LOCK="$LOG_DIR/deploy.lock"
+WAIT=0
+while ! mkdir "$LOCK" 2>/dev/null; do
+  if [ -r "$LOCK/pid" ]; then
+    PID=$(cat "$LOCK/pid" 2>/dev/null || true)
+    if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+      echo "Breaking stale deploy lock from dead PID $PID" >&2
+      rm -rf "$LOCK"
+      continue
+    fi
+  fi
+  if [ "$WAIT" -ge 600 ]; then
+    echo "Another deploy holds $LOCK after 10 min; giving up." >&2
+    exit 1
+  fi
+  sleep 2
+  WAIT=$((WAIT + 2))
+done
+echo $$ >"$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+
 LOG="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
 LATEST="$LOG_DIR/deploy-latest.log"
 

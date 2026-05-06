@@ -14,8 +14,8 @@ SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateSkill :one
-INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, owner_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateSkill :one
@@ -24,6 +24,22 @@ UPDATE skill SET
     description = COALESCE(sqlc.narg('description'), description),
     content = COALESCE(sqlc.narg('content'), content),
     config = COALESCE(sqlc.narg('config'), config),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateSkillOwnership :one
+UPDATE skill SET
+    owner_id = COALESCE(sqlc.narg('owner_id'), owner_id),
+    approver_ids = COALESCE(sqlc.narg('approver_ids'), approver_ids),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateSkillCurrentVersion :one
+UPDATE skill SET
+    current_version = $2,
+    content = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

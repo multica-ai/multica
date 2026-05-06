@@ -117,6 +117,7 @@ describe("TasksTab", () => {
           workspace_id: "ws-1",
           number: 1,
           identifier: "MUL-1",
+          kind: "issue",
           title: "Fix agent task routing",
           description: "",
           status: "todo",

@@ -87,7 +87,9 @@ interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
-  uploadFile: (file: File) => void;
+  /** Upload and insert a file. Pass `embedImage: true` to render an image
+   *  inline instead of the default attached file card. */
+  uploadFile: (file: File, options?: { embedImage?: boolean }) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
 }
@@ -186,8 +188,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
+          // text-base on mobile keeps font-size at 16px so iOS Safari doesn't
+          // auto-zoom on focus (zoom persists on back-nav).
           class: cn(
-            "rich-text-editor text-sm outline-none",
+            "rich-text-editor text-base md:text-sm outline-none",
             !editable && "readonly",
             className,
           ),
@@ -224,10 +228,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       focus: () => {
         editor?.commands.focus();
       },
-      uploadFile: (file: File) => {
+      uploadFile: (file: File, options?: { embedImage?: boolean }) => {
         if (!editor || !onUploadFileRef.current) return;
         const endPos = editor.state.doc.content.size;
-        uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
+        uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos, options);
       },
       hasActiveUploads: () => {
         if (!editor) return false;

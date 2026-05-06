@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * FileCard — Tiptap node extension for rendering uploaded non-image files
- * as styled cards instead of plain markdown links.
+ * FileCard — Tiptap node extension for rendering uploaded files (default for
+ * all uploads, including images) as styled cards instead of plain markdown
+ * links.
  *
  * Markdown serialization: `!file[filename](href)` — custom syntax that is
  * unambiguous (standard `[name](url)` is indistinguishable from regular links).
@@ -17,7 +18,8 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { FileText, Loader2, Download } from "lucide-react";
+import { FileText, Image as ImageIcon, Loader2, Download } from "lucide-react";
+import { isImageUrl } from "@multica/ui/markdown";
 
 
 // ---------------------------------------------------------------------------
@@ -28,13 +30,31 @@ import { FileText, Loader2, Download } from "lucide-react";
 // React NodeView
 // ---------------------------------------------------------------------------
 
-function FileCardView({ node }: NodeViewProps) {
+function FileCardView({ node, editor, getPos }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const isEditable = editor.isEditable;
+  const canEmbed = !uploading && href && isImageUrl(href);
 
   const openFile = () => {
     window.open(href, "_blank", "noopener,noreferrer");
+  };
+
+  const handleEmbedAsImage = () => {
+    const pos = typeof getPos === "function" ? getPos() : undefined;
+    if (typeof pos !== "number") return;
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(
+        { from: pos, to: pos + node.nodeSize },
+        {
+          type: "image",
+          attrs: { src: href, alt: filename || "image" },
+        },
+      )
+      .run();
   };
 
   return (
@@ -52,10 +72,25 @@ function FileCardView({ node }: NodeViewProps) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm">{uploading ? `Uploading ${filename}` : filename}</p>
         </div>
+        {canEmbed && isEditable && (
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="Embed as image"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleEmbedAsImage();
+            }}
+          >
+            <ImageIcon className="size-3.5" />
+          </button>
+        )}
         {!uploading && href && (
           <button
             type="button"
             className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="Download"
             onMouseDown={(e) => {
               e.preventDefault();
               e.stopPropagation();

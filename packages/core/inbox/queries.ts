@@ -13,6 +13,20 @@ export const inboxKeys = {
     [...inboxKeys.all(wsId), "active-issue-tasks"] as const,
 };
 
+// Cross-workspace key, kept separate from inboxKeys (which all carry a wsId)
+// so it doesn't get caught by per-workspace invalidations during workspace
+// switching. Drives the OS app-icon badge.
+export const appBadgeKeys = {
+  unreadCount: () => ["app-badge", "unread-count"] as const,
+};
+
+export function appBadgeUnreadCountOptions() {
+  return queryOptions({
+    queryKey: appBadgeKeys.unreadCount(),
+    queryFn: () => api.getMyTotalUnreadInboxCount(),
+  });
+}
+
 export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),

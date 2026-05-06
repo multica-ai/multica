@@ -15,6 +15,15 @@ export type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SkillVersion,
+  SkillVersionFileSnapshot,
+  SkillChangeRequest,
+  SkillChangeRequestStatus,
+  SkillFork,
+  UpdateSkillOwnershipRequest,
+  CreateSkillChangeRequestRequest,
+  ReviewSkillChangeRequestRequest,
+  ForkSkillRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimePing,
@@ -56,6 +65,7 @@ export type {
   ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export type { Channel, ChannelKind, ChannelMember, CreateChannelRequest } from "./channel";
 export type { StorageAdapter } from "./storage";
 export type { Project, ProjectStatus, ProjectPriority, ProjectAccess, ProjectMember, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";

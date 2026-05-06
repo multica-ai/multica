@@ -288,6 +288,7 @@ const mockIssue: Issue = {
   workspace_id: "ws-1",
   number: 1,
   identifier: "TES-1",
+  kind: "issue",
   title: "Implement authentication",
   description: "Add JWT auth to the backend",
   status: "in_progress",
@@ -501,5 +502,161 @@ describe("IssueDetail (shared)", () => {
         expect.objectContaining({ description: "" }),
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Channel / DM rendering — same component, different chrome based on
+// issue.kind. JEH-579 acceptance criteria: status/priority/due-date/assignee
+// pickers must be hidden for kind != 'issue', and a participant stack must
+// appear in the page header.
+// ---------------------------------------------------------------------------
+
+const mockChannelIssue: Issue = {
+  ...mockIssue,
+  id: "channel-1",
+  kind: "channel",
+  identifier: "TES-42",
+  title: "growth",
+  description: "Channel topic",
+};
+
+const mockDMIssue: Issue = {
+  ...mockIssue,
+  id: "dm-1",
+  kind: "dm",
+  identifier: "TES-43",
+  title: "",
+  description: null,
+};
+
+describe("IssueDetail (channel/DM)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+  });
+
+  it("hides task chrome and shows Participants for a channel", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockChannelIssue);
+    renderIssueDetail("channel-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Messages")).toBeInTheDocument();
+    });
+
+    // Status/Priority/Due-date/Properties pickers must be gone — they don't
+    // apply to a chat thread.
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+    expect(screen.queryByText("Status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(screen.queryByText("Due date")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assignee")).not.toBeInTheDocument();
+
+    // Participants section replaces them in the sidebar.
+    expect(screen.getByText("Participants")).toBeInTheDocument();
+
+    // Activity → Messages relabel.
+    expect(screen.queryByText("Activity")).not.toBeInTheDocument();
+  });
+
+  it("renders the channel-header bar with hash + name + topic + settings (skærm 1)", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockChannelIssue);
+    renderIssueDetail("channel-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-header")).toBeInTheDocument();
+    });
+
+    const header = screen.getByTestId("channel-header");
+
+    // Hash is rendered as a leading sigil.
+    expect(header.textContent).toContain("#");
+
+    // Channel name lives in an editable title input within the header.
+    const titleInput = screen.getByDisplayValue("growth");
+    expect(header.contains(titleInput)).toBe(true);
+
+    // Description renders as a small topic-strip in the header.
+    expect(screen.getByTestId("channel-topic").textContent).toBe("Channel topic");
+
+    // Participant avatar stack lives in the channel-header right side.
+    const stack = screen.getByTestId("header-participants");
+    expect(header.contains(stack)).toBe(true);
+
+    // Settings icon visible for channels.
+    expect(screen.getByTestId("channel-settings")).toBeInTheDocument();
+  });
+
+  it("collapses the channel-header for a DM (no hash, no topic, no settings)", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockDMIssue);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([
+      // Test User is the viewer; the DM peer is "agent-1" rendered through
+      // the actor name resolver — ensures the DM title is computed from
+      // participants, not pulled from issue.title.
+      { issue_id: "dm-1", user_type: "member", user_id: "user-1", reason: "creator", created_at: "" },
+      { issue_id: "dm-1", user_type: "agent", user_id: "agent-1", reason: "manual", created_at: "" },
+    ]);
+    renderIssueDetail("dm-1");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dm-title")).toBeInTheDocument();
+    });
+
+    // No editable title editor for DMs.
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+
+    // No topic strip and no channel settings affordance.
+    expect(screen.queryByTestId("channel-topic")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("channel-settings")).not.toBeInTheDocument();
+
+    // The DM heading sits inside the channel-header bar.
+    const header = screen.getByTestId("channel-header");
+    expect(header.contains(screen.getByTestId("dm-title"))).toBe(true);
+  });
+
+  it("marks the assigned member with an Owner tag in the participants panel", async () => {
+    const channelWithOwner: Issue = {
+      ...mockChannelIssue,
+      assignee_type: "member",
+      assignee_id: "user-1",
+    };
+    mockApiObj.getIssue.mockResolvedValue(channelWithOwner);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([
+      { issue_id: "channel-1", user_type: "member", user_id: "user-1", reason: "creator", created_at: "" },
+    ]);
+    renderIssueDetail("channel-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Participants")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("owner-tag").textContent).toBe("Owner");
+  });
+
+  it("keeps task chrome visible for a regular issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    renderIssueDetail("issue-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    // Smoke check: channel-header bar is *not* rendered for a normal
+    // issue — it's chat-only chrome.
+    expect(screen.queryByTestId("channel-header")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-participants")).not.toBeInTheDocument();
+
+    // Activity (not Messages) is the section heading for issues.
+    expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
   });
 });

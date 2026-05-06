@@ -106,6 +106,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issue" },
           },
           {
+            path: "channels/:id",
+            element: <IssueDetailPage />,
+            handle: { title: "Channel" },
+          },
+          {
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },

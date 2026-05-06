@@ -8,6 +8,7 @@ import {
   Maximize2,
   Download,
   Link as LinkIcon,
+  Paperclip,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,7 +55,7 @@ function ImageLightbox({
 // Image NodeView — renders img with hover toolbar + lightbox
 // ---------------------------------------------------------------------------
 
-function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
+function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps) {
   const src = node.attrs.src as string;
   const alt = (node.attrs.alt as string) || "";
   const title = node.attrs.title as string | undefined;
@@ -79,6 +80,22 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
     } catch {
       toast.error("Failed to copy link");
     }
+  };
+
+  const handleConvertToFileCard = () => {
+    const pos = typeof getPos === "function" ? getPos() : undefined;
+    if (typeof pos !== "number") return;
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(
+        { from: pos, to: pos + node.nodeSize },
+        {
+          type: "fileCard",
+          attrs: { href: src, filename: alt || "image", fileSize: 0 },
+        },
+      )
+      .run();
   };
 
   return (
@@ -117,6 +134,15 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
             >
               <LinkIcon className="size-3.5" />
             </button>
+            {isEditable && (
+              <button
+                type="button"
+                onClick={handleConvertToFileCard}
+                title="Convert to attachment"
+              >
+                <Paperclip className="size-3.5" />
+              </button>
+            )}
             {isEditable && (
               <button
                 type="button"

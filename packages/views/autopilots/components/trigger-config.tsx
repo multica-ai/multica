@@ -191,7 +191,7 @@ export function TriggerConfigSection({
             value={config.cronExpression}
             onChange={(e) => onChange({ ...config, cronExpression: e.target.value })}
             placeholder="0 9 * * 1-5"
-            className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
+            className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-base md:text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground mt-1">
             Standard 5-field cron (min hour dom month dow)
@@ -213,7 +213,7 @@ export function TriggerConfigSection({
                     const min = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
                     onChange({ ...config, time: `00:${min.toString().padStart(2, "0")}` });
                   }}
-                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-base md:text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
             ) : (
@@ -224,7 +224,7 @@ export function TriggerConfigSection({
                     type="time"
                     value={config.time}
                     onChange={(e) => onChange({ ...config, time: e.target.value || config.time })}
-                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
+                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-base md:text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
                 <div className="flex-1 min-w-0">

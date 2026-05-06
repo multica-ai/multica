@@ -1,6 +1,6 @@
 // CEREBRO-PATCH(core-inbox-ws-updaters): cerebro modification of upstream file
 import type { QueryClient } from "@tanstack/react-query";
-import { inboxKeys } from "./queries";
+import { appBadgeKeys, inboxKeys } from "./queries";
 import { notificationsKeys } from "@multica/cerebro-notifications/core/queries";
 import type { InboxItem, IssueStatus } from "../types";
 
@@ -16,6 +16,7 @@ export function onInboxNew(
     qc.invalidateQueries({ queryKey: notificationsKeys.unreadCount(wsId) });
   } else {
     qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    qc.invalidateQueries({ queryKey: appBadgeKeys.unreadCount() });
   }
 }
 
@@ -41,4 +42,5 @@ export function onInboxInvalidate(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
   qc.invalidateQueries({ queryKey: notificationsKeys.list(wsId) });
   qc.invalidateQueries({ queryKey: notificationsKeys.unreadCount(wsId) });
+  qc.invalidateQueries({ queryKey: appBadgeKeys.unreadCount() });
 }

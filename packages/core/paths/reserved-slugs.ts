@@ -50,6 +50,7 @@ export const RESERVED_SLUGS = new Set([
   // prevents `/{slug}/{view}` from being visually ambiguous (e.g. a
   // workspace named "issues" makes `/issues/abc` mean two things).
   "issues",
+  "channels",
   "projects",
   "autopilots",
   "agents",

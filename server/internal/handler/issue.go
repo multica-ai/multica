@@ -28,6 +28,7 @@ type IssueResponse struct {
 	WorkspaceID        string                  `json:"workspace_id"`
 	Number             int32                   `json:"number"`
 	Identifier         string                  `json:"identifier"`
+	Kind               string                  `json:"kind"`
 	Title              string                  `json:"title"`
 	Description        *string                 `json:"description"`
 	Status             string                  `json:"status"`
@@ -54,6 +55,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
 		Identifier:    identifier,
+		Kind:          i.Kind,
 		Title:         i.Title,
 		Description:   textToPtr(i.Description),
 		Status:        i.Status,
@@ -80,6 +82,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
 		Identifier:    identifier,
+		Kind:          i.Kind,
 		Title:         i.Title,
 		Status:        i.Status,
 		Priority:      i.Priority,
@@ -103,6 +106,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
 		Identifier:    identifier,
+		Kind:          i.Kind,
 		Title:         i.Title,
 		Status:        i.Status,
 		Priority:      i.Priority,

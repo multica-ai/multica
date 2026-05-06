@@ -50,6 +50,7 @@ var reservedSlugs = map[string]bool{
 
 	// Dashboard / workspace route segments
 	"issues":     true,
+	"channels":   true,
 	"projects":   true,
 	"autopilots": true,
 	"agents":     true,

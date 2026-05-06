@@ -25,6 +25,7 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged } from "../inb
 import { inboxKeys } from "../inbox/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
+import { channelKeys } from "../channels/queries";
 import { paths } from "../paths";
 import type {
   MemberAddedPayload,
@@ -123,6 +124,10 @@ export function useRealtimeSync(
       autopilot: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      },
+      channel: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
       },
     };
 

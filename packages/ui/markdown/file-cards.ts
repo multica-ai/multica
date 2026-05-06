@@ -16,6 +16,15 @@
 
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
+/** True if the URL's pathname ends in an image extension. */
+export function isImageUrl(url: string): boolean {
+  try {
+    return IMAGE_EXTS.test(new URL(url).pathname)
+  } catch {
+    return false
+  }
+}
+
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
 const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/
 

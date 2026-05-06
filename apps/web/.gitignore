@@ -1,1 +1,7 @@
 .source/
+
+# Service worker compiled by @serwist/next from app/sw.ts
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+public/workbox-*.js

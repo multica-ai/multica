@@ -18,6 +18,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     workspace_id: "ws-1",
     number: 1,
     identifier: "MUL-1",
+    kind: "issue",
     title: "Test",
     description: null,
     status: "todo",

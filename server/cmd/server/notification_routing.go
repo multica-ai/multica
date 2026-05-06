@@ -26,25 +26,213 @@ const (
 	routeOff           = "off"
 )
 
-// Default routing per notification type when the user has no override.
-// Split types (due_date_changed, priority_changed) get .assignee/.follower
-// suffixes so the assignee gets a stronger signal than passive subscribers.
-var defaultRoutes = map[string]string{
-	"issue_assigned":            routeInbox,
-	"mentioned":                 routeInbox,
-	"task_failed":               routeInbox,
-	"unassigned":                routeNotifications,
-	"reaction_added":            routeNotifications,
-	"new_comment":               routeNotifications,
-	"assignee_changed":          routeNotifications,
-	"status_changed":            routeNotifications,
-	"due_date_changed.assignee": routeInbox,
-	"due_date_changed.follower": routeNotifications,
-	"priority_changed.assignee": routeInbox,
-	"priority_changed.follower": routeNotifications,
+// Channels are independent destinations a notification can land on. A single
+// event can flow to multiple channels (e.g. inbox + mobile push) — they are
+// not mutually exclusive. Mirror of `Channel` in
+// packages/core/notifications/routing.ts.
+const (
+	channelInbox         = "inbox"
+	channelNotifications = "notifications"
+	channelMobile        = "mobile"
+	channelDesktop       = "desktop"
+	channelMail          = "mail"
+)
+
+// allChannels is the canonical iteration order for resolver / migration code.
+var allChannels = []string{
+	channelInbox,
+	channelNotifications,
+	channelMobile,
+	channelDesktop,
+	channelMail,
+}
+
+// defaultChannelChoices is the per-channel default when the user has no
+// override. Mirrors the design in the channel-first mockup. Keys match
+// defaultRoutes exactly; values say whether the channel fires for that key
+// out-of-the-box.
+var defaultChannelChoices = map[string]map[string]bool{
+	channelInbox: {
+		"issue_assigned":            true,
+		"mentioned":                 true,
+		"task_failed":               true,
+		"unassigned":                true,
+		"reaction_added":            false,
+		"new_comment":               false,
+		"assignee_changed":          false,
+		"status_changed":            false,
+		"due_date_changed.assignee": true,
+		"due_date_changed.follower": false,
+		"priority_changed.assignee": true,
+		"priority_changed.follower": false,
+	},
+	channelNotifications: {
+		"issue_assigned":            false,
+		"mentioned":                 false,
+		"task_failed":               false,
+		"unassigned":                false,
+		"reaction_added":            true,
+		"new_comment":               true,
+		"assignee_changed":          true,
+		"status_changed":            true,
+		"due_date_changed.assignee": false,
+		"due_date_changed.follower": true,
+		"priority_changed.assignee": false,
+		"priority_changed.follower": true,
+	},
+	channelMobile: {
+		"issue_assigned":            true,
+		"mentioned":                 true,
+		"task_failed":               false,
+		"unassigned":                false,
+		"reaction_added":            false,
+		"new_comment":               false,
+		"assignee_changed":          false,
+		"status_changed":            false,
+		"due_date_changed.assignee": true,
+		"due_date_changed.follower": false,
+		"priority_changed.assignee": true,
+		"priority_changed.follower": false,
+	},
+	channelDesktop: {
+		"issue_assigned":            true,
+		"mentioned":                 true,
+		"task_failed":               true,
+		"unassigned":                false,
+		"reaction_added":            false,
+		"new_comment":               false,
+		"assignee_changed":          false,
+		"status_changed":            false,
+		"due_date_changed.assignee": true,
+		"due_date_changed.follower": false,
+		"priority_changed.assignee": true,
+		"priority_changed.follower": false,
+	},
+	// Mail is forward-compatible; no events fire by default until the
+	// transport is built.
+	channelMail: {},
+}
+
+// defaultChannelTransport mirrors the per-channel "Visning" defaults from the
+// mockup — badge/sound/banner toggles that apply to the channel as a whole,
+// independent of per-event routing.
+type channelTransport struct {
+	Badge  bool
+	Sound  bool
+	Banner bool
+	Digest string
+}
+
+var defaultChannelTransport = map[string]channelTransport{
+	channelMobile:  {Badge: true, Sound: true},
+	channelDesktop: {Badge: true, Banner: true, Sound: false},
+	channelMail:    {Digest: "daily"},
+}
+
+// resolveChannelChoice reports whether a channel should fire for this user
+// and routing key. Reads
+// `preferences.notifications.<channel>.<key>` ("on"/"off") and falls back to
+// `defaultChannelChoices[channel][key]` when missing or invalid.
+//
+// Agents have no preferences; they receive everything on the inbox channel
+// only (matches existing resolveRoute behavior for non-members).
+func resolveChannelChoice(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientType, recipientID, channel, key string,
+) bool {
+	if recipientType != "member" {
+		return channel == channelInbox
+	}
+
+	prefs, err := queries.GetUserPreferences(ctx, parseUUID(recipientID))
+	if err != nil || len(prefs) == 0 {
+		return channelDefault(channel, key)
+	}
+
+	var blob map[string]any
+	if err := json.Unmarshal(prefs, &blob); err != nil {
+		slog.Warn("preferences unmarshal failed", "user_id", recipientID, "error", err)
+		return channelDefault(channel, key)
+	}
+
+	notifBlock, _ := blob["notifications"].(map[string]any)
+	if notifBlock == nil {
+		return channelDefault(channel, key)
+	}
+
+	channelBlock, _ := notifBlock[channel].(map[string]any)
+	if channelBlock == nil {
+		return channelDefault(channel, key)
+	}
+
+	override, _ := channelBlock[key].(string)
+	switch override {
+	case "on":
+		return true
+	case "off":
+		return false
+	default:
+		return channelDefault(channel, key)
+	}
+}
+
+// resolveChannelTransport returns the channel-level transport settings
+// (badge, sound, banner, digest) for a user. Reads
+// `preferences.notifications.channels.<channel>` and overlays user-specified
+// fields on top of the channel default.
+func resolveChannelTransport(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientType, recipientID, channel string,
+) channelTransport {
+	t := defaultChannelTransport[channel]
+	if recipientType != "member" {
+		return t
+	}
+
+	prefs, err := queries.GetUserPreferences(ctx, parseUUID(recipientID))
+	if err != nil || len(prefs) == 0 {
+		return t
+	}
+
+	var blob map[string]any
+	if err := json.Unmarshal(prefs, &blob); err != nil {
+		return t
+	}
+
+	notifBlock, _ := blob["notifications"].(map[string]any)
+	channelsBlock, _ := notifBlock["channels"].(map[string]any)
+	override, _ := channelsBlock[channel].(map[string]any)
+	if override == nil {
+		return t
+	}
+
+	if v, ok := override["badge"].(bool); ok {
+		t.Badge = v
+	}
+	if v, ok := override["sound"].(bool); ok {
+		t.Sound = v
+	}
+	if v, ok := override["banner"].(bool); ok {
+		t.Banner = v
+	}
+	if v, ok := override["digest"].(string); ok {
+		t.Digest = v
+	}
+	return t
+}
+
+func channelDefault(channel, key string) bool {
+	defaults, ok := defaultChannelChoices[channel]
+	if !ok {
+		return false
+	}
+	return defaults[key]
 }
 
 // splitTypes carry an .assignee / .follower suffix when looking up routing.
+// The assignee gets a stronger signal than passive subscribers for these.
 var splitTypes = map[string]bool{
 	"due_date_changed": true,
 	"priority_changed": true,
@@ -61,51 +249,6 @@ func routeKey(notifType string, isAssignee bool) string {
 		return notifType + ".assignee"
 	}
 	return notifType + ".follower"
-}
-
-// resolveRoute returns the destination for a notification destined for
-// recipientID. Reads user.preferences.notifications[<key>] and falls back
-// to defaultRoutes. Agents never have preferences and always go to the inbox.
-func resolveRoute(ctx context.Context, queries *db.Queries, recipientType, recipientID, notifType string, isAssignee bool) string {
-	key := routeKey(notifType, isAssignee)
-
-	if recipientType != "member" {
-		// Agents have no per-type preferences — always inbox.
-		fallback, ok := defaultRoutes[key]
-		if !ok {
-			return routeInbox
-		}
-		// Agents shouldn't end up in 'off' or 'notifications' regardless of
-		// the default table — keep their existing routing semantics.
-		if fallback == routeOff || fallback == routeNotifications {
-			return routeInbox
-		}
-		return fallback
-	}
-
-	prefs, err := queries.GetUserPreferences(ctx, parseUUID(recipientID))
-	if err != nil || len(prefs) == 0 {
-		return defaultRoutes[key]
-	}
-
-	var blob map[string]any
-	if err := json.Unmarshal(prefs, &blob); err != nil {
-		slog.Warn("preferences unmarshal failed", "user_id", recipientID, "error", err)
-		return defaultRoutes[key]
-	}
-
-	notifBlock, _ := blob["notifications"].(map[string]any)
-	if notifBlock == nil {
-		return defaultRoutes[key]
-	}
-
-	override, _ := notifBlock[key].(string)
-	switch override {
-	case routeInbox, routeNotifications, routeOff:
-		return override
-	default:
-		return defaultRoutes[key]
-	}
 }
 
 // issueAssigneeMemberID returns the assignee user_id when the assignee is a

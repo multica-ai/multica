@@ -194,7 +194,7 @@ function ActorSubContent({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter..."
-          className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          className="w-full bg-transparent text-base md:text-sm placeholder:text-muted-foreground outline-none"
           autoFocus
         />
       </div>
@@ -321,7 +321,7 @@ function ProjectSubContent({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter..."
-          className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          className="w-full bg-transparent text-base md:text-sm placeholder:text-muted-foreground outline-none"
           autoFocus
         />
       </div>

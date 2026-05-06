@@ -64,14 +64,15 @@ func main() {
 	registerListeners(bus, hub)
 
 	queries := db.New(pool)
+	pushSvc := service.NewPushService(queries)
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
 	// so subscribers must be written first within the same synchronous event dispatch.
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
-	registerNotificationListeners(bus, queries)
+	registerNotificationListeners(bus, queries, pushSvc)
 
-	r := NewRouter(pool, hub, bus)
+	r := NewRouter(pool, hub, bus, pushSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

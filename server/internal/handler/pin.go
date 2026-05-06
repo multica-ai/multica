@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -90,6 +92,24 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 			pr.Title = project.Title
 			pr.Icon = textToPtr(project.Icon)
 			pr.Status = project.Status
+		case "channel":
+			issue, err := h.Queries.GetIssue(r.Context(), p.ItemID)
+			if err != nil || issue.Kind != ChannelKindChannel {
+				continue // Skip deleted or kind-changed items
+			}
+			pr.Title = issue.Title
+			channelIcon := "#"
+			pr.Icon = &channelIcon
+		case "dm":
+			issue, err := h.Queries.GetIssue(r.Context(), p.ItemID)
+			if err != nil || issue.Kind != ChannelKindDM {
+				continue // Skip deleted or kind-changed items
+			}
+			peerName, ok := h.dmPeerName(r.Context(), issue.ID, userID)
+			if !ok {
+				continue // Skip orphaned DMs (no peer found — viewer not a participant or peer deleted)
+			}
+			pr.Title = peerName
 		}
 		resp = append(resp, pr)
 	}
@@ -109,8 +129,11 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
+	switch req.ItemType {
+	case "issue", "project", "channel", "dm":
+		// ok
+	default:
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', 'channel' or 'dm'")
 		return
 	}
 	if req.ItemID == "" {
@@ -121,9 +144,10 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	// Verify the item exists in this workspace
 	switch req.ItemType {
 	case "issue":
-		if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
-		}); err != nil {
+		})
+		if err != nil || issue.Kind != "issue" {
 			writeError(w, http.StatusNotFound, "issue not found")
 			return
 		}
@@ -132,6 +156,30 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
 		}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+	case "channel", "dm":
+		// Channels/DMs are issues underneath. Require the requester to be a
+		// participant (subscriber) — non-participants must not be able to pin.
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, req.ItemType+" not found")
+			return
+		}
+		if (req.ItemType == "channel" && issue.Kind != ChannelKindChannel) ||
+			(req.ItemType == "dm" && issue.Kind != ChannelKindDM) {
+			writeError(w, http.StatusNotFound, req.ItemType+" not found")
+			return
+		}
+		subscribed, err := h.Queries.IsIssueSubscriber(r.Context(), db.IsIssueSubscriberParams{
+			IssueID:  parseUUID(req.ItemID),
+			UserType: "member",
+			UserID:   parseUUID(userID),
+		})
+		if err != nil || !subscribed {
+			writeError(w, http.StatusForbidden, "not a participant of this "+req.ItemType)
 			return
 		}
 	}
@@ -227,4 +275,28 @@ func formatIdentifier(prefix string, number int32) string {
 		prefix = "ISS"
 	}
 	return prefix + "-" + strconv.Itoa(int(number))
+}
+
+// dmPeerName returns the display name of the other member in a 1:1 DM.
+// Returns ok=false if the viewer isn't a participant or the peer can't be
+// resolved — the pin should be skipped in that case.
+func (h *Handler) dmPeerName(ctx context.Context, issueID pgtype.UUID, viewerUserID string) (string, bool) {
+	subs, err := h.Queries.ListIssueSubscribers(ctx, issueID)
+	if err != nil {
+		return "", false
+	}
+	for _, s := range subs {
+		if s.UserType != "member" {
+			continue
+		}
+		if uuidToString(s.UserID) == viewerUserID {
+			continue
+		}
+		user, err := h.Queries.GetUser(ctx, s.UserID)
+		if err != nil {
+			continue
+		}
+		return user.Name, true
+	}
+	return "", false
 }

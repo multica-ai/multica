@@ -31,6 +31,13 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SkillVersion,
+  SkillChangeRequest,
+  SkillFork,
+  UpdateSkillOwnershipRequest,
+  CreateSkillChangeRequestRequest,
+  ReviewSkillChangeRequestRequest,
+  ForkSkillRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -60,6 +67,8 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
+  Channel,
+  CreateChannelRequest,
   Project,
   ProjectMember,
   CreateProjectRequest,
@@ -83,6 +92,7 @@ import type {
   WorkSession,
   UserProfileResponse,
   UserProfileRequest,
+  PushSubscriptionResponse,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -287,6 +297,35 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  // Web Push (per-device subscriptions). The server returns enabled=false
+  // when VAPID keys aren't configured — callers should hide the subscribe UI
+  // in that case.
+  async getPushPublicKey(): Promise<{ enabled: boolean; publicKey?: string }> {
+    return this.fetch("/api/push/public-key");
+  }
+
+  async listPushSubscriptions(): Promise<PushSubscriptionResponse[]> {
+    return this.fetch("/api/push/subscriptions");
+  }
+
+  async subscribePush(subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    userAgent?: string;
+  }): Promise<PushSubscriptionResponse> {
+    return this.fetch("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify(subscription),
+    });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    await this.fetch("/api/push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ endpoint }),
     });
   }
 
@@ -594,6 +633,22 @@ export class ApiClient {
     });
   }
 
+  // Channels (multi-party chat — issues with kind in channel,dm)
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   // Inbox
   async listInbox(params?: { folder?: string; archived?: boolean }): Promise<InboxItem[]> {
     const qs = new URLSearchParams();
@@ -617,6 +672,12 @@ export class ApiClient {
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
+  }
+
+  // Cross-workspace unread inbox count for the OS app-icon badge. Sent
+  // outside the workspace-scoped tree so it works without an active slug.
+  async getMyTotalUnreadInboxCount(): Promise<{ count: number }> {
+    return this.fetch("/api/me/inbox/unread-count");
   }
 
   async markAllInboxRead(): Promise<{ count: number }> {
@@ -872,6 +933,57 @@ export class ApiClient {
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Skill ownership / versioning / change requests / forks (JEH-216)
+  async updateSkillOwnership(id: string, data: UpdateSkillOwnershipRequest): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/ownership`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSkillVersions(id: string): Promise<SkillVersion[]> {
+    return this.fetch(`/api/skills/${id}/versions`);
+  }
+
+  async listSkillChangeRequests(id: string): Promise<SkillChangeRequest[]> {
+    return this.fetch(`/api/skills/${id}/change-requests`);
+  }
+
+  async listPendingSkillChangeRequests(): Promise<SkillChangeRequest[]> {
+    return this.fetch("/api/skills/change-requests");
+  }
+
+  async createSkillChangeRequest(
+    id: string,
+    data: CreateSkillChangeRequestRequest,
+  ): Promise<SkillChangeRequest> {
+    return this.fetch(`/api/skills/${id}/change-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reviewSkillChangeRequest(
+    crId: string,
+    data: ReviewSkillChangeRequestRequest,
+  ): Promise<SkillChangeRequest> {
+    return this.fetch(`/api/skills/change-requests/${crId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSkillForks(id: string): Promise<SkillFork[]> {
+    return this.fetch(`/api/skills/${id}/forks`);
+  }
+
+  async createSkillFork(id: string, data: ForkSkillRequest): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/forks`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
+import { SerwistProvider } from "@serwist/next/react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -43,6 +44,9 @@ const geistMono = Geist_Mono({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Cover the entire device viewport including notch / home indicator on iOS
+  // so installed-PWA pages can opt into safe-area-inset-* via CSS.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#05070b" },
@@ -57,8 +61,21 @@ export const metadata: Metadata = {
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+  manifest: "/manifest.webmanifest",
+  applicationName: "Multica",
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    // "default" gives a translucent status bar that picks up theme-color.
+    statusBarStyle: "default",
+  },
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icons/icon-512.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
     shortcut: ["/favicon.svg"],
   },
   openGraph: {
@@ -92,13 +109,19 @@ export default function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable)}
     >
       <body className="h-full overflow-hidden">
-        <LocaleSync />
-        <ThemeProvider>
-          <WebProviders>
-            {children}
-          </WebProviders>
-          <Toaster />
-        </ThemeProvider>
+        <SerwistProvider
+          swUrl="/sw.js"
+          disable={process.env.NODE_ENV === "development"}
+          reloadOnOnline
+        >
+          <LocaleSync />
+          <ThemeProvider>
+            <WebProviders>
+              {children}
+            </WebProviders>
+            <Toaster />
+          </ThemeProvider>
+        </SerwistProvider>
       </body>
     </html>
   );

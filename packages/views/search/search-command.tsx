@@ -458,7 +458,7 @@ export function SearchCommand() {
               placeholder="Type a command or search..."
               value={query}
               onValueChange={handleValueChange}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="flex-1 bg-transparent text-base md:text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
               ESC

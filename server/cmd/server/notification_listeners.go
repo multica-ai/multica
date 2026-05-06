@@ -1,12 +1,3 @@
-// CEREBRO-PATCH(cerebro-listeners): cerebro modifies the upstream listener
-// registrations to consult per-user notification routing
-// (resolveRoute/routeOff in notification_routing.go) and pass an
-// assigneeMemberID to disambiguate split notification types (priority_changed,
-// due_date_changed) — assignees get a stronger default routing than passive
-// subscribers. The modifications are inline and span 12+ existing listener
-// bodies; per audit decision they cannot be cleanly extracted into a separate
-// listener-registration without rewriting upstream's notify*() helpers.
-// Markers below tag the cerebro-only call sites.
 package main
 
 import (
@@ -16,10 +7,172 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// pushNotifier is set once at register time. Used by notify* helpers to fan
+// inbox items out to the recipient's web-push subscriptions in addition to
+// the existing in-app inbox/realtime delivery. Nil-safe — Web Push is opt-in
+// per device, and not every deployment has VAPID keys configured.
+var pushNotifier *service.PushService
+
+// Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
+// After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
+// and full comment bodies routinely exceeded that, which made Apple reject
+// the message ("payload has exceeded the maximum length") and triggered
+// iOS Safari's silent-fallback behaviour: a generic "Multica" notification
+// AND an auto-incremented icon badge that the SW never got to fix. Cap
+// title and body to lock-screen-readable lengths so payloads stay well
+// under the limit.
+const (
+	pushTitleMaxRunes = 100
+	pushBodyMaxRunes  = 200
+)
+
+func truncateForPush(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
+}
+
+// pushItemToMember sends a Web Push to recipientID's subscribed devices
+// describing the just-created inbox item. Only members get pushes — agents
+// don't have devices.
+//
+// Badge and Silent are derived from the recipient's mobile-channel transport
+// preferences (notifications.channels.mobile.{badge,sound}) so the icon
+// counter and notification sound respect the per-user "Visning" toggles.
+func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, recipientID, issueID, notifType, title, body string) {
+	if pushNotifier == nil || !pushNotifier.Enabled() {
+		return
+	}
+	if recipientType != "member" || recipientID == "" {
+		return
+	}
+	transport := resolveChannelTransport(ctx, queries, recipientType, recipientID, channelMobile)
+	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
+		Title:   truncateForPush(title, pushTitleMaxRunes),
+		Body:    truncateForPush(body, pushBodyMaxRunes),
+		URL:     "/?issue=" + issueID,
+		Tag:     "issue:" + issueID,
+		IssueID: issueID,
+		Type:    notifType,
+		Badge:   transport.Badge,
+		Silent:  !transport.Sound,
+	})
+}
+
+// inboxItemDraft holds the fields needed to create one inbox item. Used by
+// dispatchToMember to fan a single notification out across the channels the
+// user has chosen.
+type inboxItemDraft struct {
+	WorkspaceID   string
+	RecipientType string
+	RecipientID   string
+	IssueID       string
+	IssueStatus   string
+	NotifType     string
+	Severity      string
+	Title         string
+	Body          string
+	Details       []byte
+	Actor         events.Event
+	IsAssignee    bool
+}
+
+// dispatchToMember resolves the recipient's per-channel preferences for this
+// notification and creates one inbox_item per active "storage" channel (Inbox
+// and/or Notifications). Returns true if at least one item was created.
+//
+// Mobile and Desktop are push channels — they don't create rows in inbox_item.
+// Mobile is gated on the same row-level on/off plus the existence of an
+// inbox/notifications item (we don't push something the user can't open).
+//
+// Agents always behave as inbox-only: resolveChannelChoice returns true for
+// channelInbox and false for everything else, regardless of preferences.
+func dispatchToMember(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	d inboxItemDraft,
+) bool {
+	key := routeKey(d.NotifType, d.IsAssignee)
+
+	inboxOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelInbox, key)
+	notifOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelNotifications, key)
+	if !inboxOn && !notifOn {
+		return false
+	}
+
+	created := false
+	if inboxOn {
+		if createInboxItemForChannel(ctx, queries, bus, d, routeInbox) {
+			created = true
+		}
+	}
+	if notifOn {
+		if createInboxItemForChannel(ctx, queries, bus, d, routeNotifications) {
+			created = true
+		}
+	}
+
+	// Mobile push fires only when something landed in the user's inbox or
+	// notifications page — push is a bell-ring on top of an existing item,
+	// not a standalone notification.
+	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.IssueID, d.NotifType, d.Title, d.Body)
+	}
+
+	return created
+}
+
+func createInboxItemForChannel(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	d inboxItemDraft,
+	route string,
+) bool {
+	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   parseUUID(d.WorkspaceID),
+		RecipientType: d.RecipientType,
+		RecipientID:   parseUUID(d.RecipientID),
+		Type:          d.NotifType,
+		Severity:      d.Severity,
+		IssueID:       parseUUID(d.IssueID),
+		Title:         d.Title,
+		Body:          util.StrToText(d.Body),
+		ActorType:     util.StrToText(d.Actor.ActorType),
+		ActorID:       parseUUID(d.Actor.ActorID),
+		Details:       d.Details,
+		Route:         route,
+	})
+	if err != nil {
+		slog.Error("inbox item creation failed",
+			"recipient_id", d.RecipientID, "type", d.NotifType, "route", route, "error", err)
+		return false
+	}
+	resp := inboxItemToResponse(item)
+	if d.IssueStatus != "" {
+		resp["issue_status"] = d.IssueStatus
+	}
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: d.WorkspaceID,
+		ActorType:   d.Actor.ActorType,
+		ActorID:     d.Actor.ActorID,
+		Payload:     map[string]any{"item": resp},
+	})
+	return true
+}
 
 // mention represents a parsed @mention from markdown content (local alias).
 type mention struct {
@@ -183,43 +336,24 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
 		isAssignee := assigneeMemberID != "" && subID == assigneeMemberID
-		route := resolveRoute(ctx, queries, "member", subID, notifType, isAssignee)
-		if route == routeOff {
-			continue
-		}
-
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   parseUUID(workspaceID),
+		ok := dispatchToMember(ctx, queries, bus, inboxItemDraft{
+			WorkspaceID:   workspaceID,
 			RecipientType: "member",
-			RecipientID:   sub.UserID,
-			Type:          notifType,
+			RecipientID:   subID,
+			IssueID:       targetIssueID,
+			IssueStatus:   issueStatus,
+			NotifType:     notifType,
 			Severity:      severity,
-			IssueID:       parseUUID(targetIssueID),
 			Title:         title,
-			Body:          util.StrToText(body),
-			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			Body:          body,
 			Details:       details,
-			Route:         route,
+			Actor:         e,
+			IsAssignee:    isAssignee,
 		})
-		if err != nil {
-			slog.Error("subscriber notification creation failed",
-				"subscriber_id", subID, "type", notifType, "error", err)
-			continue
+		if ok {
+			notified[subID] = true
 		}
-
-		notified[subID] = true
-		resp := inboxItemToResponse(item)
-		resp["issue_status"] = issueStatus
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: workspaceID,
-			ActorType:   e.ActorType,
-			ActorID:     e.ActorID,
-			Payload:     map[string]any{"item": resp},
-		})
 	}
 
 	return notified
@@ -254,40 +388,19 @@ func notifyDirect(
 		return
 	}
 
-	// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
-	route := resolveRoute(ctx, queries, recipientType, recipientID, notifType, recipientIsAssignee)
-	if route == routeOff {
-		return
-	}
-
-	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   parseUUID(workspaceID),
+	dispatchToMember(ctx, queries, bus, inboxItemDraft{
+		WorkspaceID:   workspaceID,
 		RecipientType: recipientType,
-		RecipientID:   parseUUID(recipientID),
-		Type:          notifType,
+		RecipientID:   recipientID,
+		IssueID:       issueID,
+		IssueStatus:   issueStatus,
+		NotifType:     notifType,
 		Severity:      severity,
-		IssueID:       parseUUID(issueID),
 		Title:         title,
-		Body:          util.StrToText(body),
-		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		Body:          body,
 		Details:       details,
-		Route:         route,
-	})
-	if err != nil {
-		slog.Error("direct notification creation failed",
-			"recipient_id", recipientID, "type", notifType, "error", err)
-		return
-	}
-
-	resp := inboxItemToResponse(item)
-	resp["issue_status"] = issueStatus
-	bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
-		WorkspaceID: workspaceID,
-		ActorType:   e.ActorType,
-		ActorID:     e.ActorID,
-		Payload:     map[string]any{"item": resp},
+		Actor:         e,
+		IsAssignee:    recipientIsAssignee,
 	})
 }
 
@@ -337,37 +450,19 @@ func notifyMentionedMembers(
 		if id == e.ActorID || skip[id] {
 			continue
 		}
-		// CEREBRO-PATCH(cerebro-listeners): per-user route resolution.
-		// "mentioned" is not a split type; isAssignee value doesn't matter.
-		route := resolveRoute(ctx, queries, "member", id, "mentioned", false)
-		if route == routeOff {
-			continue
-		}
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   parseUUID(e.WorkspaceID),
+		dispatchToMember(ctx, queries, bus, inboxItemDraft{
+			WorkspaceID:   e.WorkspaceID,
 			RecipientType: "member",
-			RecipientID:   parseUUID(id),
-			Type:          "mentioned",
+			RecipientID:   id,
+			IssueID:       issueID,
+			IssueStatus:   issueStatus,
+			NotifType:     "mentioned",
 			Severity:      "info",
-			IssueID:       parseUUID(issueID),
 			Title:         title,
-			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			Body:          "",
 			Details:       details,
-			Route:         route,
-		})
-		if err != nil {
-			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
-			continue
-		}
-		resp := inboxItemToResponse(item)
-		resp["issue_status"] = issueStatus
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: e.WorkspaceID,
-			ActorType:   e.ActorType,
-			ActorID:     e.ActorID,
-			Payload:     map[string]any{"item": resp},
+			Actor:         e,
+			// "mentioned" is not a split type; IsAssignee has no effect.
 		})
 	}
 }
@@ -379,7 +474,8 @@ func notifyMentionedMembers(
 // NOTE: uses context.Background() because the event bus dispatches synchronously
 // within the HTTP request goroutine. Adding per-handler timeouts is a bus-level
 // concern — see events.Bus for future improvements.
-func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
+func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc *service.PushService) {
+	pushNotifier = pushSvc
 	ctx := context.Background()
 
 	// issue:created — Direct notification to assignee if assignee != actor

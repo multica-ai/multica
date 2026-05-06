@@ -1,11 +1,26 @@
 import type { InboxItemType } from "@multica/core/types";
 
-// Route destinations the user can pick per notification type.
-//   - "inbox"          → persistent inbox queue (action_required by default)
-//   - "notifications"  → lightweight notifications page in the sidebar bottom
-//   - "off"            → don't create the item at all
-// Server keeps the source of truth; client mirrors the contract for UI.
-export type RouteChoice = "inbox" | "notifications" | "off";
+// Channels are independent destinations a notification can land on. A single
+// event can flow to multiple channels (e.g. inbox + mobile push) — they are
+// not mutually exclusive. Mirror of the constants in
+// server/cmd/server/notification_routing.go.
+export type Channel =
+  | "inbox"          // persistent inbox queue
+  | "notifications"  // lightweight notifications page in the sidebar bottom
+  | "mobile"         // Web Push to phone / installed PWA
+  | "desktop"        // Native banner / dock badge in the Electron app
+  | "mail";          // Email digest (forward-compat — transport not built)
+
+// Per-event choice within a channel — a row-level on/off toggle.
+export type ChannelChoice = "on" | "off";
+
+export const CHANNELS: ReadonlyArray<Channel> = [
+  "inbox",
+  "notifications",
+  "mobile",
+  "desktop",
+  "mail",
+];
 
 // Notification types that are emitted by the server today. The TS InboxItemType
 // union also lists future types (review_requested, agent_blocked, etc.) but the
@@ -48,33 +63,139 @@ export type RoutingKey =
   | "priority_changed.assignee"
   | "priority_changed.follower";
 
-// Mirror of `defaultRoutes` on the server — used to render the segmented
-// control with the right initial selection when the user has no override.
-export const DEFAULT_ROUTES: Record<RoutingKey, RouteChoice> = {
-  issue_assigned: "inbox",
-  mentioned: "inbox",
-  task_failed: "inbox",
-  unassigned: "notifications",
-  reaction_added: "notifications",
-  new_comment: "notifications",
-  assignee_changed: "notifications",
-  status_changed: "notifications",
-  "due_date_changed.assignee": "inbox",
-  "due_date_changed.follower": "notifications",
-  "priority_changed.assignee": "inbox",
-  "priority_changed.follower": "notifications",
+// Per-channel default when the user has no override for a given key. Mirrors
+// `defaultChannelChoices` on the server — keep in sync.
+export const DEFAULT_CHANNEL_CHOICES: Record<
+  Channel,
+  Record<RoutingKey, ChannelChoice>
+> = {
+  inbox: {
+    issue_assigned: "on",
+    mentioned: "on",
+    task_failed: "on",
+    unassigned: "on",
+    reaction_added: "off",
+    new_comment: "off",
+    assignee_changed: "off",
+    status_changed: "off",
+    "due_date_changed.assignee": "on",
+    "due_date_changed.follower": "off",
+    "priority_changed.assignee": "on",
+    "priority_changed.follower": "off",
+  },
+  notifications: {
+    issue_assigned: "off",
+    mentioned: "off",
+    task_failed: "off",
+    unassigned: "off",
+    reaction_added: "on",
+    new_comment: "on",
+    assignee_changed: "on",
+    status_changed: "on",
+    "due_date_changed.assignee": "off",
+    "due_date_changed.follower": "on",
+    "priority_changed.assignee": "off",
+    "priority_changed.follower": "on",
+  },
+  mobile: {
+    issue_assigned: "on",
+    mentioned: "on",
+    task_failed: "off",
+    unassigned: "off",
+    reaction_added: "off",
+    new_comment: "off",
+    assignee_changed: "off",
+    status_changed: "off",
+    "due_date_changed.assignee": "on",
+    "due_date_changed.follower": "off",
+    "priority_changed.assignee": "on",
+    "priority_changed.follower": "off",
+  },
+  desktop: {
+    issue_assigned: "on",
+    mentioned: "on",
+    task_failed: "on",
+    unassigned: "off",
+    reaction_added: "off",
+    new_comment: "off",
+    assignee_changed: "off",
+    status_changed: "off",
+    "due_date_changed.assignee": "on",
+    "due_date_changed.follower": "off",
+    "priority_changed.assignee": "on",
+    "priority_changed.follower": "off",
+  },
+  // Mail is forward-compatible; no events fire by default until the
+  // transport is built.
+  mail: {
+    issue_assigned: "off",
+    mentioned: "off",
+    task_failed: "off",
+    unassigned: "off",
+    reaction_added: "off",
+    new_comment: "off",
+    assignee_changed: "off",
+    status_changed: "off",
+    "due_date_changed.assignee": "off",
+    "due_date_changed.follower": "off",
+    "priority_changed.assignee": "off",
+    "priority_changed.follower": "off",
+  },
 };
 
-// Pull a user's chosen route out of the preferences blob, falling back to the
-// default when the value is missing or invalid.
-export function getRouteChoice(
+// Channel-level transport settings — apply to the entire channel (badge,
+// banner, sound, digest), independent of per-event toggles.
+export interface ChannelTransport {
+  badge?: boolean;
+  sound?: boolean;
+  banner?: boolean;
+  digest?: "instant" | "daily" | "weekly";
+}
+
+export const DEFAULT_CHANNEL_TRANSPORT: Record<Channel, ChannelTransport> = {
+  inbox: {},
+  notifications: {},
+  mobile: { badge: true, sound: true },
+  desktop: { badge: true, banner: true, sound: false },
+  mail: { digest: "daily" },
+};
+
+// Pull a user's per-channel choice out of the preferences blob, falling
+// back to the per-channel default when missing or invalid.
+export function getChannelChoice(
   prefs: Record<string, unknown> | undefined,
+  channel: Channel,
   key: RoutingKey,
-): RouteChoice {
-  const block = (prefs?.notifications ?? {}) as Record<string, unknown>;
+): ChannelChoice {
+  const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
+  const block = (notif[channel] ?? {}) as Record<string, unknown>;
   const value = block[key];
-  if (value === "inbox" || value === "notifications" || value === "off") {
+  if (value === "on" || value === "off") {
     return value;
   }
-  return DEFAULT_ROUTES[key];
+  return DEFAULT_CHANNEL_CHOICES[channel][key];
+}
+
+// Pull the channel-level transport settings (badge/sound/banner/digest),
+// overlaying user-specified fields on top of the channel default.
+export function getChannelTransport(
+  prefs: Record<string, unknown> | undefined,
+  channel: Channel,
+): ChannelTransport {
+  const base = DEFAULT_CHANNEL_TRANSPORT[channel];
+  const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
+  const channels = (notif.channels ?? {}) as Record<string, unknown>;
+  const override = (channels[channel] ?? {}) as Record<string, unknown>;
+  const merged: ChannelTransport = { ...base };
+  if (typeof override.badge === "boolean") merged.badge = override.badge;
+  if (typeof override.sound === "boolean") merged.sound = override.sound;
+  if (typeof override.banner === "boolean") merged.banner = override.banner;
+  if (
+    override.digest === "instant" ||
+    override.digest === "daily" ||
+    override.digest === "weekly"
+  ) {
+    merged.digest = override.digest;
+  }
+  return merged;
 }

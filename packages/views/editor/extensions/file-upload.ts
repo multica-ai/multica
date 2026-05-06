@@ -4,7 +4,7 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { createSafeId } from "@multica/core/utils";
 
 /** Find and remove a fileCard node by uploadId. */
- 
+
 function removeUploadingFileCard(editor: any, uploadId: string) {
   const { tr } = editor.state;
   let deleted = false;
@@ -21,7 +21,7 @@ function removeUploadingFileCard(editor: any, uploadId: string) {
 }
 
 /** Update a fileCard node from uploading state to final state with real URL. */
- 
+
 function finalizeFileCard(editor: any, uploadId: string, href: string) {
   const { tr } = editor.state;
   let updated = false;
@@ -41,7 +41,7 @@ function finalizeFileCard(editor: any, uploadId: string, href: string) {
   if (updated) editor.view.dispatch(tr);
 }
 
- 
+
 function removeImageBySrc(editor: any, src: string) {
   if (!editor) return;
   const { tr } = editor.state;
@@ -58,20 +58,30 @@ function removeImageBySrc(editor: any, src: string) {
   if (deleted) editor.view.dispatch(tr);
 }
 
+export interface UploadInsertOptions {
+  /** When true and the file is an image, embed it inline instead of inserting
+   *  a fileCard. Defaults to false — images attach as cards by default so the
+   *  reader chooses when to expand them. */
+  embedImage?: boolean;
+}
+
 /**
- * Shared upload flow: insert blob preview → upload → replace with real URL.
- * Used by both paste/drop (at cursor) and button upload (at end of doc).
+ * Shared upload flow: insert skeleton → upload → replace with real URL.
+ * Used by paste/drop (at cursor), button upload (at end of doc), and the
+ * fileCard ↔ image toggle commands.
  */
 export async function uploadAndInsertFile(
-   
+
   editor: any,
   file: File,
   handler: (file: File) => Promise<UploadResult | null>,
   pos?: number,
+  options?: UploadInsertOptions,
 ) {
   const isImage = file.type.startsWith("image/");
+  const embed = isImage && options?.embedImage === true;
 
-  if (isImage) {
+  if (embed) {
     const blobUrl = URL.createObjectURL(file);
     const imgAttrs = { src: blobUrl, alt: file.name, uploading: true };
     if (pos !== undefined) {
@@ -109,7 +119,7 @@ export async function uploadAndInsertFile(
       URL.revokeObjectURL(blobUrl);
     }
   } else {
-    // Non-image: insert skeleton fileCard → upload → finalize with real URL
+    // Default: insert skeleton fileCard → upload → finalize with real URL.
     const uploadId = createSafeId();
     const cardAttrs = { filename: file.name, href: "", fileSize: file.size, uploading: true, uploadId };
     const insertContent = { type: "fileCard", attrs: cardAttrs };

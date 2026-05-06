@@ -20,15 +20,18 @@ import (
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	Config      any    `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID             string   `json:"id"`
+	WorkspaceID    string   `json:"workspace_id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Content        string   `json:"content"`
+	Config         any      `json:"config"`
+	CreatedBy      *string  `json:"created_by"`
+	OwnerID        *string  `json:"owner_id"`
+	ApproverIDs    []string `json:"approver_ids"`
+	CurrentVersion string   `json:"current_version"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
 }
 
 type SkillFileResponse struct {
@@ -54,16 +57,26 @@ func skillToResponse(s db.Skill) SkillResponse {
 		config = map[string]any{}
 	}
 
+	approverIDs := make([]string, 0, len(s.ApproverIds))
+	for _, u := range s.ApproverIds {
+		if u.Valid {
+			approverIDs = append(approverIDs, uuidToString(u))
+		}
+	}
+
 	return SkillResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		Name:        s.Name,
-		Description: s.Description,
-		Content:     s.Content,
-		Config:      config,
-		CreatedBy:   uuidToPtr(s.CreatedBy),
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:             uuidToString(s.ID),
+		WorkspaceID:    uuidToString(s.WorkspaceID),
+		Name:           s.Name,
+		Description:    s.Description,
+		Content:        s.Content,
+		Config:         config,
+		CreatedBy:      uuidToPtr(s.CreatedBy),
+		OwnerID:        uuidToPtr(s.OwnerID),
+		ApproverIDs:    approverIDs,
+		CurrentVersion: s.CurrentVersion,
+		CreatedAt:      timestampToString(s.CreatedAt),
+		UpdatedAt:      timestampToString(s.UpdatedAt),
 	}
 }
 
@@ -230,6 +243,7 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		Content:     req.Content,
 		Config:      config,
 		CreatedBy:   parseUUID(creatorID),
+		OwnerID:     parseUUID(creatorID),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -254,6 +268,20 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
+	// Snapshot v1.0.0 so the version-history view always has a baseline and
+	// the first change request has something to diff against.
+	if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
+		SkillID:     skill.ID,
+		Version:     skill.CurrentVersion,
+		Content:     skill.Content,
+		Files:       skillFilesToVersionJSON(fileResps),
+		Description: skill.Description,
+		CreatedBy:   parseUUID(creatorID),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to snapshot initial version: "+err.Error())
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
@@ -268,21 +296,63 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// canManageSkill checks whether the current user can update or delete a skill.
-// The skill creator or workspace owner/admin can manage any skill.
+// canManageSkill checks whether the current user can directly update or delete
+// a skill. The owner, an assigned approver, or a workspace owner/admin can
+// manage; everyone else must go through the change-request workflow.
 func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill db.Skill) bool {
 	wsID := uuidToString(skill.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "skill not found", "owner", "admin", "member")
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isSkillCreator := skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == requestUserID(r)
-	if !isAdmin && !isSkillCreator {
-		writeError(w, http.StatusForbidden, "only the skill creator can manage this skill")
-		return false
+	if isSkillManager(skill, requestUserID(r), member.Role) {
+		return true
 	}
-	return true
+	writeError(w, http.StatusForbidden, "only the owner, an approver, or a workspace admin can manage this skill — open a change request instead")
+	return false
+}
+
+// isSkillManager mirrors canManageSkill without writing to the response — used
+// by handlers that need to branch on permission (e.g. change-request review).
+func isSkillManager(skill db.Skill, userID, role string) bool {
+	if roleAllowed(role, "owner", "admin") {
+		return true
+	}
+	if skill.OwnerID.Valid && uuidToString(skill.OwnerID) == userID {
+		return true
+	}
+	for _, approver := range skill.ApproverIds {
+		if approver.Valid && uuidToString(approver) == userID {
+			return true
+		}
+	}
+	// Fallback for legacy skills with no owner set yet.
+	if !skill.OwnerID.Valid && skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID {
+		return true
+	}
+	return false
+}
+
+// skillFilesToVersionJSON serializes the file list snapshot embedded in a
+// skill_version row. Stored as JSONB so the snapshot is self-contained even
+// after the live skill_file rows mutate.
+func skillFilesToVersionJSON(files []SkillFileResponse) []byte {
+	if len(files) == 0 {
+		return []byte("[]")
+	}
+	type snapshot struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	out := make([]snapshot, len(files))
+	for i, f := range files {
+		out[i] = snapshot{Path: f.Path, Content: f.Content}
+	}
+	b, _ := json.Marshal(out)
+	if len(b) == 0 {
+		return []byte("[]")
+	}
+	return b
 }
 
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {

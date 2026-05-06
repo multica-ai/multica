@@ -272,7 +272,7 @@ function CreateAutopilotDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Daily code review"
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-base md:text-sm outline-none focus:ring-1 focus:ring-ring"
               autoFocus
             />
           </div>
@@ -285,7 +285,7 @@ function CreateAutopilotDialog({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Step-by-step instructions for the agent..."
               rows={6}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring resize-y"
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-base md:text-sm outline-none focus:ring-1 focus:ring-ring resize-y"
             />
           </div>
 

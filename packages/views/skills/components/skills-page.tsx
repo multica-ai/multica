@@ -241,7 +241,14 @@ function SkillListItem({
         <Sparkles className="h-4 w-4 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{skill.name}</div>
+        <div className="flex items-center gap-2">
+          <div className="truncate text-sm font-medium">{skill.name}</div>
+          {skill.current_version && (
+            <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+              v{skill.current_version}
+            </span>
+          )}
+        </div>
         {skill.description && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">
             {skill.description}

@@ -138,6 +138,7 @@ export function ChatInput({
             size="sm"
             disabled={!!disabled}
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+            onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
           />
           {isRunning && onStop && (
             <Button

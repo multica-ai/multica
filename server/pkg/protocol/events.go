@@ -65,6 +65,11 @@ const (
 	EventChatDone        = "chat:done"
 	EventChatSessionRead = "chat:session_read"
 
+	// Channel events (multi-party chat — issues with kind in channel,dm)
+	EventChannelCreated = "channel:created"
+	EventChannelUpdated = "channel:updated"
+	EventChannelDeleted = "channel:deleted"
+
 	// Project events
 	EventProjectCreated = "project:created"
 	EventProjectUpdated = "project:updated"

@@ -56,7 +56,7 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *service.PushService) chi.Router {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -79,7 +79,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 	}
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, signupConfig)
+	h := handler.New(queries, pool, hub, bus, emailSvc, pushSvc, store, cfSigner, signupConfig)
 
 	// CEREBRO: feature-flag handler kept in dedicated package so upstream-merges
 	// don't conflict on router wiring.
@@ -249,6 +249,18 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Delete("/api/me/profile", h.DeleteMyProfile)
 		r.Patch("/api/me/preferences", h.UpdateMyPreferences)
 		r.Post("/api/cli-token", h.IssueCliToken)
+
+		// Cross-workspace unread inbox count for the OS app-icon badge.
+		// Outside the workspace-scoped tree because the badge is single-icon
+		// and reflects every workspace the user belongs to.
+		r.Get("/api/me/inbox/unread-count", h.CountUnreadInboxTotal)
+
+		// Web Push subscriptions (per-device, per-user). The frontend reads
+		// the public key on load to decide whether to show the subscribe UI.
+		r.Get("/api/push/public-key", h.GetPushPublicKey)
+		r.Get("/api/push/subscriptions", h.ListPushSubscriptions)
+		r.Post("/api/push/subscribe", h.SubscribePush)
+		r.Post("/api/push/unsubscribe", h.UnsubscribePush)
 		// /api/upload-file is registered in the task-allowlist group above
 		// so agents can upload attachments while running a task.
 
@@ -438,6 +450,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				r.Get("/change-requests", h.ListPendingChangeRequests)
+				r.Post("/change-requests/{crId}/review", h.ReviewSkillChangeRequest)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)
 					r.Put("/", h.UpdateSkill)
@@ -445,6 +459,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+					r.Put("/ownership", h.UpdateSkillOwnership)
+					r.Get("/versions", h.ListSkillVersions)
+					r.Get("/change-requests", h.ListSkillChangeRequests)
+					r.Post("/change-requests", h.CreateSkillChangeRequest)
+					r.Get("/forks", h.ListSkillForks)
+					r.Post("/forks", h.CreateSkillFork)
 				})
 			})
 
@@ -474,6 +494,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
+
+			// Channels (multi-party chat — issues with kind in channel,dm).
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Get("/{id}", h.GetChannel)
+			})
 
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
