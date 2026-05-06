@@ -118,7 +118,6 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     appVersion: config.appVersion || undefined,
   });
 
-
   initialized = true;
 
   // Flush any identify() that arrived before init resolved.

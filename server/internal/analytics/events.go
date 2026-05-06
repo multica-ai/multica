@@ -300,6 +300,7 @@ func PROpened(actorID, workspaceID, issueID, prURL, provider string) Event {
 	}
 }
 
+
 func feedbackLengthBucket(n int) string {
 	switch {
 	case n < 100:

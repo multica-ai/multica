@@ -157,6 +157,17 @@ SET status = 'cancelled', completed_at = now()
 WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
+-- name: CancelAgentTasksByChatSession :many
+-- Cancels active tasks belonging to a chat session. Called from
+-- DeleteChatSession so the daemon doesn't keep running work whose result
+-- has nowhere to land. Must run BEFORE the chat_session row is deleted —
+-- the FK ON DELETE SET NULL would otherwise nullify chat_session_id and we
+-- could no longer reach those tasks.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
+
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
 WHERE id = $1;
@@ -225,7 +236,7 @@ RETURNING *;
 -- a rerun does not inherit the bad session. The daemon classifies these
 -- failures (iteration_limit, agent_fallback_message) when it detects the
 -- agent emitted a fallback marker instead of a real result.
-SELECT session_id, work_dir FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'

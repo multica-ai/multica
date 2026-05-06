@@ -28,3 +28,9 @@ DELETE FROM project_resource WHERE id = $1;
 
 -- name: CountProjectResources :one
 SELECT count(*) FROM project_resource WHERE project_id = $1;
+
+-- name: GetProjectResourceCounts :many
+SELECT project_id, count(*)::bigint AS resource_count
+FROM project_resource
+WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
+GROUP BY project_id;

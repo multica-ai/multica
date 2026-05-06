@@ -99,7 +99,7 @@ multica issue create --title "给 README 加一段 ASCII 架构图"
 multica issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。
+`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `multica agent list --output json` 或 `multica workspace members --output json`。
 
 **接下来守护进程会**：
 

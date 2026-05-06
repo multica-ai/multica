@@ -34,6 +34,7 @@ import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { toast } from "sonner";
 import { useCreateIssue } from "@multica/core/issues/mutations";
+import { modKey } from "@multica/core/platform";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -85,10 +86,6 @@ function shouldShowBubbleMenu(editor: Editor): boolean {
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
 }
-
-const isMac =
-  typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
-const mod = isMac ? "\u2318" : "Ctrl";
 
 // ---------------------------------------------------------------------------
 // Mark Toggle Button
@@ -577,10 +574,10 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${mod}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${mod}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${mod}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${mod}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${modKey}+B`} isActive={fmt.bold} />
+            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${modKey}+I`} isActive={fmt.italic} />
+            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
+            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${modKey}+E`} isActive={fmt.code} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={

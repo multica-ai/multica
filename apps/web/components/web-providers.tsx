@@ -57,6 +57,7 @@ export function WebProviders({ children }: { children: React.ReactNode }) {
       onLogin={setLoggedInCookie}
       onLogout={clearLoggedInCookie}
       identity={identity}
+      workspaceUrlHost={process.env.NEXT_PUBLIC_WORKSPACE_URL_HOST}
     >
       {/* Suspense boundary is required by Next.js for useSearchParams in
           a client component mounted this high in the tree. */}

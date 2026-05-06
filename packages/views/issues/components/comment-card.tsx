@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -348,7 +348,7 @@ function CommentRow({
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-function CommentCard({
+function CommentCardImpl({
   issueId,
   entry,
   allReplies,
@@ -605,5 +605,12 @@ function CommentCard({
     </Card>
   );
 }
+
+// Memoized so a long timeline (e.g. Inbox-embedded IssueDetail with thousands
+// of comments) does not re-render every card on each parent state update or
+// WS-driven cache refresh. Default shallow comparison is sufficient: the
+// timeline grouping is useMemo'd in issue-detail.tsx (stable Map ref), and
+// every callback is stabilized via useCallback in use-issue-timeline.ts.
+const CommentCard = memo(CommentCardImpl);
 
 export { CommentCard, type CommentCardProps };

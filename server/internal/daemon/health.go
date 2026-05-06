@@ -48,6 +48,7 @@ type repoCheckoutRequest struct {
 	URL         string `json:"url"`
 	WorkspaceID string `json:"workspace_id"`
 	WorkDir     string `json:"workdir"`
+	Ref         string `json:"ref,omitempty"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
 }
@@ -158,11 +159,12 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		}
 
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID:        req.WorkspaceID,
-			RepoURL:            req.URL,
-			WorkDir:            req.WorkDir,
-			AgentName:          req.AgentName,
-			TaskID:             req.TaskID,
+			WorkspaceID:         req.WorkspaceID,
+			RepoURL:             req.URL,
+			WorkDir:             req.WorkDir,
+			Ref:                 req.Ref,
+			AgentName:           req.AgentName,
+			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 		})
 		if err != nil {
@@ -187,4 +189,3 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		d.logger.Warn("health server error", "error", err)
 	}
 }
-

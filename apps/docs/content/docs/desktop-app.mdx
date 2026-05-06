@@ -5,7 +5,7 @@ description: What Multica Desktop is, how it differs from the web app, and when 
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica Desktop is a native desktop app for macOS, Windows, and Linux. It talks to the same backend as the web app and shows the same data, but it adds a few things the browser can't: **independent tab groups per [workspace](/workspaces)**, **automatic [daemon](/daemon-runtimes) startup**, and **one-click upgrades**.
+Multica Desktop is a native desktop app for macOS, Windows, and Linux. For the environment it is configured for, it talks to the same backend as the web app and shows the same data. By default Desktop uses Multica Cloud; self-hosted instances can be configured with a local runtime config file. Desktop also adds a few things the browser can't: **independent tab groups per [workspace](/workspaces)**, **automatic [daemon](/daemon-runtimes) startup**, and **one-click upgrades**.
 
 ## Desktop or web — which to pick
 
@@ -66,25 +66,34 @@ Grab the installer for your platform from the [Multica downloads page](https://m
 
 On first launch you'll need to sign in — the same email + verification code flow as the web app. Once you're in, Desktop syncs your workspace list automatically.
 
-<Callout type="warning">
-**Released Desktop builds are pinned to Multica Cloud.** The backend, websocket, and web URLs are baked in at build time (`VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`) — there is no in-app option to point Desktop at a self-hosted instance. To use Desktop against a self-hosted backend you need to build it yourself:
+<Callout type="info">
+**Desktop defaults to Multica Cloud, but can be pointed at a self-hosted instance with a local config file.** There is still no in-app "connect to self-host" picker. Desktop reads `~/.multica/desktop.json` before the renderer starts; if the file is missing, it uses the Cloud defaults.
 
-```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
-# Edit apps/desktop/.env.production:
-#   VITE_API_URL=https://api.your-domain
-#   VITE_WS_URL=wss://api.your-domain/ws
-#   VITE_APP_URL=https://your-domain
-pnpm install
-pnpm --filter @multica/desktop package
+Minimal self-host config:
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.your-domain"
+}
 ```
 
-If you'd rather not build from source, the supported self-hosted path is **web frontend + CLI** — see [Self-host quickstart](/self-host-quickstart). Runtime backend configuration in Desktop is tracked in [issue #1371](https://github.com/multica-ai/multica/issues/1371).
+`apiUrl` is required and must use `http` or `https`. Desktop derives `wsUrl` as `/ws` on the same origin (`wss` for `https`, `ws` for `http`) and derives `appUrl` from the API origin. If your deployment uses different origins, set them explicitly:
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.your-domain",
+  "wsUrl": "wss://api.your-domain/ws",
+  "appUrl": "https://your-domain"
+}
+```
+
+If `desktop.json` exists but is invalid, Desktop fails closed and shows a blocking config error instead of silently falling back to Cloud. For development builds, `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL` still take precedence during `electron-vite dev`. Runtime Desktop self-host configuration was implemented for [issue #1371](https://github.com/multica-ai/multica/issues/1371).
 </Callout>
 
 ## Next steps
 
 - [Cloud Quickstart](/cloud-quickstart) — the Cloud onboarding flow for Desktop
-- [Self-Host Quickstart](/self-host-quickstart) — running your own backend (Desktop against self-host requires a custom build, see the callout above)
+- [Self-Host Quickstart](/self-host-quickstart) — running your own backend and connecting with the CLI or Desktop runtime config
 - [Daemon and runtimes](/daemon-runtimes) — how the daemon works (Desktop starts it for you, but the behavior is the same)

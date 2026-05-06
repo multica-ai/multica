@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -11,7 +12,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// In-memory update store
+// CLI update request store
 // ---------------------------------------------------------------------------
 
 type UpdateStatus string
@@ -22,14 +23,6 @@ const (
 	UpdateCompleted UpdateStatus = "completed"
 	UpdateFailed    UpdateStatus = "failed"
 	UpdateTimeout   UpdateStatus = "timeout"
-
-	// updateTimeout is how long an update request can stay non-terminal
-	// before being auto-transitioned to UpdateTimeout.
-	updateTimeout = 120 * time.Second
-	// updateStoreRetention is the Redis TTL for individual update request
-	// records. It must be longer than updateTimeout so the record survives
-	// long enough for the UI to poll it.
-	updateStoreRetention = 5 * time.Minute
 )
 
 // UpdateRequest represents a pending or completed CLI update request.
@@ -42,40 +35,57 @@ type UpdateRequest struct {
 	Error         string       `json:"error,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt     time.Time    `json:"updated_at"`
+	RunStartedAt  *time.Time   `json:"-"`
 }
 
-// applyUpdateTimeout transitions a request to UpdateTimeout when it has been
-// stuck in a non-terminal state past its threshold. Returns true when the
-// transition was applied so callers (e.g. the Redis store) can persist the
-// change.
-func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
-	if (req.Status == UpdatePending || req.Status == UpdateRunning) && now.Sub(req.CreatedAt) > updateTimeout {
-		req.Status = UpdateTimeout
-		req.Error = "update did not complete within 120 seconds"
-		req.UpdatedAt = now
-		return true
-	}
-	return false
-}
+const (
+	updatePendingTimeout = 120 * time.Second
+	updateRunningTimeout = 150 * time.Second
+	updateStoreRetention = 5 * time.Minute
+)
 
-// UpdateStore abstracts the persistence of CLI update requests. Both the
-// in-memory implementation (single-node) and the Redis-backed one (multi-node)
-// satisfy this interface.
 type UpdateStore interface {
 	Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
+	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error)
 	Complete(ctx context.Context, id string, output string) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
-// InMemoryUpdateStore is a thread-safe in-memory store for CLI update requests.
+func updateRequestTerminal(status UpdateStatus) bool {
+	return status == UpdateCompleted || status == UpdateFailed || status == UpdateTimeout
+}
+
+func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
+	switch req.Status {
+	case UpdatePending:
+		if now.Sub(req.CreatedAt) > updatePendingTimeout {
+			req.Status = UpdateTimeout
+			req.Error = "daemon did not respond within 120 seconds"
+			req.UpdatedAt = now
+			return true
+		}
+	case UpdateRunning:
+		if req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > updateRunningTimeout {
+			req.Status = UpdateTimeout
+			req.Error = "update did not complete within 150 seconds"
+			req.UpdatedAt = now
+			return true
+		}
+	}
+	return false
+}
+
+// InMemoryUpdateStore is the single-node implementation. Multi-node deploys
+// must use RedisUpdateStore so Web POST, daemon heartbeat, daemon report, and
+// UI polling agree on the same request lifecycle.
 type InMemoryUpdateStore struct {
 	mu       sync.Mutex
 	requests map[string]*UpdateRequest // keyed by update ID
 }
 
-func NewUpdateStore() *InMemoryUpdateStore {
+func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	return &InMemoryUpdateStore{
 		requests: make(map[string]*UpdateRequest),
 	}
@@ -85,9 +95,9 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clean up old requests (>5 minutes).
+	// Clean up old requests.
 	for id, req := range s.requests {
-		if time.Since(req.CreatedAt) > 5*time.Minute {
+		if time.Since(req.CreatedAt) > updateStoreRetention {
 			delete(s.requests, id)
 		}
 	}
@@ -125,9 +135,22 @@ func (s *InMemoryUpdateStore) Get(_ context.Context, id string) (*UpdateRequest,
 	if !ok {
 		return nil, nil
 	}
-	// Check for timeout (both pending and running states).
 	applyUpdateTimeout(req, time.Now())
 	return req, nil
+}
+
+func (s *InMemoryUpdateStore) HasPending(_ context.Context, runtimeID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for _, req := range s.requests {
+		applyUpdateTimeout(req, now)
+		if req.RuntimeID == runtimeID && req.Status == UpdatePending {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // PopPending returns and marks as running the pending update for a runtime.
@@ -135,14 +158,23 @@ func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string) (*
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var oldest *UpdateRequest
+	now := time.Now()
 	for _, req := range s.requests {
+		applyUpdateTimeout(req, now)
 		if req.RuntimeID == runtimeID && req.Status == UpdatePending {
-			req.Status = UpdateRunning
-			req.UpdatedAt = time.Now()
-			return req, nil
+			if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
+				oldest = req
+			}
 		}
 	}
-	return nil, nil
+	if oldest != nil {
+		oldest.Status = UpdateRunning
+		startedAt := now
+		oldest.RunStartedAt = &startedAt
+		oldest.UpdatedAt = now
+	}
+	return oldest, nil
 }
 
 func (s *InMemoryUpdateStore) Complete(_ context.Context, id string, output string) error {
@@ -214,14 +246,29 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 
 // GetUpdate returns the status of an update request (protected route, called by frontend).
 func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+		return
+	}
+
 	updateID := chi.URLParam(r, "updateId")
 
 	update, err := h.UpdateStore.Get(r.Context(), updateID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get update")
+		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
 		return
 	}
-	if update == nil {
+	if update == nil || update.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "update not found")
 		return
 	}
@@ -240,6 +287,21 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 
 	updateID := chi.URLParam(r, "updateId")
 
+	existing, err := h.UpdateStore.Get(r.Context(), updateID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
+		return
+	}
+	if existing == nil || existing.RuntimeID != runtimeID {
+		writeError(w, http.StatusNotFound, "update not found")
+		return
+	}
+	if updateRequestTerminal(existing.Status) {
+		slog.Debug("ignoring stale update report", "runtime_id", runtimeID, "update_id", updateID, "status", existing.Status)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
 	var req struct {
 		Status string `json:"status"` // "running", "completed", or "failed"
 		Output string `json:"output"`
@@ -253,12 +315,14 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 	switch req.Status {
 	case "completed":
 		if err := h.UpdateStore.Complete(r.Context(), updateID, req.Output); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to complete update")
+			slog.Error("UpdateStore Complete failed", "error", err, "update_id", updateID)
+			writeError(w, http.StatusInternalServerError, "failed to persist completion")
 			return
 		}
 	case "failed":
 		if err := h.UpdateStore.Fail(r.Context(), updateID, req.Error); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to fail update")
+			slog.Error("UpdateStore Fail failed", "error", err, "update_id", updateID)
+			writeError(w, http.StatusInternalServerError, "failed to persist failure")
 			return
 		}
 	case "running":

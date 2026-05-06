@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { ApiClient } from "../api/client";
 import { setApiInstance } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
@@ -9,32 +8,11 @@ import { createChatStore, registerChatStore } from "../chat";
 import { WSProvider } from "../realtime";
 import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
-import { setWorkspaceUrlHost } from "./workspace-url-host";
-import { getCurrentWsId } from "./workspace-storage";
-import { issueKeys } from "../issues/queries";
-import { inboxKeys } from "../inbox/queries";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import { setWorkspaceUrlHost } from "./workspace-url-host";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
-
-function VisibilityRefetcher() {
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    function handleVisibilityChange() {
-      if (document.visibilityState !== "visible") return;
-      const wsId = getCurrentWsId();
-      if (!wsId) return;
-      queryClient.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-      queryClient.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [queryClient]);
-  return null;
-}
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
@@ -87,8 +65,8 @@ export function CoreProvider({
   cookieAuth,
   onLogin,
   onLogout,
-  workspaceUrlHost: workspaceUrlHostProp,
   identity,
+  workspaceUrlHost: workspaceUrlHostProp,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
@@ -99,7 +77,6 @@ export function CoreProvider({
 
   return (
     <QueryProvider>
-      <VisibilityRefetcher />
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}

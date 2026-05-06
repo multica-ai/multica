@@ -51,8 +51,8 @@ import {
 
 // Per-row data assembled at the page level. The columns reach into
 // `row.original` and never pull their own data — except for the per-runtime
-// usage query in CostCell, which intentionally keeps its 180-day cache key
-// shared with the runtime-detail page (clicking a row pre-warms detail).
+// usage query in CostCell, which fetches its own narrow 14-day window
+// (just enough for the cell's 7d cost + 7d prior-window delta).
 export interface RuntimeRow {
   runtime: AgentRuntime;
   ownerMember: MemberWithUser | null;
@@ -320,12 +320,20 @@ function WorkloadCell({
   );
 }
 
-// Per-row cost — fetches the same 180-day usage window used by the
-// runtime-detail page so clicking a row makes detail render instantly from
-// cache. Cold load incurs N parallel requests, but each is cheap and they
-// all share the same query key.
+// Per-row cost — only renders a 7d total + delta vs the prior 7d, so we
+// only need 14 days of usage. Previously this fetched a 180-day window to
+// share the cache key with the runtime-detail page, but that turned the
+// list page into N × 180d in-line aggregations against `task_usage` (one
+// per runtime row) and dominated DB load for this view. Detail still
+// fetches its own 180d window on navigation; the cold-load difference for
+// detail is one extra request, while the steady-state savings on the list
+// page are large.
+const COST_CELL_DAYS = 14;
+
 function CostCell({ runtimeId }: { runtimeId: string }) {
-  const { data: usage = [] } = useQuery(runtimeUsageOptions(runtimeId, 180));
+  const { data: usage = [] } = useQuery(
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+  );
   const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
   const costPrev7d = useMemo(
     () => computeCostInWindow(usage, 7, 7),

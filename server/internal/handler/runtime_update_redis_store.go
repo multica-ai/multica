@@ -10,38 +10,31 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Redis-backed implementation of UpdateStore.
-//
-// Storage layout (mirrors the model-list / local-skill Redis store patterns):
-//
-//   mul:update:<request_id>             → JSON-encoded UpdateRequest, TTL = retention
-//   mul:update:pending:<runtime_id>     → ZSET { member = request_id, score = created_at UnixNano }
-//                                         TTL = retention * 2, refreshed on Create
-//   mul:update:active:<runtime_id>      → request_id of the currently pending or running
-//                                         update for the runtime, TTL = retention. Used to
-//                                         enforce the "one update at a time per runtime"
-//                                         rule across nodes; deleted on terminal transitions.
-//
-// PopPending uses the same atomic claimPendingScript as the model-list and
-// local-skill stores (defined in runtime_local_skills_redis_store.go) — ZREM
-// the pending entry + SET the running record in a single Lua call so a
-// transient error between the two cannot strand the request.
+// Redis-backed implementation of UpdateStore. CLI updates have the same
+// pending-request shape as model-list and runtime-local-skill requests:
+// frontend creates the request, daemon claims it on heartbeat, daemon reports
+// a terminal result, and the UI polls by request ID. In multi-node deploys all
+// four calls can hit different API replicas, so the lifecycle must live in
+// shared storage.
 
 const (
-	updateKeyPrefix     = "mul:update:"
-	updatePendingPrefix = "mul:update:pending:"
-	updateActivePrefix  = "mul:update:active:"
-	updatePopMaxRetries = 5
+	updateKeyPrefix          = "mul:update:req:"
+	updatePendingPrefix      = "mul:update:pending:"
+	updateActivePrefix       = "mul:update:active:"
+	updateRedisPopMaxRetries = 5
 )
 
-func updateKey(id string) string                 { return updateKeyPrefix + id }
-func updatePendingKey(runtimeID string) string   { return updatePendingPrefix + runtimeID }
-func updateActiveKey(runtimeID string) string    { return updateActivePrefix + runtimeID }
+func updateKey(id string) string               { return updateKeyPrefix + id }
+func updatePendingKey(runtimeID string) string { return updatePendingPrefix + runtimeID }
+func updateActiveKey(runtimeID string) string  { return updateActivePrefix + runtimeID }
 
-// RedisUpdateStore stores pending / running / completed daemon CLI update
-// requests in Redis so every API node agrees on the same state. Without this
-// the frontend could create a request on Pod A while the daemon polls Pod B
-// and never picks it up — see PR #51 for the equivalent fix on ModelListStore.
+var deleteIfValueScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
+
 type RedisUpdateStore struct {
 	rdb *redis.Client
 }
@@ -51,24 +44,6 @@ func NewRedisUpdateStore(rdb *redis.Client) *RedisUpdateStore {
 }
 
 func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error) {
-	// Best-effort enforcement of "one update at a time per runtime". Two nodes
-	// can still race past this check (the in-memory store has the same race
-	// across pods), but in practice updates are rare and operator-initiated,
-	// so this is good enough.
-	if existing, err := s.rdb.Get(ctx, updateActiveKey(runtimeID)).Result(); err == nil && existing != "" {
-		req, err := s.loadRequest(ctx, existing)
-		if err != nil {
-			return nil, err
-		}
-		if req != nil && (req.Status == UpdatePending || req.Status == UpdateRunning) {
-			return nil, errUpdateInProgress
-		}
-		// Stale active key (record gone or already in a terminal state) — fall
-		// through; the SET below will overwrite it with the new request id.
-	} else if err != nil && !errors.Is(err, redis.Nil) {
-		return nil, fmt.Errorf("get active update: %w", err)
-	}
-
 	now := time.Now()
 	req := &UpdateRequest{
 		ID:            randomID(),
@@ -78,22 +53,31 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion 
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	data, err := json.Marshal(req)
+	data, err := s.marshalRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal update request: %w", err)
+		return nil, err
+	}
+
+	activeKey := updateActiveKey(runtimeID)
+	ok, err := s.rdb.SetNX(ctx, activeKey, req.ID, updateStoreRetention).Result()
+	if err != nil {
+		return nil, fmt.Errorf("reserve active update: %w", err)
+	}
+	if !ok {
+		return nil, errUpdateInProgress
 	}
 
 	pipe := s.rdb.TxPipeline()
 	pipe.Set(ctx, updateKey(req.ID), data, updateStoreRetention)
-	pipe.Set(ctx, updateActiveKey(runtimeID), req.ID, updateStoreRetention)
 	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),
 		Member: req.ID,
 	})
-	// Keep the pending ZSET alive longer than individual requests so stale
-	// members can be swept lazily on PopPending.
 	pipe.Expire(ctx, updatePendingKey(runtimeID), updateStoreRetention*2)
 	if _, err := pipe.Exec(ctx); err != nil {
+		_ = s.clearActiveIfMatches(ctx, runtimeID, req.ID)
+		_ = s.rdb.Del(ctx, updateKey(req.ID)).Err()
+		_ = s.rdb.ZRem(ctx, updatePendingKey(runtimeID), req.ID).Err()
 		return nil, fmt.Errorf("persist update request: %w", err)
 	}
 	return req, nil
@@ -103,9 +87,6 @@ func (s *RedisUpdateStore) Get(ctx context.Context, id string) (*UpdateRequest, 
 	return s.loadRequest(ctx, id)
 }
 
-// loadRequest fetches a single record, applies the timeout transition if the
-// stored state has aged past the threshold, and persists the transition when
-// applicable so sibling nodes observe the same terminal state.
 func (s *RedisUpdateStore) loadRequest(ctx context.Context, id string) (*UpdateRequest, error) {
 	raw, err := s.rdb.Get(ctx, updateKey(id)).Bytes()
 	if errors.Is(err, redis.Nil) {
@@ -114,27 +95,26 @@ func (s *RedisUpdateStore) loadRequest(ctx context.Context, id string) (*UpdateR
 	if err != nil {
 		return nil, fmt.Errorf("get update request: %w", err)
 	}
-	var req UpdateRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil, fmt.Errorf("decode update request: %w", err)
+	req, err := s.unmarshalRequest(raw)
+	if err != nil {
+		return nil, err
 	}
-	if applyUpdateTimeout(&req, time.Now()) {
-		// Persist the timeout so subsequent Get / PopPending on any node see
-		// the terminal state, drop the id from the pending zset, and clear
-		// the active key if it still points at this id.
-		if err := s.persistRequest(ctx, &req); err != nil {
+	if applyUpdateTimeout(req, time.Now()) {
+		if err := s.persistRequest(ctx, req); err != nil {
+			return nil, err
+		}
+		if err := s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID); err != nil {
 			return nil, err
 		}
 		s.rdb.ZRem(ctx, updatePendingKey(req.RuntimeID), req.ID)
-		s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID)
 	}
-	return &req, nil
+	return req, nil
 }
 
 func (s *RedisUpdateStore) persistRequest(ctx context.Context, req *UpdateRequest) error {
-	data, err := json.Marshal(req)
+	data, err := s.marshalRequest(req)
 	if err != nil {
-		return fmt.Errorf("marshal update request: %w", err)
+		return err
 	}
 	if err := s.rdb.Set(ctx, updateKey(req.ID), data, updateStoreRetention).Err(); err != nil {
 		return fmt.Errorf("persist update request: %w", err)
@@ -142,29 +122,47 @@ func (s *RedisUpdateStore) persistRequest(ctx context.Context, req *UpdateReques
 	return nil
 }
 
-// clearActiveIfMatches deletes the per-runtime active key only if it still
-// references the given request id. Prevents a terminal transition from
-// clobbering a newer update that has already taken the active slot.
-var clearActiveIfMatchesScript = redis.NewScript(`
-local current = redis.call('GET', KEYS[1])
-if current == ARGV[1] then
-    redis.call('DEL', KEYS[1])
-    return 1
-end
-return 0
-`)
+type redisUpdateEnvelope struct {
+	Public       *UpdateRequest `json:"r"`
+	RunStartedAt *time.Time     `json:"s,omitempty"`
+}
 
-func (s *RedisUpdateStore) clearActiveIfMatches(ctx context.Context, runtimeID, id string) {
-	clearActiveIfMatchesScript.Run(ctx, s.rdb, []string{updateActiveKey(runtimeID)}, id)
+func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
+	env := redisUpdateEnvelope{Public: req, RunStartedAt: req.RunStartedAt}
+	data, err := json.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("marshal update request: %w", err)
+	}
+	return data, nil
+}
+
+func (s *RedisUpdateStore) unmarshalRequest(raw []byte) (*UpdateRequest, error) {
+	var env redisUpdateEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("decode update request: %w", err)
+	}
+	if env.Public == nil {
+		return nil, fmt.Errorf("decode update request: missing payload")
+	}
+	env.Public.RunStartedAt = env.RunStartedAt
+	return env.Public, nil
+}
+
+func (s *RedisUpdateStore) HasPending(ctx context.Context, runtimeID string) (bool, error) {
+	cnt, err := s.rdb.ZCard(ctx, updatePendingKey(runtimeID)).Result()
+	if err != nil {
+		return false, fmt.Errorf("zcard pending updates: %w", err)
+	}
+	return cnt > 0, nil
 }
 
 func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error) {
 	pendingKey := updatePendingKey(runtimeID)
 
-	for attempt := 0; attempt < updatePopMaxRetries; attempt++ {
+	for attempt := 0; attempt < updateRedisPopMaxRetries; attempt++ {
 		ids, err := s.rdb.ZRange(ctx, pendingKey, 0, 0).Result()
 		if err != nil {
-			return nil, fmt.Errorf("zrange pending: %w", err)
+			return nil, fmt.Errorf("zrange pending updates: %w", err)
 		}
 		if len(ids) == 0 {
 			return nil, nil
@@ -176,37 +174,32 @@ func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*U
 			return nil, err
 		}
 		if req == nil {
-			// Record expired but the zset still references it — drop and retry.
 			s.rdb.ZRem(ctx, pendingKey, id)
 			continue
 		}
 		if req.Status != UpdatePending {
-			// Either the timeout fired inside loadRequest or another node
-			// already picked it up. Unlink from the pending set and retry.
 			s.rdb.ZRem(ctx, pendingKey, id)
 			continue
 		}
 
 		now := time.Now()
 		req.Status = UpdateRunning
+		req.RunStartedAt = &now
 		req.UpdatedAt = now
-		data, err := json.Marshal(req)
+		data, err := s.marshalRequest(req)
 		if err != nil {
-			return nil, fmt.Errorf("marshal update request: %w", err)
+			return nil, err
 		}
 
-		// Atomically claim: ZREM from pending + SET the updated record.
-		// Uses the same Lua script as the model-list / local-skill stores.
 		result, err := claimPendingScript.Run(
 			ctx, s.rdb,
 			[]string{pendingKey, updateKey(id)},
 			id, data, int(updateStoreRetention.Seconds()),
 		).Int64()
 		if err != nil {
-			return nil, fmt.Errorf("claim pending: %w", err)
+			return nil, fmt.Errorf("claim pending update: %w", err)
 		}
 		if result == 0 {
-			// Another node won the race — retry.
 			continue
 		}
 		return req, nil
@@ -219,7 +212,7 @@ func (s *RedisUpdateStore) Complete(ctx context.Context, id string, output strin
 	if err != nil {
 		return err
 	}
-	if req == nil {
+	if req == nil || updateRequestTerminal(req.Status) {
 		return nil
 	}
 	req.Status = UpdateCompleted
@@ -228,7 +221,10 @@ func (s *RedisUpdateStore) Complete(ctx context.Context, id string, output strin
 	if err := s.persistRequest(ctx, req); err != nil {
 		return err
 	}
-	s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID)
+	if err := s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID); err != nil {
+		return err
+	}
+	s.rdb.ZRem(ctx, updatePendingKey(req.RuntimeID), req.ID)
 	return nil
 }
 
@@ -237,7 +233,7 @@ func (s *RedisUpdateStore) Fail(ctx context.Context, id string, errMsg string) e
 	if err != nil {
 		return err
 	}
-	if req == nil {
+	if req == nil || updateRequestTerminal(req.Status) {
 		return nil
 	}
 	req.Status = UpdateFailed
@@ -246,6 +242,19 @@ func (s *RedisUpdateStore) Fail(ctx context.Context, id string, errMsg string) e
 	if err := s.persistRequest(ctx, req); err != nil {
 		return err
 	}
-	s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID)
+	if err := s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID); err != nil {
+		return err
+	}
+	s.rdb.ZRem(ctx, updatePendingKey(req.RuntimeID), req.ID)
+	return nil
+}
+
+func (s *RedisUpdateStore) clearActiveIfMatches(ctx context.Context, runtimeID, id string) error {
+	if runtimeID == "" || id == "" {
+		return nil
+	}
+	if err := deleteIfValueScript.Run(ctx, s.rdb, []string{updateActiveKey(runtimeID)}, id).Err(); err != nil {
+		return fmt.Errorf("clear active update: %w", err)
+	}
 	return nil
 }

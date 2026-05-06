@@ -48,6 +48,63 @@ func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	}
 }
 
+// ── resolveResumedSessionID ──
+
+func TestResolveResumedSessionIDMatching(t *testing.T) {
+	t.Parallel()
+	// Server confirms our requested id — happy resume path. No change.
+	got, changed := resolveResumedSessionID(
+		"ses_alpha",
+		json.RawMessage(`{"sessionId":"ses_alpha"}`),
+	)
+	if got != "ses_alpha" {
+		t.Errorf("got %q, want ses_alpha", got)
+	}
+	if changed {
+		t.Errorf("changed: got true, want false")
+	}
+}
+
+func TestResolveResumedSessionIDDifferent(t *testing.T) {
+	t.Parallel()
+	// Server returned a different id — local state was lost and the
+	// server silently spun up a new session. We trust the server.
+	got, changed := resolveResumedSessionID(
+		"ses_alpha",
+		json.RawMessage(`{"sessionId":"ses_beta_new"}`),
+	)
+	if got != "ses_beta_new" {
+		t.Errorf("got %q, want ses_beta_new", got)
+	}
+	if !changed {
+		t.Errorf("changed: got false, want true")
+	}
+}
+
+func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
+	t.Parallel()
+	// Older / non-conforming server returns no sessionId — defensive
+	// fallback to the requested id. This preserves the legacy happy
+	// path; a stale id will eventually fail downstream and be retried
+	// via the daemon's session-resume fallback (daemon.go).
+	for _, body := range []string{
+		`{}`,
+		`{"sessionId":""}`,
+		`not json`,
+	} {
+		got, changed := resolveResumedSessionID(
+			"ses_alpha",
+			json.RawMessage(body),
+		)
+		if got != "ses_alpha" {
+			t.Errorf("body=%q: got %q, want ses_alpha", body, got)
+		}
+		if changed {
+			t.Errorf("body=%q: changed: got true, want false", body)
+		}
+	}
+}
+
 // ── buildHermesSessionParams ──
 
 func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
@@ -311,6 +368,48 @@ func TestHermesClientHandleSessionNotificationAgentMessage(t *testing.T) {
 	}
 	if got.Content != "Hello from Kiro" {
 		t.Errorf("content: got %q, want %q", got.Content, "Hello from Kiro")
+	}
+}
+
+// Regression for #1997: Hermes ACP can flush queued session updates from
+// the previous turn (history replay on session/resume, or chunks queued
+// before our session/prompt response is sent) before the current turn
+// actually starts. Until acceptNotification gates them out, those updates
+// were appended to output and re-sent to the UI, making the previous
+// answer appear duplicated alongside the new one. The Backend wires the
+// gate to a streamingCurrentTurn flag set just before session/prompt; here
+// we exercise the gate directly on hermesClient.
+func TestHermesClientAcceptNotificationGate(t *testing.T) {
+	t.Parallel()
+
+	var (
+		got    []Message
+		accept bool
+	)
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		acceptNotification: func(string) bool {
+			return accept
+		},
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	replay := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"history should be ignored"}}}}`
+	c.handleLine(replay)
+	if len(got) != 0 {
+		t.Fatalf("expected gate to drop replay before turn starts, got %+v", got)
+	}
+
+	accept = true
+	live := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"current"}}}}`
+	c.handleLine(live)
+	if len(got) != 1 {
+		t.Fatalf("expected current-turn update to pass the gate, got %+v", got)
+	}
+	if got[0].Content != "current" {
+		t.Fatalf("got content %q, want \"current\"", got[0].Content)
 	}
 }
 

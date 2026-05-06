@@ -190,8 +190,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "kimi",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,

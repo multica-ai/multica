@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 
 func testLogger() *slog.Logger {
 	return slog.Default()
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func TestShortID(t *testing.T) {
@@ -740,17 +745,17 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// Skills should be in .config/opencode/skills/ (native discovery).
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "SKILL.md"))
+	// Skills should be in .opencode/skills/ (native discovery).
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "SKILL.md"))
 	if err != nil {
-		t.Fatalf("failed to read .config/opencode/skills/go-conventions/SKILL.md: %v", err)
+		t.Fatalf("failed to read .opencode/skills/go-conventions/SKILL.md: %v", err)
 	}
 	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
 		t.Error("SKILL.md missing content")
 	}
 
-	// Supporting files should also be under .config/opencode/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "templates", "example.go"))
+	// Supporting files should also be under .opencode/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "templates", "example.go"))
 	if err != nil {
 		t.Fatalf("failed to read supporting file: %v", err)
 	}
@@ -1916,7 +1921,7 @@ func TestWriteReadGCMeta(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	wsID := "ws-test-001"
 
-	if err := WriteGCMeta(dir, issueID, wsID); err != nil {
+	if err := WriteGCMeta(dir, issueID, wsID, discardLogger()); err != nil {
 		t.Fatalf("WriteGCMeta: %v", err)
 	}
 
@@ -1938,8 +1943,20 @@ func TestWriteReadGCMeta(t *testing.T) {
 
 func TestWriteGCMeta_EmptyRoot(t *testing.T) {
 	t.Parallel()
-	if err := WriteGCMeta("", "issue", "ws"); err != nil {
+	if err := WriteGCMeta("", "issue", "ws", discardLogger()); err != nil {
 		t.Fatalf("expected nil for empty root, got %v", err)
+	}
+}
+
+func TestWriteGCMeta_EmptyIssueID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if err := WriteGCMeta(dir, "", "ws", discardLogger()); err != nil {
+		t.Fatalf("expected nil for empty issue ID, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, gcMetaFile)); !os.IsNotExist(err) {
+		t.Fatalf("expected gc meta file to be absent, got err=%v", err)
 	}
 }
 

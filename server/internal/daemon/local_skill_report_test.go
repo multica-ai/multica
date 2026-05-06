@@ -16,9 +16,9 @@ import (
 // the production schedule on cleanup.
 func withFastLocalSkillReportBackoffs(t *testing.T) {
 	t.Helper()
-	prev := localSkillReportBackoffs
-	localSkillReportBackoffs = []time.Duration{0, 0, 0, 0}
-	t.Cleanup(func() { localSkillReportBackoffs = prev })
+	prev := runtimeReportBackoffs
+	runtimeReportBackoffs = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { runtimeReportBackoffs = prev })
 }
 
 // localSkillReportDaemon wires a Daemon instance around an httptest.Server
@@ -110,18 +110,18 @@ func TestReportLocalSkillResult_GivesUpAfterAllAttemptsFail(t *testing.T) {
 
 	d.reportLocalSkillListResult(context.Background(), Runtime{ID: "rt-1"}, "req-1", map[string]any{"status": "completed"})
 
-	// Each element in localSkillReportBackoffs is one attempt — a persistent
+	// Each element in runtimeReportBackoffs is one attempt — a persistent
 	// outage should burn through every slot and then stop (logging Error).
-	if got := atomic.LoadInt32(calls); int(got) != len(localSkillReportBackoffs) {
-		t.Fatalf("expected %d attempts, got %d", len(localSkillReportBackoffs), got)
+	if got := atomic.LoadInt32(calls); int(got) != len(runtimeReportBackoffs) {
+		t.Fatalf("expected %d attempts, got %d", len(runtimeReportBackoffs), got)
 	}
 }
 
 func TestReportLocalSkillResult_AbortsOnContextCancel(t *testing.T) {
 	// Keep one real delay in the schedule so cancel lands mid-backoff.
-	prev := localSkillReportBackoffs
-	localSkillReportBackoffs = []time.Duration{0, 200 * time.Millisecond}
-	t.Cleanup(func() { localSkillReportBackoffs = prev })
+	prev := runtimeReportBackoffs
+	runtimeReportBackoffs = []time.Duration{0, 200 * time.Millisecond}
+	t.Cleanup(func() { runtimeReportBackoffs = prev })
 
 	d, calls := localSkillReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "{}", http.StatusInternalServerError)

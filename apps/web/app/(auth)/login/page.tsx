@@ -53,7 +53,6 @@ async function resolveLoggedInDestination(
   return resolvePostAuthDestination(workspaces, hasOnboarded);
 }
 
-
 function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();

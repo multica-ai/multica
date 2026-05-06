@@ -73,6 +73,32 @@ function PillButton({
   );
 }
 
+function RepoUrlText({
+  url,
+  className,
+}: {
+  url: string;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            title={url}
+            className={cn("truncate flex-1 text-left", className)}
+          >
+            {url}
+          </span>
+        }
+      />
+      <TooltipContent side="top" align="start" className="max-w-sm break-all">
+        {url}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
@@ -446,7 +472,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           className="size-3.5"
                         />
                         <GithubIcon className="size-3.5" />
-                        <span className="truncate flex-1 text-left">{repo.url}</span>
+                        <RepoUrlText url={repo.url} />
                       </button>
                     );
                   })}
@@ -492,7 +518,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       className="flex items-center gap-2 text-xs"
                     >
                       <GithubIcon className="size-3 text-muted-foreground" />
-                      <span className="truncate flex-1">{url}</span>
+                      <RepoUrlText url={url} />
                       <button
                         type="button"
                         onClick={() => toggleRepo(url)}

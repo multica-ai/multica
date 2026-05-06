@@ -16,6 +16,7 @@ export interface Project {
   updated_at: string;
   issue_count: number;
   done_count: number;
+  resource_count: number;
 }
 
 export interface CreateProjectRequest {

@@ -140,7 +140,7 @@ multica auth status
 Expected output should show the authenticated user and server URL.
 
 **If login fails:**
-- If no browser is available (headless environment), the user can generate a Personal Access Token at `https://app.multica.ai/settings` and run: `multica login --token`
+- If no browser is available (headless environment), the user can generate a Personal Access Token at `https://app.multica.ai/settings` and run: `multica login --token <mul_...>` (use `--token=` with an empty value to be prompted interactively).
 - If the server URL needs to be customized: `multica config set server_url <url>` before logging in.
 
 ---
@@ -166,12 +166,12 @@ Wait 3 seconds, then verify:
 multica daemon status
 ```
 
-Expected output should show `running` status with detected agents (e.g. `claude`, `codex`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, `cursor-agent`).
+Expected output should show `running` status with detected agents (e.g. `claude`, `codex`, `copilot`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, `cursor-agent`).
 
 **If daemon fails to start:**
 - Check logs: `multica daemon logs`
 - If a port conflict occurs, the daemon may already be running under a different profile.
-- If no agents are detected, ensure at least one AI CLI (`claude`, `codex`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`) is installed and on the `$PATH`.
+- If no agents are detected, ensure at least one AI CLI (`claude`, `codex`, `copilot`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`) is installed and on the `$PATH`.
 
 ---
 
@@ -185,12 +185,12 @@ multica daemon status
 
 Confirm:
 1. Status is `running`
-2. At least one agent is listed (e.g. `claude`, `codex`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`)
+2. At least one agent is listed (e.g. `claude`, `codex`, `copilot`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`)
 3. At least one workspace is being watched
 
 If the agents list is empty, tell the user:
 
-> "The Multica daemon is running but no AI agent CLIs were detected. Please install at least one supported CLI (`claude`, `codex`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`), then restart the daemon with `multica daemon stop && multica daemon start`."
+> "The Multica daemon is running but no AI agent CLIs were detected. Please install at least one supported CLI (`claude`, `codex`, `copilot`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, or `cursor-agent`), then restart the daemon with `multica daemon stop && multica daemon start`."
 
 ---
 

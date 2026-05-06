@@ -157,7 +157,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
-        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown());
+        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
@@ -173,7 +173,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-          const md = stripBlobUrls(ed.getMarkdown());
+          const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
           onUpdateRef.current?.(md);

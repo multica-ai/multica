@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
+  Archive,
   Calendar,
   ChevronDown,
   ChevronLeft,
@@ -112,10 +113,14 @@ function formatActivity(
       return `renamed this issue from "${details.from ?? "?"}" to "${details.to ?? "?"}"`;
     case "description_updated":
       return "updated the description";
-    case "task_completed":
-      return "completed the task";
-    case "task_failed":
-      return "task failed";
+    case "task_completed": {
+      const n = entry.coalesced_count ?? 1;
+      return n > 1 ? `completed the task (${n} times)` : "completed the task";
+    }
+    case "task_failed": {
+      const n = entry.coalesced_count ?? 1;
+      return n > 1 ? `task failed (${n} times)` : "task failed";
+    }
     default:
       return entry.action ?? "";
   }
@@ -242,6 +247,63 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+
+  // Memoized timeline grouping. The same Map / groups references are reused
+  // across re-renders that don't change `timeline`, so React.memo on
+  // CommentCard can skip re-rendering when the only thing that moved was
+  // unrelated parent state (e.g. composer draft, sidebar toggle).
+  const timelineView = useMemo(() => {
+    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
+    const repliesByParent = new Map<string, TimelineEntry[]>();
+    for (const e of timeline) {
+      if (e.type === "comment" && e.parent_id) {
+        const list = repliesByParent.get(e.parent_id) ?? [];
+        list.push(e);
+        repliesByParent.set(e.parent_id, list);
+      }
+    }
+
+    // Coalesce consecutive activities from the same actor + action.
+    // - task_completed / task_failed: no time limit (these repeat across runs)
+    // - all other actions: within a 2-minute window
+    const COALESCE_MS = 2 * 60 * 1000;
+    const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
+    const coalesced: TimelineEntry[] = [];
+    for (const entry of topLevel) {
+      if (entry.type === "activity") {
+        const prev = coalesced[coalesced.length - 1];
+        if (
+          prev?.type === "activity" &&
+          prev.action === entry.action &&
+          prev.actor_type === entry.actor_type &&
+          prev.actor_id === entry.actor_id &&
+          (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
+            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
+        ) {
+          coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
+          continue;
+        }
+      }
+      coalesced.push(entry);
+    }
+
+    // Group consecutive activities together so the connector line works
+    const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
+    for (const entry of coalesced) {
+      if (entry.type === "activity") {
+        const last = groups[groups.length - 1];
+        if (last?.type === "activities") {
+          last.entries.push(entry);
+        } else {
+          groups.push({ type: "activities", entries: [entry] });
+        }
+      } else {
+        groups.push({ type: "comment", entries: [entry] });
+      }
+    }
+
+    return { repliesByParent, groups };
+  }, [timeline]);
 
   const {
     reactions: issueReactions,
@@ -547,6 +609,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   }
                 />
                 <TooltipContent side="bottom">Mark as done</TooltipContent>
+              </Tooltip>
+            )}
+            {onDone && issue.status === "done" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => { onDone(); }}
+                    >
+                      <Archive />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Archive</TooltipContent>
               </Tooltip>
             )}
             <Tooltip>
@@ -877,121 +956,73 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">
-              {(() => {
-                const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
-                const repliesByParent = new Map<string, TimelineEntry[]>();
-                for (const e of timeline) {
-                  if (e.type === "comment" && e.parent_id) {
-                    const list = repliesByParent.get(e.parent_id) ?? [];
-                    list.push(e);
-                    repliesByParent.set(e.parent_id, list);
-                  }
-                }
-
-                // Coalesce: same actor + same action within 2 min → keep last only
-                const COALESCE_MS = 2 * 60 * 1000;
-                const coalesced: TimelineEntry[] = [];
-                for (const entry of topLevel) {
-                  if (entry.type === "activity") {
-                    const prev = coalesced[coalesced.length - 1];
-                    if (
-                      prev?.type === "activity" &&
-                      prev.action === entry.action &&
-                      prev.actor_type === entry.actor_type &&
-                      prev.actor_id === entry.actor_id &&
-                      Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS
-                    ) {
-                      // Replace previous with this one (keep the later result)
-                      coalesced[coalesced.length - 1] = entry;
-                      continue;
-                    }
-                  }
-                  coalesced.push(entry);
-                }
-
-                // Group consecutive activities together so the connector line works
-                const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
-                for (const entry of coalesced) {
-                  if (entry.type === "activity") {
-                    const last = groups[groups.length - 1];
-                    if (last?.type === "activities") {
-                      last.entries.push(entry);
-                    } else {
-                      groups.push({ type: "activities", entries: [entry] });
-                    }
-                  } else {
-                    groups.push({ type: "comment", entries: [entry] });
-                  }
-                }
-
-                return groups.map((group) => {
-                  if (group.type === "comment") {
-                    const entry = group.entries[0]!;
-                    return (
-                      <div key={entry.id} id={`comment-${entry.id}`}>
-                        <CommentCard
-                          issueId={id}
-                          entry={entry}
-                          allReplies={repliesByParent}
-                          currentUserId={user?.id}
-                          canModerate={canModerateComments}
-                          onReply={submitReply}
-                          onEdit={editComment}
-                          onDelete={deleteComment}
-                          onToggleReaction={handleToggleReaction}
-                          highlightedCommentId={highlightedId}
-                        />
-                      </div>
-                    );
-                  }
-
+              {timelineView.groups.map((group) => {
+                if (group.type === "comment") {
+                  const entry = group.entries[0]!;
                   return (
-                    <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
-                      {group.entries.map((entry, _idx) => {
-                        const details = (entry.details ?? {}) as Record<string, string>;
-                        const isStatusChange = entry.action === "status_changed";
-                        const isPriorityChange = entry.action === "priority_changed";
-                        const isDueDateChange = entry.action === "due_date_changed";
-
-                        let leadIcon: React.ReactNode;
-                        if (isStatusChange && details.to) {
-                          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-                        } else if (isPriorityChange && details.to) {
-                          leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-                        } else if (isDueDateChange) {
-                          leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-                        } else {
-                          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-                        }
-
-                        return (
-                          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-                            <div className="mr-2 flex w-4 shrink-0 justify-center">
-                              {leadIcon}
-                            </div>
-                            <div className="flex min-w-0 flex-1 items-center gap-1">
-                              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                              <span className="truncate">{formatActivity(entry, getActorName)}</span>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <span className="ml-auto shrink-0 cursor-default">
-                                      {timeAgo(entry.created_at)}
-                                    </span>
-                                  }
-                                />
-                                <TooltipContent side="top">
-                                  {new Date(entry.created_at).toLocaleString()}
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div key={entry.id} id={`comment-${entry.id}`}>
+                      <CommentCard
+                        issueId={id}
+                        entry={entry}
+                        allReplies={timelineView.repliesByParent}
+                        currentUserId={user?.id}
+                        canModerate={canModerateComments}
+                        onReply={submitReply}
+                        onEdit={editComment}
+                        onDelete={deleteComment}
+                        onToggleReaction={handleToggleReaction}
+                        highlightedCommentId={highlightedId}
+                      />
                     </div>
                   );
-                });
-              })()}
+                }
+
+                return (
+                  <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
+                    {group.entries.map((entry, _idx) => {
+                      const details = (entry.details ?? {}) as Record<string, string>;
+                      const isStatusChange = entry.action === "status_changed";
+                      const isPriorityChange = entry.action === "priority_changed";
+                      const isDueDateChange = entry.action === "due_date_changed";
+
+                      let leadIcon: React.ReactNode;
+                      if (isStatusChange && details.to) {
+                        leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+                      } else if (isPriorityChange && details.to) {
+                        leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+                      } else if (isDueDateChange) {
+                        leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+                      } else {
+                        leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+                      }
+
+                      return (
+                        <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+                          <div className="mr-2 flex w-4 shrink-0 justify-center">
+                            {leadIcon}
+                          </div>
+                          <div className="flex min-w-0 flex-1 items-center gap-1">
+                            <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+                            <span className="truncate">{formatActivity(entry, getActorName)}</span>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="ml-auto shrink-0 cursor-default">
+                                    {timeAgo(entry.created_at)}
+                                  </span>
+                                }
+                              />
+                              <TooltipContent side="top">
+                                {new Date(entry.created_at).toLocaleString()}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Bottom comment input — no avatar, full width */}
