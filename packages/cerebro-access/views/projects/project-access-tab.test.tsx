@@ -98,7 +98,7 @@ vi.mock("@multica/core/projects/queries", () => ({
   },
 }));
 
-vi.mock("../../common/actor-avatar", () => ({
+vi.mock("@multica/views/common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
     <span data-testid={"avatar-" + actorId}>av</span>
   ),

@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { RestrictedLock } from "../../common/restricted-lock";
+import { RestrictedLock } from "@multica/cerebro-access/views";
 
 export function ProjectPicker({
   projectId,

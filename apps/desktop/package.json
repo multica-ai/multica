@@ -26,6 +26,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.5",
     "@fontsource/geist-mono": "^5.2.7",
+    "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-attachments": "workspace:*",
     "@multica/cerebro-chat": "workspace:*",

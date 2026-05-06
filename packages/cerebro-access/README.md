@@ -10,6 +10,30 @@ back them.
 - Hooks and components for the combined restrict+pick UI.
 - Query/mutation wrappers around access-related endpoints when those
   endpoints are cerebro-only.
+- `views/components/restricted-lock.{tsx,test.tsx}` — small lock badge
+  shown next to a restricted project's name.
+- `views/components/restricted-ref.{tsx,test.tsx}` — inline marker for a
+  restricted-project reference (used inside issue detail).
+- `views/projects/project-access-tab.{tsx,test.tsx}` — full
+  manage-membership tab in project settings.
+
+## Why the Go access handler stays in `server/internal/handler/`
+
+`access.go` defines unexported helpers `isWorkspaceAdmin`,
+`canAccessProject`, `canAccessIssue` as methods on the upstream
+`*Handler` struct. The corresponding tests
+(`access_test.go`, `access_handlers_test.go`, `access_privacy_test.go`,
+`access_ws_test.go`) call those methods directly via the package-level
+`testHandler` and `testPool` fixtures from upstream's `handler_test.go`.
+
+Moving the production code to `server/internal/cerebro/access/` would
+require renaming methods, re-implementing the test fixture
+infrastructure per cerebro test-package, and updating every call site
+that currently invokes `h.canAccessProject(...)` etc. — a real refactor
+beyond Phase 6's mechanical-move scope. The existing
+`CEREBRO-PATCH(access-handler)` markers keep the files compliant with
+the upstream-zone validator. The same logic applies to
+`project_access.go` / `project_access_test.go`.
 
 ## May land here
 

@@ -14,7 +14,7 @@ import { projectKeys } from "@multica/core/projects/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import type { Project, ProjectAccess, ProjectMember } from "@multica/core/types";
-import { ActorAvatar } from "../../common/actor-avatar";
+import { ActorAvatar } from "@multica/views/common/actor-avatar";
 
 type Props = { project: Project };
 

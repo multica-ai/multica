@@ -70,9 +70,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-// CEREBRO-PATCH(project-detail-access): RestrictedLock indicator + ProjectAccessTab content for access control
-import { RestrictedLock } from "../../common/restricted-lock";
-import { ProjectAccessTab } from "./project-access-tab";
+// CEREBRO-PATCH(project-detail-access): RestrictedLock + ProjectAccessTab from cerebro-access after Phase 6 relocation
+import { RestrictedLock, ProjectAccessTab } from "@multica/cerebro-access/views";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display

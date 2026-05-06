@@ -38,7 +38,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
 import { PageHeader } from "../../layout/page-header";
 import { PriorityIcon } from "../../issues/components/priority-icon";
-import { RestrictedLock } from "../../common/restricted-lock";
+import { RestrictedLock } from "@multica/cerebro-access/views";
 
 function formatRelativeDate(date: string): string {
   const diff = Date.now() - new Date(date).getTime();

@@ -71,7 +71,7 @@ import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@m
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { PrivacyToggle } from "./privacy-toggle";
-import { RestrictedRef } from "../../common/restricted-ref";
+import { RestrictedRef } from "@multica/cerebro-access/views";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
