@@ -146,10 +146,13 @@
   background: conic-gradient(
     from var(--border-beam-angle),
     transparent 0deg,
-    transparent 280deg,
-    color-mix(in oklab, var(--brand) 50%, transparent) 320deg,
-    var(--brand) 350deg,
-    color-mix(in oklab, var(--brand) 30%, transparent) 360deg
+    transparent 220deg,
+    #ffbe7b 245deg,
+    #ff777f 270deg,
+    #ff8ab4 295deg,
+    #a07cfe 320deg,
+    #5b9dff 345deg,
+    transparent 360deg
   );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
@@ -165,9 +168,11 @@
     animation: none;
     background: linear-gradient(
       90deg,
-      color-mix(in oklab, var(--brand) 30%, transparent),
-      var(--brand),
-      color-mix(in oklab, var(--brand) 30%, transparent)
+      #ffbe7b,
+      #ff777f,
+      #ff8ab4,
+      #a07cfe,
+      #5b9dff
     );
   }
 }
