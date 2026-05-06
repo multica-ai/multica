@@ -96,7 +96,7 @@ func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreat
 const countIssues = `-- name: CountIssues :one
 SELECT count(*) FROM issue
 WHERE workspace_id = $1
-  AND kind = 'task'
+  AND kind = 'issue'
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
   AND ($4::uuid IS NULL OR assignee_id = $4)
@@ -137,7 +137,7 @@ INSERT INTO issue (
     parent_issue_id, position, due_date, number, project_id, kind
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    COALESCE($15::text, 'task')
+    COALESCE($15::text, 'issue')
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, kind, is_private
 `
 
@@ -215,7 +215,7 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
     $15, $16,
-    COALESCE($17::text, 'task')
+    COALESCE($17::text, 'issue')
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, kind, is_private
 `
 
@@ -473,7 +473,7 @@ SELECT i.id, i.workspace_id, i.title, i.status, i.priority,
 FROM issue i
 LEFT JOIN project p ON p.id = i.project_id
 WHERE i.workspace_id = $1
-  AND i.kind = 'task'
+  AND i.kind = 'issue'
   AND (
     $4::boolean
     OR (
@@ -599,7 +599,7 @@ SELECT id, workspace_id, title, status, priority,
        parent_issue_id, position, due_date, created_at, updated_at, number, project_id, kind
 FROM issue
 WHERE workspace_id = $1
-  AND kind = 'task'
+  AND kind = 'issue'
   AND status NOT IN ('done', 'cancelled')
   AND ($2::text IS NULL OR priority = $2)
   AND ($3::uuid IS NULL OR assignee_id = $3)

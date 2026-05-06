@@ -3,7 +3,7 @@
 -- have to know they share a table with tasks.
 
 -- name: ListChannelsForUser :many
--- Returns channels (kind != task) where the user is a subscriber. Joins
+-- Returns channels (kind != 'issue') where the user is a subscriber. Joins
 -- through issue_subscriber so participation is the gating predicate.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.kind, i.assignee_type, i.assignee_id,

@@ -137,7 +137,7 @@ type ListChannelsForUserRow struct {
 // Channels are issues with kind IN ('channel', 'dm'). The issue table is
 // the storage; these queries narrow the view so the channel UI doesn't
 // have to know they share a table with tasks.
-// Returns channels (kind != task) where the user is a subscriber. Joins
+// Returns channels (kind != 'issue') where the user is a subscriber. Joins
 // through issue_subscriber so participation is the gating predicate.
 func (q *Queries) ListChannelsForUser(ctx context.Context, arg ListChannelsForUserParams) ([]ListChannelsForUserRow, error) {
 	rows, err := q.db.Query(ctx, listChannelsForUser, arg.WorkspaceID, arg.UserID)

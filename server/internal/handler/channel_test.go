@@ -124,9 +124,10 @@ func TestCreateChannelDMRejectsSelf(t *testing.T) {
 
 // TestCreateChannelRejectsBadKind ensures only 'channel' and 'dm' kinds
 // are accepted — protects the issue table from invalid kinds bypassing
-// the CHECK constraint.
+// the CHECK constraint. 'issue' is the default kind and not a valid
+// channel kind, so it must be rejected here.
 func TestCreateChannelRejectsBadKind(t *testing.T) {
-	for _, badKind := range []string{"", "task", "thread", "anything"} {
+	for _, badKind := range []string{"", "issue", "task", "thread", "anything"} {
 		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/channels", map[string]any{
 			"kind":       badKind,
@@ -183,7 +184,7 @@ func TestListChannelsExcludesNonParticipants(t *testing.T) {
 	}
 }
 
-// TestChannelsHiddenFromIssueList verifies the regression fix: kind='task'
+// TestChannelsHiddenFromIssueList verifies the regression fix: kind='issue'
 // filter on ListIssues prevents channels from leaking into the issue UI.
 func TestChannelsHiddenFromIssueList(t *testing.T) {
 	peerID, cleanup := createSecondTestUser(t, "issue-list")
