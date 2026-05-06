@@ -27,6 +27,7 @@ func BuildPrompt(task Task) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	appendLabelInstructions(&b, task)
 	return b.String()
 }
 
@@ -90,6 +91,21 @@ func buildQuickCreatePrompt(task Task) string {
 	return b.String()
 }
 
+// appendLabelInstructions appends label-linked instructions to the prompt.
+// Each label on the issue can carry optional agent instructions (configured
+// in the Manage Labels dialog). When present, they're injected here so the
+// agent is context-aware of the label's intent without changing the
+// assignment model. Multiple labels stack additively.
+func appendLabelInstructions(b *strings.Builder, task Task) {
+	if len(task.LabelInstructions) == 0 {
+		return
+	}
+	b.WriteString("\n\nLabel-linked instructions (respect ALL of these while working on this issue):\n\n")
+	for _, li := range task.LabelInstructions {
+		fmt.Fprintf(b, "[%s] %s\n\n", li.Name, li.Instructions)
+	}
+}
+
 // buildCommentPrompt constructs a prompt for comment-triggered tasks.
 // The triggering comment content is embedded directly so the agent cannot
 // miss it, even when stale output files exist in a reused workdir.
@@ -116,6 +132,7 @@ func buildCommentPrompt(task Task) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
+	appendLabelInstructions(&b, task)
 	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
