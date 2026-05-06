@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 // MinVersions defines the minimum required CLI version for each agent type.
@@ -14,46 +12,6 @@ var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
-}
-
-// MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
-// the multica CLI version reported by the daemon at registration time. The
-// quick-create prompt that the agent runs depends on CLI behavior introduced
-// after this version (attachment URL handling, no-retry semantics on
-// `multica issue create` failure — see PR #1851); older daemons would either
-// double-create issues or mishandle pasted screenshot URLs. Treated as a hard
-// requirement: missing / unparsable / below this threshold all fail closed.
-const MinQuickCreateCLIVersion = "0.2.20"
-
-// Errors returned by CheckMinCLIVersion. Callers branch on these to surface
-// "needs upgrade" vs "version not reported" with the right user message.
-var (
-	ErrCLIVersionMissing = errors.New("multica CLI version not reported by daemon")
-	ErrCLIVersionTooOld  = errors.New("multica CLI version is below required minimum")
-)
-
-// CheckMinCLIVersion returns nil when `detected` parses as ≥ minimum. Returns
-// ErrCLIVersionMissing for empty or unparsable input, and ErrCLIVersionTooOld
-// when parsable but below the minimum. The caller can check for these
-// sentinel errors with errors.Is to drive the response shape.
-func CheckMinCLIVersion(detected string) error {
-	d := strings.TrimSpace(detected)
-	if d == "" {
-		return ErrCLIVersionMissing
-	}
-	parsed, err := parseSemver(d)
-	if err != nil {
-		return ErrCLIVersionMissing
-	}
-	min, err := parseSemver(MinQuickCreateCLIVersion)
-	if err != nil {
-		// Misconfiguration in the constant itself — fail closed as missing.
-		return ErrCLIVersionMissing
-	}
-	if parsed.lessThan(min) {
-		return ErrCLIVersionTooOld
-	}
-	return nil
 }
 
 // semver holds a parsed semantic version (major.minor.patch).
