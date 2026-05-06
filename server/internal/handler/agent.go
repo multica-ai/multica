@@ -46,7 +46,7 @@ type AgentResponse struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	OwnerID            *string           `json:"owner_id"`
-	Skills             []SkillResponse   `json:"skills"`
+	Skills             []SkillSummaryResponse `json:"skills"`
 	CreatedAt          string            `json:"created_at"`
 	UpdatedAt          string            `json:"updated_at"`
 	ArchivedAt         *string           `json:"archived_at"`
@@ -105,7 +105,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []SkillResponse{},
+		Skills:             []SkillSummaryResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
@@ -273,10 +273,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
-	skillMap := map[string][]SkillResponse{}
+	skillMap := map[string][]SkillSummaryResponse{}
 	for _, row := range skillRows {
 		agentID := uuidToString(row.AgentID)
-		skillMap[agentID] = append(skillMap[agentID], SkillResponse{
+		skillMap[agentID] = append(skillMap[agentID], SkillSummaryResponse{
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
 			Description: row.Description,
@@ -308,15 +308,18 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := agentToResponse(agent)
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
 	if len(skills) > 0 {
-		resp.Skills = make([]SkillResponse, len(skills))
+		resp.Skills = make([]SkillSummaryResponse, len(skills))
 		for i, s := range skills {
-			resp.Skills[i] = skillToResponse(s)
+			resp.Skills[i] = skillSummaryToResponse(
+				s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+				s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+			)
 		}
 	}
 

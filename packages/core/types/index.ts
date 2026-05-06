@@ -13,6 +13,7 @@ export type {
   CreateAgentRequest,
   UpdateAgentRequest,
   Skill,
+  SkillSummary,
   SkillFile,
   CreateSkillRequest,
   UpdateSkillRequest,

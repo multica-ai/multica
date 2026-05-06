@@ -26,6 +26,7 @@ import type {
   MemberWithUser,
   User,
   Skill,
+  SkillSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -913,7 +914,7 @@ export class ApiClient {
   }
 
   // Skills
-  async listSkills(): Promise<Skill[]> {
+  async listSkills(): Promise<SkillSummary[]> {
     return this.fetch("/api/skills");
   }
 
@@ -946,7 +947,7 @@ export class ApiClient {
     });
   }
 
-  async listAgentSkills(agentId: string): Promise<Skill[]> {
+  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
 
