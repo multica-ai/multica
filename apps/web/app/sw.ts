@@ -9,7 +9,7 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { Serwist } from "serwist";
-import { applyAppBadge, type BadgingNavigator } from "./sw-badge";
+import { applyAppBadge, resolveBadgeCount, type BadgingNavigator } from "./sw-badge";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -91,11 +91,20 @@ self.addEventListener("push", (event) => {
   if (payload.tag) {
     (opts as NotificationOptions & { renotify?: boolean }).renotify = true;
   }
-  const badge = applyBadgeFromSelf(payload.unreadCount);
+
+  // Always run the badge update inside waitUntil so the SW stays alive long
+  // enough to call setAppBadge. If we let the push handler return without
+  // touching the badge, iOS WebKit auto-increments by 1 — the source of the
+  // "badge keeps adding more" bug.
   event.waitUntil(
-    badge
-      ? Promise.all([self.registration.showNotification(title, opts), badge])
-      : self.registration.showNotification(title, opts),
+    Promise.all([
+      self.registration.showNotification(title, opts),
+      (async () => {
+        const count = await resolveBadgeCount(payload.unreadCount);
+        const promise = applyBadgeFromSelf(count);
+        if (promise) await promise;
+      })(),
+    ]),
   );
 });
 
