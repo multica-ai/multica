@@ -34,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useT } from "../../i18n";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -64,6 +65,7 @@ export function AgentRowActions({
   canManage,
   onDuplicate,
 }: AgentRowActionsProps) {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
 
@@ -93,9 +95,9 @@ export function AgentRowActions({
     try {
       await api.archiveAgent(agent.id);
       invalidateAgents();
-      toast.success("Agent archived");
+      toast.success(t(($) => $.row_actions.agent_archived_toast));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.archive_failed_toast));
     }
   };
 
@@ -103,27 +105,23 @@ export function AgentRowActions({
     try {
       await api.restoreAgent(agent.id);
       invalidateAgents();
-      toast.success("Agent restored");
+      toast.success(t(($) => $.row_actions.agent_restored_toast));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.restore_failed_toast));
     }
   };
 
   const handleCancelTasks = async () => {
     try {
       const { cancelled } = await api.cancelAgentTasks(agent.id);
-      // Server broadcasts task:cancelled per row; useRealtimeSync will
-      // invalidate the agent-task-snapshot cache for us. We still kick
-      // agents in case the back-end's ReconcileAgentStatus changed
-      // agent.status.
       invalidateAgents();
       toast.success(
         cancelled === 0
-          ? "No active tasks to cancel"
-          : `Cancelled ${cancelled} task${cancelled === 1 ? "" : "s"}`,
+          ? t(($) => $.row_actions.no_tasks_to_cancel_toast)
+          : t(($) => $.row_actions.cancelled_tasks_toast, { count: cancelled }),
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel tasks");
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.cancel_failed_toast));
     }
   };
 
@@ -139,7 +137,7 @@ export function AgentRowActions({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Row actions"
+              aria-label={t(($) => $.row.actions_aria)}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
             />
@@ -159,19 +157,19 @@ export function AgentRowActions({
               onClick={() => setConfirmCancel(true)}
             >
               <Square className="h-3.5 w-3.5" />
-              Cancel all tasks
+              {t(($) => $.row_actions.cancel_all_tasks)}
             </DropdownMenuItem>
           )}
           {showDuplicate && (
             <DropdownMenuItem onClick={() => onDuplicate(agent)}>
               <Copy className="h-3.5 w-3.5" />
-              Duplicate
+              {t(($) => $.row_actions.duplicate)}
             </DropdownMenuItem>
           )}
           {showRestore && (
             <DropdownMenuItem onClick={handleRestore}>
               <RotateCcw className="h-3.5 w-3.5" />
-              Restore
+              {t(($) => $.row_actions.restore)}
             </DropdownMenuItem>
           )}
           {showArchive && (
@@ -182,7 +180,7 @@ export function AgentRowActions({
                 onClick={() => setConfirmArchive(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Archive
+                {t(($) => $.row_actions.archive)}
               </DropdownMenuItem>
             </>
           )}
@@ -202,20 +200,16 @@ export function AgentRowActions({
           >
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Cancel all tasks for &ldquo;{agent.name}&rdquo;?
+                {t(($) => $.row_actions.cancel_dialog_title, { name: agent.name })}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {describeCancelImpact(runningCount, queuedCount)}
-                {runningCount > 0 && (
-                  <>
-                    {" "}Running tasks may take up to 5 seconds to fully halt.
-                  </>
-                )}{" "}
-                Cancelled tasks cannot be resumed.
+                {describeCancelImpact(runningCount, queuedCount, t)}
+                {runningCount > 0 && t(($) => $.row_actions.cancel_dialog_running_note)}
+                {t(($) => $.row_actions.cancel_dialog_irreversible)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Keep them</AlertDialogCancel>
+              <AlertDialogCancel>{t(($) => $.row_actions.cancel_dialog_keep)}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 onClick={() => {
@@ -223,7 +217,7 @@ export function AgentRowActions({
                   void handleCancelTasks();
                 }}
               >
-                Cancel all tasks
+                {t(($) => $.row_actions.cancel_dialog_confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -245,18 +239,16 @@ export function AgentRowActions({
                 </div>
                 <div className="flex-1">
                   <AlertDialogTitle>
-                    Archive &ldquo;{agent.name}&rdquo;?
+                    {t(($) => $.row_actions.archive_dialog_title, { name: agent.name })}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
-                    The agent won&apos;t be assignable or mentionable, and any
-                    active tasks will be cancelled. All history is preserved
-                    and you can restore it later.
+                    {t(($) => $.row_actions.archive_dialog_description)}
                   </AlertDialogDescription>
                 </div>
               </div>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t(($) => $.row_actions.archive_dialog_cancel)}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 onClick={() => {
@@ -264,7 +256,7 @@ export function AgentRowActions({
                   void handleArchive();
                 }}
               >
-                Archive
+                {t(($) => $.row_actions.archive_dialog_confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -274,16 +266,17 @@ export function AgentRowActions({
   );
 }
 
-function describeCancelImpact(running: number, queued: number): string {
-  // Both zero shouldn't happen — the menu item is gated on hasActiveWork —
-  // but guarding anyway so the copy never reads "stop 0 tasks and 0 tasks".
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
   if (running === 0 && queued === 0) {
-    return "There are no active tasks to cancel.";
+    return t(($) => $.row_actions.cancel_dialog_no_tasks);
   }
   const parts: string[] = [];
-  if (running > 0) parts.push(`${running} running`);
-  if (queued > 0) parts.push(`${queued} queued`);
-  return `This will cancel ${parts.join(" and ")} ${
-    running + queued === 1 ? "task" : "tasks"
-  }.`;
+  if (running > 0) parts.push(t(($) => $.row_actions.cancel_dialog_running, { count: running }));
+  if (queued > 0) parts.push(t(($) => $.row_actions.cancel_dialog_queued, { count: queued }));
+  return t(($) => $.row_actions.cancel_dialog_impact, {
+    summary: parts.join(" + "),
+    count: running + queued,
+  });
 }

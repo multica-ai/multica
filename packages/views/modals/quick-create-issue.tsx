@@ -40,6 +40,7 @@ import {
   FileDropOverlay,
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { useT } from "../i18n";
 
 // AgentCreatePanel — agent-mode body of the create-issue dialog. Renders
 // only the inner content; the surrounding `<Dialog>` AND `<DialogContent>`
@@ -59,6 +60,7 @@ export function AgentCreatePanel({
   onSwitchMode?: () => void;
   data?: Record<string, unknown> | null;
 }) {
+  const { t } = useT("modals");
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
@@ -116,7 +118,10 @@ export function AgentCreatePanel({
   // daemons handle attachments and partial-failure retries incorrectly
   // (see PR #1851 / MUL-1496). Pre-check on the picker so the user gets
   // immediate feedback instead of waiting for the inbox failure; the
-  // server re-validates as the trust boundary.
+  // server re-validates as the trust boundary. Dev-built daemons
+  // (git-describe shape) are exempted inside checkQuickCreateCliVersion
+  // — frontend and server share the same signal there, so they agree by
+  // construction across web/desktop/staging without comparing env flags.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>
@@ -172,7 +177,7 @@ export function AgentCreatePanel({
       setLastAgentId(agentId);
       clearPrompt();
       setLastMode("agent");
-      toast.success("Sent to agent — you'll get an inbox notification when it's done", {
+      toast.success(t(($) => $.create_issue.agent.toast_sent), {
         duration: 4000,
       });
       if (keepOpen) {
@@ -200,7 +205,7 @@ export function AgentCreatePanel({
           min_version?: string;
         };
         if (body.code === "agent_unavailable") {
-          setError(body.reason || "Agent is unavailable. Pick another agent.");
+          setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
           setSubmitting(false);
           return;
         }
@@ -211,13 +216,16 @@ export function AgentCreatePanel({
           // consistency.
           const cur = body.current_version || "unknown";
           setError(
-            `This agent's daemon CLI (${cur}) is below the required ${body.min_version || MIN_QUICK_CREATE_CLI_VERSION}. Upgrade the daemon to use Create with agent.`,
+            t(($) => $.create_issue.agent.error_daemon_version, {
+              current: cur,
+              min: body.min_version || MIN_QUICK_CREATE_CLI_VERSION,
+            }),
           );
           setSubmitting(false);
           return;
         }
       }
-      setError("Failed to submit. Try again.");
+      setError(t(($) => $.create_issue.agent.error_unknown));
     } finally {
       setSubmitting(false);
     }
@@ -243,14 +251,14 @@ export function AgentCreatePanel({
 
   return (
     <>
-        <DialogTitle className="sr-only">Quick create issue</DialogTitle>
+        <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_agent)}</DialogTitle>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">Create with agent</span>
+            <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
               keyboard focus, and the dialog's focus trap briefly lands focus
@@ -259,8 +267,8 @@ export function AgentCreatePanel({
           <button
             type="button"
             onClick={onClose}
-            title="Close"
-            aria-label="Close"
+            title={t(($) => $.common.close)}
+            aria-label={t(($) => $.common.close)}
             className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
           >
             <XIcon className="size-4" />
@@ -274,10 +282,10 @@ export function AgentCreatePanel({
               render={
                 <button
                   type="button"
-                  aria-label="Select agent"
+                  aria-label={t(($) => $.create_issue.agent.select_agent_aria)}
                   className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-sm px-1.5 py-1 -ml-1.5 hover:bg-accent/60"
                 >
-                  <span>Created by</span>
+                  <span>{t(($) => $.create_issue.agent.created_by)}</span>
                   {selectedAgent ? (
                     <span className="flex items-center gap-1.5 text-foreground">
                       <ActorAvatar
@@ -288,7 +296,7 @@ export function AgentCreatePanel({
                       {selectedAgent.name}
                     </span>
                   ) : (
-                    <span>Pick an agent…</span>
+                    <span>{t(($) => $.create_issue.agent.pick_an_agent)}</span>
                   )}
                 </button>
               }
@@ -296,7 +304,7 @@ export function AgentCreatePanel({
             <DropdownMenuContent align="start" className="w-64 max-h-72 overflow-y-auto">
               {visibleAgents.length === 0 ? (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  No agents available.
+                  {t(($) => $.create_issue.agent.no_agents)}
                 </div>
               ) : (
                 visibleAgents.map((a: Agent) => (
@@ -327,8 +335,11 @@ export function AgentCreatePanel({
         {selectedAgent && versionBlocked && (
           <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
             {versionCheck.state === "missing"
-              ? `This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ ${versionCheck.min}. Upgrade the daemon and reconnect, or switch to manual create.`
-              : `This agent's daemon CLI is ${versionCheck.current} — Create with agent needs ≥ ${versionCheck.min}. Upgrade the daemon, or switch to manual create.`}
+              ? t(($) => $.create_issue.agent.version_missing, { min: versionCheck.min })
+              : t(($) => $.create_issue.agent.version_below, {
+                  current: versionCheck.current,
+                  min: versionCheck.min,
+                })}
           </div>
         )}
 
@@ -346,7 +357,7 @@ export function AgentCreatePanel({
           <ContentEditor
             ref={editorRef}
             defaultValue={initialPrompt}
-            placeholder='Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"'
+            placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
             onUpdate={(md) => {
               setHasContent(md.trim().length > 0);
               setPrompt(md);
@@ -372,7 +383,7 @@ export function AgentCreatePanel({
             />
             {keepOpen && sentCount > 0 && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400">
-                {sentCount} sent
+                {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
               </span>
             )}
           </div>
@@ -380,11 +391,11 @@ export function AgentCreatePanel({
             <button
               type="button"
               onClick={switchToManual}
-              title="Switch to manual create — fill the fields yourself"
+              title={t(($) => $.create_issue.switch_to_manual_tooltip)}
               className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="size-3.5" />
-              Switch to Manual
+              {t(($) => $.create_issue.switch_to_manual)}
             </button>
             <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
               <Switch
@@ -392,7 +403,7 @@ export function AgentCreatePanel({
                 checked={keepOpen}
                 onCheckedChange={setKeepOpen}
               />
-              Create another
+              {t(($) => $.create_issue.create_another)}
             </label>
             <Button
               size="sm"
@@ -400,14 +411,14 @@ export function AgentCreatePanel({
               disabled={!hasContent || !agentId || submitting || versionBlocked || uploading}
               title={
                 versionBlocked
-                  ? `Daemon CLI must be ≥ ${versionCheck.min}`
+                  ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
                   : undefined
               }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
-              {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
-                <span className="flex items-center gap-1"><Check className="size-3.5" />Sent</span>
-              ) : `Create (${formatShortcut(modKey, enterKey)})`}
+              {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+                <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
+              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
         </div>

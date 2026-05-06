@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, History } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -36,6 +36,7 @@ import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import { ChatSessionHistory } from "./chat-session-history";
 import {
   ContextAnchorButton,
   ContextAnchorCard,
@@ -46,11 +47,13 @@ import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatPendingTask, ChatSession } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 
 export function ChatWindow() {
+  const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -58,6 +61,8 @@ export function ChatWindow() {
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const showHistory = useChatStore((s) => s.showHistory);
+  const setShowHistory = useChatStore((s) => s.setShowHistory);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -83,7 +88,10 @@ export function ChatWindow() {
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
 
-  // Check if current session is archived
+  // Legacy archived sessions (the old soft-archive feature was removed but
+  // pre-existing rows with status='archived' may still exist) render as
+  // read-only: history list keeps showing them, but ChatInput is disabled
+  // and the server still rejects POST /messages for them.
   const currentSession = activeSessionId
     ? allSessions.find((s) => s.id === activeSessionId)
     : null;
@@ -391,7 +399,7 @@ export function ChatWindow() {
             >
               <Plus />
             </TooltipTrigger>
-            <TooltipContent side="top">New chat</TooltipContent>
+            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
           </Tooltip>
           <SessionDropdown
             sessions={sessions}
@@ -409,6 +417,24 @@ export function ChatWindow() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className="text-muted-foreground data-[active=true]:bg-accent"
+                  data-active={showHistory ? "true" : undefined}
+                  onClick={() => setShowHistory(!showHistory)}
+                />
+              }
+            >
+              <History />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {showHistory ? t(($) => $.window.history_back_tooltip) : t(($) => $.window.history_show_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   className="text-muted-foreground"
                   onClick={toggleExpand}
                 />
@@ -417,7 +443,7 @@ export function ChatWindow() {
               {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
             </TooltipTrigger>
             <TooltipContent side="top">
-              {isExpanded || isAtMax ? "Restore" : "Fullscreen"}
+              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -433,63 +459,72 @@ export function ChatWindow() {
             >
               <Minus />
             </TooltipTrigger>
-            <TooltipContent side="top">Minimize</TooltipContent>
+            <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </div>
 
-      {/* Messages / skeleton / empty state */}
-      {showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : hasMessages ? (
-        <ChatMessageList
-          messages={messages}
-          pendingTask={pendingTask}
-          availability={availability}
-        />
+      {/* History panel takes over the body when toggled — surfaces the
+       *  per-row delete button. Hidden by default; the input + banners
+       *  are skipped here because the panel has its own affordances. */}
+      {showHistory ? (
+        <ChatSessionHistory />
       ) : (
-        <EmptyState
-          hasSessions={sessions.length > 0}
-          agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
-        />
-      )}
+        <>
+          {/* Messages / skeleton / empty state */}
+          {showSkeleton ? (
+            <ChatMessageSkeleton />
+          ) : hasMessages ? (
+            <ChatMessageList
+              messages={messages}
+              pendingTask={pendingTask}
+              availability={availability}
+            />
+          ) : (
+            <EmptyState
+              hasSessions={sessions.length > 0}
+              agentName={activeAgent?.name}
+              onPickPrompt={(text) => handleSend(text)}
+            />
+          )}
 
-      {/* Status banner above the input — single mutually-exclusive slot.
-       *  Priority: no-agent > offline / unstable. Agent presence is the
-       *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. ContextAnchorCard stays in
-       *  topSlot because that's per-message context, not session state.
-       *
-       *  We key off `noAgent` (the resolved-empty state) rather than
-       *  `!activeAgent`, so the loading window between mount and the
-       *  first agent-list response stays banner-free. */}
-      {noAgent ? (
-        <NoAgentBanner />
-      ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
-      )}
+          {/* Status banner above the input — single mutually-exclusive slot.
+           *  Priority: no-agent > offline / unstable. Agent presence is the
+           *  hard prerequisite (you can't send anything without one), so it
+           *  always wins over a presence hint. ContextAnchorCard stays in
+           *  topSlot because that's per-message context, not session state.
+           *
+           *  We key off `noAgent` (the resolved-empty state) rather than
+           *  `!activeAgent`, so the loading window between mount and the
+           *  first agent-list response stays banner-free. */}
+          {noAgent ? (
+            <NoAgentBanner />
+          ) : (
+            <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+          )}
 
-      {/* Input — disabled for archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
-      <ChatInput
-        onSend={handleSend}
-        onStop={handleStop}
-        isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
-        noAgent={noAgent}
-        agentName={activeAgent?.name}
-        topSlot={<ContextAnchorCard />}
-        leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
+          {/* Input — disabled for legacy archived sessions; locked out entirely
+           *  when there's no agent (the EmptyState above carries the CTA). */}
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStop}
+            isRunning={!!pendingTaskId}
+            disabled={isSessionArchived}
+            noAgent={noAgent}
+            agentName={activeAgent?.name}
+            topSlot={<ContextAnchorCard />}
+            leftAdornment={
+              <AgentDropdown
+                agents={availableAgents}
+                activeAgent={activeAgent}
+                userId={user?.id}
+                onSelect={handleSelectAgent}
+              />
+            }
+            rightAdornment={<ContextAnchorButton />}
           />
-        }
-        rightAdornment={<ContextAnchorButton />}
-      />
+        </>
+      )}
     </motion.div>
   );
 }
@@ -510,6 +545,7 @@ function AgentDropdown({
   userId: string | undefined;
   onSelect: (agent: Agent) => void;
 }) {
+  const { t } = useT("chat");
   // Split into the user's own agents and everyone else so the menu groups
   // them — matches the old AgentSelector layout.
   const { mine, others } = useMemo(() => {
@@ -523,7 +559,7 @@ function AgentDropdown({
   }, [agents, userId]);
 
   if (!activeAgent) {
-    return <span className="text-xs text-muted-foreground">No agents</span>;
+    return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
@@ -542,7 +578,7 @@ function AgentDropdown({
       <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
         {mine.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>My agents</DropdownMenuLabel>
+            <DropdownMenuLabel>{t(($) => $.window.my_agents)}</DropdownMenuLabel>
             {mine.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
@@ -556,7 +592,7 @@ function AgentDropdown({
         {mine.length > 0 && others.length > 0 && <DropdownMenuSeparator />}
         {others.length > 0 && (
           <DropdownMenuGroup>
-            <DropdownMenuLabel>Others</DropdownMenuLabel>
+            <DropdownMenuLabel>{t(($) => $.window.others)}</DropdownMenuLabel>
             {others.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
@@ -617,10 +653,11 @@ function SessionDropdown({
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
 }) {
+  const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const title = activeSession?.title?.trim() || "New chat";
+  const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
   const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
 
   // Aggregate "which sessions have an in-flight task right now". Reuses
@@ -660,14 +697,14 @@ function SessionDropdown({
         <span className="truncate text-sm font-medium">{title}</span>
         {otherSessionRunning ? (
           <span
-            aria-label="Another chat is running"
-            title="Another chat is running"
+            aria-label={t(($) => $.window.another_running)}
+            title={t(($) => $.window.another_running)}
             className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
           />
         ) : otherSessionUnread ? (
           <span
-            aria-label="Another chat has unread replies"
-            title="Another chat has unread replies"
+            aria-label={t(($) => $.window.another_unread)}
+            title={t(($) => $.window.another_unread)}
             className="size-1.5 shrink-0 rounded-full bg-brand"
           />
         ) : null}
@@ -676,7 +713,7 @@ function SessionDropdown({
       <DropdownMenuContent align="start" className="max-h-80 w-auto min-w-56 max-w-80">
         {sessions.length === 0 ? (
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            No previous chats
+            {t(($) => $.window.no_previous)}
           </div>
         ) : (
           sessions.map((session) => {
@@ -701,7 +738,7 @@ function SessionDropdown({
                   <span className="size-6 shrink-0" />
                 )}
                 <span className="truncate flex-1 text-sm">
-                  {session.title?.trim() || "New chat"}
+                  {session.title?.trim() || t(($) => $.window.untitled)}
                 </span>
                 {/* Right-edge status pip: in-flight wins over unread because
                  *  "still working" is more actionable than "has reply" — and
@@ -711,14 +748,14 @@ function SessionDropdown({
                  *  amber + pulse to read as activity. */}
                 {isRunning ? (
                   <span
-                    aria-label="Running"
-                    title="Running"
+                    aria-label={t(($) => $.window.running)}
+                    title={t(($) => $.window.running)}
                     className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
                   />
                 ) : session.has_unread ? (
                   <span
-                    aria-label="Unread"
-                    title="Unread"
+                    aria-label={t(($) => $.window.unread)}
+                    title={t(($) => $.window.unread)}
                     className="size-1.5 shrink-0 rounded-full bg-brand"
                   />
                 ) : null}
@@ -732,16 +769,19 @@ function SessionDropdown({
   );
 }
 
-/**
- * Three starter prompts shown on the empty state. Tapping one sends it
- * immediately — ChatGPT-style — because the point is showing users what
- * this chat is for: operating on the workspace, not open-ended Q&A.
- */
-const STARTER_PROMPTS: { icon: string; text: string }[] = [
-  { icon: "📋", text: "List my open tasks by priority" },
-  { icon: "📝", text: "Summarize what I did today" },
-  { icon: "💡", text: "Plan what to work on next" },
+// Three starter prompts shown on the empty state. Each is keyed into the
+// chat namespace so labels translate per locale; the icon stays raw since
+// emojis are locale-neutral.
+const STARTER_KEYS: ("list_open" | "summarize_today" | "plan_next")[] = [
+  "list_open",
+  "summarize_today",
+  "plan_next",
 ];
+const STARTER_ICONS: Record<(typeof STARTER_KEYS)[number], string> = {
+  list_open: "📋",
+  summarize_today: "📝",
+  plan_next: "💡",
+};
 
 function EmptyState({
   hasSessions,
@@ -752,27 +792,26 @@ function EmptyState({
   agentName?: string;
   onPickPrompt: (text: string) => void;
 }) {
+  const { t } = useT("chat");
   // First-time experience: the user has never started a chat in this
   // workspace. Educate before suggesting actions — starter prompts
   // presume the user already knows what chat is for.
-  //
-  // Independent of agent state: missing-agent feedback lives in the
-  // banner above the input, not here. That keeps this surface focused
-  // on "what is chat" rather than "what's broken right now".
   if (!hasSessions) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8">
         <div className="text-center space-y-3">
-          <h3 className="text-base font-semibold">Chat with your agents</h3>
+          <h3 className="text-base font-semibold">
+            {t(($) => $.empty_state.first_time_title)}
+          </h3>
           <p className="text-sm text-muted-foreground">
-            ✨ They know your workspace —{" "}
+            {t(($) => $.empty_state.first_time_intro)}{" "}
             <span className="font-medium text-foreground">
-              issues, projects, skills
+              {t(($) => $.empty_state.first_time_pillars)}
             </span>
-            .
+            {t(($) => $.empty_state.first_time_pillars_suffix)}
           </p>
           <p className="text-sm text-muted-foreground">
-            Ask for a summary, plan your day, or hand off a quick task.
+            {t(($) => $.empty_state.first_time_actions)}
           </p>
         </div>
       </div>
@@ -784,22 +823,29 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-8">
       <div className="text-center space-y-1">
         <h3 className="text-base font-semibold">
-          {agentName ? `Hi, I'm ${agentName}` : "Welcome to Multica"}
+          {agentName
+            ? t(($) => $.empty_state.returning_title_named, { name: agentName })
+            : t(($) => $.empty_state.returning_title_default)}
         </h3>
-        <p className="text-sm text-muted-foreground">Try asking</p>
+        <p className="text-sm text-muted-foreground">
+          {t(($) => $.empty_state.returning_subtitle)}
+        </p>
       </div>
       <div className="w-full max-w-xs space-y-2">
-        {STARTER_PROMPTS.map((prompt) => (
-          <button
-            key={prompt.text}
-            type="button"
-            onClick={() => onPickPrompt(prompt.text)}
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent hover:border-brand/40"
-          >
-            <span className="mr-2">{prompt.icon}</span>
-            {prompt.text}
-          </button>
-        ))}
+        {STARTER_KEYS.map((key) => {
+          const text = t(($) => $.starter_prompts[key]);
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onPickPrompt(text)}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent hover:border-brand/40"
+            >
+              <span className="mr-2">{STARTER_ICONS[key]}</span>
+              {text}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

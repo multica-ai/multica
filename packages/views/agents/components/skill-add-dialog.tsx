@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { useT } from "../../i18n";
 
 /**
  * Single source of truth for "attach a workspace skill to this agent".
@@ -40,6 +41,7 @@ export function SkillAddDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
@@ -58,7 +60,7 @@ export function SkillAddDialog({
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add skill");
+      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.skills.add_failed_toast));
     } finally {
       setSaving(false);
     }
@@ -68,9 +70,9 @@ export function SkillAddDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-sm">Add skill</DialogTitle>
+          <DialogTitle className="text-sm">{t(($) => $.tab_body.skills.add_dialog_title)}</DialogTitle>
           <DialogDescription className="text-xs">
-            Select a workspace skill to assign to this agent.
+            {t(($) => $.tab_body.skills.add_dialog_description)}
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-64 space-y-1 overflow-y-auto">
@@ -94,13 +96,13 @@ export function SkillAddDialog({
           ))}
           {availableSkills.length === 0 && (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              All workspace skills are already assigned.
+              {t(($) => $.tab_body.skills.add_dialog_empty)}
             </p>
           )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t(($) => $.tab_body.skills.add_dialog_cancel)}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,8 +1,23 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enModals from "../locales/en/modals.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, modals: enModals },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
@@ -236,7 +251,11 @@ function renderModal(element: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(<QueryClientProvider client={qc}>{element}</QueryClientProvider>);
+  return render(
+    <I18nWrapper>
+      <QueryClientProvider client={qc}>{element}</QueryClientProvider>
+    </I18nWrapper>,
+  );
 }
 
 describe("CreateIssueModal", () => {

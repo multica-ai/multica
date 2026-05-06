@@ -8,6 +8,8 @@ import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
+import { loadRuntimeConfig } from "./runtime-config-loader";
+import type { RuntimeConfigResult } from "../shared/runtime-config";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -37,6 +39,10 @@ if (process.platform !== "win32") {
 const PROTOCOL = "multica";
 
 let mainWindow: BrowserWindow | null = null;
+let runtimeConfigResult: RuntimeConfigResult = {
+  ok: false,
+  error: { message: "Runtime config has not loaded yet" },
+};
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -72,7 +78,25 @@ function handleDeepLink(url: string): void {
 
 // --- Window creation -----------------------------------------------------
 
+// Tracks the OS-preferred language as last seen by the running process.
+// Updated on each window-focus check so we can emit a `locale:system-changed`
+// event to the renderer when the user changes their OS language without
+// quitting the app — without restart, app.getPreferredSystemLanguages()
+// would still report the boot value forever.
+let lastKnownSystemLocale = "en";
+
+function getSystemLocale(): string {
+  return app.getPreferredSystemLanguages()[0] ?? "en";
+}
+
 function createWindow(): void {
+  // Pass the OS-preferred language to the renderer via additionalArguments
+  // instead of a sync IPC call. process.argv is available to the preload
+  // script before the first network request, so the renderer's i18next
+  // instance can initialize with the right locale on the very first paint.
+  const systemLocale = getSystemLocale();
+  lastKnownSystemLocale = systemLocale;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -89,6 +113,7 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
 
@@ -104,6 +129,18 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  // Detect OS language changes while the app is running. Electron has no
+  // dedicated event for this on any platform, so we poll on focus regain —
+  // catches the common case where users switch System Settings → Language
+  // and bring the app back. The renderer decides whether to act (it ignores
+  // the signal when the user has an explicit Settings choice).
+  mainWindow.on("focus", () => {
+    const current = getSystemLocale();
+    if (current === lastKnownSystemLocale) return;
+    lastKnownSystemLocale = current;
+    mainWindow?.webContents.send("locale:system-changed", current);
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -187,7 +224,25 @@ if (!gotTheLock) {
     if (deepLinkUrl) handleDeepLink(deepLinkUrl);
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    const viteEnv = import.meta.env as ImportMetaEnv & {
+      readonly VITE_API_URL?: string;
+      readonly VITE_WS_URL?: string;
+      readonly VITE_APP_URL?: string;
+    };
+
+    runtimeConfigResult = await loadRuntimeConfig({
+      isDev: is.dev,
+      // electron-vite exposes VITE_* on import.meta.env for the main process;
+      // keep dev URL overrides on the same source the renderer used before
+      // runtime config moved endpoint resolution into main/preload.
+      env: {
+        apiUrl: viteEnv.VITE_API_URL,
+        wsUrl: viteEnv.VITE_WS_URL,
+        appUrl: viteEnv.VITE_APP_URL,
+      },
+    });
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -221,6 +276,13 @@ if (!gotTheLock) {
       const p = process.platform;
       const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
       event.returnValue = { version: getAppVersion(), os };
+    });
+
+    // Sync IPC: preload exposes the validated runtime config before renderer
+    // boot. If desktop.json exists but is invalid, renderer receives the
+    // blocking error and must not silently fall back to the cloud defaults.
+    ipcMain.on("runtime-config:get", (event) => {
+      event.returnValue = runtimeConfigResult;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

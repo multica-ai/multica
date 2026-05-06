@@ -305,10 +305,11 @@ multica workspace members <workspace-id>
 multica issue list
 multica issue list --status in_progress
 multica issue list --priority urgent --assignee "Agent Name"
+multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --limit 20 --output json
 ```
 
-Available filters: `--status`, `--priority`, `--assignee`, `--project`, `--limit`.
+Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
 ### Get Issue
 
@@ -321,9 +322,10 @@ multica issue get <id> --output json
 
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
+multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee`, `--parent`, `--project`, `--due-date`.
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace members --output json` / `multica agent list --output json`.
 
 ### Update Issue
 
@@ -335,8 +337,11 @@ multica issue update <id> --title "New title" --priority urgent
 
 ```bash
 multica issue assign <id> --to "Lambda"
+multica issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue assign <id> --unassign
 ```
+
+Pass `--to-id <uuid>` to assign by canonical UUID (mutually exclusive with `--to`); useful when names overlap across members and agents.
 
 ### Change Status
 

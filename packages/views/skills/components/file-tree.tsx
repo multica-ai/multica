@@ -10,6 +10,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Tree data structures
@@ -155,13 +156,14 @@ export function FileTree({
   selectedPath: string;
   onSelect: (path: string) => void;
 }) {
+  const { t } = useT("skills");
   const tree = buildTree(filePaths);
 
   if (tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
         <FolderOpen className="h-5 w-5 text-muted-foreground/40" />
-        <p className="mt-2 text-xs">No files</p>
+        <p className="mt-2 text-xs">{t(($) => $.file_tree.no_files)}</p>
       </div>
     );
   }

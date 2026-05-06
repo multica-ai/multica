@@ -1,6 +1,7 @@
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import { useT } from "../../i18n";
 
 /**
  * One-line runtime row for Step 3's web CLI expand. Provider logo,
@@ -18,6 +19,7 @@ export function CompactRuntimeRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t: tAgents } = useT("agents");
   const online = runtime.status === "online";
   return (
     <div
@@ -47,7 +49,7 @@ export function CompactRuntimeRow({
           "h-2 w-2 shrink-0 rounded-full",
           online ? "bg-success" : "bg-muted-foreground/40",
         )}
-        aria-label={online ? "Online" : "Offline"}
+        aria-label={online ? tAgents(($) => $.availability.online) : tAgents(($) => $.availability.offline)}
       />
     </div>
   );

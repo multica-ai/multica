@@ -1,6 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import type { AgentRuntime } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enOnboarding from "../../locales/en/onboarding.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 // Hoisted mocks — replace analytics and the runtime picker before the SUT
 // imports them. Tests drive picker state via `mocks.pickerState`; every
@@ -60,7 +65,9 @@ function renderStep() {
   const onNext = vi.fn();
   const onBack = vi.fn();
   render(
-    <StepRuntimeConnect wsId="ws_test" onNext={onNext} onBack={onBack} />,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <StepRuntimeConnect wsId="ws_test" onNext={onNext} onBack={onBack} />
+    </I18nProvider>,
   );
   return { onNext, onBack };
 }

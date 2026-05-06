@@ -1,4 +1,5 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
+import type { RuntimeConfigResult } from "../shared/runtime-config";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -6,6 +7,12 @@ interface DesktopAPI {
     version: string;
     os: "macos" | "windows" | "linux" | "unknown";
   };
+  /** OS-preferred locale (BCP 47) injected by main via additionalArguments. */
+  systemLocale: string;
+  /** Subscribe to OS language changes detected after boot. Returns an unsubscribe function. */
+  onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
+  /** Validated runtime endpoint config, or a blocking config error. */
+  runtimeConfig: RuntimeConfigResult;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */

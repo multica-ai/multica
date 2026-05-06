@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,7 +55,7 @@ type Daemon struct {
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
 	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSetCh chan struct{}      // notifies the WS wakeup loop to reconnect with a new runtime set
+	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -92,7 +93,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:         logger,
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   make(map[string]Runtime),
-		runtimeSetCh:   make(chan struct{}, 1),
+		runtimeSet:     newRuntimeSetWatcher(),
 		agentVersions:  make(map[string]string),
 		wsHBLastAck:    make(map[string]time.Time),
 		activeEnvRoots: make(map[string]int),
@@ -116,18 +117,48 @@ func (d *Daemon) agentVersion(provider string) string {
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
-	select {
-	case d.runtimeSetCh <- struct{}{}:
-	default:
+	d.runtimeSet.notify()
+}
+
+// runtimeSetWatcher is a tiny pub/sub for runtime-set changes. It exists
+// because more than one supervisor (taskWakeupLoop, heartbeatLoop, pollLoop)
+// needs to react to runtime-set changes; a single buffered channel would
+// race so only the first listener would learn about each change.
+//
+// Each subscriber gets a 1-slot channel; missed nudges coalesce into a
+// single signal — the subscriber is expected to re-derive the current
+// runtime set via allRuntimeIDs() rather than relying on edge counts.
+type runtimeSetWatcher struct {
+	mu          sync.Mutex
+	subscribers map[chan struct{}]struct{}
+}
+
+func newRuntimeSetWatcher() *runtimeSetWatcher {
+	return &runtimeSetWatcher{subscribers: make(map[chan struct{}]struct{})}
+}
+
+// Subscribe returns a channel that receives a non-blocking nudge whenever
+// the runtime set changes, and an unsubscribe func the caller must invoke
+// when done.
+func (w *runtimeSetWatcher) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	w.mu.Lock()
+	w.subscribers[ch] = struct{}{}
+	w.mu.Unlock()
+	return ch, func() {
+		w.mu.Lock()
+		delete(w.subscribers, ch)
+		w.mu.Unlock()
 	}
 }
 
-func (d *Daemon) drainRuntimeSetChanged() {
-	for {
+func (w *runtimeSetWatcher) notify() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for ch := range w.subscribers {
 		select {
-		case <-d.runtimeSetCh:
+		case ch <- struct{}{}:
 		default:
-			return
 		}
 	}
 }
@@ -222,7 +253,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.workspaceSyncLoop(ctx)
 
 	taskWakeups := make(chan struct{}, 1)
-	d.drainRuntimeSetChanged()
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
@@ -667,34 +697,104 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	return nil
 }
 
+// heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
+// gets an independent ticker so a slow heartbeat for one runtime cannot block
+// heartbeats for any other runtime — this matters when a single daemon serves
+// multiple workspaces, because the previous shared loop would serialize an
+// up-to-30s HTTP timeout across every runtime in the set.
 func (d *Daemon) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(d.cfg.HeartbeatInterval)
-	defer ticker.Stop()
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
 
+	cancels := make(map[string]context.CancelFunc)
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
+
+	sync := func() {
+		want := make(map[string]struct{})
+		for _, rid := range d.allRuntimeIDs() {
+			want[rid] = struct{}{}
+		}
+		for rid, cancel := range cancels {
+			if _, ok := want[rid]; !ok {
+				cancel()
+				delete(cancels, rid)
+			}
+		}
+		for rid := range want {
+			if _, ok := cancels[rid]; ok {
+				continue
+			}
+			rctx, rcancel := context.WithCancel(ctx)
+			cancels[rid] = rcancel
+			go d.runRuntimeHeartbeat(rctx, rid)
+		}
+	}
+
+	sync()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-runtimeSetCh:
+			sync()
+		}
+	}
+}
+
+// runRuntimeHeartbeat owns the HTTP heartbeat schedule for a single runtime.
+// The first tick fires after a small jittered delay (up to one full interval)
+// to avoid a thundering herd when the daemon registers many runtimes at once.
+func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
+	interval := d.cfg.HeartbeatInterval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	// Jittered initial delay; cap at the interval so the first beat still
+	// happens within one period.
+	if jitter := time.Duration(rand.Int63n(int64(interval))); jitter > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(jitter):
+		}
+	}
+
+	d.runHeartbeatTick(ctx, rid)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, rid := range d.allRuntimeIDs() {
-				// Skip HTTP heartbeat for runtimes that successfully acked
-				// a recent WebSocket heartbeat. The WS path keeps last_seen_at
-				// fresh and delivers actions, so the HTTP write would be a
-				// duplicate DB update. If the WS heartbeat goes silent the
-				// freshness window expires and HTTP resumes automatically on
-				// the next tick — that is the fallback the WS path relies on.
-				if d.wsHeartbeatRecentlyAcked(rid) {
-					continue
-				}
-				resp, err := d.client.SendHeartbeat(ctx, rid)
-				if err != nil {
-					d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
-					continue
-				}
-				d.handleHeartbeatActions(ctx, rid, resp)
-			}
+			d.runHeartbeatTick(ctx, rid)
 		}
 	}
+}
+
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+	// Skip HTTP heartbeat for runtimes that successfully acked a recent
+	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
+	// actions, so the HTTP write would be a duplicate DB update. If the WS
+	// heartbeat goes silent the freshness window expires and HTTP resumes
+	// automatically on the next tick — that is the fallback the WS path
+	// relies on.
+	if d.wsHeartbeatRecentlyAcked(rid) {
+		return
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
+		}
+		return
+	}
+	d.handleHeartbeatActions(ctx, rid, resp)
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -1060,93 +1160,176 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
+// pollLoop supervises one runtimePoller goroutine per registered runtime,
+// fans wake-up signals out to all of them, and waits for in-flight tasks to
+// drain on shutdown. Per-runtime workers replace the previous round-robin
+// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
+// longer delays claims on every other runtime — that was the cross-workspace
+// stall mode reported in MUL-1744.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var wg sync.WaitGroup
+	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
+	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
 
-	pollOffset := 0
-	pollCount := 0
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
+
+	type pollerHandle struct {
+		cancel context.CancelFunc
+		wakeup chan struct{}
+	}
+	pollers := make(map[string]*pollerHandle)
+
+	syncPollers := func() {
+		want := make(map[string]struct{})
+		for _, rid := range d.allRuntimeIDs() {
+			want[rid] = struct{}{}
+		}
+		for rid, h := range pollers {
+			if _, ok := want[rid]; !ok {
+				h.cancel()
+				delete(pollers, rid)
+			}
+		}
+		for rid := range want {
+			if _, ok := pollers[rid]; ok {
+				continue
+			}
+			pctx, pcancel := context.WithCancel(ctx)
+			wakeup := make(chan struct{}, 1)
+			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
+			pollerWG.Add(1)
+			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
+				defer pollerWG.Done()
+				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+			}(rid, pctx, wakeup)
+		}
+	}
+
+	syncPollers()
+
 	for {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
+			for _, h := range pollers {
+				h.cancel()
+			}
+			// Wait for all pollers to fully return before waiting on taskWG.
+			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
+			// could race with taskWG.Wait when the counter is zero, which
+			// is an undefined sync.WaitGroup misuse.
+			pollerWG.Wait()
+
 			waitDone := make(chan struct{})
-			go func() { wg.Wait(); close(waitDone) }()
+			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
 			case <-waitDone:
 			case <-time.After(30 * time.Second):
 				d.logger.Warn("timed out waiting for in-flight tasks")
 			}
 			return ctx.Err()
-		default:
+		case <-runtimeSetCh:
+			syncPollers()
+		case <-taskWakeups:
+			// Fan out to every runtime poller. Any of them might have a queued
+			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
+			// of wake-ups doesn't pile up.
+			for _, h := range pollers {
+				select {
+				case h.wakeup <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// runRuntimePoller is the per-runtime claim+dispatch loop. It owns its own
+// poll cadence and wakeup channel so that a slow HTTP claim for this runtime
+// cannot delay any other runtime's claims.
+//
+// The execution slot is acquired BEFORE ClaimTask. The alternative —
+// claiming first and then waiting for a slot — would let claimed tasks pile
+// up in the server-side `dispatched` state without a corresponding
+// StartTask, and the server's sweeper would fail them as `failed/timeout`
+// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
+// exact user-visible failure this issue is fixing, so we cannot risk
+// recreating it under load.
+//
+// Slot-before-claim does mean a slow claim holds a slot during its HTTP
+// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
+// below the 300s dispatch timeout, so other runtimes' tasks stay in
+// server-side `queued` state (which has no timeout) rather than entering
+// `dispatched` and racing the sweeper.
+//
+// pollerCtx is cancelled when this runtime is removed from the watched set
+// (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
+// passed to handleTask so an in-flight task is not killed just because the
+// runtime set changed mid-flight — the task continues to run until the
+// daemon itself shuts down (or the server cancels it).
+func (d *Daemon) runRuntimePoller(
+	pollerCtx, parentCtx context.Context,
+	rid string,
+	sem chan int,
+	wakeup <-chan struct{},
+	taskWG *sync.WaitGroup,
+) {
+	for {
+		if pollerCtx.Err() != nil {
+			return
 		}
 
-		runtimeIDs := d.allRuntimeIDs()
-		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
-				wg.Wait()
-				return err
+		// Acquire an execution slot before claiming. If at capacity, sleep
+		// without claiming so we don't push a task into `dispatched` and
+		// then race the 5-min server-side dispatch timeout while waiting.
+		var slot int
+		select {
+		case slot = <-sem:
+		case <-pollerCtx.Done():
+			return
+		default:
+			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
 			}
 			continue
 		}
 
-		claimed := false
-		n := len(runtimeIDs)
-		for i := 0; i < n; i++ {
-			// Check if we have capacity before claiming.
-			var slot int
-			select {
-			case slot = <-sem:
-				// Acquired a slot.
-			default:
-				// All slots occupied, stop trying to claim.
-				d.logger.Debug("poll: at capacity", "running", d.cfg.MaxConcurrentTasks)
-				goto sleep
-			}
-
-			rid := runtimeIDs[(pollOffset+i)%n]
-			task, err := d.client.ClaimTask(ctx, rid)
-			if err != nil {
-				sem <- slot // Release the slot.
-				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
-				continue
-			}
-			if task != nil {
-				taskTarget := task.IssueID
-				if taskTarget == "" && task.ChatSessionID != "" {
-					taskTarget = "chat:" + shortID(task.ChatSessionID)
-				}
-				d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
-				wg.Add(1)
-				d.activeTasks.Add(1)
-				go func(t Task, slot int) {
-					defer wg.Done()
-					defer d.activeTasks.Add(-1)
-					defer func() { sem <- slot }()
-					d.handleTask(ctx, t, slot)
-				}(*task, slot)
-				claimed = true
-				pollOffset = (pollOffset + i + 1) % n
-				break
-			}
-			// No task for this runtime, release the slot and try next.
+		task, err := d.client.ClaimTask(pollerCtx, rid)
+		if err != nil {
 			sem <- slot
+			if pollerCtx.Err() == nil {
+				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
+			}
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
 		}
 
-	sleep:
-		if !claimed {
-			pollCount++
-			if pollCount%20 == 1 {
-				d.logger.Debug("poll: no tasks", "runtimes", runtimeIDs, "cycle", pollCount)
+		if task == nil {
+			sem <- slot
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
 			}
-			pollOffset = (pollOffset + 1) % n
-			if err := sleepWithContextOrWakeup(ctx, d.cfg.PollInterval, taskWakeups); err != nil {
-				wg.Wait()
-				return err
-			}
-		} else {
-			pollCount = 0
+			continue
 		}
+
+		taskTarget := task.IssueID
+		if taskTarget == "" && task.ChatSessionID != "" {
+			taskTarget = "chat:" + shortID(task.ChatSessionID)
+		}
+		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
+		taskWG.Add(1)
+		d.activeTasks.Add(1)
+		go func(t Task, slot int) {
+			defer taskWG.Done()
+			defer d.activeTasks.Add(-1)
+			defer func() { sem <- slot }()
+			d.handleTask(parentCtx, t, slot)
+		}(*task, slot)
+		// Loop immediately: more tasks may already be queued for this runtime.
 	}
 }
 
@@ -1159,6 +1342,60 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 		sem <- i
 	}
 	return sem
+}
+
+// shouldInterruptAgent decides whether the running agent should be cancelled
+// based on the latest GetTaskStatus call. Pure function so the decision is
+// trivially testable; the polling goroutine in watchTaskCancellation is just
+// I/O around it.
+//
+// Two cases trigger cancellation:
+//
+//  1. status == "cancelled" — the server moved the task to cancelled
+//     (issue reassigned, user cancel, ...).
+//  2. err is a 404 with "task not found" — the task row was deleted while
+//     the agent was running. Without this we'd let the local agent keep
+//     emitting tool calls against a dead task for its full timeout window.
+//
+// All other errors (transient network, 5xx, ...) intentionally do NOT
+// trigger cancellation — the next tick will retry and we don't want a
+// flaky link to kill an in-flight agent.
+func shouldInterruptAgent(status string, err error) bool {
+	if err != nil {
+		return isTaskNotFoundError(err)
+	}
+	return status == "cancelled"
+}
+
+// watchTaskCancellation polls the server for the task's status on the given
+// interval and returns a channel that is closed when the running agent
+// should be interrupted. The polling goroutine stops when ctx is cancelled,
+// so callers should pass the runCtx that was set up around the agent run.
+func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
+	cancelled := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				status, err := d.client.GetTaskStatus(ctx, taskID)
+				if !shouldInterruptAgent(status, err) {
+					continue
+				}
+				if err != nil {
+					taskLog.Info("task gone server-side, interrupting agent", "error", err)
+				} else {
+					taskLog.Info("task cancelled by server, interrupting agent")
+				}
+				close(cancelled)
+				return
+			}
+		}
+	}()
+	return cancelled
 }
 
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
@@ -1190,27 +1427,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	// Create a cancellable context so we can interrupt the running agent
-	// when the server-side task status changes to 'cancelled'.
+	// when the server signals the task should stop — either status moves
+	// to "cancelled" or the task row is deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// Poll for cancellation every 5 seconds while the task is running.
-	cancelledByPoll := make(chan struct{})
+	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, 5*time.Second, taskLog)
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case <-ticker.C:
-				if status, err := d.client.GetTaskStatus(ctx, task.ID); err == nil && status == "cancelled" {
-					taskLog.Info("task cancelled by server, interrupting agent")
-					runCancel()
-					close(cancelledByPoll)
-					return
-				}
-			}
+		select {
+		case <-cancelledByPoll:
+			runCancel()
+		case <-runCtx.Done():
 		}
 	}()
 
@@ -1236,11 +1463,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
-	// Check if the task was cancelled while it was running (e.g. issue
-	// was reassigned). If so, skip reporting results — the server already
-	// moved the task to 'cancelled' so complete/fail would fail anyway.
-	if status, err := d.client.GetTaskStatus(ctx, task.ID); err == nil && status == "cancelled" {
-		taskLog.Info("task cancelled during execution, discarding result")
+	// Final pre-completion check: if the server already moved the task to
+	// "cancelled" or deleted the row outright, skip reporting — the
+	// complete/fail callbacks would fail anyway. Reuse shouldInterruptAgent
+	// so this guard honors the same signals as the in-flight watcher.
+	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
+		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
 	}
 
@@ -1278,7 +1506,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// can look up the issue later. Written last so that a mid-task crash
 	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID); err != nil {
+		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}

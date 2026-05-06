@@ -1,8 +1,3 @@
--- name: ListComments :many
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC;
-
 -- name: ListCommentsPaginated :many
 SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
@@ -19,6 +14,33 @@ SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC
 LIMIT $4 OFFSET $5;
+
+-- name: ListCommentsLatest :many
+-- Top N comments for an issue, newest first. Backs the default cursor
+-- pagination entry point (no cursor → return the most recent page).
+SELECT * FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3;
+
+-- name: ListCommentsBefore :many
+-- Keyset pagination: comments older than ($3, $4) tuple. Returns DESC so the
+-- caller can stitch pages without re-sorting.
+SELECT * FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+  AND (created_at, id) < ($3::timestamptz, $4::uuid)
+ORDER BY created_at DESC, id DESC
+LIMIT $5;
+
+-- name: ListCommentsAfter :many
+-- Keyset pagination: comments newer than ($3, $4) tuple. Returns ASC because
+-- "newer" pagination naturally walks forward in time; the merge layer
+-- normalizes to the response order.
+SELECT * FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+  AND (created_at, id) > ($3::timestamptz, $4::uuid)
+ORDER BY created_at ASC, id ASC
+LIMIT $5;
 
 -- name: CountComments :one
 SELECT count(*) FROM comment
