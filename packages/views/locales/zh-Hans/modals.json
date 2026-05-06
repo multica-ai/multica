@@ -121,7 +121,7 @@
       "version_missing": "该智能体的 daemon 没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级 daemon 并重连，或切换到手动创建。",
       "version_below": "该智能体的 daemon CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级 daemon，或切换到手动创建。",
       "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
-      "submit": "创建（⌘↵）",
+      "submit": "创建",
       "sending": "发送中...",
       "uploading": "上传中...",
       "sent_label": "已发送",
