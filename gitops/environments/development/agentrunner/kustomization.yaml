@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentfarm
+
+resources:
+  - service-account.yaml
+  - external-secret.yaml
+  - deployment.yaml

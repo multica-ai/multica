@@ -1,0 +1,115 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentfarm-agentrunner
+  namespace: agentfarm
+  annotations:
+    # Sync after the ExternalSecret has been reconciled (wave -1) so the
+    # agentfarm-agentrunner Secret exists when the pod template is applied.
+    argocd.argoproj.io/sync-wave: "4"
+  labels:
+    app: agentfarm
+    component: agentrunner
+spec:
+  replicas: 1
+  strategy:
+    # The daemon claims tasks as soon as it registers; running two replicas in
+    # parallel during a rolling update would double-claim. Recreate is safer.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agentfarm
+      component: agentrunner
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: agentrunner
+      annotations:
+        # Reloader rolls the pod when agentfarm-agentrunner changes
+        # (10m SSM refresh — same pattern as the backend deployment).
+        reloader.stakater.com/auto: "true"
+    spec:
+      serviceAccountName: agentfarm-agentrunner
+      imagePullSecrets:
+        - name: regcred
+      # Match the backend deployment's node placement so we land on the same
+      # arm64 Karpenter pool the agentrunner image is built for.
+      nodeSelector:
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agentrunner
+          image: ghcr.io/g2crowd/agentfarm-agentrunner-prod
+          imagePullPolicy: IfNotPresent
+          # MULTICA_SERVER_URL, MULTICA_APP_URL, MULTICA_TOKEN, ANTHROPIC_API_KEY
+          # and MULTICA_AGENT_RUNTIME_NAME come in via envFrom — see
+          # ../agentrunner/external-secret.yaml. Per-deployment overrides go
+          # into the explicit env: block below.
+          envFrom:
+            - secretRef:
+                name: agentfarm-agentrunner
+          env:
+            # Pin the daemon id to the pod name so multiple agentrunner pods
+            # (or a redeploy) don't collide with each other on the server.
+            - name: MULTICA_DAEMON_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MULTICA_DAEMON_DEVICE_NAME
+              value: "agentfarm-agentrunner"
+            # The daemon writes claimed-task workspaces under this root; mounted
+            # as a writable emptyDir volume below.
+            - name: MULTICA_WORKSPACES_ROOT
+              value: /home/agentrunner/multica_workspaces
+          # The daemon's /health endpoint binds to 127.0.0.1 only
+          # (server/internal/daemon/health.go), so kubelet can't reach it via
+          # TCP. Use `multica daemon status` instead — it reads the PID file
+          # and queries the local health port from inside the pod.
+          livenessProbe:
+            exec:
+              command: ["multica", "daemon", "status"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["multica", "daemon", "status"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: home
+              mountPath: /home/agentrunner
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: home
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+      terminationGracePeriodSeconds: 30

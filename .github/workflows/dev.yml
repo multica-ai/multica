@@ -50,3 +50,13 @@ jobs:
       bakefile: docker-bake.web.hcl
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
+
+  bake-build-agentrunner:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: dev
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.agentrunner.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
