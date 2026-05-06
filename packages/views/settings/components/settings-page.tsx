@@ -62,7 +62,7 @@ const WORKSPACE_TAB_VALUES = {
   repositories: "repositories",
   labs: "labs",
   members: "members",
-  work_calendars: "work calendars",
+  work_calendars: "work_calendars",
   integrations: "integrations",
 } as const;
 const WORKSPACE_TAB_ICONS = {
@@ -168,11 +168,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="members">
             <MembersTab />
           </TabsContent>
+          <TabsContent value="work_calendars">
+            <WorkCalendarsTab />
+          </TabsContent>
           <TabsContent value="integrations">
             <WorkspaceIntegrationsTab />
-          </TabsContent>
-          <TabsContent value="work-calendars">
-            <WorkCalendarsTab />
           </TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>
