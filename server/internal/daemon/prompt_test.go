@@ -17,8 +17,16 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 
 	mustContain := []string{
-		// rule 1: strip meta-instructions before writing User request
-		"Meta-instructions to the issue-creating agent itself",
+		// rule 1a: strip verbal routing meta-instructions
+		"Routing meta-instructions to the issue-creating agent itself",
+		// rule 1b: strip pure conversational fillers
+		"Pure conversational fillers with no information",
+		// rule 1c: cc mentions must keep the mention link in the description body,
+		// since `multica issue create` has no --subscriber flag and the platform
+		// auto-subscribes via mention parsing — see PR review feedback that
+		// originally exposed this gap
+		"CC mentions are special",
+		"the platform auto-subscribes members",
 		// rule 2: emit Context only when references were actually fetched
 		"include this section ONLY when the input cited external references",
 		"Do NOT emit a Context section to:",
