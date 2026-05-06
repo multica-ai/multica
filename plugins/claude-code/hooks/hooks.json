@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "command": "if ! command -v multica >/dev/null 2>&1; then echo '[multica] CLI not installed. Install: curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash'; elif ! multica workspace get --output json 2>/dev/null; then echo '[multica] Not logged in. Run: multica login'; else multica workspace get --output json; fi",
+        "timeout": 8000,
+        "on_failure": "ignore"
+      }
+    ]
+  }
+}
