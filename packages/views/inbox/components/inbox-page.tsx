@@ -1046,6 +1046,7 @@ export function InboxPage() {
       key={selectedChannel.id}
       channelId={selectedChannel.id}
       initialChannel={selectedChannel}
+      onArchive={() => setSelectedKey(null, "")}
     />
   ) : selectedChatSession || selectedKey === "new-chat" ? (
     <InboxChatPanel

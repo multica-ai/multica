@@ -2,18 +2,20 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Hash, MessageSquare } from "lucide-react";
+import { Archive, Hash, MessageSquare, Pin } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { channelDetailOptions, channelKeys } from "@multica/core/channels";
 import { inboxKeys, inboxListOptions } from "@multica/core/inbox/queries";
-import { useMarkInboxRead } from "@multica/core/inbox/mutations";
-import type { Channel, InboxItem, TimelineEntry } from "@multica/core/types";
+import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
+import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentCard } from "../../issues/components/comment-card";
 import { CommentInput } from "../../issues/components/comment-input";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useChannelDisplay } from "./use-channel-display";
 
 interface ChannelDetailProps {
@@ -21,9 +23,12 @@ interface ChannelDetailProps {
   /** Initial data from the inbox-list query, so the panel can render before
    *  the per-channel detail query resolves. */
   initialChannel?: Channel | null;
+  /** Called after the user archives the channel from the thread header.
+   *  Lets the inbox clear its selection. */
+  onArchive?: () => void;
 }
 
-export function ChannelDetail({ channelId, initialChannel }: ChannelDetailProps) {
+export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const qc = useQueryClient();
@@ -85,6 +90,18 @@ export function ChannelDetail({ channelId, initialChannel }: ChannelDetailProps)
 
   const grouped = useMemo(() => groupTimeline(timeline), [timeline]);
 
+  const archiveInbox = useArchiveInbox();
+  const handleArchive = () => {
+    // Channels archive by archiving the inbox row pointing at them. If the
+    // user hasn't been notified yet (no inbox row exists) the action is a
+    // no-op — the row will get archived next time it lands.
+    const item = inboxItems.find(
+      (i: InboxItem) => i.issue_id === channelId && !i.archived,
+    );
+    if (item) archiveInbox.mutate(item.id);
+    onArchive?.();
+  };
+
   if (!channel) {
     return (
       <div className="flex flex-1 flex-col p-4 gap-4">
@@ -97,19 +114,65 @@ export function ChannelDetail({ channelId, initialChannel }: ChannelDetailProps)
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-        <ChannelHeaderIcon channel={channel} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-sm font-medium">
+      <header className="flex shrink-0 flex-col gap-1 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <ChannelHeaderIcon channel={channel} />
+          <div className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
             {display.isChannel && (
               <Hash className="size-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="truncate">{display.title}</span>
           </div>
-          <p className="truncate text-xs text-muted-foreground">
+          {display.otherParticipants.length > 0 && (
+            <ParticipantStack participants={display.otherParticipants} />
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    disabled
+                    aria-label="Pin to sidebar"
+                    className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground opacity-60"
+                  />
+                }
+              >
+                <Pin className="size-3.5" />
+              </TooltipTrigger>
+              {/* Pin types still need extending — JEH-592. Disabled until
+                  pin.item_type accepts 'channel' / 'dm'. */}
+              <TooltipContent side="bottom">Pinning channels is coming soon</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={handleArchive}
+                    aria-label="Archive conversation"
+                    className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
+                  />
+                }
+              >
+                <Archive className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Archive</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+        {/* Subtitle slot: prefer description (matches the mockup), fall back
+            to a participant count for unnamed channels. DMs have no
+            secondary line — the peer name is already the title. */}
+        {channel.description ? (
+          <p className="truncate pl-10 text-xs text-muted-foreground">
+            {channel.description}
+          </p>
+        ) : display.isChannel && channel.participants.length > 1 ? (
+          <p className="truncate pl-10 text-xs text-muted-foreground">
             {participantsLabel(channel)}
           </p>
-        </div>
+        ) : null}
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
@@ -138,6 +201,32 @@ export function ChannelDetail({ channelId, initialChannel }: ChannelDetailProps)
       <div className="shrink-0 border-t px-4 py-3">
         <CommentInput issueId={channelId} onSubmit={submitComment} />
       </div>
+    </div>
+  );
+}
+
+// Cap the inline avatar stack at MAX participants — anything beyond that
+// becomes a "+N" chip so the header stays single-line on narrow panes.
+const MAX_AVATARS = 4;
+
+function ParticipantStack({ participants }: { participants: ChannelMember[] }) {
+  const visible = participants.slice(0, MAX_AVATARS);
+  const overflow = participants.length - visible.length;
+  return (
+    <div className="ml-1 flex shrink-0 items-center">
+      <AvatarGroup className="-space-x-1.5">
+        {visible.map((p) => (
+          <ActorAvatar
+            key={`${p.user_type}:${p.user_id}`}
+            actorType={p.user_type}
+            actorId={p.user_id}
+            size={18}
+          />
+        ))}
+      </AvatarGroup>
+      {overflow > 0 && (
+        <span className="ml-1 text-xs text-muted-foreground">+{overflow}</span>
+      )}
     </div>
   );
 }
