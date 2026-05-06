@@ -826,7 +826,7 @@ func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or
 	// using a cancelled context if the query respects it.
-	
+
 	// Create a handler with a "broken" queries object is hard because it's a struct.
 	// Instead, let's use a context that is already cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -841,13 +841,13 @@ func TestSendCodeDbError(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	testHandler.SendCode(w, req)
-	
+
 	// If the DB query respects the cancelled context, it should return an error.
 	// pgx usually returns context.Canceled which is not what isNotFound checks for.
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-	
+
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] != "failed to lookup user" {
@@ -882,6 +882,35 @@ func TestSendCodeRateLimit(t *testing.T) {
 	testHandler.SendCode(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("SendCode (second): expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendCodeFixedVerificationCodeSkipsTemporaryCode(t *testing.T) {
+	const email = "fixed-sendcode-test@multica.ai"
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, "123456")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email})
+	req := httptest.NewRequest("POST", "/auth/send-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SendCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SendCode fixed code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM verification_code WHERE email = $1`, email).Scan(&count); err != nil {
+		t.Fatalf("count verification_code: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("SendCode fixed code: expected no temporary codes, got %d", count)
 	}
 }
 
@@ -941,6 +970,70 @@ func TestVerifyCode(t *testing.T) {
 	}
 }
 
+func TestVerifyFixedVerificationCode(t *testing.T) {
+	const (
+		email = "fixed-verify-test@multica.ai"
+		code  = "123456"
+	)
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, code)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM external_account_binding WHERE external_user_id = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": code})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("VerifyCode fixed code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp LoginResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Token == "" {
+		t.Fatal("VerifyCode fixed code: expected non-empty token")
+	}
+	if resp.User.Email != email {
+		t.Fatalf("VerifyCode fixed code: expected email %q, got %q", email, resp.User.Email)
+	}
+
+	if _, err := testHandler.Queries.GetUserByEmail(ctx, email); err != nil {
+		t.Fatalf("VerifyCode fixed code: expected user to be created: %v", err)
+	}
+}
+
+func TestVerifyFixedVerificationCodeWrongCode(t *testing.T) {
+	const email = "fixed-wrong-code-test@multica.ai"
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, "123456")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "000000"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("VerifyCode fixed wrong code: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testHandler.Queries.GetUserByEmail(ctx, email); err == nil {
+		t.Fatal("VerifyCode fixed wrong code: expected user not to be created")
+	}
+}
+
 func TestVerifyCodeWrongCode(t *testing.T) {
 	const email = "wrong-code-test@multica.ai"
 	ctx := context.Background()
@@ -966,6 +1059,19 @@ func TestVerifyCodeWrongCode(t *testing.T) {
 	testHandler.VerifyCode(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("VerifyCode (wrong code): expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func insertFixedVerificationCode(t *testing.T, email, code string) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO fixed_verification_code (email, code_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (email) DO UPDATE
+		SET code_hash = EXCLUDED.code_hash
+	`, email, fixedVerificationCodeHash(code))
+	if err != nil {
+		t.Fatalf("insert fixed verification code: %v", err)
 	}
 }
 

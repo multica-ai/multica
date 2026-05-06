@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +102,11 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 		"iat":   time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
+}
+
+func fixedVerificationCodeHash(code string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
+	return hex.EncodeToString(sum[:])
 }
 
 // findOrCreateUser returns the existing user for an email, or creates one if
@@ -254,6 +261,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if _, err := h.Queries.GetFixedVerificationCodeByEmail(r.Context(), email); err == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
+		return
+	} else if !isNotFound(err) {
+		writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+		return
+	}
+
 	// Rate limit: max 1 code per 60 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
 	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
@@ -304,6 +319,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if handled := h.verifyFixedCode(w, r, email, code); handled {
+		return
+	}
+
 	dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
@@ -322,6 +341,30 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.completeEmailLogin(w, r, email)
+}
+
+func (h *Handler) verifyFixedCode(w http.ResponseWriter, r *http.Request, email, code string) bool {
+	fixedCode, err := h.Queries.GetFixedVerificationCodeByEmail(r.Context(), email)
+	if err != nil {
+		if isNotFound(err) {
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+		return true
+	}
+
+	expectedHash := fixedVerificationCodeHash(code)
+	if subtle.ConstantTimeCompare([]byte(expectedHash), []byte(fixedCode.CodeHash)) != 1 {
+		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		return true
+	}
+
+	h.completeEmailLogin(w, r, email)
+	return true
+}
+
+func (h *Handler) completeEmailLogin(w http.ResponseWriter, r *http.Request, email string) {
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
 		var signupErr SignupError
@@ -351,7 +394,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)
+		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
