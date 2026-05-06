@@ -523,6 +523,23 @@ type DaemonHeartbeatRequest struct {
 // to claim, so we never start a claim we might have to abort.
 const heartbeatHasPendingTimeout = 1 * time.Second
 
+// runtimeLivenessTTL is how long a Redis liveness record stays valid. It must
+// be >= the runtime sweeper's stale threshold (45s); we set it equal so a
+// runtime that misses three heartbeats expires out of Redis at the same
+// instant the DB sweeper would mark it offline. Anything shorter would create
+// a window where Redis says "dead" but the DB still says "online", confusing
+// the sweeper filter.
+const runtimeLivenessTTL = 45 * time.Second
+
+// runtimeHeartbeatDBFlushInterval is the maximum staleness we tolerate on
+// agent_runtime.last_seen_at while Redis is the active liveness source. When
+// last_seen_at gets older than this, the heartbeat path forces a DB write so
+// the UI's "last seen" display and the DB-fallback sweeper threshold (which
+// kicks in if Redis is unavailable) stay reasonably fresh. Must be >
+// runtimeLivenessTTL — otherwise we would write the DB on every beat and the
+// Redis path would buy us nothing.
+const runtimeHeartbeatDBFlushInterval = 60 * time.Second
+
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	authPath := middleware.DaemonAuthPathFromContext(r.Context())
@@ -642,6 +659,52 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	return ack, err
 }
 
+// recordHeartbeat marks the runtime as alive. When LivenessStore is available
+// (Redis configured and reachable) it writes a TTL'd liveness key and skips
+// the DB row write on most beats — the DB is only updated on the
+// offline→online transition or once per runtimeHeartbeatDBFlushInterval to
+// keep last_seen_at fresh enough for the UI and the DB-fallback sweeper.
+//
+// When LivenessStore is unavailable (no Redis configured) or any Touch call
+// errors, recordHeartbeat falls back to writing the DB on every beat — that
+// is the original behavior and keeps the sweeper's DB-only path correct.
+func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
+	now := time.Now()
+
+	// Decide whether the DB row needs a write *before* touching Redis, so a
+	// Touch failure can simply force needDBWrite=true without re-evaluating
+	// the structural reasons.
+	needDBWrite := !h.LivenessStore.Available() ||
+		rt.Status != "online" ||
+		!rt.LastSeenAt.Valid ||
+		now.Sub(rt.LastSeenAt.Time) >= runtimeHeartbeatDBFlushInterval
+
+	if h.LivenessStore.Available() {
+		if err := h.LivenessStore.Touch(ctx, uuidToString(rt.ID), runtimeLivenessTTL); err != nil {
+			// Redis hiccup: degrade transparently to the DB-only path for
+			// this beat. The sweeper falls back to its DB threshold the
+			// same way when IsAliveBatch fails, so end-to-end correctness
+			// is preserved.
+			slog.Warn("liveness touch failed; falling back to DB heartbeat",
+				"runtime_id", uuidToString(rt.ID), "error", err)
+			needDBWrite = true
+		}
+	}
+
+	if !needDBWrite {
+		return nil
+	}
+
+	// Online rows take the cheap path: a single non-indexed column write
+	// that stays HOT-eligible. Only the offline→online transition (or a
+	// row that has never been seen) needs to flip status and updated_at.
+	if rt.Status == "online" && rt.LastSeenAt.Valid {
+		return h.Queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
+	}
+	_, err := h.Queries.MarkAgentRuntimeOnline(ctx, rt.ID)
+	return err
+}
+
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
@@ -650,19 +713,19 @@ type heartbeatMetrics struct {
 }
 
 // processHeartbeat does the work shared by HTTP POST /api/daemon/heartbeat and
-// the WebSocket daemon:heartbeat path: bumps last_seen_at and pulls any
-// pending actions queued for the runtime. Auth and request decoding live in
-// the caller because they differ between transports.
+// the WebSocket daemon:heartbeat path: records liveness and pulls any pending
+// actions queued for the runtime. Auth and request decoding live in the
+// caller because they differ between transports.
 func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 	runtimeID := uuidToString(rt.ID)
 
 	updateStart := time.Now()
-	_, updateErr := h.Queries.UpdateAgentRuntimeHeartbeat(ctx, rt.ID)
-	m.UpdateMs = time.Since(updateStart).Milliseconds()
-	if updateErr != nil {
-		return nil, m, updateErr
+	if err := h.recordHeartbeat(ctx, rt); err != nil {
+		m.UpdateMs = time.Since(updateStart).Milliseconds()
+		return nil, m, err
 	}
+	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 

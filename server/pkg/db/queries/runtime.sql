@@ -39,7 +39,19 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
--- name: UpdateAgentRuntimeHeartbeat :one
+-- name: TouchAgentRuntimeLastSeen :exec
+-- Bumps last_seen_at on an already-online runtime. Deliberately does NOT touch
+-- status or updated_at: status is unchanged on the hot heartbeat path, and
+-- avoiding updated_at keeps the row HOT-eligible (no index columns change) and
+-- avoids invalidating any downstream consumer that watches updated_at.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = $1;
+
+-- name: MarkAgentRuntimeOnline :one
+-- Used on the offline→online transition (and on first heartbeat after
+-- registration). Writes status, last_seen_at, and updated_at because the
+-- status flip is a real state change and we want updated_at to reflect it.
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
@@ -50,11 +62,23 @@ UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
 
--- name: MarkStaleRuntimesOffline :many
+-- name: SelectStaleOnlineRuntimes :many
+-- Lists online runtimes whose last_seen_at exceeds the stale window. The
+-- sweeper uses this as a candidate set, then optionally filters via the
+-- LivenessStore before flipping rows to offline (a fresh Redis liveness
+-- record means the DB row is just lagging, not actually dead).
+SELECT id, workspace_id FROM agent_runtime
+WHERE status = 'online'
+  AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
+
+-- name: MarkRuntimesOfflineByIDs :many
+-- Flips a known set of runtime IDs from online to offline. Paired with
+-- SelectStaleOnlineRuntimes in the sweeper so the candidate selection and
+-- the actual write are decoupled (the LivenessStore filter sits between).
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
-  AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+  AND id = ANY(@ids::uuid[])
 RETURNING id, workspace_id;
 
 -- name: FailTasksForOfflineRuntimes :many
