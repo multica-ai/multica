@@ -20,6 +20,12 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import {
+  runtimeListOptions,
+  checkQuickCreateCliVersion,
+  readRuntimeCliVersion,
+  MIN_QUICK_CREATE_CLI_VERSION,
+} from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent } from "@multica/core/types";
@@ -105,6 +111,30 @@ export function AgentCreatePanel({
     [visibleAgents, agentId],
   );
 
+  // Daemon CLI version gate. The agent-create flow needs the runtime's
+  // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
+  // daemons handle attachments and partial-failure retries incorrectly
+  // (see PR #1851 / MUL-1496). Pre-check on the picker so the user gets
+  // immediate feedback instead of waiting for the inbox failure; the
+  // server re-validates as the trust boundary. Skipped in dev builds so
+  // local source-built daemons (which report a `git describe` version
+  // like v0.2.15-N-gHASH that parses below the threshold) don't get
+  // blocked during testing — server has the matching APP_ENV bypass.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const selectedRuntime = useMemo(
+    () =>
+      selectedAgent?.runtime_id
+        ? runtimes.find((r) => r.id === selectedAgent.runtime_id)
+        : undefined,
+    [runtimes, selectedAgent?.runtime_id],
+  );
+  const versionCheck = useMemo(
+    () => checkQuickCreateCliVersion(readRuntimeCliVersion(selectedRuntime?.metadata)),
+    [selectedRuntime?.metadata],
+  );
+  const versionBlocked =
+    process.env.NODE_ENV === "production" && versionCheck.state !== "ok";
+
   const initialPrompt = (data?.prompt as string) || promptDraft;
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
@@ -138,7 +168,7 @@ export function AgentCreatePanel({
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !agentId || submitting || uploading) return;
+    if (!md || !agentId || submitting || versionBlocked || uploading) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -164,11 +194,29 @@ export function AgentCreatePanel({
     } catch (e) {
       // Server returns 422 with { code, ... } for the structured rejection
       // paths the modal cares about. Surface the reason in-modal so the
-      // user can switch to a live agent without leaving the flow.
+      // user can switch to a live agent / upgrade their daemon without
+      // leaving the flow.
       if (e instanceof ApiError && e.body && typeof e.body === "object") {
-        const body = e.body as { code?: string; reason?: string };
+        const body = e.body as {
+          code?: string;
+          reason?: string;
+          current_version?: string;
+          min_version?: string;
+        };
         if (body.code === "agent_unavailable") {
           setError(body.reason || "Agent is unavailable. Pick another agent.");
+          setSubmitting(false);
+          return;
+        }
+        if (body.code === "daemon_version_unsupported") {
+          // Race fallback: the picker pre-check should normally catch this,
+          // but a runtime can silently re-register with an older CLI between
+          // pre-check and submit. Same wording as the inline notice for
+          // consistency.
+          const cur = body.current_version || "unknown";
+          setError(
+            `This agent's daemon CLI (${cur}) is below the required ${body.min_version || MIN_QUICK_CREATE_CLI_VERSION}. Upgrade the daemon to use Create with agent.`,
+          );
           setSubmitting(false);
           return;
         }
@@ -280,6 +328,14 @@ export function AgentCreatePanel({
           </DropdownMenu>
         </div>
 
+        {selectedAgent && versionBlocked && (
+          <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            {versionCheck.state === "missing"
+              ? `This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ ${versionCheck.min}. Upgrade the daemon and reconnect, or switch to manual create.`
+              : `This agent's daemon CLI is ${versionCheck.current} — Create with agent needs ≥ ${versionCheck.min}. Upgrade the daemon, or switch to manual create.`}
+          </div>
+        )}
+
         {/* Prompt — same rich editor Advanced uses, so paste/drop images,
             mentions, and formatting all work. The dropZone wrapper enables
             drag-and-drop file uploads alongside paste. */}
@@ -345,7 +401,12 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !agentId || submitting || uploading}
+              disabled={!hasContent || !agentId || submitting || versionBlocked || uploading}
+              title={
+                versionBlocked
+                  ? `Daemon CLI must be ≥ ${versionCheck.min}`
+                  : undefined
+              }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
               {submitting ? "Sending…" : uploading ? "Uploading…" : justSent ? (
