@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./core/folders": "./core/folders.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

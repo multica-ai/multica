@@ -39,7 +39,7 @@ import {
   useDeleteInboxFolder,
   useAddInboxFolderItem,
   useSetInboxFolderParent,
-} from "@multica/core/inbox/folders";
+} from "./core/folders";
 import { IssueDetail } from "@multica/views/issues/components";
 import { useNavigation } from "@multica/views/navigation";
 import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
@@ -94,7 +94,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { InboxListItem, timeAgo } from "@multica/views/inbox/components/inbox-list-item";
 import { typeLabels } from "@multica/views/inbox/components/inbox-detail-label";
-import { InboxChatPanel } from "@multica/views/inbox/components/inbox-chat-panel";
+import { InboxChatPanel } from "./views/components/inbox-chat-panel";
 
 type ViewMode =
   | { kind: "inbox" }

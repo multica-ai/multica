@@ -1,16 +1,16 @@
 // CEREBRO-PATCH(core-inbox-folders): cerebro modification of upstream file
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import { useWorkspaceId } from "../hooks";
+import { api } from "@multica/core/api";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type {
   InboxFolder,
   InboxFolderItemType,
   InboxFolderMembership,
   InboxItem,
   ChatSession,
-} from "../types";
-import { inboxKeys } from "./queries";
-import { chatKeys } from "../chat/queries";
+} from "@multica/core/types";
+import { inboxKeys } from "@multica/core/inbox/queries";
+import { chatKeys } from "@multica/core/chat/queries";
 
 export const inboxFolderKeys = {
   all: (wsId: string) => ["inbox-folders", wsId] as const,
