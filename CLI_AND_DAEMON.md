@@ -202,6 +202,9 @@ Agent-specific overrides:
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
 | `MULTICA_CODEX_ARGS` | Default extra arguments for Codex runs |
+| `MULTICA_CODEX_APP_VISIBLE` | Set to `true` to create a small Codex App-visible portal thread after Codex tasks |
+| `MULTICA_CODEX_APP_PORTAL_ROOT` | Directory where Codex App visible portal files are written (default: `~/Documents/Codex/Multica`) |
+| `MULTICA_CODEX_APP_VISIBLE_CWD` | Working directory used for the visible Codex thread; set this to the Codex App workspace where you want the entry to appear |
 | `MULTICA_COPILOT_PATH` | Custom path to the `copilot` binary |
 | `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
@@ -222,6 +225,10 @@ Agent-specific overrides:
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 
 `MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
+
+On macOS, Codex detection also checks the Codex Desktop app bundle at `/Applications/Codex.app/Contents/Resources/codex` when `MULTICA_CODEX_PATH` is unset and `codex` is not on `PATH`.
+
+`MULTICA_CODEX_APP_VISIBLE=true` is opt-in because it creates an extra short Codex thread after each Codex task. The task still runs in Multica's isolated workdir; the portal only writes `README.md`, `result.md`, `links.json`, and a best-effort `real-workdir` link so users can find the Multica result from Codex App. To make entries appear under a specific Codex App sidebar workspace, set `MULTICA_CODEX_APP_VISIBLE_CWD` to that workspace root.
 
 ### Self-Hosted Server
 

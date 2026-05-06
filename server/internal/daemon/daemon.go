@@ -1274,6 +1274,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 
+	d.maybeCreateCodexAppVisibleTaskEntry(ctx, task, result, provider, taskLog)
+
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the issue later. Written last so that a mid-task crash
 	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
