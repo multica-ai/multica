@@ -6,7 +6,8 @@ import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive, Hash, MessagesSquare } from "lucide-react";
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
-import type { Channel, InboxItem } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
 import { useChannelDisplay } from "../../channels";
 import { InboxDetailLabel } from "./inbox-detail-label";
 
@@ -55,7 +56,7 @@ function InboxListItemShell({
       {unread && (
         <span
           aria-hidden
-          className="absolute inset-y-0 left-0 w-0.5 bg-brand"
+          className="absolute inset-y-0 left-0 w-1 bg-brand"
         />
       )}
       {children}
@@ -95,6 +96,7 @@ export function InboxListItem({
   onArchive: () => void;
 }) {
   const unread = !item.read;
+  const mentioned = item.type === "mentioned" && unread;
   return (
     <InboxListItemShell
       isSelected={isSelected}
@@ -108,46 +110,38 @@ export function InboxListItem({
         size={28}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {unread && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-            )}
-            <span
-              className={`truncate text-sm ${unread ? "font-medium" : "text-muted-foreground"}`}
-            >
-              {item.title}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {item.issue_status && (
-              <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
-            )}
-          </div>
-        </div>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p
-            className={`flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
+        <div className="flex items-baseline justify-between gap-2">
+          <span
+            className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold" : "text-muted-foreground"}`}
           >
-            {isAgentActive && (
-              <span
-                title="Agent is working"
-                className="relative inline-flex size-2 shrink-0 items-center justify-center"
-              >
-                <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-              </span>
-            )}
-            <span className="truncate">
-              <InboxDetailLabel item={item} />
-            </span>
-          </p>
+            {item.title}
+          </span>
+          {mentioned && <MentionBadge />}
+          {item.issue_status && (
+            <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
+          )}
           <span
             className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
           >
             {timeAgo(item.created_at)}
           </span>
         </div>
+        <p
+          className={`mt-0.5 flex items-start gap-1.5 text-xs leading-snug line-clamp-2 ${unread ? "text-foreground" : "text-muted-foreground/70"}`}
+        >
+          {isAgentActive && (
+            <span
+              title="Agent is working"
+              className="relative mt-1 inline-flex size-2 shrink-0 items-center justify-center"
+            >
+              <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+            </span>
+          )}
+          <span className="line-clamp-2">
+            <InboxDetailLabel item={item} />
+          </span>
+        </p>
       </div>
     </InboxListItemShell>
   );
@@ -156,6 +150,7 @@ export function InboxListItem({
 export function ChannelListItem({
   channel,
   preview,
+  mentioned = false,
   isSelected,
   onClick,
   onArchive,
@@ -163,16 +158,16 @@ export function ChannelListItem({
   channel: Channel;
   /** Last message snippet shown under the title. */
   preview?: { author: string; text: string } | null;
+  /** True when at least one unread inbox row for this channel is a mention. */
+  mentioned?: boolean;
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
 }) {
   const display = useChannelDisplay(channel);
   const unread = channel.unread_count > 0;
-  // The mockup's "Sara: snippet" shape — compact preview with author name.
-  const previewText = preview
-    ? `${preview.author}: ${preview.text}`
-    : channel.description ?? "";
+  const showParticipants =
+    display.isChannel && display.otherParticipants.length > 0;
 
   return (
     <InboxListItemShell
@@ -183,16 +178,13 @@ export function ChannelListItem({
     >
       <ChannelAvatarStack channel={channel} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {unread && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-            )}
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
             {display.isChannel && (
               <Hash className="size-3.5 shrink-0 text-muted-foreground" />
             )}
             <span
-              className={`truncate text-sm ${unread ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-sm ${unread ? "font-semibold" : "text-muted-foreground"}`}
             >
               {display.title}
             </span>
@@ -202,21 +194,81 @@ export function ChannelListItem({
               </span>
             )}
           </div>
-        </div>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p
-            className={`min-w-0 truncate text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
-          >
-            {previewText || (display.isChannel ? "No messages yet" : "")}
-          </p>
+          {mentioned && <MentionBadge />}
           <span
             className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
           >
             {timeAgo(channel.updated_at)}
           </span>
         </div>
+        {showParticipants && (
+          <ParticipantsLine participants={display.otherParticipants} />
+        )}
+        <ChannelSnippet
+          preview={preview ?? null}
+          fallback={channel.description ?? ""}
+          isChannel={display.isChannel}
+          unread={unread}
+        />
       </div>
     </InboxListItemShell>
+  );
+}
+
+function ParticipantsLine({ participants }: { participants: ChannelMember[] }) {
+  const { getActorName } = useActorName();
+  // Cap inline names so a 12-member channel doesn't blow the row width.
+  const visible = participants.slice(0, 4);
+  const overflow = participants.length - visible.length;
+  const names = visible
+    .map((p) => getActorName(p.user_type, p.user_id))
+    .join(", ");
+  return (
+    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+      {names}
+      {overflow > 0 ? ` +${overflow}` : ""}
+    </p>
+  );
+}
+
+function ChannelSnippet({
+  preview,
+  fallback,
+  isChannel,
+  unread,
+}: {
+  preview: { author: string; text: string } | null;
+  fallback: string;
+  isChannel: boolean;
+  unread: boolean;
+}) {
+  const tone = unread ? "text-foreground" : "text-muted-foreground/70";
+  if (preview) {
+    return (
+      <p className={`mt-0.5 line-clamp-2 text-xs leading-snug ${tone}`}>
+        <span className="font-semibold">{preview.author}:</span> {preview.text}
+      </p>
+    );
+  }
+  if (fallback) {
+    return (
+      <p className={`mt-0.5 line-clamp-2 text-xs leading-snug ${tone}`}>
+        {fallback}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-0.5 truncate text-xs text-muted-foreground/60">
+      {isChannel ? "No messages yet" : ""}
+    </p>
+  );
+}
+
+function MentionBadge() {
+  return (
+    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-destructive">
+      @ you
+    </span>
   );
 }
 

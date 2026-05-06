@@ -258,6 +258,21 @@ export function InboxPage() {
     [channels],
   );
 
+  // Per-channel "@you was mentioned" flag — true when at least one unread
+  // inbox item attached to the channel has type = 'mentioned'. The channel
+  // row uses this to render the small "@ YOU" badge from the mockup.
+  const mentionedChannels = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      if (item.read) continue;
+      if (item.type !== "mentioned") continue;
+      if (!item.issue_id) continue;
+      if (!channelMap.has(item.issue_id)) continue;
+      set.add(item.issue_id);
+    }
+    return set;
+  }, [items, channelMap]);
+
   const view = useInboxViewStore((s) => s.view);
   const setView = useInboxViewStore((s) => s.setView);
   const [showNewMessage, setShowNewMessage] = useState(false);
@@ -768,6 +783,7 @@ export function InboxPage() {
         >
           <ChannelListItem
             channel={channel}
+            mentioned={mentionedChannels.has(channel.id)}
             isSelected={channel.id === selectedKey}
             onClick={() => setSelectedKey("issue", channel.id)}
             onArchive={() => {

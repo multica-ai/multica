@@ -150,7 +150,7 @@ describe("ChannelListItem", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
-  it("shows the snippet preview with author when provided", () => {
+  it("shows the snippet preview with bold author when provided", () => {
     render(
       <ChannelListItem
         channel={makeChannel()}
@@ -160,6 +160,74 @@ describe("ChannelListItem", () => {
         onArchive={() => {}}
       />,
     );
-    expect(screen.getByText("Sara: shipping at 3")).toBeInTheDocument();
+    // Author and text are split — author is wrapped in a bold span so the
+    // mail-style "**Sara:** shipping at 3" reads correctly.
+    expect(screen.getByText("Sara:")).toBeInTheDocument();
+    expect(screen.getByText("shipping at 3")).toBeInTheDocument();
+  });
+
+  it("renders the @YOU mention badge when mentioned", () => {
+    render(
+      <ChannelListItem
+        channel={makeChannel({ unread_count: 1 })}
+        mentioned
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    expect(screen.getByText(/@\s*you/i)).toBeInTheDocument();
+  });
+
+  it("hides the @YOU badge when not mentioned", () => {
+    render(
+      <ChannelListItem
+        channel={makeChannel({ unread_count: 1 })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/@\s*you/i)).toBeNull();
+  });
+
+  it("shows participant names line for named channels with multiple members", () => {
+    render(
+      <ChannelListItem
+        channel={makeChannel({
+          kind: "channel",
+          title: "growth",
+          participants: [
+            { user_type: "member", user_id: "me" },
+            { user_type: "member", user_id: "alice" },
+            { user_type: "member", user_id: "bob" },
+          ],
+        })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    // Names from the mocked getActorName ("User-alic", "User-bob ") joined.
+    expect(screen.getByText(/User-alic, User-bob/)).toBeInTheDocument();
+  });
+
+  it("does not show participant names line for DMs", () => {
+    render(
+      <ChannelListItem
+        channel={makeChannel({
+          kind: "dm",
+          participants: [
+            { user_type: "member", user_id: "me" },
+            { user_type: "member", user_id: "alice" },
+          ],
+        })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    // DMs derive title from the peer; participants line is channel-only.
+    expect(screen.queryByText(/User-alic,/)).toBeNull();
   });
 });
