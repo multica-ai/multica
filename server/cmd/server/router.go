@@ -108,6 +108,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	localCfg := localmode.FromEnv()
 	h.LocalMode = localCfg
+	h.TaskService.LocalMode = localCfg
 	h.LocalBootstrapper = localmode.NewBootstrapper(pool)
 	if rdb != nil {
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/localmode"
 )
 
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
@@ -183,5 +185,130 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	testHandler.CreateAgent(w2, newRequest(http.MethodPost, "/api/agents", body))
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("second CreateAgent with duplicate name: expected 409, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+// TestLocalLimitClampsCreateAgentMaxConcurrent verifies that when the server
+// is running in local product mode, an agent created with
+// max_concurrent_tasks above the local cap is silently clamped to the cap.
+// This gives users a "clear response" — the API echoes back the effective
+// value at creation time, so the UI never displays a fictional limit.
+func TestLocalLimitClampsCreateAgentMaxConcurrent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const agentName = "local_concurrency_clamp_create"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			testWorkspaceID, agentName,
+		)
+	})
+
+	// Clone the handler so we don't mutate the global test instance.
+	h := *testHandler
+	h.LocalMode = localmode.Config{ProductMode: "local"}
+
+	body := map[string]any{
+		"name":                 agentName,
+		"description":          "",
+		"runtime_id":           testRuntimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 5,
+	}
+
+	w := httptest.NewRecorder()
+	h.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	got, _ := resp["max_concurrent_tasks"].(float64)
+	if int(got) != localmode.MaxConcurrentTasks {
+		t.Fatalf("expected max_concurrent_tasks clamped to %d, got %v",
+			localmode.MaxConcurrentTasks, resp["max_concurrent_tasks"])
+	}
+}
+
+// TestLocalLimitClampsUpdateAgentMaxConcurrent verifies that an UpdateAgent
+// request raising max_concurrent_tasks above the local cap is silently
+// clamped to the cap when the server runs in local product mode.
+func TestLocalLimitClampsUpdateAgentMaxConcurrent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "local_concurrency_clamp_update", []byte(`{}`))
+
+	h := *testHandler
+	h.LocalMode = localmode.Config{ProductMode: "local"}
+
+	body := map[string]any{
+		"max_concurrent_tasks": 10,
+	}
+
+	req := newRequest(http.MethodPut, "/api/agents/"+agentID, body)
+	req = withURLParam(req, "id", agentID)
+
+	w := httptest.NewRecorder()
+	h.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	got, _ := resp["max_concurrent_tasks"].(float64)
+	if int(got) != localmode.MaxConcurrentTasks {
+		t.Fatalf("expected max_concurrent_tasks clamped to %d, got %v",
+			localmode.MaxConcurrentTasks, resp["max_concurrent_tasks"])
+	}
+}
+
+// TestLocalLimitDoesNothingOutsideLocalMode pins the symmetric case: in
+// non-local mode the cap doesn't apply and the requested value passes
+// through unchanged. The default test handler has empty LocalMode (cloud).
+func TestLocalLimitDoesNothingOutsideLocalMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const agentName = "local_concurrency_passthrough"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			testWorkspaceID, agentName,
+		)
+	})
+
+	body := map[string]any{
+		"name":                 agentName,
+		"description":          "",
+		"runtime_id":           testRuntimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 5,
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	got, _ := resp["max_concurrent_tasks"].(float64)
+	if int(got) != 5 {
+		t.Fatalf("expected max_concurrent_tasks=5 in non-local mode, got %v",
+			resp["max_concurrent_tasks"])
 	}
 }

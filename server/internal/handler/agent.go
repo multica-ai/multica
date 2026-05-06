@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/localmode"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -407,6 +408,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.MaxConcurrentTasks == 0 {
 		req.MaxConcurrentTasks = 6
 	}
+	// Local product mode imposes a workspace-wide cap on simultaneous
+	// running tasks, so an agent's individual ceiling never needs to
+	// exceed it. Clamping here makes the limit visible in the API
+	// response so the UI can echo the effective value to the user.
+	if h.LocalMode.Enabled() && req.MaxConcurrentTasks > localmode.MaxConcurrentTasks {
+		req.MaxConcurrentTasks = localmode.MaxConcurrentTasks
+	}
 
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 	if !ok {
@@ -650,7 +658,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.MaxConcurrentTasks != nil {
-		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+		v := *req.MaxConcurrentTasks
+		// Symmetric clamp with CreateAgent: in local product mode an
+		// agent's per-agent limit can never exceed the workspace-wide
+		// cap, so a request raising it above the cap is silently
+		// truncated. The response surfaces the effective value.
+		if h.LocalMode.Enabled() && v > localmode.MaxConcurrentTasks {
+			v = localmode.MaxConcurrentTasks
+		}
+		params.MaxConcurrentTasks = pgtype.Int4{Int32: v, Valid: true}
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}

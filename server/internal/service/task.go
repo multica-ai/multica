@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/localmode"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -34,6 +35,11 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// LocalMode gates the workspace-wide concurrency cap that fires only
+	// when MULTICA_PRODUCT_MODE=local. In cloud mode the cap is a no-op
+	// — per-agent max_concurrent_tasks remains the only limit. Set
+	// post-construction in router.go alongside Wakeup / EmptyClaim.
+	LocalMode localmode.Config
 }
 
 type TaskWakeupNotifier interface {
@@ -410,6 +416,29 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
 
+	// Local product mode caps the total active (running + dispatched)
+	// task count across the whole workspace, not just per agent. A
+	// single laptop should not run more than a handful of agent
+	// processes at once even if the user has spun up several agents
+	// each with a high per-agent limit. Cloud mode skips this branch
+	// entirely.
+	if s.LocalMode.Enabled() {
+		activeCount, err := s.countActiveTasksInWorkspace(ctx, agent.WorkspaceID)
+		if err != nil {
+			outcome = "error_count_workspace"
+			return nil, fmt.Errorf("count workspace active tasks: %w", err)
+		}
+		if activeCount >= int64(localmode.MaxConcurrentTasks) {
+			slog.Debug("task claim: local cap reached",
+				"workspace_id", util.UUIDToString(agent.WorkspaceID),
+				"active", activeCount,
+				"max", localmode.MaxConcurrentTasks,
+			)
+			outcome = "local_cap"
+			return nil, nil // No capacity (no error — daemon polls again)
+		}
+	}
+
 	t0 = time.Now()
 	running, err := s.Queries.CountRunningTasks(ctx, agentID)
 	countRunningMs = time.Since(t0).Milliseconds()
@@ -453,6 +482,27 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	outcome = "claimed"
 	return &task, nil
+}
+
+// countActiveTasksInWorkspace sums the running + dispatched task counts
+// across every agent in the workspace. Used by the local-mode workspace
+// cap. With a per-host install of <=5 agents the loop is cheap; the
+// per-agent count uses an indexed query (agent_task_queue.agent_id +
+// status).
+func (s *TaskService) countActiveTasksInWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	agents, err := s.Queries.ListAgents(ctx, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, a := range agents {
+		n, err := s.Queries.CountRunningTasks(ctx, a.ID)
+		if err != nil {
+			return 0, err
+		}
+		total += n
+	}
+	return total, nil
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
