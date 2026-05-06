@@ -690,6 +690,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // When a parent passes `onDelete`, we detect deletion via effect
               // above and skip navigation. Otherwise the modal navigates for us.
               onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+              enableTakeOver
               trigger={
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                   <MoreHorizontal />

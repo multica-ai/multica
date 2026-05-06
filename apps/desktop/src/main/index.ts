@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
+import { setupIssueTakeOver } from "./issue-take-over";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
@@ -355,6 +356,7 @@ if (!gotTheLock) {
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+    setupIssueTakeOver();
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {
