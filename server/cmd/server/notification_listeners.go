@@ -19,7 +19,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -456,7 +455,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}
@@ -491,7 +490,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}

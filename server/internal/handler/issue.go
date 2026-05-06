@@ -1498,10 +1498,20 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Trigger the assigned agent when a member moves an issue out of backlog.
-	// Backlog acts as a parking lot — moving to an active status signals the
-	// issue is ready for work.
-	if statusChanged && !assigneeChanged && actorType == "member" &&
+	// Trigger the assigned agent when anyone (member or another agent) moves an
+	// issue out of backlog. Skip when the assignee agent moves its own issue
+	// to prevent self-loops. Exception: when the author agent is currently
+	// running a task on a DIFFERENT issue, the status change is a chained
+	// hand-off (e.g. agent finishing MOIK-12 sets MOIK-13 to todo where both
+	// are assigned to the same agent) and must still trigger pickup.
+	isSelfActor := actorType == "agent" && issue.AssigneeType.String == "agent" &&
+		uuidToString(issue.AssigneeID) == actorID
+	if isSelfActor {
+		if taskIssueID := h.actorCurrentIssueID(r); taskIssueID != "" && taskIssueID != uuidToString(issue.ID) {
+			isSelfActor = false
+		}
+	}
+	if statusChanged && !assigneeChanged && !isSelfActor &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
@@ -1883,8 +1893,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Trigger agent when moving out of backlog (batch).
-		if statusChanged && !assigneeChanged && actorType == "member" &&
+		// Trigger agent when moving out of backlog (batch). Same rule as the
+		// single-update handler: self-loop unless the agent is currently
+		// running a task on a different issue (chained hand-off).
+		isSelfActorBatch := actorType == "agent" && issue.AssigneeType.String == "agent" &&
+			uuidToString(issue.AssigneeID) == actorID
+		if isSelfActorBatch {
+			if taskIssueID := h.actorCurrentIssueID(r); taskIssueID != "" && taskIssueID != uuidToString(issue.ID) {
+				isSelfActorBatch = false
+			}
+		}
+		if statusChanged && !assigneeChanged && !isSelfActorBatch &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)

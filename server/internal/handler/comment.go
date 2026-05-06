@@ -294,11 +294,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
+	// Exception: when the author agent is currently running a task on a
+	// DIFFERENT issue, the comment is a chained hand-off (e.g. finishing
+	// MOIK-12 and kicking off MOIK-13 where both are assigned to the same
+	// agent) and must still trigger pickup. Without any task context we stay
+	// conservative and suppress to preserve the anti-loop guarantee for manual
+	// same-agent actions.
 	// Also skip when the comment @mentions others but not the assignee agent —
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	isSelfComment := authorType == "agent" && issue.AssigneeType.String == "agent" &&
+		uuidToString(issue.AssigneeID) == authorID
+	if isSelfComment {
+		if taskIssueID := h.actorCurrentIssueID(r); taskIssueID != "" && taskIssueID != uuidToString(issue.ID) {
+			isSelfComment = false
+		}
+	}
+	if !isSelfComment && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 		// Always use the current comment as the trigger so the agent reads
