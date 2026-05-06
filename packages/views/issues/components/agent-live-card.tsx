@@ -56,6 +56,12 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const seenSeqs = useRef(new Set<string>());
   const hydratedTaskIds = useRef(new Set<string>());
   const mountedRef = useRef(true);
+  // Monotonic counter — each reconcile() call captures its issued seq and
+  // only applies its response if it's still the latest issued. This stops
+  // a slow getActiveTasksForIssue response from clobbering newer truth
+  // (e.g. a stale "task is active" payload re-adding a banner that a
+  // newer "tasks: []" response just cleared).
+  const reconcileSeq = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -70,8 +76,14 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   // listTaskMessages hydration to backfill any messages that landed
   // before the WS subscription saw them.
   const reconcile = useCallback(() => {
+    const mySeq = ++reconcileSeq.current;
     api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
       if (!mountedRef.current) return;
+      // A newer reconcile was issued after this one — drop this response
+      // unconditionally and let the latest request win, regardless of
+      // resolution order. Without this guard, a slow A then a fast B can
+      // resolve in B-then-A order and A re-adds tasks B already cleared.
+      if (mySeq !== reconcileSeq.current) return;
       const activeIds = new Set(tasks.map((t) => t.id));
 
       setTaskStates((prev) => {
