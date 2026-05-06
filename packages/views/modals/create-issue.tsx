@@ -546,9 +546,9 @@ export function ManualCreatePanel({
                   type="button"
                   onClick={switchToAgent}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
                 >
-                  <ArrowLeftRight className="size-3.5" />
+                  <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
                 </button>
                 <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">

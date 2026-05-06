@@ -114,6 +114,64 @@
   animation: chat-text-shimmer 2.5s linear infinite;
 }
 
+/* Border beam: a brand-tinted highlight sweeps continuously around the
+ * element's rounded border, drawing the eye to a CTA that would otherwise
+ * blend into the chrome (e.g. the "switch to agent" affordance in manual
+ * create). Built with a conic-gradient on a ::before whose mask carves out a
+ * 1px ring; an animated @property angle drives the rotation so only the
+ * gradient repaints, not layout. The ring respects `border-radius: inherit`,
+ * so any rounded host picks up the right curvature for free. Pair with a
+ * subtle background tint on the host so the highlight has something to ride
+ * on at low contrast. */
+@property --border-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes border-beam-rotate {
+  to { --border-beam-angle: 360deg; }
+}
+
+.border-beam {
+  position: relative;
+}
+
+.border-beam::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--border-beam-angle),
+    transparent 0deg,
+    transparent 280deg,
+    color-mix(in oklab, var(--brand) 50%, transparent) 320deg,
+    var(--brand) 350deg,
+    color-mix(in oklab, var(--brand) 30%, transparent) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: border-beam-rotate 3.2s linear infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .border-beam::before {
+    animation: none;
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--brand) 30%, transparent),
+      var(--brand),
+      color-mix(in oklab, var(--brand) 30%, transparent)
+    );
+  }
+}
+
 /* Sidebar: open triggers (dropdown/popover) get active background */
 [data-sidebar="menu-button"][data-popup-open] {
   background-color: var(--sidebar-accent);
