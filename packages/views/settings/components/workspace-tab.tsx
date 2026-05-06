@@ -36,7 +36,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
-import { KillSwitchSection } from "./kill-switch-section";
+import { KillSwitchSection } from "@multica/cerebro-budgets/views";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);

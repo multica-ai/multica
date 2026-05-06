@@ -25,6 +25,7 @@
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-attachments": "workspace:*",
+    "@multica/cerebro-budgets": "workspace:*",
     "@multica/cerebro-chat": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
