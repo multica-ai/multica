@@ -248,9 +248,13 @@ function PinRow({
     enabled: !isIssue,
   });
 
+  const triggeredRef = useRef(false);
   useEffect(() => {
     const err = isIssue ? issueQuery.error : projectQuery.error;
-    if (err instanceof ApiError && err.status === 404) onUnpin();
+    if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
+      triggeredRef.current = true;
+      onUnpin();
+    }
   }, [isIssue, issueQuery.error, onUnpin, projectQuery.error]);
 
   if (isIssue) {
