@@ -1249,11 +1249,19 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 // poll cadence and wakeup channel so that a slow HTTP claim for this runtime
 // cannot delay any other runtime's claims.
 //
-// Critically, the execution slot is acquired AFTER ClaimTask returns, not
-// before. Holding a slot during the claim's HTTP roundtrip would let one
-// stuck runtime starve every other runtime out of the shared slot pool —
-// catastrophic when MaxConcurrentTasks is small (e.g. 1, the default for
-// many local setups).
+// The execution slot is acquired BEFORE ClaimTask. The alternative —
+// claiming first and then waiting for a slot — would let claimed tasks pile
+// up in the server-side `dispatched` state without a corresponding
+// StartTask, and the server's sweeper would fail them as `failed/timeout`
+// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
+// exact user-visible failure this issue is fixing, so we cannot risk
+// recreating it under load.
+//
+// Slot-before-claim does mean a slow claim holds a slot during its HTTP
+// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
+// below the 300s dispatch timeout, so other runtimes' tasks stay in
+// server-side `queued` state (which has no timeout) rather than entering
+// `dispatched` and racing the sweeper.
 //
 // pollerCtx is cancelled when this runtime is removed from the watched set
 // (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
@@ -1272,8 +1280,25 @@ func (d *Daemon) runRuntimePoller(
 			return
 		}
 
+		// Acquire an execution slot before claiming. If at capacity, sleep
+		// without claiming so we don't push a task into `dispatched` and
+		// then race the 5-min server-side dispatch timeout while waiting.
+		var slot int
+		select {
+		case slot = <-sem:
+		case <-pollerCtx.Done():
+			return
+		default:
+			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
 		task, err := d.client.ClaimTask(pollerCtx, rid)
 		if err != nil {
+			sem <- slot
 			if pollerCtx.Err() == nil {
 				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
 			}
@@ -1284,23 +1309,11 @@ func (d *Daemon) runRuntimePoller(
 		}
 
 		if task == nil {
+			sem <- slot
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
-		}
-
-		// We have a claimed task. Now block on slot acquisition. Other
-		// runtimes' pollers continue to claim freely while we wait — only
-		// the dispatch step is bounded by MaxConcurrentTasks. The claimed
-		// task already moved to dispatched state on the server, so if we
-		// fail to acquire a slot before shutdown the runtime sweeper will
-		// fail it as runtime_offline once deregister flips us offline.
-		var slot int
-		select {
-		case slot = <-sem:
-		case <-pollerCtx.Done():
-			return
 		}
 
 		taskTarget := task.IssueID

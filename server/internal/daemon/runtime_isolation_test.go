@@ -64,14 +64,15 @@ func TestRuntimeSetWatcherFanOut(t *testing.T) {
 }
 
 // TestRunRuntimePollerIsolatesSlowRuntime is the regression test for
-// MUL-1744: a slow ClaimTask for one runtime must not delay claims on any
-// other runtime. The serial pre-isolation pollLoop would have blocked the
-// fast runtime behind the slow one's HTTP request.
+// MUL-1744's main symptom: a slow ClaimTask on one runtime must not delay
+// claims on any other runtime. The pre-refactor pollLoop's serial round-
+// robin made every runtime wait behind the slow one's HTTP roundtrip.
 //
-// MaxConcurrentTasks is deliberately set to 1 — the strict case GPT-Boy
-// flagged on review. Holding the only slot during a slow claim would make
-// the fast runtime starve, so this guards both the per-goroutine refactor
-// AND the slot-acquired-after-claim invariant.
+// MaxConcurrentTasks=4 leaves headroom so each runtime gets its own slot.
+// The poller does acquire a slot before claiming (see runRuntimePoller for
+// why), so this test deliberately uses a capacity that fits both runtimes
+// concurrently — that's the case where slot-before-claim still gives full
+// isolation.
 func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +109,7 @@ func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 		ServerBaseURL:      srv.URL,
 		HeartbeatInterval:  time.Hour, // disable WS-suppression effects
 		PollInterval:       50 * time.Millisecond,
-		MaxConcurrentTasks: 1,
+		MaxConcurrentTasks: 4,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,6 +143,54 @@ func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 			t.Fatalf("fast runtime made only %d claims while slow runtime blocked; expected ≥3", fastClaims.Load())
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+// TestRunRuntimePollerSkipsClaimWhenAtCapacity pins the slot-before-claim
+// invariant: when no execution slots are available, the poller must NOT
+// call ClaimTask. Pre-claiming and then waiting for a slot would let the
+// task pile up in server-side `dispatched` state and race the 5-minute
+// `dispatchTimeoutSeconds` sweeper, recreating the exact failure mode this
+// issue is fixing.
+func TestRunRuntimePollerSkipsClaimWhenAtCapacity(t *testing.T) {
+	t.Parallel()
+
+	var claimAttempts atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/tasks/claim") {
+			claimAttempts.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"task":null}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       20 * time.Millisecond,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Drain the only slot to simulate a long-running handleTask occupying
+	// capacity. The poller must observe an empty sem and skip ClaimTask.
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	<-sem // hold it: never returned during this test
+
+	var taskWG sync.WaitGroup
+	go d.runRuntimePoller(ctx, ctx, "runtime-busy", sem, make(chan struct{}, 1), &taskWG)
+
+	// Give the poller several PollInterval ticks to race against the empty
+	// sem. With slot-before-claim it must report zero claim attempts; the
+	// older "claim first" path would have hammered ClaimTask each tick.
+	time.Sleep(200 * time.Millisecond)
+
+	if got := claimAttempts.Load(); got != 0 {
+		t.Fatalf("poller called ClaimTask %d times while at capacity; want 0 — pre-claiming risks server-side dispatch_timeout", got)
 	}
 }
 
