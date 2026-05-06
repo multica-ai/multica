@@ -414,14 +414,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (useModalStore.getState().modal) return;
       e.preventDefault();
       const lastMode = useCreateModeStore.getState().lastMode;
+      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
       if (lastMode === "manual") {
-        // Auto-fill project when on a project detail page (manual form only —
-        // agent mode lets the agent infer project from the prompt).
-        const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-        const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
+        // Auto-fill project when on a project detail page.
         useModalStore.getState().open("create-issue", data);
       } else {
-        useModalStore.getState().open("quick-create-issue");
+        useModalStore.getState().open("quick-create-issue", data);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -560,7 +559,15 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("quick-create-issue")}
+                onClick={() => {
+                  const projectMatch = pathname.match(
+                    /^\/[^/]+\/projects\/([^/]+)$/,
+                  );
+                  const data = projectMatch
+                    ? { project_id: projectMatch[1] }
+                    : undefined;
+                  useModalStore.getState().open("quick-create-issue", data);
+                }}
               >
                 <span className="relative">
                   <SquarePen />

@@ -40,6 +40,7 @@ import {
   FileDropOverlay,
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { ProjectPicker } from "../projects/components/project-picker";
 
 // AgentCreatePanel — agent-mode body of the create-issue dialog. Renders
 // only the inner content; the surrounding `<Dialog>` AND `<DialogContent>`
@@ -56,7 +57,7 @@ export function AgentCreatePanel({
   data,
 }: {
   onClose: () => void;
-  onSwitchMode?: () => void;
+  onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
 }) {
   const workspaceName = useCurrentWorkspace()?.name;
@@ -92,6 +93,10 @@ export function AgentCreatePanel({
     const seed = (data?.agent_id as string) || lastAgentId || undefined;
     if (seed && visibleAgents.some((a) => a.id === seed)) return seed;
     return visibleAgents[0]?.id;
+  });
+  const [projectId, setProjectId] = useState<string | undefined>(() => {
+    const seed = data?.project_id;
+    return typeof seed === "string" && seed ? seed : undefined;
   });
 
   // Re-seed once visible list resolves (queries may be empty on first render).
@@ -171,7 +176,11 @@ export function AgentCreatePanel({
     setSubmitting(true);
     setError(null);
     try {
-      await api.quickCreateIssue({ agent_id: agentId, prompt: md });
+      await api.quickCreateIssue({
+        agent_id: agentId,
+        prompt: md,
+        ...(projectId ? { project_id: projectId } : {}),
+      });
       setLastAgentId(agentId);
       clearPrompt();
       setLastMode("agent");
@@ -241,7 +250,7 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    onSwitchMode?.();
+    onSwitchMode?.(projectId ? { project_id: projectId } : null);
   };
 
   return (
@@ -270,8 +279,8 @@ export function AgentCreatePanel({
           </button>
         </div>
 
-        {/* Agent picker */}
-        <div className="px-5 pt-1 pb-2 shrink-0">
+        {/* Agent and project pickers */}
+        <div className="px-5 pt-1 pb-2 shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -325,6 +334,16 @@ export function AgentCreatePanel({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span>Project</span>
+            <ProjectPicker
+              projectId={projectId ?? null}
+              onUpdate={(updates) => {
+                setProjectId(updates.project_id ?? undefined);
+                setError(null);
+              }}
+            />
+          </div>
         </div>
 
         {selectedAgent && versionBlocked && (

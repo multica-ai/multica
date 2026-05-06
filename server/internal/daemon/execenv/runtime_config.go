@@ -173,7 +173,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
 		if ctx.ProjectTitle != "" {
-			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+			if ctx.QuickCreatePrompt != "" {
+				fmt.Fprintf(&b, "The issue you create must belong to **%s**.\n\n", ctx.ProjectTitle)
+			} else {
+				fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+			}
 		}
 		if len(ctx.ProjectResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
@@ -211,6 +215,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
 		b.WriteString("Hard guardrails (apply even if the user message is missing):\n")
 		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
+		if ctx.ProjectID != "" {
+			fmt.Fprintf(&b, "- Include `--project %q` on the `multica issue create` invocation.\n", ctx.ProjectID)
+		}
 		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.AutopilotRunID != "" {

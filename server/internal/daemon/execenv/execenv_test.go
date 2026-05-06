@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -216,6 +217,149 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
 		}
+	}
+}
+
+func TestPrepareAfterCreateHookRunsBeforeContextFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook fixture is POSIX-only")
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-hook-order",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		AgentName:      "Hook Agent",
+		Provider:       "claude",
+		AfterCreate: &AfterCreateHook{
+			Script: `
+if [ -e ".agent_context" ] || [ -e "CLAUDE.md" ]; then
+  echo "context files should not exist before after_create"
+  exit 7
+fi
+printf "ready" > hook_marker
+`,
+		},
+		Task: TaskContextForEnv{
+			IssueID:   "11111111-2222-3333-4444-555555555555",
+			AgentName: "Hook Agent",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	marker, err := os.ReadFile(filepath.Join(env.WorkDir, "hook_marker"))
+	if err != nil {
+		t.Fatalf("hook marker missing: %v", err)
+	}
+	if string(marker) != "ready" {
+		t.Fatalf("hook marker = %q, want ready", marker)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context", "issue_context.md")); err != nil {
+		t.Fatalf("context file should be written after hook: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.RootDir, "logs", afterCreateLogName)); err != nil {
+		t.Fatalf("after_create log missing: %v", err)
+	}
+}
+
+func TestPrepareAfterCreateHookFailureReturnsLogContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook fixture is POSIX-only")
+	}
+
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-hook-fail",
+		TaskID:         "22222222-3333-4444-5555-666666666666",
+		AgentName:      "Hook Agent",
+		Provider:       "claude",
+		AfterCreate: &AfterCreateHook{
+			Script: `echo "setup failed"; exit 42`,
+		},
+		Task: TaskContextForEnv{IssueID: "22222222-3333-4444-5555-666666666666"},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("expected Prepare to fail")
+	}
+	var hookErr *AfterCreateHookError
+	if !errors.As(err, &hookErr) {
+		t.Fatalf("expected AfterCreateHookError, got %T: %v", err, err)
+	}
+	if hookErr.WorkDir == "" || hookErr.EnvRoot == "" || hookErr.LogPath == "" {
+		t.Fatalf("hook error missing path context: %+v", hookErr)
+	}
+	if !strings.Contains(hookErr.OutputTail, "setup failed") {
+		t.Fatalf("output tail missing hook output: %q", hookErr.OutputTail)
+	}
+	data, readErr := os.ReadFile(hookErr.LogPath)
+	if readErr != nil {
+		t.Fatalf("read hook log: %v", readErr)
+	}
+	if !strings.Contains(string(data), "setup failed") {
+		t.Fatalf("hook log missing output:\n%s", data)
+	}
+}
+
+func TestCappedWriterLimitsOutput(t *testing.T) {
+	var b strings.Builder
+	w := &cappedWriter{w: &b, max: 5}
+
+	n, err := w.Write([]byte("123456789"))
+	if err != nil {
+		t.Fatalf("first write failed: %v", err)
+	}
+	if n != 9 {
+		t.Fatalf("first write n = %d, want 9", n)
+	}
+	n, err = w.Write([]byte("abcdef"))
+	if err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+	if n != 6 {
+		t.Fatalf("second write n = %d, want 6", n)
+	}
+
+	got := b.String()
+	if !strings.HasPrefix(got, "12345") {
+		t.Fatalf("output prefix = %q, want capped payload", got)
+	}
+	if strings.Count(got, "after_create log truncated") != 1 {
+		t.Fatalf("expected one truncation marker, got %q", got)
+	}
+	if strings.Contains(got, "6789") || strings.Contains(got, "abcdef") {
+		t.Fatalf("output included bytes past cap: %q", got)
+	}
+}
+
+func TestPrepareAfterCreateHookTimeoutUsesEnvOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook fixture is POSIX-only")
+	}
+	t.Setenv(AfterCreateHookTimeoutEnv, "10ms")
+
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-hook-timeout",
+		TaskID:         "33333333-4444-5555-6666-777777777777",
+		AgentName:      "Hook Agent",
+		Provider:       "claude",
+		AfterCreate: &AfterCreateHook{
+			Script: `sleep 1`,
+		},
+		Task: TaskContextForEnv{IssueID: "33333333-4444-5555-6666-777777777777"},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("expected Prepare to time out")
+	}
+	var hookErr *AfterCreateHookError
+	if !errors.As(err, &hookErr) {
+		t.Fatalf("expected AfterCreateHookError, got %T: %v", err, err)
+	}
+	if !hookErr.TimedOut {
+		t.Fatalf("expected timeout classification, got %+v", hookErr)
 	}
 }
 

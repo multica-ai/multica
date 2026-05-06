@@ -111,6 +111,18 @@ The text is intentionally minimal. The full payload is on disk; the prompt only 
 
 Resource fetch is **best-effort**. If the API call fails, the project section is omitted from the prompt and the file is not written, but the task still starts. Agents never block on missing project context.
 
+## Project setup hooks
+
+Workspace owners and admins can add a project setup hook at `settings.hooks.after_create`. The daemon runs this shell script once for each fresh project-scoped task workdir, after creating `workdir/`, `output/`, and `logs/`, but before writing Multica context files, provider config, skills, or starting the provider.
+
+The hook runs from the task `workdir` with the same Multica task environment the agent receives, including `MULTICA_WORKDIR`, `MULTICA_ENV_ROOT`, `MULTICA_WORKSPACE_ID`, `MULTICA_PROJECT_ID`, and the local daemon/API variables needed by `multica repo checkout`. On Unix, hooks run with `/bin/sh -c`; on Windows, they run with `cmd /C`.
+
+Output is written to `logs/after_create.log` inside the task environment. Stdout/stderr are capped so a broken hook cannot grow the log indefinitely, while the task error still includes a short output tail. The default timeout is 30 minutes and can be changed by setting `MULTICA_PROJECT_AFTER_CREATE_TIMEOUT` to a Go duration such as `10m`.
+
+If the hook exits non-zero or times out, Multica marks the task as blocked before provider startup and preserves the environment paths for debugging. When a later task reuses an existing workdir, the hook does not run again.
+
+Treat setup hooks like code running on the daemon host. Only configure hooks from projects and scripts you trust.
+
 ## Adding a new resource type
 
 The whole point of the abstraction is that new types are cheap. The full path:

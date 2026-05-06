@@ -7,6 +7,226 @@ import (
 	"testing"
 )
 
+func TestProjectSettingsHooksAfterCreateRoundTrip(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Settings hook project",
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "git clone https://github.com/example/repo.git .",
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	}()
+
+	settings := project.Settings.(map[string]any)
+	hooks := settings["hooks"].(map[string]any)
+	if got := hooks["after_create"]; got != "git clone https://github.com/example/repo.git ." {
+		t.Fatalf("create settings hooks.after_create = %q", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "corepack pnpm install --frozen-lockfile",
+			},
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateProject: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode UpdateProject: %v", err)
+	}
+	settings = updated.Settings.(map[string]any)
+	hooks = settings["hooks"].(map[string]any)
+	if got := hooks["after_create"]; got != "corepack pnpm install --frozen-lockfile" {
+		t.Fatalf("updated settings hooks.after_create = %q", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects/"+project.ID, nil)
+	req = withURLParam(req, "id", project.ID)
+	testHandler.GetProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetProject: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var fetched ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode GetProject: %v", err)
+	}
+	settings = fetched.Settings.(map[string]any)
+	hooks = settings["hooks"].(map[string]any)
+	if got := hooks["after_create"]; got != "corepack pnpm install --frozen-lockfile" {
+		t.Fatalf("fetched settings hooks.after_create = %q", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjects: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listed struct {
+		Projects []ProjectResponse `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode ListProjects: %v", err)
+	}
+	found := false
+	for _, p := range listed.Projects {
+		if p.ID != project.ID {
+			continue
+		}
+		found = true
+		settings = p.Settings.(map[string]any)
+		hooks = settings["hooks"].(map[string]any)
+		if got := hooks["after_create"]; got != "corepack pnpm install --frozen-lockfile" {
+			t.Fatalf("listed settings hooks.after_create = %q", got)
+		}
+	}
+	if !found {
+		t.Fatalf("project %s missing from list response", project.ID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/search/projects?workspace_id="+testWorkspaceID+"&q=Settings", nil)
+	testHandler.SearchProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SearchProjects: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var searched struct {
+		Projects []SearchProjectResponse `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&searched); err != nil {
+		t.Fatalf("decode SearchProjects: %v", err)
+	}
+	found = false
+	for _, p := range searched.Projects {
+		if p.ID != project.ID {
+			continue
+		}
+		found = true
+		settings = p.Settings.(map[string]any)
+		hooks = settings["hooks"].(map[string]any)
+		if got := hooks["after_create"]; got != "corepack pnpm install --frozen-lockfile" {
+			t.Fatalf("searched settings hooks.after_create = %q", got)
+		}
+	}
+	if !found {
+		t.Fatalf("project %s missing from search response", project.ID)
+	}
+}
+
+func TestProjectSettingsRejectMalformedHooks(t *testing.T) {
+	for name, body := range map[string]map[string]any{
+		"settings array": {
+			"title":    "Bad settings",
+			"settings": []any{"not", "object"},
+		},
+		"hooks string": {
+			"title":    "Bad hooks",
+			"settings": map[string]any{"hooks": "nope"},
+		},
+		"after_create number": {
+			"title": "Bad after_create",
+			"settings": map[string]any{
+				"hooks": map[string]any{"after_create": 42},
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, body)
+			testHandler.CreateProject(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("CreateProject: expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestProjectSettingsHooksRequireAdminRole(t *testing.T) {
+	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+
+	w := httptest.NewRecorder()
+	req := newRequestAsUser(memberUserID, http.MethodPost, "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Member hook project",
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo no",
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateProject with hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Owner-created hook target",
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo yes",
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	}()
+
+	w = httptest.NewRecorder()
+	req = newRequestAsUser(memberUserID, http.MethodPut, "/api/projects/"+project.ID, map[string]any{
+		"settings": map[string]any{},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateProject clearing hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequestAsUser(memberUserID, http.MethodPut, "/api/projects/"+project.ID, map[string]any{
+		"settings": map[string]any{
+			"hooks": map[string]any{
+				"after_create": "echo no",
+			},
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateProject with hook as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestProjectResourceLifecycle(t *testing.T) {
 	// Create a project to attach resources to.
 	w := httptest.NewRecorder()
@@ -204,4 +424,3 @@ func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 		}
 	}
 }
-

@@ -466,6 +466,56 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 }
 
+func TestRunTaskAfterCreateFailureBlocksBeforeProviderStart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell hook fixture is POSIX-only")
+	}
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg = Config{
+		WorkspacesRoot: t.TempDir(),
+		HealthPort:     19514,
+		Agents: map[string]AgentEntry{
+			"codex": {Path: "/definitely/not/executed"},
+		},
+	}
+	d.activeEnvRoots = make(map[string]int)
+
+	result, err := d.runTask(context.Background(), Task{
+		ID:          "44444444-5555-6666-7777-888888888888",
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-hook-run",
+		Agent: &AgentData{
+			ID:   "agent-1",
+			Name: "Hook Agent",
+		},
+		ProjectID: "project-1",
+		ProjectHooks: &ProjectHooksData{
+			AfterCreate: `echo "setup failed before provider"; exit 13`,
+		},
+	}, "codex", 0, slog.Default())
+	if err != nil {
+		t.Fatalf("runTask returned error: %v", err)
+	}
+	if result.Status != "blocked" {
+		t.Fatalf("expected blocked result, got %+v", result)
+	}
+	if !strings.Contains(result.Comment, "setup failed before provider") {
+		t.Fatalf("result comment missing hook output: %q", result.Comment)
+	}
+	if result.EnvRoot == "" || result.WorkDir == "" {
+		t.Fatalf("result missing env paths: %+v", result)
+	}
+	logPath := filepath.Join(result.EnvRoot, "logs", "after_create.log")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("after_create log missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.WorkDir, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatalf("context files should not be written after hook failure, stat err=%v", err)
+	}
+}
+
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")

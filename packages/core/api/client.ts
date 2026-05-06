@@ -1,6 +1,7 @@
 import type {
   Issue,
   CreateIssueRequest,
+  QuickCreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesResponse,
   SearchIssuesResponse,
@@ -426,7 +427,7 @@ export class ApiClient {
     });
   }
 
-  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
+  async quickCreateIssue(data: QuickCreateIssueRequest): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),

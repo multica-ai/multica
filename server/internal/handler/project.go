@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ type ProjectResponse struct {
 	Icon        *string `json:"icon"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
+	Settings    any     `json:"settings"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
 	CreatedAt   string  `json:"created_at"`
@@ -33,6 +35,13 @@ type ProjectResponse struct {
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
+	var settings any
+	if p.Settings != nil {
+		json.Unmarshal(p.Settings, &settings)
+	}
+	if settings == nil {
+		settings = map[string]any{}
+	}
 	return ProjectResponse{
 		ID:          uuidToString(p.ID),
 		WorkspaceID: uuidToString(p.WorkspaceID),
@@ -41,6 +50,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Icon:        textToPtr(p.Icon),
 		Status:      p.Status,
 		Priority:    p.Priority,
+		Settings:    settings,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
 		CreatedAt:   timestampToString(p.CreatedAt),
@@ -62,6 +72,7 @@ type CreateProjectRequest struct {
 	Icon        *string                               `json:"icon"`
 	Status      string                                `json:"status"`
 	Priority    string                                `json:"priority"`
+	Settings    any                                   `json:"settings"`
 	LeadType    *string                               `json:"lead_type"`
 	LeadID      *string                               `json:"lead_id"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
@@ -83,8 +94,86 @@ type UpdateProjectRequest struct {
 	Icon        *string `json:"icon"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
+	Settings    any     `json:"settings"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+}
+
+type projectHooksWire struct {
+	AfterCreate string `json:"after_create,omitempty"`
+}
+
+func projectSettingsMentionsAfterCreateHook(settings any) bool {
+	obj, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	hooksRaw, ok := obj["hooks"]
+	if !ok {
+		return false
+	}
+	hooks, ok := hooksRaw.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, exists := hooks["after_create"]
+	return exists
+}
+
+func (h *Handler) requireProjectHookManager(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can configure project setup hooks")
+		return false
+	}
+	return true
+}
+
+func marshalProjectSettingsForWrite(settings any) ([]byte, error) {
+	if settings == nil {
+		return []byte("{}"), nil
+	}
+	obj, ok := settings.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("settings must be an object")
+	}
+	if hooksRaw, exists := obj["hooks"]; exists {
+		hooks, ok := hooksRaw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("settings.hooks must be an object")
+		}
+		if afterCreateRaw, exists := hooks["after_create"]; exists {
+			if _, ok := afterCreateRaw.(string); !ok {
+				return nil, fmt.Errorf("settings.hooks.after_create must be a string")
+			}
+		}
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("settings must be valid JSON: %w", err)
+	}
+	return data, nil
+}
+
+func projectHooksFromSettings(settings []byte) *projectHooksWire {
+	if len(settings) == 0 {
+		return nil
+	}
+	var payload struct {
+		Hooks struct {
+			AfterCreate string `json:"after_create"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(settings, &payload); err != nil {
+		return nil
+	}
+	if payload.Hooks.AfterCreate == "" {
+		return nil
+	}
+	return &projectHooksWire{AfterCreate: payload.Hooks.AfterCreate}
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +251,8 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -182,6 +272,18 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
+	}
+	if raw, ok := rawFields["settings"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		writeError(w, http.StatusBadRequest, "settings must be an object")
+		return
+	}
+	settingsJSON, err := marshalProjectSettingsForWrite(req.Settings)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if projectSettingsMentionsAfterCreateHook(req.Settings) && !h.requireProjectHookManager(w, r, workspaceID) {
+		return
 	}
 	var leadType pgtype.Text
 	var leadID pgtype.UUID
@@ -226,6 +328,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
+		Settings:    settingsJSON,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -311,6 +414,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		"icon":         resp.Icon,
 		"status":       resp.Status,
 		"priority":     resp.Priority,
+		"settings":     resp.Settings,
 		"lead_type":    resp.LeadType,
 		"lead_id":      resp.LeadID,
 		"created_at":   resp.CreatedAt,
@@ -371,6 +475,23 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority != nil {
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
+	}
+	if _, ok := rawFields["settings"]; ok {
+		if bytes.Equal(bytes.TrimSpace(rawFields["settings"]), []byte("null")) {
+			writeError(w, http.StatusBadRequest, "settings must be an object")
+			return
+		}
+		settingsJSON, err := marshalProjectSettingsForWrite(req.Settings)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if (projectSettingsMentionsAfterCreateHook(req.Settings) ||
+			projectHooksFromSettings(prevProject.Settings) != nil) &&
+			!h.requireProjectHookManager(w, r, workspaceID) {
+			return
+		}
+		params.Settings = settingsJSON
 	}
 	if _, ok := rawFields["description"]; ok {
 		if req.Description != nil {
@@ -562,7 +683,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.settings,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
@@ -648,6 +769,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			&row.project.LeadID,
 			&row.project.CreatedAt,
 			&row.project.UpdatedAt,
+			&row.project.Settings,
 			&row.totalCount,
 			&row.matchSource,
 		); err != nil {

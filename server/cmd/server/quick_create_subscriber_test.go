@@ -34,6 +34,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		parseUUID(testWorkspaceID),
 		parseUUID(testUserID),
 		parseUUID(agentID),
+		pgtype.UUID{},
 		"please file a bug",
 	)
 	if err != nil {
@@ -105,6 +106,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		parseUUID(testWorkspaceID),
 		parseUUID(testUserID),
 		parseUUID(agentID),
+		pgtype.UUID{},
 		"another bug",
 	)
 	if err != nil {
