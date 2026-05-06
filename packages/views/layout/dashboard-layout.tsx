@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar
 import { ModalRegistry } from "../modals/registry";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
+import { useAppBadgeSync } from "../inbox/use-app-badge";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -22,6 +23,10 @@ export function DashboardLayout({
   searchSlot,
   loadingIndicator,
 }: DashboardLayoutProps) {
+  // OS app-icon badge — kept in sync with cross-workspace unread inbox.
+  // Outside DashboardGuard so it's auth-state-aware via the hook itself
+  // and keeps running across workspace switches.
+  useAppBadgeSync();
   return (
     <DashboardGuard
       loadingFallback={

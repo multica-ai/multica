@@ -73,13 +73,19 @@ func (s *PushService) Enabled() bool {
 
 // Payload is the JSON body shipped to the service worker. Keep field names
 // stable — the SW reads them.
+//
+// UnreadCount is stamped by SendToUser before serialisation: it is the
+// recipient's total unread inbox items across every workspace, used by the
+// service worker to drive the PWA app badge (`navigator.setAppBadge`). The
+// sender on a notify-* path leaves it zero; SendToUser overwrites it.
 type Payload struct {
-	Title   string `json:"title"`
-	Body    string `json:"body,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Tag     string `json:"tag,omitempty"`
-	IssueID string `json:"issueId,omitempty"`
-	Type    string `json:"type,omitempty"`
+	Title       string `json:"title"`
+	Body        string `json:"body,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Tag         string `json:"tag,omitempty"`
+	IssueID     string `json:"issueId,omitempty"`
+	Type        string `json:"type,omitempty"`
+	UnreadCount int64  `json:"unreadCount"`
 }
 
 // SendToUser fans the payload out to every device the user has subscribed.
@@ -97,6 +103,17 @@ func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) 
 	}
 	if len(subs) == 0 {
 		return
+	}
+
+	// Stamp the OS app-badge counter on the payload. Counted across all of
+	// the user's workspaces because the badge is single-icon and OS-level.
+	// On error we leave the count at zero — the SW will simply clear the
+	// badge, which is preferable to crashing the broadcast.
+	count, err := s.queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(userID))
+	if err != nil {
+		slog.Warn("push: unread count failed", "user_id", userID, "error", err)
+	} else {
+		p.UnreadCount = count
 	}
 
 	body, err := json.Marshal(p)

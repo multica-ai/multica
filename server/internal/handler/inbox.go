@@ -261,6 +261,26 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// CountUnreadInboxTotal returns the user's total unread inbox count across
+// every workspace they belong to. Used by the PWA service worker / web app to
+// drive the OS app-icon badge, which is single-icon and cannot reflect
+// workspace scope. Lives outside the workspace-scoped routes so it is callable
+// without an X-Workspace-Slug header.
+func (h *Handler) CountUnreadInboxTotal(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	count, err := h.Queries.CountUnreadInboxForUserAllWorkspaces(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
+}
+
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

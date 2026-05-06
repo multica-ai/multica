@@ -162,6 +162,23 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 	return count, err
 }
 
+const countUnreadInboxForUserAllWorkspaces = `-- name: CountUnreadInboxForUserAllWorkspaces :one
+SELECT count(*) FROM inbox_item
+WHERE recipient_type = 'member' AND recipient_id = $1
+  AND read = false AND archived = false AND route = 'inbox'
+`
+
+// Total unread inbox items for a member across every workspace they belong to.
+// Drives the OS-level PWA app badge, which is single-icon and cannot reflect
+// workspace scope. recipient_type is fixed to 'member' because agents do not
+// carry an OS badge.
+func (q *Queries) CountUnreadInboxForUserAllWorkspaces(ctx context.Context, recipientID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadInboxForUserAllWorkspaces, recipientID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnreadNotifications = `-- name: CountUnreadNotifications :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3

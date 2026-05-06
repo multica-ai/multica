@@ -237,6 +237,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *
 		r.Patch("/api/me/preferences", h.UpdateMyPreferences)
 		r.Post("/api/cli-token", h.IssueCliToken)
 
+		// Cross-workspace unread inbox count for the OS app-icon badge.
+		// Outside the workspace-scoped tree because the badge is single-icon
+		// and reflects every workspace the user belongs to.
+		r.Get("/api/me/inbox/unread-count", h.CountUnreadInboxTotal)
+
 		// Web Push subscriptions (per-device, per-user). The frontend reads
 		// the public key on load to decide whether to show the subscribe UI.
 		r.Get("/api/push/public-key", h.GetPushPublicKey)

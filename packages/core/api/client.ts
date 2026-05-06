@@ -635,6 +635,12 @@ export class ApiClient {
     return this.fetch("/api/inbox/unread-count");
   }
 
+  // Cross-workspace unread inbox count for the OS app-icon badge. Sent
+  // outside the workspace-scoped tree so it works without an active slug.
+  async getMyTotalUnreadInboxCount(): Promise<{ count: number }> {
+    return this.fetch("/api/me/inbox/unread-count");
+  }
+
   async markAllInboxRead(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
   }

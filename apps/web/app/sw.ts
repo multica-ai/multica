@@ -9,6 +9,7 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { Serwist } from "serwist";
+import { applyAppBadge, type BadgingNavigator } from "./sw-badge";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -40,6 +41,20 @@ interface PushPayload {
   tag?: string;
   issueId?: string;
   type?: string;
+  // Total unread inbox items for the recipient across every workspace.
+  // Drives the OS-level PWA app-icon badge via the Badging API. Always set
+  // by the server on real pushes; absent only on fallback/empty payloads.
+  unreadCount?: number;
+}
+
+// Badging API is available on iOS 16.4+ Safari (installed PWA), Android
+// Chrome and desktop Chrome — on other browsers the methods are absent and
+// the service worker must not crash. Read off the worker's `self.navigator`,
+// then defer to the shared sw-badge helper for the actual decision tree
+// (reused by the test suite and by the page-side postMessage bridge).
+function applyBadgeFromSelf(count: number | undefined): Promise<void> | undefined {
+  const nav = (self as unknown as { navigator?: BadgingNavigator }).navigator;
+  return applyAppBadge(nav, count);
 }
 
 self.addEventListener("push", (event) => {
@@ -76,7 +91,24 @@ self.addEventListener("push", (event) => {
   if (payload.tag) {
     (opts as NotificationOptions & { renotify?: boolean }).renotify = true;
   }
-  event.waitUntil(self.registration.showNotification(title, opts));
+  const badge = applyBadgeFromSelf(payload.unreadCount);
+  event.waitUntil(
+    badge
+      ? Promise.all([self.registration.showNotification(title, opts), badge])
+      : self.registration.showNotification(title, opts),
+  );
+});
+
+// Allow the page to drive the OS badge directly — used after the user reads
+// or archives inbox items in-app, where no push fires but the badge needs to
+// reflect the new count immediately.
+self.addEventListener("message", (event) => {
+  const data = event.data as { type?: string; count?: number } | undefined;
+  if (!data || data.type !== "set-app-badge") return;
+  const promise = applyBadgeFromSelf(data.count);
+  if (promise && "waitUntil" in event) {
+    (event as ExtendableMessageEvent).waitUntil(promise);
+  }
 });
 
 self.addEventListener("notificationclick", (event) => {

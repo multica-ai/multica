@@ -44,6 +44,15 @@ SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
   AND read = false AND archived = false AND route = 'inbox';
 
+-- name: CountUnreadInboxForUserAllWorkspaces :one
+-- Total unread inbox items for a member across every workspace they belong to.
+-- Drives the OS-level PWA app badge, which is single-icon and cannot reflect
+-- workspace scope. recipient_type is fixed to 'member' because agents do not
+-- carry an OS badge.
+SELECT count(*) FROM inbox_item
+WHERE recipient_type = 'member' AND recipient_id = $1
+  AND read = false AND archived = false AND route = 'inbox';
+
 -- name: CountUnreadNotifications :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
