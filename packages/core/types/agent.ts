@@ -51,6 +51,36 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+// One repository checkout produced by the daemon when running a task.
+// Populated on the task `result` JSON by the runner. The fields mirror the
+// Go side's `daemon/runtime.WorktreeMetadata` struct — keep them in sync.
+export interface TaskWorktreeMetadata {
+  repo_url: string;
+  path: string;
+  branch_name: string;
+  requested_ref: string;
+  /** Empty when the daemon could not resolve the base ref. */
+  base_ref?: string;
+}
+
+// Structured shape of `AgentTask.result` once a task has finished. All
+// fields are optional because legacy / in-flight payloads may omit them,
+// and the daemon writes `omitempty` for empty strings on the wire.
+export interface TaskResult {
+  /** PR URL when the agent opened one — empty otherwise. */
+  pr_url?: string;
+  /** Final agent output / summary. */
+  output?: string;
+  /** Daemon session ID for resumption. */
+  session_id?: string;
+  /** Working directory used during execution. */
+  work_dir?: string;
+  /** Convenience top-level branch when there's a single worktree. */
+  branch_name?: string;
+  /** Per-repo worktree metadata. Empty when no repos were checked out. */
+  worktrees?: TaskWorktreeMetadata[];
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -64,7 +94,7 @@ export interface AgentTask {
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  result: unknown;
+  result: TaskResult | null;
   error: string | null;
   // Empty string when the task is not in a failed state (the backend uses
   // `omitempty`, so the field may also be missing on non-failed tasks).

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError } from "./client";
+import type { AgentTask, TaskResult, TaskWorktreeMetadata } from "../types/agent";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -125,6 +126,65 @@ describe("ApiClient", () => {
     expect(headers["X-Client-Platform"]).toBe("desktop");
     expect(headers["X-Client-Version"]).toBe("1.2.3");
     expect(headers["X-Client-OS"]).toBe("macos");
+  });
+
+  it("parses task responses with worktree metadata", async () => {
+    const taskResponse: AgentTask = {
+      id: "task-1",
+      agent_id: "agent-1",
+      runtime_id: "rt-1",
+      issue_id: "",
+      status: "completed",
+      priority: 0,
+      dispatched_at: "2026-05-01T10:00:00Z",
+      started_at: "2026-05-01T10:00:01Z",
+      completed_at: "2026-05-01T10:05:00Z",
+      result: {
+        pr_url: "https://github.com/org/repo/pull/42",
+        output: "Done.",
+        session_id: "session-abc",
+        work_dir: "/tmp/work",
+        branch_name: "agent/foo/abcd",
+        worktrees: [
+          {
+            repo_url: "git@github.com:org/repo.git",
+            path: "/tmp/work/repo",
+            branch_name: "agent/foo/abcd",
+            requested_ref: "main",
+            base_ref: "refs/remotes/origin/main",
+          },
+        ],
+      },
+      error: null,
+      created_at: "2026-05-01T09:59:00Z",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([taskResponse]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listAgentTasks("agent-1");
+    expect(tasks).toHaveLength(1);
+    const parsed = tasks[0]!;
+
+    // Type-level assertions: these compile only if AgentTask.result is
+    // TaskResult | null and TaskWorktreeMetadata is exported.
+    const accept = (t: AgentTask): TaskResult | null => t.result;
+    const wt: TaskWorktreeMetadata | undefined = parsed.result?.worktrees?.[0];
+    expect(wt?.repo_url).toBe("git@github.com:org/repo.git");
+    expect(wt?.path).toBe("/tmp/work/repo");
+    expect(wt?.branch_name).toBe("agent/foo/abcd");
+    expect(wt?.requested_ref).toBe("main");
+    expect(wt?.base_ref).toBe("refs/remotes/origin/main");
+    expect(parsed.result?.work_dir).toBe("/tmp/work");
+    expect(accept(parsed)).toEqual(parsed.result);
   });
 
   it("omits X-Client-* headers when identity is not configured", async () => {

@@ -434,6 +434,22 @@ export function AgentTranscriptDialog({
               </MetadataChip>
             )}
           </div>
+
+          {/* Worktree metadata: repo checkouts produced by the daemon */}
+          {task.result?.worktrees && task.result.worktrees.length > 0 && (
+            <section className="text-xs">
+              <h3 className="mb-1 text-xs font-medium">Repositories</h3>
+              <ul className="space-y-1">
+                {task.result.worktrees.map((wt) => (
+                  <li key={wt.path} className="font-mono text-muted-foreground">
+                    <span className="text-foreground">{wt.repo_url}</span> · {wt.branch_name}
+                    {wt.requested_ref ? ` · req=${wt.requested_ref}` : ""}
+                    {wt.base_ref ? ` · base=${wt.base_ref}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
