@@ -54,6 +54,17 @@ type SkillSummaryResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// AgentSkillSummary is the still-narrower shape used for skills embedded in
+// an Agent payload (`GET /api/agents`, `GET /api/agents/{id}`). The agent
+// list batch query only joins enough columns to render the assignee chip in
+// the UI; the standalone `/api/agents/{id}/skills` endpoint returns the full
+// SkillSummaryResponse for callers that need the source/origin info.
+type AgentSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type SkillFileResponse struct {
 	ID        string `json:"id"`
 	SkillID   string `json:"skill_id"`
