@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,14 +24,27 @@ const (
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
-	// dispatchTimeoutSeconds fails tasks stuck in 'dispatched' beyond this.
-	// The dispatched→running transition should be near-instant, so 5 minutes
-	// means something went wrong (e.g. StartTask API call failed silently).
-	dispatchTimeoutSeconds = 300.0
 	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
 	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
 	runningTimeoutSeconds = 9000.0
 )
+
+// dispatchTimeoutSeconds is read from MULTICA_DISPATCH_TIMEOUT_SECS at startup
+// (default 300s). Fails tasks stuck in 'dispatched' beyond this — the
+// dispatched→running transition should be near-instant so 5 minutes means
+// something went wrong (e.g. StartTask API call failed silently).
+var dispatchTimeoutSeconds = getEnvFloat("MULTICA_DISPATCH_TIMEOUT_SECS", 300.0)
+
+// getEnvFloat reads a float64 from an environment variable, returning
+// defaultVal if the variable is unset, empty, or not a valid positive number.
+func getEnvFloat(key string, defaultVal float64) float64 {
+	if s := os.Getenv(key); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultVal
+}
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
