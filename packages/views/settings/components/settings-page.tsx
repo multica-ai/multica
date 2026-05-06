@@ -4,6 +4,7 @@ import React from "react";
 import { User, Palette, Key, Settings, Users, FolderGit2, FlaskConical, Bell } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useProductCapabilities } from "@multica/core/platform";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
 import { TokensTab } from "./tokens-tab";
@@ -41,6 +42,16 @@ interface SettingsPageProps {
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
+  const capabilities = useProductCapabilities();
+  const showApiTokens = capabilities.auth.showApiTokens;
+  const showMembers = capabilities.collaboration.showMembers;
+
+  const visibleAccountTabs = accountTabs.filter(
+    (tab) => tab.value !== "tokens" || showApiTokens,
+  );
+  const visibleWorkspaceTabs = workspaceTabs.filter(
+    (tab) => tab.value !== "members" || showMembers,
+  );
 
   return (
     <Tabs
@@ -56,7 +67,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
             My Account
           </span>
-          {accountTabs.map((tab) => (
+          {visibleAccountTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
               {tab.label}
@@ -73,7 +84,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? "Workspace"}
           </span>
-          {workspaceTabs.map((tab) => (
+          {visibleWorkspaceTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
               {tab.label}
@@ -88,11 +99,15 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="appearance"><AppearanceTab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
-          <TabsContent value="tokens"><TokensTab /></TabsContent>
+          {showApiTokens && (
+            <TabsContent value="tokens"><TokensTab /></TabsContent>
+          )}
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
+          {showMembers && (
+            <TabsContent value="members"><MembersTab /></TabsContent>
+          )}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

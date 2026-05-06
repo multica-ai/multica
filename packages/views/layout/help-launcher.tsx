@@ -8,11 +8,13 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useModalStore } from "@multica/core/modals";
+import { useProductCapabilities } from "@multica/core/platform";
 
 const DOCS_URL = "https://multica.ai/docs";
 const CHANGELOG_URL = "https://multica.ai/changelog";
 
 export function HelpLauncher() {
+  const capabilities = useProductCapabilities();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -50,12 +52,14 @@ export function HelpLauncher() {
           Change log
           <ArrowUpRight className="size-3 translate-y-px text-muted-foreground/50" />
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => useModalStore.getState().open("feedback")}
-        >
-          <MessageCircle className="h-3.5 w-3.5" />
-          Feedback
-        </DropdownMenuItem>
+        {capabilities.feedback.allowRemoteSubmission && (
+          <DropdownMenuItem
+            onClick={() => useModalStore.getState().open("feedback")}
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            Feedback
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

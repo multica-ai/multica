@@ -5,6 +5,7 @@ import { Plus, Search, Server } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useProductCapabilities } from "@multica/core/platform";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
@@ -90,6 +91,8 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const capabilities = useProductCapabilities();
+  const allowRemote = capabilities.runtimes.allowRemoteConnection;
   const [scope, setScope] = useState<RuntimeFilter>("mine");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [search, setSearch] = useState("");
@@ -158,7 +161,9 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
-        onConnectRemote={() => setShowConnectDialog(true)}
+        onConnectRemote={
+          allowRemote ? () => setShowConnectDialog(true) : undefined
+        }
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -166,7 +171,11 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
 
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
-            <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
+            <EmptyState
+              onConnectRemote={
+                allowRemote ? () => setShowConnectDialog(true) : undefined
+              }
+            />
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
@@ -195,7 +204,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
         )}
       </div>
 
-      {showConnectDialog && (
+      {allowRemote && showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
     </div>
@@ -212,7 +221,7 @@ function PageHeaderBar({
   onConnectRemote,
 }: {
   totalCount: number;
-  onConnectRemote: () => void;
+  onConnectRemote?: () => void;
 }) {
   return (
     <PageHeader className="justify-between px-5">
@@ -236,10 +245,12 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onConnectRemote}>
-        <Plus className="h-3 w-3" />
-        Connect remote machine
-      </Button>
+      {onConnectRemote && (
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus className="h-3 w-3" />
+          Connect remote machine
+        </Button>
+      )}
     </PageHeader>
   );
 }
@@ -429,7 +440,7 @@ function HealthChip({
 // workspace. Different from "filter matches nothing" (NoMatchesState).
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
+function EmptyState({ onConnectRemote }: { onConnectRemote?: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -437,18 +448,21 @@ function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
       </div>
       <h2 className="mt-4 text-base font-semibold">No runtimes yet</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Desktop auto-scans your local machine. For AWS EC2 or other remote
-        machines, connect them using the setup wizard.
+        {onConnectRemote
+          ? "Desktop auto-scans your local machine. For AWS EC2 or other remote machines, connect them using the setup wizard."
+          : "Desktop auto-scans your local machine. Your runtime will appear here once the daemon registers."}
       </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        Connect remote machine
-      </Button>
+      {onConnectRemote && (
+        <Button
+          type="button"
+          size="sm"
+          onClick={onConnectRemote}
+          className="mt-5"
+        >
+          <Plus className="h-3 w-3" />
+          Connect remote machine
+        </Button>
+      )}
     </div>
   );
 }

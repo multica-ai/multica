@@ -33,7 +33,7 @@ import {
   useCurrentWorkspace,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { setCurrentWorkspace } from "@multica/core/platform";
+import { setCurrentWorkspace, useProductCapabilities } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
@@ -48,6 +48,8 @@ export function WorkspaceTab() {
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
   const hasOnboarded = useHasOnboarded();
+  const { collaboration } = useProductCapabilities();
+  const allowLeaveWorkspace = collaboration.allowLeaveWorkspace;
 
   /**
    * Send the user to a safe URL BEFORE the leave/delete mutation fires.
@@ -262,29 +264,36 @@ export function WorkspaceTab() {
 
         <Card>
           <CardContent className="space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium">Leave workspace</p>
-                <p className="text-xs text-muted-foreground">
-                  {isSoleOwner
-                    ? isSoleMember
-                      ? "You're the only member. Delete the workspace to leave."
-                      : "You're the only owner. Promote another member to owner first, or delete the workspace."
-                    : "Remove yourself from this workspace."}
-                </p>
+            {allowLeaveWorkspace && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">Leave workspace</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isSoleOwner
+                      ? isSoleMember
+                        ? "You're the only member. Delete the workspace to leave."
+                        : "You're the only owner. Promote another member to owner first, or delete the workspace."
+                      : "Remove yourself from this workspace."}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLeaveWorkspace}
+                  disabled={actionId === "leave" || isSoleOwner}
+                >
+                  {actionId === "leave" ? "Leaving..." : "Leave workspace"}
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLeaveWorkspace}
-                disabled={actionId === "leave" || isSoleOwner}
-              >
-                {actionId === "leave" ? "Leaving..." : "Leave workspace"}
-              </Button>
-            </div>
+            )}
 
             {isOwner && (
-              <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div
+                className={
+                  "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" +
+                  (allowLeaveWorkspace ? " border-t pt-3" : "")
+                }
+              >
                 <div>
                   <p className="text-sm font-medium text-destructive">Delete workspace</p>
                   <p className="text-xs text-muted-foreground">

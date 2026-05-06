@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { setCurrentWorkspace } from "@multica/core/platform";
+import { setCurrentWorkspace, useProductCapabilities } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
   completeOnboarding,
@@ -56,6 +56,7 @@ export function OnboardingFlow({
   runtimeInstructions?: React.ReactNode;
 }) {
   const user = useAuthStore((s) => s.user);
+  const capabilities = useProductCapabilities();
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
   }
@@ -216,13 +217,22 @@ export function OnboardingFlow({
   //     Under the CLI path it embeds StepRuntimeConnect for the live
   //     probe; the Cloud path is a soft exit via the waitlist.
   if (step === "runtime" && workspace) {
-    if (!runtimeInstructions) {
+    // Local-only mode (allowCloud=false) collapses Step 3 to the direct
+    // runtime connect view. The web fork (Download / CLI / Cloud) only
+    // makes sense when the cloud waitlist + remote-runtime paths are
+    // available — otherwise we skip straight to the local probe even if
+    // a `runtimeInstructions` slot was passed in.
+    if (!runtimeInstructions || !capabilities.runtimes.allowCloud) {
       return (
         <StepRuntimeConnect
           wsId={workspace.id}
           onNext={handleRuntimeNext}
           onBack={() => handleBack("runtime")}
-          onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
+          onWaitlistSubmitted={
+            capabilities.runtimes.allowCloud
+              ? () => setWaitlistSubmitted(true)
+              : undefined
+          }
         />
       );
     }

@@ -68,6 +68,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
+import { useProductCapabilities } from "@multica/core/platform";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -314,8 +315,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const logout = useLogout();
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
+  const capabilities = useProductCapabilities();
+  const showInvitations = capabilities.collaboration.showInvitations;
+  const showLogout = capabilities.auth.showLogin;
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
-  const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
+  // In local mode there are no invitations to fetch — gate the query so we
+  // don't make a useless network call.
+  const { data: myInvitations = EMPTY_INVITATIONS } = useQuery({
+    ...myInvitationListOptions(),
+    enabled: showInvitations,
+  });
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
@@ -441,7 +450,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuButton>
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                        {myInvitations.length > 0 && (
+                        {showInvitations && myInvitations.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
@@ -502,7 +511,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       Create workspace
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
-                  {myInvitations.length > 0 && (
+                  {showInvitations && myInvitations.length > 0 && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuGroup>
@@ -540,13 +549,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       </DropdownMenuGroup>
                     </>
                   )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem variant="destructive" onClick={logout}>
-                      <LogOut className="h-3.5 w-3.5" />
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
+                  {showLogout && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem variant="destructive" onClick={logout}>
+                          <LogOut className="h-3.5 w-3.5" />
+                          Log out
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </SidebarMenuItem>
