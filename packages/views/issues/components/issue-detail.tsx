@@ -291,9 +291,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // CommentCard can skip re-rendering when the only thing that moved was
   // unrelated parent state (e.g. composer draft, sidebar toggle).
   const timelineView = useMemo(() => {
-    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
+    // Defensive: guard against non-array timeline (e.g. null/undefined from a
+    // misbehaving selector). The hook normalises this too — both layers guard
+    // so a regression upstream can't white-screen the detail page (#BRY-53).
+    const safeTimeline = Array.isArray(timeline) ? timeline : [];
+    const topLevel = safeTimeline.filter((e) => e.type === "activity" || !e.parent_id);
     const repliesByParent = new Map<string, TimelineEntry[]>();
-    for (const e of timeline) {
+    for (const e of safeTimeline) {
       if (e.type === "comment" && e.parent_id) {
         const list = repliesByParent.get(e.parent_id) ?? [];
         list.push(e);
@@ -377,8 +381,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const loading = issueLoading;
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
+  // Guard timeline.length — non-array timeline (null/undefined) would throw
+  // when computing the dep array. Boundary normaliser already ensures array,
+  // this is the second layer (#BRY-53).
+  const timelineLength = Array.isArray(timeline) ? timeline.length : 0;
   useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0) return;
+    if (!highlightCommentId || timelineLength === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
     const el = document.getElementById(`comment-${highlightCommentId}`);
     if (el) {
@@ -390,7 +398,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return () => clearTimeout(timer);
       });
     }
-  }, [highlightCommentId, timeline.length]);
+  }, [highlightCommentId, timelineLength]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
