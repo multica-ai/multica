@@ -964,17 +964,17 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// Skills should be in .config/opencode/skills/ (native discovery).
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "SKILL.md"))
+	// Skills should be in .opencode/skills/ (native discovery).
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "SKILL.md"))
 	if err != nil {
-		t.Fatalf("failed to read .config/opencode/skills/go-conventions/SKILL.md: %v", err)
+		t.Fatalf("failed to read .opencode/skills/go-conventions/SKILL.md: %v", err)
 	}
 	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
 		t.Error("SKILL.md missing content")
 	}
 
-	// Supporting files should also be under .config/opencode/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".config", "opencode", "skills", "go-conventions", "templates", "example.go"))
+	// Supporting files should also be under .opencode/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "templates", "example.go"))
 	if err != nil {
 		t.Fatalf("failed to read supporting file: %v", err)
 	}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,8 +13,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"errors"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -937,7 +936,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// handling, no-retry on partial failure). Older daemons either
 	// double-create issues on partial CLI failures or mishandle pasted
 	// screenshot URLs; fail closed before enqueuing rather than surface
-	// the breakage as an inbox failure twenty seconds later.
+	// the breakage as an inbox failure twenty seconds later. Dev-built
+	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
+	// so `make daemon` works without weakening staging or production.
 	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
