@@ -41,18 +41,19 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
-import { HealthIcon, healthLabel } from "./shared";
+import { HealthIcon, useHealthLabel } from "./shared";
 import {
   computeCostInWindow,
   formatLastSeen,
   isVersionNewer,
   pctChange,
 } from "../utils";
+import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
 // `row.original` and never pull their own data — except for the per-runtime
-// usage query in CostCell, which intentionally keeps its 180-day cache key
-// shared with the runtime-detail page (clicking a row pre-warms detail).
+// usage query in CostCell, which fetches its own narrow 14-day window
+// (just enough for the cell's 7d cost + 7d prior-window delta).
 export interface RuntimeRow {
   runtime: AgentRuntime;
   ownerMember: MemberWithUser | null;
@@ -78,11 +79,14 @@ const COL_WIDTHS = {
   actions: 60,
 } as const;
 
+type RuntimesT = ReturnType<typeof useT<"runtimes">>["t"];
+
 interface CreateColumnsArgs {
   showOwner: boolean;
   latestCliVersion: string | null;
   wsId: string;
   now: number;
+  t: RuntimesT;
 }
 
 export function createRuntimeColumns({
@@ -90,18 +94,19 @@ export function createRuntimeColumns({
   latestCliVersion,
   wsId,
   now,
+  t,
 }: CreateColumnsArgs): ColumnDef<RuntimeRow>[] {
   const cols: ColumnDef<RuntimeRow>[] = [
     {
       id: "runtime",
-      header: "Runtime",
+      header: () => t(($) => $.list.col_runtime),
       size: COL_WIDTHS.runtime,
       meta: { grow: true },
       cell: ({ row }) => <RuntimeNameCell runtime={row.original.runtime} />,
     },
     {
       id: "health",
-      header: "Health",
+      header: () => t(($) => $.list.col_health),
       size: COL_WIDTHS.health,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -113,7 +118,7 @@ export function createRuntimeColumns({
   if (showOwner) {
     cols.push({
       id: "owner",
-      header: "Owner",
+      header: () => t(($) => $.list.col_owner),
       size: COL_WIDTHS.owner,
       cell: ({ row }) =>
         row.original.ownerMember ? (
@@ -136,7 +141,7 @@ export function createRuntimeColumns({
   cols.push(
     {
       id: "agents",
-      header: "Agents",
+      header: () => t(($) => $.list.col_agents),
       size: COL_WIDTHS.agents,
       cell: ({ row }) => (
         <AgentStack agentIds={row.original.workload.agentIds} />
@@ -144,7 +149,7 @@ export function createRuntimeColumns({
     },
     {
       id: "workload",
-      header: "Workload",
+      header: () => t(($) => $.list.col_workload),
       size: COL_WIDTHS.workload,
       cell: ({ row }) => {
         const health = deriveRuntimeHealth(row.original.runtime, now);
@@ -160,13 +165,13 @@ export function createRuntimeColumns({
     },
     {
       id: "cost",
-      header: () => <div className="text-right">Cost · 7d</div>,
+      header: () => <div className="text-right">{t(($) => $.list.col_cost)}</div>,
       size: COL_WIDTHS.cost,
       cell: ({ row }) => <CostCell runtimeId={row.original.runtime.id} />,
     },
     {
       id: "cli",
-      header: "CLI",
+      header: () => t(($) => $.list.col_cli),
       size: COL_WIDTHS.cli,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -255,13 +260,14 @@ function HealthCell({
   runtime: AgentRuntime;
   now: number;
 }) {
+  const labelOf = useHealthLabel();
   const health = deriveRuntimeHealth(runtime, now);
   const lastSeen = formatLastSeen(runtime.last_seen_at);
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <HealthIcon health={health} />
       <span className="block min-w-0 truncate text-sm">
-        {healthLabel(health)}
+        {labelOf(health)}
         {health !== "online" && runtime.last_seen_at && (
           <span className="text-muted-foreground"> · {lastSeen}</span>
         )}
@@ -284,6 +290,7 @@ function WorkloadCell({
   queued: number;
   offline: boolean;
 }) {
+  const { t: tAgents } = useT("agents");
   if (offline) {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
@@ -292,8 +299,6 @@ function WorkloadCell({
     queuedCount: queued,
   });
   const wl = workloadConfig[workload];
-  // Working: running count, with +Nq overflow tail. Queued: bare queued
-  // count. Idle: no counts at all — the label is the whole signal.
   const counts =
     workload === "working"
       ? queued > 0
@@ -304,13 +309,12 @@ function WorkloadCell({
         : null;
   return (
     <span className="inline-flex items-center gap-1 text-xs">
-      {/* Icon only for working/queued — see WorkloadCell in agent-columns. */}
       {workload !== "idle" && (
         <wl.icon
           className={`h-3 w-3 shrink-0 ${wl.textClass} ${workload === "working" ? "animate-spin" : ""}`}
         />
       )}
-      <span className={`shrink-0 ${wl.textClass}`}>{wl.label}</span>
+      <span className={`shrink-0 ${wl.textClass}`}>{tAgents(($) => $.workload[workload])}</span>
       {counts && (
         <span className="truncate font-mono tabular-nums text-muted-foreground">
           {counts}
@@ -320,12 +324,21 @@ function WorkloadCell({
   );
 }
 
-// Per-row cost — fetches the same 180-day usage window used by the
-// runtime-detail page so clicking a row makes detail render instantly from
-// cache. Cold load incurs N parallel requests, but each is cheap and they
-// all share the same query key.
+// Per-row cost — only renders a 7d total + delta vs the prior 7d, so we
+// only need 14 days of usage. Previously this fetched a 180-day window to
+// share the cache key with the runtime-detail page, but that turned the
+// list page into N × 180d in-line aggregations against `task_usage` (one
+// per runtime row) and dominated DB load for this view. Detail still
+// fetches its own 180d window on navigation; the cold-load difference for
+// detail is one extra request, while the steady-state savings on the list
+// page are large.
+const COST_CELL_DAYS = 14;
+
 function CostCell({ runtimeId }: { runtimeId: string }) {
-  const { data: usage = [] } = useQuery(runtimeUsageOptions(runtimeId, 180));
+  const { t } = useT("runtimes");
+  const { data: usage = [] } = useQuery(
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+  );
   const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
   const costPrev7d = useMemo(
     () => computeCostInWindow(usage, 7, 7),
@@ -353,7 +366,7 @@ function CostCell({ runtimeId }: { runtimeId: string }) {
     delta == null
       ? null
       : delta === 0
-        ? "flat"
+        ? t(($) => $.list.cost_delta_flat)
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
     <div className="flex flex-col items-end leading-tight">
@@ -374,6 +387,7 @@ function CliCell({
   runtime: AgentRuntime;
   latestCliVersion: string | null;
 }) {
+  const { t } = useT("runtimes");
   if (runtime.runtime_mode === "cloud") {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
@@ -400,7 +414,7 @@ function CliCell({
     <div className="flex min-w-0 items-center gap-1 text-xs">
       {isManaged && (
         <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
-          Desktop
+          {t(($) => $.list.cli_managed_badge)}
         </span>
       )}
       <span
@@ -416,12 +430,12 @@ function CliCell({
             render={
               <ArrowUpCircle
                 className="h-3 w-3 shrink-0 text-warning"
-                aria-label="Update available"
+                aria-label={t(($) => $.list.cli_update_available_aria)}
               />
             }
           />
           <TooltipContent>
-            Update available: {latestCliVersion}
+            {t(($) => $.list.cli_update_available_tooltip, { version: latestCliVersion })}
           </TooltipContent>
         </Tooltip>
       )}
@@ -471,6 +485,7 @@ function RowMenu({
   wsId: string;
   canDelete: boolean;
 }) {
+  const { t } = useT("runtimes");
   const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -481,12 +496,12 @@ function RowMenu({
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success("Runtime deleted");
+        toast.success(t(($) => $.detail.toast_deleted));
         setDeleteOpen(false);
       },
       onError: (e) => {
         toast.error(
-          e instanceof Error ? e.message : "Failed to delete runtime",
+          e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed),
         );
       },
     });
@@ -500,7 +515,7 @@ function RowMenu({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Row actions"
+              aria-label={t(($) => $.list.row_actions_aria)}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
             />
@@ -516,10 +531,10 @@ function RowMenu({
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setDeleteOpen(true)}
-            title="Only the runtime owner and workspace admins can delete this runtime"
+            title={t(($) => $.list.delete_permission_hint)}
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete
+            {t(($) => $.list.delete_action)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -532,23 +547,22 @@ function RowMenu({
       >
         <AlertDialogContent onClick={(e) => e.stopPropagation()}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Runtime</AlertDialogTitle>
+            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{runtime.name}&rdquo;?
-              This action cannot be undone.
+              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
               <span className="mt-2 block text-xs text-muted-foreground/80">
-                Only the runtime owner and workspace admins can delete a runtime.
+                {t(($) => $.list.delete_admin_hint)}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

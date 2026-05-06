@@ -121,7 +121,7 @@ func TestEnsureSymlink_SkipsWhenSourceMissing(t *testing.T) {
 	}
 }
 
-func TestEnsureSymlink_SkipsExistingRegularFile(t *testing.T) {
+func TestEnsureSymlink_ReplacesStaleRegularFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -130,14 +130,50 @@ func TestEnsureSymlink_SkipsExistingRegularFile(t *testing.T) {
 	os.WriteFile(src, []byte("new"), 0o644)
 	os.WriteFile(dst, []byte("old"), 0o644)
 
+	// Regression for issue #2081: a regular file at dst (e.g. left over from
+	// the Windows copy fallback in createFileLink) must be replaced so the
+	// per-task home picks up changes to the shared source — otherwise a
+	// once-stale auth.json never refreshes across env reuses.
 	if err := ensureSymlink(src, dst); err != nil {
 		t.Fatalf("ensureSymlink: %v", err)
 	}
 
-	// Should not be replaced.
-	data, _ := os.ReadFile(dst)
-	if string(data) != "old" {
-		t.Errorf("existing file content changed to %q", data)
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(data) != "new" {
+		t.Errorf("dst content = %q, want %q (file should be re-linked/re-copied from src)", data, "new")
+	}
+}
+
+func TestEnsureSymlink_RefreshesAfterCopyFallbackThenSrcChange(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	src := filepath.Join(dir, "auth.json")
+	dst := filepath.Join(dir, "task-auth.json")
+
+	// Simulate the Windows copy fallback: first link is a copy of v1.
+	os.WriteFile(src, []byte(`{"refresh_token":"v1"}`), 0o644)
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("seed copy fallback: %v", err)
+	}
+
+	// Shared source rotates to v2 (e.g. Codex Desktop refreshed the token).
+	os.WriteFile(src, []byte(`{"refresh_token":"v2"}`), 0o644)
+
+	// Reuse path runs ensureSymlink again — expected to refresh dst from src.
+	if err := ensureSymlink(src, dst); err != nil {
+		t.Fatalf("ensureSymlink: %v", err)
+	}
+
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(data) != `{"refresh_token":"v2"}` {
+		t.Errorf("dst content after refresh = %q, want v2 contents", data)
 	}
 }
 

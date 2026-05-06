@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
+import { pickLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
@@ -15,6 +16,8 @@ import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
+import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { RESOURCES } from "@multica/views/locales";
 
 
 function AppContent() {
@@ -269,6 +272,7 @@ async function handleDaemonLogout() {
 
 export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
+  const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.
@@ -276,6 +280,36 @@ export default function App() {
     () => ({ platform: "desktop", version, os }),
     [version, os],
   );
+  // Locale resolution happens once at app boot. Switching language goes
+  // through window.location.reload() to avoid hydration mismatch.
+  const localeAdapter = useMemo(
+    () => createDesktopLocaleAdapter(systemLocale),
+    [systemLocale],
+  );
+  const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
+  const resources = useMemo(
+    () => ({ [locale]: RESOURCES[locale] }),
+    [locale],
+  );
+
+  // React to OS-level language changes detected by main on focus regain.
+  // Only act when the user is following the system signal (no explicit
+  // Settings choice) — otherwise their preference wins. Cross-device sync
+  // for the explicit-choice case is handled inside CoreProvider.
+  useEffect(() => {
+    return window.desktopAPI.onSystemLocaleChanged((nextSystemLocale) => {
+      if (localeAdapter.getUserChoice()) return;
+      const next = pickLocale({
+        ...localeAdapter,
+        getSystemPreferences: () =>
+          nextSystemLocale ? [nextSystemLocale] : [],
+      });
+      if (next === locale) return;
+      localeAdapter.persist(next);
+      window.location.reload();
+    });
+  }, [localeAdapter, locale]);
+
   return (
     <ThemeProvider>
       {runtimeConfigResult.ok ? (
@@ -284,6 +318,9 @@ export default function App() {
           wsUrl={runtimeConfigResult.config.wsUrl}
           onLogout={handleDaemonLogout}
           identity={identity}
+          locale={locale}
+          resources={resources}
+          localeAdapter={localeAdapter}
         >
           <AppContent />
         </CoreProvider>

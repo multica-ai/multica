@@ -26,6 +26,7 @@ import type {
 } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { IssueStatus } from "@multica/core/types";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
@@ -117,6 +118,7 @@ function mergeMentionItems(
 
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command }, ref) {
+    const { t } = useT("editor");
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [serverIssueItems, setServerIssueItems] = useState<MentionItem[]>([]);
     const [isSearchingIssues, setIsSearchingIssues] = useState(false);
@@ -230,12 +232,19 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
       return (
         <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
-          {isWaitingForServer ? "Searching..." : "No results"}
+          {isWaitingForServer
+            ? t(($) => $.mention.searching)
+            : t(($) => $.mention.no_results)}
         </div>
       );
     }
 
     const groups = groupItems(displayItems);
+    const groupLabel = (label: string): string => {
+      if (label === "Users") return t(($) => $.mention.group_users);
+      if (label === "Issues") return t(($) => $.mention.group_issues);
+      return label;
+    };
 
     // Build a flat index mapping: globalIndex → item
     let globalIndex = 0;
@@ -245,7 +254,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         {groups.map((group) => (
           <div key={group.label}>
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-              {group.label}
+              {groupLabel(group.label)}
             </div>
             {group.items.map((item) => {
               const idx = globalIndex++;
@@ -281,6 +290,7 @@ function MentionRow({
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
+  const { t } = useT("editor");
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -322,8 +332,12 @@ function MentionRow({
         size={20}
         showStatusDot
       />
-      <span className="truncate font-medium">{item.label}</span>
+      <span className="truncate font-medium">
+        {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
+      </span>
       {item.type === "agent" && (
+        // "Agent" is a glossary-protected product term — kept un-translated.
+        // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
       )}
     </button>

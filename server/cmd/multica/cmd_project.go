@@ -225,6 +225,14 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get project: %w", err)
 	}
 
+	// Breadcrumb to the resources sub-collection. Goes to stderr so JSON on
+	// stdout stays parseable; the `resource_count` field on the response is
+	// the programmatic equivalent. JSON numbers decode as float64.
+	if n, _ := project["resource_count"].(float64); n > 0 {
+		fmt.Fprintf(os.Stderr, "%d resource(s) attached — run `multica project resource list %s` to view.\n",
+			int64(n), strVal(project, "id"))
+	}
+
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		lead := formatLead(project)

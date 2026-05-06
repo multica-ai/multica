@@ -63,6 +63,7 @@ import { CapabilityBanner } from "@multica/ui/components/common/capability-banne
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { useT } from "../../i18n";
 
 const SKILL_MD = "SKILL.md";
 
@@ -72,14 +73,17 @@ type DraftFile = { id?: string; path: string; content: string };
 // File path validation + inline add
 // ---------------------------------------------------------------------------
 
-function validateNewFilePath(path: string, existing: string[]): string {
-  const p = path.trim();
-  if (!p) return "Path cannot be empty.";
-  if (p.startsWith("/")) return "Absolute paths are not allowed.";
-  if (p.split("/").includes("..")) return 'Paths cannot contain "..".';
-  if (p === SKILL_MD) return "SKILL.md is reserved for the main file.";
-  if (existing.includes(p)) return "A file at this path already exists.";
-  return "";
+function useValidateNewFilePath() {
+  const { t } = useT("skills");
+  return (path: string, existing: string[]): string => {
+    const p = path.trim();
+    if (!p) return t(($) => $.detail.add_file.errors.empty);
+    if (p.startsWith("/")) return t(($) => $.detail.add_file.errors.absolute);
+    if (p.split("/").includes("..")) return t(($) => $.detail.add_file.errors.double_dot);
+    if (p === SKILL_MD) return t(($) => $.detail.add_file.errors.reserved);
+    if (existing.includes(p)) return t(($) => $.detail.add_file.errors.exists);
+    return "";
+  };
 }
 
 function AddFileInline({
@@ -91,11 +95,13 @@ function AddFileInline({
   onAdd: (path: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useT("skills");
+  const validate = useValidateNewFilePath();
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
 
   const submit = () => {
-    const err = validateNewFilePath(path, existingPaths);
+    const err = validate(path, existingPaths);
     if (err) {
       setError(err);
       return;
@@ -116,7 +122,7 @@ function AddFileInline({
           if (e.key === "Enter") submit();
           if (e.key === "Escape") onCancel();
         }}
-        placeholder="templates/review.md"
+        placeholder={t(($) => $.detail.add_file.placeholder)}
         className="h-7 font-mono text-xs"
       />
       {error && (
@@ -126,10 +132,10 @@ function AddFileInline({
       )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <Button type="button" size="xs" onClick={submit}>
-          Add
+          {t(($) => $.detail.add_file.add)}
         </Button>
         <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
-          Cancel
+          {t(($) => $.detail.add_file.cancel)}
         </Button>
       </div>
     </div>
@@ -141,11 +147,11 @@ function AddFileInline({
 // ---------------------------------------------------------------------------
 
 function UsedBySection({ agents }: { agents: Agent[] }) {
+  const { t } = useT("skills");
   if (agents.length === 0) {
     return (
       <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
-        Not assigned to any agent yet. Open an agent&rsquo;s Skills tab to
-        assign.
+        {t(($) => $.detail.sidebar.used_by_empty)}
       </div>
     );
   }
@@ -184,15 +190,16 @@ function OriginSidebarCard({
   origin: OriginInfo;
   runtime: AgentRuntime | null;
 }) {
+  const { t } = useT("skills");
   if (origin.type === "manual") return null;
 
   const isRuntime = origin.type === "runtime_local";
   const label =
     origin.type === "runtime_local"
-      ? "Imported from local runtime"
+      ? t(($) => $.detail.origin_card.imported_runtime)
       : origin.type === "clawhub"
-        ? "Imported from ClawHub"
-        : "Imported from Skills.sh";
+        ? t(($) => $.detail.origin_card.imported_clawhub)
+        : t(($) => $.detail.origin_card.imported_skills_sh);
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
@@ -221,7 +228,7 @@ function OriginSidebarCard({
       )}
       {origin.provider && (
         <div className="mt-1 font-mono text-xs text-muted-foreground">
-          provider · {origin.provider}
+          {t(($) => $.detail.origin_card.provider, { provider: origin.provider })}
         </div>
       )}
     </div>
@@ -233,6 +240,7 @@ function OriginSidebarCard({
 // ---------------------------------------------------------------------------
 
 export function SkillDetailPage({ skillId }: { skillId: string }) {
+  const { t } = useT("skills");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
@@ -253,16 +261,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     runtimeListOptions(wsId),
   );
 
-  // Build the skillId → agents map once per agent-list identity, not on every
-  // render — see selectSkillAssignments' doc comment.
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
     [agents],
   );
 
   const canEdit = useCanEditSkill(skill, wsId);
-  // Rich Decision for the read-only banner — same answer as `canEdit`, but
-  // carries the `reason` enum the banner needs to render correct copy.
   const skillPermissions = useSkillPermissions(skill ?? null, wsId);
 
   const [name, setName] = useState("");
@@ -274,24 +278,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
-  // When a WS refetch lands newer server state while we have in-progress
-  // edits, we surface a banner instead of silently clobbering the draft.
   const [conflictPending, setConflictPending] = useState(false);
 
-  // Ref to latest draft — lets the seeding effect decide whether user has
-  // in-progress edits without itself depending on draft state (which would
-  // fire the effect on every keystroke).
   const draftRef = useRef({ name, description, content, files });
   draftRef.current = { name, description, content, files };
 
-  // Tracks `${wsId}:${id}@${updated_at}` we last seeded from. `wsId` guards
-  // against the rare cross-workspace race where `skillId` collides across
-  // workspaces (same UUID wouldn't in practice, but the scope is correct).
   const seededKeyRef = useRef<string | null>(null);
 
-  // Seed draft from server state. Preserves in-progress edits when a WS
-  // invalidation refetches the same skill; surfaces a conflict banner if
-  // server state has drifted under unedited-yet-mid-edit conditions.
   useEffect(() => {
     if (!skill) return;
     const key = `${wsId}:${skill.id}@${skill.updated_at}`;
@@ -367,9 +360,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const filePaths = useMemo(() => Array.from(fileMap.keys()), [fileMap]);
   const selectedContent = fileMap.get(selectedPath) ?? "";
 
-  // If the selected file disappeared (user deleted it, or WS refresh removed
-  // it), jump back to SKILL.md so the viewer never shows an empty body with
-  // a ghost path label.
   useEffect(() => {
     if (selectedPath !== SKILL_MD && !fileMap.has(selectedPath)) {
       setSelectedPath(SKILL_MD);
@@ -417,10 +407,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         files: files.filter((f) => f.path.trim()),
       };
       const updated = await api.updateSkill(skill.id, payload);
-      // Seed local state + cache with the authoritative server response so
-      // draft → clean transition is immediate. Syncs ALL fields (not just
-      // name/desc) — otherwise server-side normalization of content/files
-      // would leave isDirty stuck at true.
       qc.setQueryData(
         skillDetailOptions(wsId, skill.id).queryKey,
         updated,
@@ -428,18 +414,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       seedFromSkill(updated);
       seededKeyRef.current = `${wsId}:${updated.id}@${updated.updated_at}`;
       setConflictPending(false);
-      // Invalidate list (list rows carry `updated_at`, name, description) AND
-      // agents (each agent inlines its `skills` array, so a rename here must
-      // sync there too). `exact: true` on skills keeps the detail cache we
-      // just wrote from getting re-fetched.
       qc.invalidateQueries({
         queryKey: workspaceKeys.skills(wsId),
         exact: true,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Skill saved");
+      toast.success(t(($) => $.detail.toast_saved));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save skill");
+      toast.error(err instanceof Error ? err.message : t(($) => $.detail.toast_save_failed));
     } finally {
       setSaving(false);
     }
@@ -457,20 +439,16 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     setDeleting(true);
     try {
       await api.deleteSkill(skill.id);
-      // Navigate first so the detail route unmounts BEFORE invalidation
-      // refetches the now-404 row — otherwise users see a "Skill not found"
-      // flash. Deleting also cascade-removes junction rows on the server,
-      // so agents cache must refresh too.
       navigation.replace(paths.skills());
       qc.removeQueries({
         queryKey: skillDetailOptions(wsId, skill.id).queryKey,
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success("Skill deleted");
+      toast.success(t(($) => $.detail.toast_deleted));
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to delete skill",
+        err instanceof Error ? err.message : t(($) => $.detail.toast_delete_failed),
       );
       setDeleting(false);
       setConfirmDelete(false);
@@ -532,22 +510,20 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             render={<AppLink href={paths.skills()} />}
           >
             <ArrowLeft className="h-3 w-3" />
-            All skills
+            {t(($) => $.detail.all_skills)}
           </Button>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
           <AlertCircle className="h-8 w-8 text-muted-foreground/40" />
-          <p className="text-sm font-medium">Skill not found</p>
+          <p className="text-sm font-medium">{t(($) => $.detail.not_found.title)}</p>
           <p className="max-w-xs text-xs text-muted-foreground">
-            {error instanceof Error
-              ? error.message
-              : "This skill may have been deleted or you lost access."}
+            {error instanceof Error ? error.message : t(($) => $.detail.not_found.fallback)}
           </p>
           <AppLink
             href={paths.skills()}
             className={`${buttonVariants({ variant: "outline", size: "xs" })} mt-2`}
           >
-            Back to Skills
+            {t(($) => $.detail.not_found.back)}
           </AppLink>
         </div>
       </div>
@@ -559,14 +535,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (!origin) return null;
     if (origin.type === "runtime_local") {
       return originRuntime
-        ? `Local runtime · ${originRuntime.name}`
+        ? t(($) => $.detail.subline.origin_runtime_named, { name: originRuntime.name })
         : origin.provider
-          ? `Local runtime · ${origin.provider}`
-          : "Local runtime";
+          ? t(($) => $.detail.subline.origin_runtime_provider, { provider: origin.provider })
+          : t(($) => $.detail.subline.origin_runtime_unknown);
     }
-    if (origin.type === "clawhub") return "Imported · ClawHub";
-    if (origin.type === "skills_sh") return "Imported · Skills.sh";
-    return "Workspace";
+    if (origin.type === "clawhub") return t(($) => $.detail.subline.origin_clawhub);
+    if (origin.type === "skills_sh") return t(($) => $.detail.subline.origin_skills_sh);
+    return t(($) => $.detail.subline.origin_workspace);
   })();
 
   return (
@@ -579,7 +555,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           render={<AppLink href={paths.skills()} />}
         >
           <ArrowLeft className="h-3 w-3" />
-          All skills
+          {t(($) => $.detail.all_skills)}
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
@@ -589,7 +565,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {!canEdit && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
-              Read-only
+              {t(($) => $.detail.read_only)}
             </span>
           )}
           {canEdit && (
@@ -601,13 +577,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                     size="icon-sm"
                     onClick={() => setConfirmDelete(true)}
                     className="text-muted-foreground hover:text-destructive"
-                    aria-label="Delete skill"
+                    aria-label={t(($) => $.detail.delete_aria)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 }
               />
-              <TooltipContent>Delete skill</TooltipContent>
+              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -623,20 +599,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </div>
       )}
 
-      {/* Supporting query error banner (non-blocking — the page still works
-          but agent attribution / runtime names / permission checks are
-          partial). */}
       {supportingQueryDown && (
         <div
           role="status"
           className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-4 py-2 text-xs text-muted-foreground"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          <span>
-            Some workspace data failed to load. Creator attribution, runtime
-            names, or edit permissions may appear incomplete until the next
-            refresh.
-          </span>
+          <span>{t(($) => $.detail.supporting_data_warning)}</span>
         </div>
       )}
 
@@ -646,7 +615,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <aside className="flex w-56 shrink-0 flex-col border-r">
           <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Files · {totalFileCount(skill)}
+              {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
             </span>
             {canEdit && (
               <Tooltip>
@@ -658,13 +627,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                       size="icon-sm"
                       onClick={() => setAddingFile(true)}
                       className="text-muted-foreground"
-                      aria-label="Add file"
+                      aria-label={t(($) => $.detail.add_file_aria)}
                     >
                       <Plus className="h-3.5 w-3.5" />
                     </Button>
                   }
                 />
-                <TooltipContent>Add file</TooltipContent>
+                <TooltipContent>{t(($) => $.detail.add_file_tooltip)}</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -692,7 +661,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 className="text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="h-3 w-3" />
-                Delete file
+                {t(($) => $.detail.delete_file)}
               </Button>
             </div>
           )}
@@ -706,9 +675,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               value={name}
               readOnly={!canEdit}
               onChange={(e) => setName(e.target.value)}
-              placeholder="skill-name"
+              placeholder={t(($) => $.detail.name_placeholder)}
               className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 read-only:cursor-default"
-              aria-label="Skill name"
+              aria-label={t(($) => $.detail.name_aria)}
             />
             <div className="space-y-1">
               <Label
@@ -716,20 +685,18 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 className="text-xs text-muted-foreground"
               >
                 <Pencil className="h-3 w-3" />
-                Description
+                {t(($) => $.detail.description_label)}
               </Label>
               <Textarea
                 id="skill-description"
                 value={description}
                 readOnly={!canEdit}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="One sentence describing when an agent should use this skill…"
+                placeholder={t(($) => $.detail.description_placeholder)}
                 rows={2}
                 className="resize-none text-sm read-only:cursor-default"
               />
             </div>
-            {/* Subline: origin · updated · creator — each segment atomic so
-                flex-wrap doesn't orphan the separators. */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {originLabel && (
                 <span className="inline-flex items-center gap-1">
@@ -743,7 +710,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               )}
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden>·</span>
-                <span>Updated {timeAgo(skill.updated_at)}</span>
+                <span>
+                  {t(($) => $.detail.subline.updated_label, {
+                    when: timeAgo(skill.updated_at),
+                  })}
+                </span>
               </span>
               {creator && (
                 <span className="inline-flex items-center gap-2">
@@ -755,15 +726,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                       avatarUrl={creator.avatar_url}
                       size={14}
                     />
-                    by {creator.name}
+                    {t(($) => $.detail.subline.by_creator, { name: creator.name })}
                   </span>
                 </span>
               )}
             </div>
           </div>
 
-          {/* Conflict banner — surfaces when a WS refetch arrived with newer
-              server state while the user had edits in flight. */}
+          {/* Conflict banner */}
           {conflictPending && canEdit && (
             <div
               role="status"
@@ -773,11 +743,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
               <div className="flex-1">
                 <div className="font-medium text-foreground">
-                  Someone else updated this skill
+                  {t(($) => $.detail.conflict_banner.title)}
                 </div>
                 <div className="mt-0.5 text-muted-foreground">
-                  Your edits are preserved. Discard to pull their changes, or
-                  Save to overwrite.
+                  {t(($) => $.detail.conflict_banner.body)}
                 </div>
               </div>
             </div>
@@ -802,7 +771,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             >
               <span className="h-1.5 w-1.5 rounded-full bg-brand" />
               <span className="text-xs text-muted-foreground">
-                Unsaved changes — will overwrite the live skill on save
+                {t(($) => $.detail.save_bar.unsaved)}
               </span>
               <div className="ml-auto flex items-center gap-1.5">
                 <Button
@@ -811,7 +780,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   size="xs"
                   onClick={handleDiscard}
                 >
-                  Discard
+                  {t(($) => $.detail.save_bar.discard)}
                 </Button>
                 <Button
                   type="button"
@@ -822,12 +791,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   {saving ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      Saving…
+                      {t(($) => $.detail.save_bar.saving)}
                     </>
                   ) : (
                     <>
                       <Save className="h-3 w-3" />
-                      Save changes
+                      {t(($) => $.detail.save_bar.save)}
                     </>
                   )}
                 </Button>
@@ -840,36 +809,46 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 px-4 py-4">
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Metadata
+              {t(($) => $.detail.sidebar.metadata)}
             </h3>
             <dl className="space-y-1.5 text-xs">
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Created</dt>
+                <dt className="min-w-20 text-muted-foreground">
+                  {t(($) => $.detail.sidebar.created)}
+                </dt>
                 <dd className="min-w-0 flex-1">
                   {timeAgo(skill.created_at)}
                 </dd>
               </div>
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Updated</dt>
+                <dt className="min-w-20 text-muted-foreground">
+                  {t(($) => $.detail.sidebar.updated)}
+                </dt>
                 <dd className="min-w-0 flex-1">
                   {timeAgo(skill.updated_at)}
                 </dd>
               </div>
               {creator && (
                 <div className="flex gap-2">
-                  <dt className="min-w-20 text-muted-foreground">Created by</dt>
+                  <dt className="min-w-20 text-muted-foreground">
+                    {t(($) => $.detail.sidebar.created_by)}
+                  </dt>
                   <dd className="min-w-0 flex-1">{creator.name}</dd>
                 </div>
               )}
               <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">Files</dt>
+                <dt className="min-w-20 text-muted-foreground">
+                  {t(($) => $.detail.sidebar.files)}
+                </dt>
                 <dd className="min-w-0 flex-1">{totalFileCount(skill)}</dd>
               </div>
               <div
                 className="flex gap-2"
                 title={skill.id}
               >
-                <dt className="min-w-20 text-muted-foreground">ID</dt>
+                <dt className="min-w-20 text-muted-foreground">
+                  {t(($) => $.detail.sidebar.id)}
+                </dt>
                 <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
                   {skill.id.slice(0, 8)}…
                 </dd>
@@ -880,7 +859,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {origin && origin.type !== "manual" && (
             <div>
               <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Origin
+                {t(($) => $.detail.sidebar.origin)}
               </h3>
               <OriginSidebarCard origin={origin} runtime={originRuntime} />
             </div>
@@ -888,20 +867,21 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Used by {skillAgents.length} agent
-              {skillAgents.length === 1 ? "" : "s"}
+              {t(($) => $.detail.sidebar.used_by, { count: skillAgents.length })}
             </h3>
             <UsedBySection agents={skillAgents} />
           </div>
 
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Permissions
+              {t(($) => $.detail.sidebar.permissions)}
             </h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {canEdit
-                ? "You can edit and delete this skill. Changes take effect on the next agent run."
-                : `Only the creator${creator ? ` (${creator.name})` : ""} or a workspace admin can edit this skill.`}
+                ? t(($) => $.detail.sidebar.permissions_owner)
+                : creator
+                  ? t(($) => $.detail.sidebar.permissions_locked_creator, { name: creator.name })
+                  : t(($) => $.detail.sidebar.permissions_locked)}
             </p>
           </div>
         </aside>
@@ -916,17 +896,20 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete skill?</DialogTitle>
+            <DialogTitle>{t(($) => $.detail.delete_dialog.title)}</DialogTitle>
             <DialogDescription>
-              This will permanently delete &ldquo;{skill.name}&rdquo; and remove
-              it from{" "}
               {skillAgents.length > 0
-                ? `${skillAgents.length} agent${skillAgents.length === 1 ? "" : "s"} currently using it.`
-                : "all agents."}
+                ? t(($) => $.detail.delete_dialog.description_with_agents, {
+                    name: skill.name,
+                    count: skillAgents.length,
+                  })
+                : t(($) => $.detail.delete_dialog.description_no_agents, {
+                    name: skill.name,
+                  })}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            This action cannot be undone.
+            {t(($) => $.detail.delete_dialog.warning)}
           </div>
           <DialogFooter>
             <Button
@@ -935,7 +918,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               onClick={() => setConfirmDelete(false)}
               disabled={deleting}
             >
-              Cancel
+              {t(($) => $.detail.delete_dialog.cancel)}
             </Button>
             <Button
               type="button"
@@ -946,12 +929,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               {deleting ? (
                 <>
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  Deleting…
+                  {t(($) => $.detail.delete_dialog.deleting)}
                 </>
               ) : (
                 <>
                   <Trash2 className="h-3 w-3" />
-                  Delete permanently
+                  {t(($) => $.detail.delete_dialog.confirm)}
                 </>
               )}
             </Button>

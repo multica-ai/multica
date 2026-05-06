@@ -96,6 +96,38 @@ func (q *Queries) GetProjectResource(ctx context.Context, id pgtype.UUID) (Proje
 	return i, err
 }
 
+const getProjectResourceCounts = `-- name: GetProjectResourceCounts :many
+SELECT project_id, count(*)::bigint AS resource_count
+FROM project_resource
+WHERE project_id = ANY($1::uuid[])
+GROUP BY project_id
+`
+
+type GetProjectResourceCountsRow struct {
+	ProjectID     pgtype.UUID `json:"project_id"`
+	ResourceCount int64       `json:"resource_count"`
+}
+
+func (q *Queries) GetProjectResourceCounts(ctx context.Context, projectIds []pgtype.UUID) ([]GetProjectResourceCountsRow, error) {
+	rows, err := q.db.Query(ctx, getProjectResourceCounts, projectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetProjectResourceCountsRow{}
+	for rows.Next() {
+		var i GetProjectResourceCountsRow
+		if err := rows.Scan(&i.ProjectID, &i.ResourceCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getProjectResourceInWorkspace = `-- name: GetProjectResourceInWorkspace :one
 SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
 WHERE id = $1 AND workspace_id = $2
