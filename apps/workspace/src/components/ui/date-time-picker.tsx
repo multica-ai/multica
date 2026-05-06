@@ -16,8 +16,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 const DEFAULT_HOUR = 8;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-// 5-minute increments for the scroll list; free-form text input covers any minute
-const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+// All 60 minutes when seconds mode is on; 5-min increments otherwise
+const MINUTES_ALL = Array.from({ length: 60 }, (_, i) => i);
+const MINUTES_5 = Array.from({ length: 12 }, (_, i) => i * 5);
+const SECONDS_ALL = Array.from({ length: 60 }, (_, i) => i);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,29 +37,33 @@ function getInitialDraft(value: string | null): Date {
   return d;
 }
 
-function formatTimeInput(date: Date | undefined): string {
+function formatTimeInput(date: Date | undefined, showSeconds: boolean): string {
   if (!date) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const base = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return showSeconds ? `${base}:${pad(date.getSeconds())}` : base;
 }
 
-function parseTimeInput(value: string): { hour: number; minute: number } | null {
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+function parseTimeInput(value: string, showSeconds: boolean): { hour: number; minute: number; second: number } | null {
+  const pattern = showSeconds ? /^(\d{1,2}):(\d{2}):(\d{2})$/ : /^(\d{1,2}):(\d{2})$/;
+  const match = value.match(pattern);
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return { hour, minute };
+  const second = showSeconds ? Number(match[3]) : 0;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null;
+  return { hour, minute, second };
 }
 
-/** Formats an ISO string for display as "Jun 10, 2:30 PM". */
-function formatDisplayValue(value: string | null): string {
+/** Formats an ISO string for display. Shows seconds when showSeconds is true. */
+function formatDisplayValue(value: string | null, showSeconds: boolean): string {
   if (!value) return "";
   return new Date(value).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    ...(showSeconds ? { second: "2-digit" } : {}),
   });
 }
 
@@ -76,12 +82,15 @@ export interface DateTimePickerProps {
   disabled?: boolean;
   /** Popover alignment. */
   align?: "start" | "center" | "end";
+  /** Show seconds scroll column and include seconds in display/input. Default false. */
+  showSeconds?: boolean;
 }
 
 /**
  * A custom date-time picker that matches the IssueDateTimePicker UX:
- * calendar + hour/minute scroll lists + free-form time input + Apply/Clear.
+ * calendar + hour/minute(/second) scroll lists + free-form time input + Apply/Clear.
  *
+ * Pass `showSeconds` to enable second-level precision (scroll column + HH:mm:ss input).
  * Accepts and emits ISO 8601 strings; the internal draft is a `Date` object.
  */
 export function DateTimePicker({
@@ -91,28 +100,32 @@ export function DateTimePicker({
   required = false,
   disabled = false,
   align = "start",
+  showSeconds = false,
 }: DateTimePickerProps) {
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState<Date>(() => getInitialDraft(value));
-  const [timeInput, setTimeInput] = useState(() => formatTimeInput(getInitialDraft(value)));
+  const [timeInput, setTimeInput] = useState(() => formatTimeInput(getInitialDraft(value), showSeconds));
   const hourRef = useRef<HTMLDivElement | null>(null);
   const minuteRef = useRef<HTMLDivElement | null>(null);
+  const secondRef = useRef<HTMLDivElement | null>(null);
+
+  const MINUTES = showSeconds ? MINUTES_ALL : MINUTES_5;
 
   // Reset draft when popover opens with the latest external value.
   useEffect(() => {
     if (open) {
       const next = getInitialDraft(value);
       setDraftDate(next);
-      setTimeInput(formatTimeInput(next));
+      setTimeInput(formatTimeInput(next, showSeconds));
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync time input text whenever draft date changes.
   useEffect(() => {
-    setTimeInput(formatTimeInput(draftDate));
-  }, [draftDate]);
+    setTimeInput(formatTimeInput(draftDate, showSeconds));
+  }, [draftDate, showSeconds]);
 
-  // Scroll selected hour/minute into view when popover opens.
+  // Scroll selected hour/minute/second into view when popover opens.
   useEffect(() => {
     if (!open) return;
     const id = window.requestAnimationFrame(() => {
@@ -122,6 +135,9 @@ export function DateTimePicker({
       minuteRef.current
         ?.querySelector<HTMLButtonElement>(`[data-time-unit="minute"][data-time-value="${draftDate.getMinutes()}"]`)
         ?.scrollIntoView({ block: "nearest" });
+      secondRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-time-unit="second"][data-time-value="${draftDate.getSeconds()}"]`)
+        ?.scrollIntoView({ block: "nearest" });
     });
     return () => window.cancelAnimationFrame(id);
   }, [open, draftDate]);
@@ -130,29 +146,31 @@ export function DateTimePicker({
     if (!selected) return;
     setDraftDate((cur) => {
       const next = new Date(selected);
-      next.setHours(cur.getHours(), cur.getMinutes(), 0, 0);
+      next.setHours(cur.getHours(), cur.getMinutes(), showSeconds ? cur.getSeconds() : 0, 0);
       return next;
     });
   };
 
-  const handleTimeUnitChange = (type: "hour" | "minute", v: number) => {
+  const handleTimeUnitChange = (type: "hour" | "minute" | "second", v: number) => {
     setDraftDate((cur) => {
       const next = new Date(cur);
       if (type === "hour") next.setHours(v);
-      else next.setMinutes(v);
-      next.setSeconds(0, 0);
+      else if (type === "minute") next.setMinutes(v);
+      else next.setSeconds(v, 0);
+      if (!showSeconds) next.setSeconds(0, 0);
       return next;
     });
   };
 
   const handleTimeInputChange = (raw: string) => {
-    const sanitized = raw.replace(/[^\d:]/g, "").slice(0, 5);
+    const maxLen = showSeconds ? 8 : 5;
+    const sanitized = raw.replace(/[^\d:]/g, "").slice(0, maxLen);
     setTimeInput(sanitized);
-    const parsed = parseTimeInput(sanitized);
+    const parsed = parseTimeInput(sanitized, showSeconds);
     if (!parsed) return;
     setDraftDate((cur) => {
       const next = new Date(cur);
-      next.setHours(parsed.hour, parsed.minute, 0, 0);
+      next.setHours(parsed.hour, parsed.minute, parsed.second, 0);
       return next;
     });
   };
@@ -175,7 +193,7 @@ export function DateTimePicker({
       >
         <CalendarDays className="size-3.5 text-muted-foreground shrink-0" />
         {value ? (
-          <span className="text-sm">{formatDisplayValue(value)}</span>
+          <span className="text-sm">{formatDisplayValue(value, showSeconds)}</span>
         ) : (
           <span className="text-sm text-muted-foreground">{placeholder}</span>
         )}
@@ -200,16 +218,16 @@ export function DateTimePicker({
             <Input
               value={timeInput}
               onChange={(e) => handleTimeInputChange(e.target.value)}
-              placeholder="HH:mm"
+              placeholder={showSeconds ? "HH:mm:ss" : "HH:mm"}
               inputMode="numeric"
               className="h-auto border-0 bg-transparent px-0 py-0 text-base text-primary shadow-none focus-visible:ring-0"
             />
           </div>
         </div>
 
-        {/* Hour / minute scroll lists */}
+        {/* Hour / minute / (optional) second scroll lists */}
         <div className="flex border-t">
-          <ScrollArea className="h-40 w-1/2 border-r sm:h-56">
+          <ScrollArea className={`h-40 sm:h-56 border-r ${showSeconds ? "w-1/3" : "w-1/2"}`}>
             <div ref={hourRef} className="flex flex-col p-2">
               {HOURS.map((h) => (
                 <Button
@@ -226,7 +244,7 @@ export function DateTimePicker({
               ))}
             </div>
           </ScrollArea>
-          <ScrollArea className="h-40 w-1/2 sm:h-56">
+          <ScrollArea className={`h-40 sm:h-56 ${showSeconds ? "w-1/3 border-r" : "w-1/2"}`}>
             <div ref={minuteRef} className="flex flex-col p-2">
               {MINUTES.map((m) => (
                 <Button
@@ -243,6 +261,25 @@ export function DateTimePicker({
               ))}
             </div>
           </ScrollArea>
+          {showSeconds && (
+            <ScrollArea className="h-40 w-1/3 sm:h-56">
+              <div ref={secondRef} className="flex flex-col p-2">
+                {SECONDS_ALL.map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    data-time-unit="second"
+                    data-time-value={s}
+                    variant={draftDate.getSeconds() === s ? "default" : "ghost"}
+                    className="w-full shrink-0 justify-start font-normal"
+                    onClick={() => handleTimeUnitChange("second", s)}
+                  >
+                    {String(s).padStart(2, "0")}
+                  </Button>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
         </div>
 
         {/* Apply / Clear */}

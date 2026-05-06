@@ -276,6 +276,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
                   required
                   disabled={isRunning}
                   align="start"
+                  showSeconds
                 />
               </div>
             </div>
@@ -291,6 +292,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
                     placeholder="Pick stop time"
                     required
                     align="start"
+                    showSeconds
                   />
                 </div>
               </div>
