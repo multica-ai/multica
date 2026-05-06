@@ -27,6 +27,7 @@ import {
   mapAllEntries,
   filterAllEntries,
   prependToLatestPage,
+  collectDeletedCommentIds,
   type TimelineCacheData,
 } from "./timeline-cache";
 
@@ -392,26 +393,7 @@ export function useDeleteComment(issueId: string) {
       });
 
       // Cascade: collect all child comment IDs across every loaded page.
-      const toRemove = new Set<string>([commentId]);
-      for (const [, data] of prevSnapshots) {
-        if (!data) continue;
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const page of data.pages) {
-            for (const e of page.entries) {
-              if (
-                e.parent_id &&
-                toRemove.has(e.parent_id) &&
-                !toRemove.has(e.id)
-              ) {
-                toRemove.add(e.id);
-                changed = true;
-              }
-            }
-          }
-        }
-      }
+      const toRemove = collectDeletedCommentIds(prevSnapshots, commentId);
 
       qc.setQueriesData<TimelineCacheData>(
         { queryKey: ["issues", "timeline", issueId] },

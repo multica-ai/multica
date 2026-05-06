@@ -67,6 +67,19 @@ const queryState = vi.hoisted(() => ({
   isLoading: false,
 }));
 
+// Shared query-client mocks. Hoisted so tests can inspect setQueryData calls
+// (capture the updater functions WS handlers pass in, then invoke them with
+// crafted `old` values — this is how we exercise the upstream#2143 / #2147
+// invariant + shape-guard without wiring a real QueryClient).
+const qcMocks = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
+  setQueryData: vi.fn(),
+  setQueriesData: vi.fn(),
+  getQueryData: vi.fn(),
+  getQueriesData: vi.fn(() => []),
+  cancelQueries: vi.fn(),
+}));
+
 function emptyPage() {
   return {
     entries: [],
@@ -93,14 +106,7 @@ vi.mock("@tanstack/react-query", async () => {
       isFetchingNextPage: false,
       isFetchingPreviousPage: false,
     }),
-    useQueryClient: () => ({
-      invalidateQueries: vi.fn(),
-      setQueryData: vi.fn(),
-      setQueriesData: vi.fn(),
-      getQueryData: vi.fn(),
-      getQueriesData: vi.fn(() => []),
-      cancelQueries: vi.fn(),
-    }),
+    useQueryClient: () => qcMocks,
     useMutationState: () => [],
   };
 });
@@ -121,6 +127,12 @@ import { useIssueTimeline } from "./use-issue-timeline";
 describe("useIssueTimeline", () => {
   beforeEach(() => {
     wsHandlers.clear();
+    qcMocks.invalidateQueries.mockClear();
+    qcMocks.setQueryData.mockClear();
+    qcMocks.setQueriesData.mockClear();
+    qcMocks.getQueryData.mockClear();
+    qcMocks.getQueriesData.mockClear();
+    qcMocks.cancelQueries.mockClear();
     queryState.data = {
       pages: [{ ...emptyPage(), has_more_after: false }],
       pageParams: [{ mode: "latest" }],
@@ -314,5 +326,194 @@ describe("useIssueTimeline", () => {
       result.current.jumpToLatest();
     });
     expect(result.current.newEntriesBelowCount).toBe(0);
+  });
+
+  // Regression: upstream#2143 / #2147 — `timeline.filter is not a function`.
+  // A malformed cache entry (non-array pages / entries) used to crash the
+  // render tree because consumers call `timeline.filter(...)` directly on
+  // the returned value. The flattening memo now coerces to an empty array
+  // on any unexpected shape.
+  describe("malformed cache data → empty timeline (no crash)", () => {
+    it("returns [] when data.pages is not an array", () => {
+      queryState.data = { pages: null, pageParams: [] };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+      // Consumer pattern that previously crashed — proves it no longer does.
+      expect(() => result.current.timeline.filter(() => true)).not.toThrow();
+    });
+
+    it("returns [] when data is a bare object without pages (legacy shape)", () => {
+      queryState.data = {};
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+    });
+
+    it("skips pages whose entries is not an array, keeps well-formed pages", () => {
+      queryState.data = {
+        pages: [
+          { ...emptyPage(), entries: null, has_more_after: false },
+          {
+            ...emptyPage(),
+            entries: [
+              { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
+            ],
+          },
+        ],
+        pageParams: [{ mode: "latest" }, { mode: "before", cursor: "x" }],
+      };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline.map((e) => e.id)).toEqual(["c1"]);
+    });
+
+    it("returns [] when a single page is null", () => {
+      queryState.data = {
+        pages: [null],
+        pageParams: [{ mode: "latest" }],
+      };
+      const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      expect(result.current.timeline).toEqual([]);
+    });
+  });
+
+  // Follow-up to upstream#2143 / #2147: we already tolerate malformed cache
+  // on the *read* side (memo guards), but we still don't know which writer
+  // pollutes the cache. The dev-only `assertTimelineShape` invariant fires
+  // at the top of every timeline setQueryData updater so the first bad write
+  // throws loudly in dev/test, pinpointing the polluter instead of silently
+  // degrading. Prod keeps tolerating (NODE_ENV gate + shape guards below).
+  describe("setQueryData invariant (dev-only)", () => {
+    // Helper: invoke a WS handler and pull the updater callback the hook
+    // passed to setQueryData, so we can exercise it with synthetic `old`.
+    function captureUpdater(
+      handlerEvent: string,
+      payload: unknown,
+    ): (old: unknown) => unknown {
+      const handler = wsHandlers.get(handlerEvent);
+      expect(handler).toBeDefined();
+      act(() => handler!(payload));
+      const lastCall = qcMocks.setQueryData.mock.calls.at(-1);
+      expect(lastCall).toBeDefined();
+      const updater = lastCall![1] as (old: unknown) => unknown;
+      expect(typeof updater).toBe("function");
+      return updater;
+    }
+
+    const goodPage = {
+      entries: [
+        { type: "comment", id: "c1", actor_type: "member", actor_id: "u", parent_id: null, created_at: "2026-05-06T01:00:00Z" },
+      ],
+      next_cursor: null,
+      prev_cursor: null,
+      has_more_before: false,
+      has_more_after: false,
+    };
+
+    it("throws when data.pages is not an array (comment:created path)", () => {
+      renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      const updater = captureUpdater("comment:created", {
+        comment: {
+          id: "n",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "hi",
+          parent_id: null,
+          created_at: "2026-05-06T05:00:00Z",
+          updated_at: "2026-05-06T05:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+      expect(() => updater({ pages: null, pageParams: [] })).toThrow(
+        /data\.pages is not an array/,
+      );
+    });
+
+    it("throws when a page has non-array entries (comment:deleted path)", () => {
+      renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      const updater = captureUpdater("comment:deleted", {
+        comment_id: "c1",
+        issue_id: "issue-1",
+      });
+      expect(() =>
+        updater({
+          pages: [{ ...goodPage, entries: null }],
+          pageParams: [{ mode: "latest" }],
+        }),
+      ).toThrow(/data\.pages\[0\]\.entries is not an array/);
+    });
+
+    it("no-ops (undefined → undefined) on empty cache, does not throw", () => {
+      renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      const updater = captureUpdater("comment:updated", {
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "edit",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T06:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+      expect(() => updater(undefined)).not.toThrow();
+    });
+
+    it("does NOT throw on well-formed cache (sanity)", () => {
+      renderHook(() => useIssueTimeline("issue-1", "user-1"));
+      const updater = captureUpdater("reaction:added", {
+        issue_id: "issue-1",
+        reaction: { id: "r1", comment_id: "c1", emoji: "+1", actor_type: "member", actor_id: "u" },
+      });
+      expect(() =>
+        updater({ pages: [goodPage], pageParams: [{ mode: "latest" }] }),
+      ).not.toThrow();
+    });
+
+    it("stays silent in production (NODE_ENV=production): the bad cache passes through to the shape guards downstream", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      try {
+        renderHook(() => useIssueTimeline("issue-1", "user-1"));
+        const updater = captureUpdater("comment:deleted", {
+          comment_id: "c1",
+          issue_id: "issue-1",
+        });
+        // Prod behavior: invariant off, the comment:deleted walk returns
+        // `old` unchanged when pages is not an array (new guard below it).
+        const bad = { pages: null, pageParams: [] };
+        expect(() => updater(bad)).not.toThrow();
+        expect(updater(bad)).toBe(bad);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("comment:deleted walk skips non-array page.entries in production (no throw, other pages processed)", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      try {
+        renderHook(() => useIssueTimeline("issue-1", "user-1"));
+        const updater = captureUpdater("comment:deleted", {
+          comment_id: "c1",
+          issue_id: "issue-1",
+        });
+        const mixed = {
+          pages: [
+            { ...goodPage, entries: null },
+            goodPage,
+          ],
+          pageParams: [{ mode: "latest" }, { mode: "before", cursor: "x" }],
+        };
+        // Should not throw even though one page has non-array entries.
+        const out = updater(mixed) as { pages: unknown[] };
+        expect(Array.isArray(out.pages)).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
   });
 });

@@ -42,6 +42,35 @@ import { useT } from "../../i18n";
 
 type TLData = TimelineCacheData;
 
+// Dev-only invariant: fire loudly if any WS/mutation path hands a non-array-
+// shaped cache to a setQueryData updater. Production behavior is already
+// tolerant (shape guards in timeline-cache.ts + the flattening memo below),
+// so this exists purely to surface the upstream polluter in dev/test — the
+// thing that got us upstream#2143 / #2147 in the first place. NODE_ENV is
+// checked at call time so tests can flip to "production" via vi.stubEnv.
+function assertTimelineShape(label: string, data: TLData | undefined): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (data === undefined) return;
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      `[timeline-cache/${label}] invariant: cache root has type ${typeof data}`,
+    );
+  }
+  if (!Array.isArray(data.pages)) {
+    throw new Error(
+      `[timeline-cache/${label}] invariant: data.pages is not an array`,
+    );
+  }
+  for (let i = 0; i < data.pages.length; i++) {
+    const page = data.pages[i];
+    if (!page || !Array.isArray(page.entries)) {
+      throw new Error(
+        `[timeline-cache/${label}] invariant: data.pages[${i}].entries is not an array`,
+      );
+    }
+  }
+}
+
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
     type: "comment",
@@ -95,7 +124,11 @@ export function useIssueTimeline(
   // isAtLatest is the cache-invariant we use to decide where WS-delivered
   // entries belong. It's true when the FIRST loaded page reports no newer
   // entries on the server — i.e. the user is looking at the live tail.
-  const isAtLatest = data?.pages[0]?.has_more_after === false;
+  //
+  // Same shape-guard as the timeline memo below: a malformed `data.pages`
+  // (not an array) previously crashed `data.pages[0]` and white-screened the
+  // whole issue route (upstream#2143 / #2147).
+  const isAtLatest = Array.isArray(data?.pages) && data!.pages[0]?.has_more_after === false;
 
   const [submitting, setSubmitting] = useState(false);
   const [newEntriesBelowCount, setNewEntriesBelowCount] = useState(0);
@@ -103,10 +136,19 @@ export function useIssueTimeline(
   // Flatten pages → ASC array for the legacy UI consumer. pages are DESC
   // newest-first; the consumer (issue-detail.tsx) renders chronologically
   // (oldest at top). Concat → DESC; reverse once at the end → ASC.
+  //
+  // Defensive on pages / entries shape: consumers like `issue-detail.tsx`
+  // call `timeline.filter(...)` directly. A malformed cache entry (stale
+  // shape from a persisted older build, gzip/proxy mishap, hand-written
+  // setQueryData in a future caller) would otherwise white-screen the whole
+  // tab (see upstream#2143 / #2147: `timeline.filter is not a function`).
+  // Coerce to `[]` on any unexpected shape so the UI degrades to empty
+  // instead of crashing the route.
   const timeline = useMemo<TimelineEntry[]>(() => {
-    if (!data) return [];
+    if (!data || !Array.isArray(data.pages)) return [];
     const flat: TimelineEntry[] = [];
     for (const page of data.pages) {
+      if (!page || !Array.isArray(page.entries)) continue;
       for (const entry of page.entries) flat.push(entry);
     }
     return flat.reverse();
@@ -140,9 +182,10 @@ export function useIssueTimeline(
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
         if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, commentToTimelineEntry(comment)),
-          );
+          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+            assertTimelineShape("comment:created", old);
+            return prependToLatestPage(old, commentToTimelineEntry(comment));
+          });
         } else {
           // Reading older history — don't yank scroll position. Surface a
           // counter so the UI can offer "jump to latest (N new)".
@@ -159,11 +202,12 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) =>
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+          assertTimelineShape("comment:updated", old);
+          return mapAllEntries(old, (e) =>
             e.id === comment.id ? commentToTimelineEntry(comment) : e,
-          ),
-        );
+          );
+        });
       },
       [qc, issueId, around],
     ),
@@ -178,12 +222,14 @@ export function useIssueTimeline(
         // Cascade through replies. Walk pages collectively; a reply may live
         // on a different page than its parent.
         qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
-          if (!old) return old;
+          assertTimelineShape("comment:deleted", old);
+          if (!old || !Array.isArray(old.pages)) return old;
           const idsToRemove = new Set<string>([comment_id]);
           let changed = true;
           while (changed) {
             changed = false;
             for (const page of old.pages) {
+              if (!page || !Array.isArray(page.entries)) continue;
               for (const e of page.entries) {
                 if (
                   e.parent_id &&
@@ -212,9 +258,10 @@ export function useIssueTimeline(
         const entry = p.entry;
         if (!entry || !entry.id) return;
         if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, entry),
-          );
+          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+            assertTimelineShape("activity:created", old);
+            return prependToLatestPage(old, entry);
+          });
         } else {
           setNewEntriesBelowCount((c) => c + 1);
         }
@@ -229,14 +276,15 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+          assertTimelineShape("reaction:added", old);
+          return mapAllEntries(old, (e) => {
             if (e.id !== reaction.comment_id) return e;
             const existing = e.reactions ?? [];
             if (existing.some((r) => r.id === reaction.id)) return e;
             return { ...e, reactions: [...existing, reaction] };
-          }),
-        );
+          });
+        });
       },
       [qc, issueId, around],
     ),
@@ -248,8 +296,9 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
+        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+          assertTimelineShape("reaction:removed", old);
+          return mapAllEntries(old, (e) => {
             if (e.id !== p.comment_id) return e;
             return {
               ...e,
@@ -262,8 +311,8 @@ export function useIssueTimeline(
                   ),
               ),
             };
-          }),
-        );
+          });
+        });
       },
       [qc, issueId, around],
     ),
@@ -425,11 +474,13 @@ export function useIssueTimeline(
   // (DESC pages → ASC flat), so the offset within page[0] becomes
   // (totalEntries - 1) - target_index.
   const targetFlatIndex = useMemo(() => {
-    if (!data || data.pages.length === 0) return null;
+    if (!data || !Array.isArray(data.pages) || data.pages.length === 0) return null;
     const first = data.pages[0];
-    if (!first || first.target_index == null) return null;
+    if (!first || !Array.isArray(first.entries) || first.target_index == null) return null;
     let total = 0;
-    for (const p of data.pages) total += p.entries.length;
+    for (const p of data.pages) {
+      if (p && Array.isArray(p.entries)) total += p.entries.length;
+    }
     return total - 1 - first.target_index;
   }, [data]);
 
