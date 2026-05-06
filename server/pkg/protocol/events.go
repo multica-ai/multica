@@ -104,4 +104,11 @@ const (
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
+
+	// GitHub integration events
+	EventGitHubInstallationCreated = "github_installation:created"
+	EventGitHubInstallationDeleted = "github_installation:deleted"
+	EventPullRequestLinked         = "pull_request:linked"
+	EventPullRequestUpdated        = "pull_request:updated"
+	EventPullRequestUnlinked       = "pull_request:unlinked"
 )

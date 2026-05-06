@@ -269,7 +269,7 @@ func notifyIssueSubscribers(
 			Title:         title,
 			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -334,7 +334,7 @@ func notifyDirect(
 		Title:         title,
 		Body:          util.StrToText(body),
 		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
 	})
 	if err != nil {
@@ -421,7 +421,7 @@ func notifyMentionedMembers(
 			IssueID:       parseUUID(issueID),
 			Title:         title,
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
