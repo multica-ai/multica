@@ -609,6 +609,42 @@ func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"token": tokenString})
 }
 
+// LocalSession bootstraps the singleton local identity/space and returns a
+// JWT for it. Available only when the server runs with MULTICA_PRODUCT_MODE=local;
+// the desktop app calls it on startup so the user is authenticated without an
+// interactive login screen. Any state-changing API call rides on the issued
+// token, just like a verification-code or Google login session would.
+func (h *Handler) LocalSession(w http.ResponseWriter, r *http.Request) {
+	if !h.LocalMode.Enabled() || h.LocalBootstrapper == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	result, err := h.LocalBootstrapper.EnsureLocal(r.Context())
+	if err != nil {
+		slog.Error("local-session: bootstrap failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to bootstrap local session")
+		return
+	}
+
+	tokenString, err := h.issueJWT(result.User)
+	if err != nil {
+		slog.Warn("local-session: failed to issue JWT", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("local-session: failed to set auth cookies", "error", err)
+	}
+
+	slog.Info("local-session: issued token", append(logger.RequestAttrs(r), "user_id", uuidToString(result.User.ID))...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(result.User),
+	})
+}
+
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	auth.ClearAuthCookies(w)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})

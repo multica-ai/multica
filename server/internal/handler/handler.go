@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/localmode"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -24,6 +25,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// LocalBootstrapper produces (or retrieves) the singleton local user, space,
+// and owner membership when the server runs in local product mode. The
+// concrete implementation lives in package localmode; the interface keeps the
+// handler package free of *pgxpool.Pool plumbing and lets tests substitute
+// fakes.
+type LocalBootstrapper interface {
+	EnsureLocal(ctx context.Context) (localmode.BootstrapResult, error)
+}
 
 // randomID returns a random 16-byte hex string used as a request ID for
 // in-memory stores (model list, local skills, CLI update, etc.).
@@ -68,6 +78,8 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	LocalMode             localmode.Config
+	LocalBootstrapper     LocalBootstrapper
 	cfg                   Config
 }
 

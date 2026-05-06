@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/localmode"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -105,6 +106,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
+	localCfg := localmode.FromEnv()
+	h.LocalMode = localCfg
+	h.LocalBootstrapper = localmode.NewBootstrapper(pool)
 	if rdb != nil {
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
@@ -198,6 +202,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
+
+	// Local-only product entry point. The desktop client posts here on
+	// startup to materialize the singleton local user/space and obtain a
+	// JWT — no interactive login surface exists in local mode.
+	if localCfg.Enabled() {
+		r.Post("/api/auth/local-session", h.LocalSession)
+	}
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
