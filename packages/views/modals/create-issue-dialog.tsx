@@ -60,7 +60,9 @@ export function CreateIssueDialog({
           // Width is capped; height is content-driven up to 80vh so a
           // pasted screenshot can't push the dialog past the viewport
           // (the inner editor area scrolls instead).
-          "!max-w-xl !w-full !max-h-[80vh]",
+          isExpanded
+            ? "!max-w-4xl !w-full !h-5/6"
+            : "!max-w-xl !w-full !max-h-[80vh]",
           // Smooth size transition when switching modes — the manual mode
           // uses the same easing.
           "!transition-all !duration-300 !ease-out",
@@ -79,6 +81,8 @@ export function CreateIssueDialog({
             onClose={onClose}
             onSwitchMode={switchTo("manual")}
             data={panelData}
+            isExpanded={isExpanded}
+            setIsExpanded={setIsExpanded}
           />
         ) : (
           <ManualCreatePanel
