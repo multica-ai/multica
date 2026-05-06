@@ -22,6 +22,7 @@ import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcri
 import { IssuesScreen } from "../screens/issues/issues-screen";
 import { InboxDetailScreen } from "../screens/mine/inbox-detail-screen";
 import { InboxScreen } from "../screens/mine/inbox-screen";
+import { AgentsScreen } from "../screens/mine/agents-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
@@ -181,19 +182,6 @@ function SearchScreen() {
     <Screen>
       <Text style={styles.title}>Search</Text>
       <Text style={styles.muted}>Issue and project search entry point.</Text>
-    </Screen>
-  );
-}
-
-function AgentsScreen() {
-  return <ReadOnlyPlaceholderScreen title="Agents" />;
-}
-
-function ReadOnlyPlaceholderScreen({ title }: { title: string }) {
-  return (
-    <Screen>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.muted}>Read-only mobile view entry point.</Text>
     </Screen>
   );
 }
