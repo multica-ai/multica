@@ -254,6 +254,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       sidebarRef.current?.collapse();
     }
   }, [isMobile]);
+  // Auto-close the mobile sheet on route changes — the local `sidebarOpen`
+  // survives navigation between projects/issues, bridging back-navigation and
+  // leaving an open Base UI Dialog covering the destination page (JEH-601).
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [projectId, router.pathname, isMobile]);
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);

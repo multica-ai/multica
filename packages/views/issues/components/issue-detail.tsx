@@ -419,6 +419,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       sidebarRef.current?.collapse();
     }
   }, [isMobile]);
+  // Auto-close the mobile sheet on route changes — the local `sidebarOpen`
+  // survives navigation between issues (same component, different param) and
+  // bridges back-navigation, leaving an open Base UI Dialog covering the
+  // destination page (JEH-601: iOS swipe-back lock).
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [id, router.pathname, isMobile]);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [backlogHintOpen, setBacklogHintOpen] = useState(false);
