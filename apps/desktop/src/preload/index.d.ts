@@ -1,5 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 
+import type { LocalStackStatus } from "../shared/local-stack-types";
+
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
@@ -71,6 +73,13 @@ interface DaemonAPI {
   openLogFile: () => Promise<{ success: boolean; error?: string }>;
 }
 
+interface LocalStackAPI {
+  getStatus: () => Promise<LocalStackStatus>;
+  retry: () => Promise<void>;
+  openLogs: () => Promise<{ ok: boolean }>;
+  onStatusChange: (callback: (status: LocalStackStatus) => void) => () => void;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -88,6 +97,7 @@ declare global {
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
+    localStackAPI: LocalStackAPI;
     updater: UpdaterAPI;
   }
 }

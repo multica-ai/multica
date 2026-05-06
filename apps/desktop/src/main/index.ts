@@ -8,6 +8,7 @@ import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
+import { LocalStackSupervisor } from "./local-stack-supervisor";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -37,6 +38,28 @@ if (process.platform !== "win32") {
 const PROTOCOL = "multica";
 
 let mainWindow: BrowserWindow | null = null;
+
+// Local-stack supervisor: orchestrates the per-component start order
+// (database → migrations → api → bootstrap → daemon → runtimeRegistration)
+// for the local-only desktop product. Task 9 ships only the shell — the
+// runners below are no-op placeholders that resolve immediately. Task 11
+// will plug in real Postgres / migrations / API runners. The renderer
+// observes status via `localStackAPI` exposed from the preload bridge.
+const localStackSupervisor = new LocalStackSupervisor({
+  runners: [
+    { name: "database", start: async () => {} },
+    { name: "migrations", start: async () => {} },
+    { name: "api", start: async () => {} },
+    { name: "bootstrap", start: async () => {} },
+    { name: "daemon", start: async () => {} },
+    { name: "runtimeRegistration", start: async () => {} },
+  ],
+  onStatusChange: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("localStack:status", status);
+    }
+  },
+});
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -289,10 +312,27 @@ if (!gotTheLock) {
       }
     });
 
+    // IPC: local-stack supervisor — status read, retry trigger, log opener
+    // (the log opener is a Task 12 placeholder that lets the renderer wire
+    // the action button without a no-op error).
+    ipcMain.handle("localStack:get-status", () =>
+      localStackSupervisor.getStatus(),
+    );
+    ipcMain.handle("localStack:retry", () => localStackSupervisor.retry());
+    ipcMain.handle("localStack:open-logs", () => {
+      // TODO Task 12: surface aggregated local-stack logs.
+      return { ok: false };
+    });
+
     createWindow();
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+
+    // Kick off the supervisor once the window is up. We don't await — the
+    // renderer subscribes to status broadcasts and renders progress as
+    // each component transitions.
+    void localStackSupervisor.start();
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {

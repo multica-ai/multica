@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 
+import type { LocalStackStatus } from "../shared/local-stack-types";
+
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
 // (async ipc.invoke) would race the ApiClient construction in initCore and
@@ -149,6 +151,19 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:open-log-file"),
 };
 
+const localStackAPI = {
+  getStatus: (): Promise<LocalStackStatus> =>
+    ipcRenderer.invoke("localStack:get-status"),
+  retry: (): Promise<void> => ipcRenderer.invoke("localStack:retry"),
+  openLogs: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("localStack:open-logs"),
+  onStatusChange: (callback: (status: LocalStackStatus) => void) => {
+    const handler = (_: unknown, status: LocalStackStatus) => callback(status);
+    ipcRenderer.on("localStack:status", handler);
+    return () => ipcRenderer.removeListener("localStack:status", handler);
+  },
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -177,6 +192,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
+  contextBridge.exposeInMainWorld("localStackAPI", localStackAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
@@ -185,6 +201,8 @@ if (process.contextIsolated) {
   window.desktopAPI = desktopAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.daemonAPI = daemonAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.localStackAPI = localStackAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }
