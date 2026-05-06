@@ -385,6 +385,7 @@ export function ManualCreatePanel({
                 )}
                 triggerRender={<PillButton />}
                 align="start"
+                width="w-80 max-w-[calc(100vw-2rem)]"
               />
 
               {/* Due date */}

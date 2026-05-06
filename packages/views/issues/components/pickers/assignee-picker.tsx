@@ -44,6 +44,7 @@ export function AssigneePicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  width = "w-52",
 }: {
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
@@ -53,6 +54,7 @@ export function AssigneePicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  width?: string;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -102,7 +104,7 @@ export function AssigneePicker({
         setOpen(v);
         if (!v) setFilter("");
       }}
-      width="w-52"
+      width={width}
       align={align}
       searchable
       searchPlaceholder="Assign to..."
@@ -149,7 +151,7 @@ export function AssigneePicker({
               }}
             >
               <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
-              <span>{m.name}</span>
+              <span className="truncate">{m.name}</span>
             </PickerItem>
           ))}
         </PickerSection>
@@ -185,9 +187,9 @@ export function AssigneePicker({
                 }}
               >
                 <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
-                <span className={allowed ? "" : "text-muted-foreground"}>{a.name}</span>
+                <span className={allowed ? "truncate" : "truncate text-muted-foreground"}>{a.name}</span>
                 {a.visibility === "private" && (
-                  <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+                  <Lock className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 )}
               </PickerItem>
             );
