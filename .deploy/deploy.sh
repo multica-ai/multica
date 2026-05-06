@@ -75,11 +75,32 @@ echo "Building Next.js frontend…"
 # when an incremental build runs over a previous build with route-group
 # changes — pages then 500 in production with InvariantError. Clean
 # .next first so every deploy is a from-scratch build.
+#
+# CRITICAL: stop the running next-server BEFORE removing .next/ —
+# otherwise the live process keeps reading from a directory the build
+# is rewriting under it, and serves 500s with "client reference
+# manifest does not exist" until the new build finishes (and even then
+# only for users whose connection lands on a fresh next-server, not on
+# an orphan hanging onto a stale .next/). Symptom: JEH-599 frontend
+# spam after #80 mutex landed.
+echo "Stopping frontend before .next reset…"
+launchctl bootout gui/$(id -u)/com.multica.frontend 2>/dev/null || true
+# Reap any next-server still around — webhook restarts can leave orphans
+# from earlier deploys that bootout didn't catch.
+pkill -f next-server 2>/dev/null || true
+# Give the OS a moment to release port 4200 so the new launchd start
+# below doesn't race a half-dead listener.
+sleep 1
+
 rm -rf apps/web/.next
 pnpm --filter @multica/web build
 
 echo "Restarting launchd jobs…"
 launchctl kickstart -k gui/$(id -u)/com.multica.backend
+# Bring the frontend back up on the freshly built .next/. bootstrap is
+# idempotent — bootout above may have already torn the job out, so we
+# load it back before kickstart can act on it.
+launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.multica.frontend.plist" 2>/dev/null || true
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
 
 echo "=== deploy finished: $(date -Iseconds) ==="
