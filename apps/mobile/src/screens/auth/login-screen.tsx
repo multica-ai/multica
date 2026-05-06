@@ -2,10 +2,12 @@ import "react-native-get-random-values";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useAuthStore } from "@multica/core/auth";
+import { useCoreQueryClient } from "@multica/core/provider";
 import { Button, Field, Heading, Screen } from "../../components/ui/primitives";
 import { colors, spacing } from "../../theme/tokens";
 
 export function LoginScreen() {
+  const queryClient = useCoreQueryClient();
   const sendCode = useAuthStore((state) => state.sendCode);
   const verifyCode = useAuthStore((state) => state.verifyCode);
   const [email, setEmail] = useState("");
@@ -33,6 +35,7 @@ export function LoginScreen() {
     setSubmitting(true);
     setError(null);
     try {
+      queryClient.clear();
       await verifyCode(email.trim(), code.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to verify code");

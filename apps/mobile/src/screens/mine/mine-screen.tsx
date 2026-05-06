@@ -4,6 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
 import { Bot, Inbox, Server } from "lucide-react-native";
+import { useMobileLogout } from "../../auth/use-mobile-logout";
 import { Button, Screen } from "../../components/ui/primitives";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -25,7 +26,7 @@ export function MineScreen() {
   const navigation = useNavigation<MineNavigation>();
   const { workspace } = useMobileWorkspace();
   const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
+  const logout = useMobileLogout();
   const { data: inboxItems = [] } = useInboxList(workspace.id);
   const displayName = user?.name || user?.email || "User";
   const initial = displayName.trim().charAt(0).toUpperCase() || "U";

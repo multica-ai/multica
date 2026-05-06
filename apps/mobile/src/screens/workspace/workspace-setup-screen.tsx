@@ -4,6 +4,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { completeOnboarding } from "@multica/core/onboarding";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
+import { useMobileLogout } from "../../auth/use-mobile-logout";
 import { Button, Field, Heading, Screen } from "../../components/ui/primitives";
 import { colors, radii, spacing } from "../../theme/tokens";
 
@@ -18,7 +19,7 @@ function slugify(value: string): string {
 
 export function WorkspaceSetupScreen() {
   const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
+  const logout = useMobileLogout();
   const createWorkspace = useCreateWorkspace();
   const [name, setName] = useState(
     user?.name ? `${user.name}'s Workspace` : "My Workspace",

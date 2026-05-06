@@ -13,6 +13,7 @@ import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
 import type { Workspace } from "@multica/core/types";
 import { CircleUserRound, ListTodo } from "lucide-react-native";
+import { useMobileLogout } from "../auth/use-mobile-logout";
 import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
@@ -128,7 +129,7 @@ function WorkspaceGate({
 }
 
 function SignedInErrorScreen() {
-  const logout = useAuthStore((state) => state.logout);
+  const logout = useMobileLogout();
 
   return (
     <Screen>
