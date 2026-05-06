@@ -1,0 +1,1 @@
+export { WikiListPage } from "./components";

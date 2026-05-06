@@ -80,6 +80,10 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  WikiPage,
+  CreateWikiPageRequest,
+  UpdateWikiPageRequest,
+  ListWikiPagesResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1226,5 +1230,32 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Wiki
+  async listWikiPages(): Promise<ListWikiPagesResponse> {
+    return this.fetch("/api/wiki/pages");
+  }
+
+  async getWikiPage(id: string): Promise<WikiPage> {
+    return this.fetch(`/api/wiki/pages/${id}`);
+  }
+
+  async createWikiPage(data: CreateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch("/api/wiki/pages", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWikiPage(id: string, data: UpdateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch(`/api/wiki/pages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWikiPage(id: string): Promise<void> {
+    await this.fetch(`/api/wiki/pages/${id}`, { method: "DELETE" });
   }
 }
