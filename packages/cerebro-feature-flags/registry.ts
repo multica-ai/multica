@@ -7,22 +7,24 @@
  */
 
 export type CerebroFlagKey =
-  | "cerebro_inbox"
   | "cerebro_access_control"
   | "cerebro_members_admin"
   | "cerebro_sandbox_ui"
-  | "cerebro_mcp_guide";
+  | "cerebro_mcp_guide"
+  | "cerebro_channels"
+  | "cerebro_web_push";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
  * All cerebro features default to enabled — opt-out, not opt-in.
  */
 export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
-  cerebro_inbox: true,
   cerebro_access_control: true,
   cerebro_members_admin: true,
   cerebro_sandbox_ui: true,
   cerebro_mcp_guide: true,
+  cerebro_channels: true,
+  cerebro_web_push: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -36,12 +38,6 @@ export interface CerebroFlagDefinition {
  * the user.
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
-  {
-    key: "cerebro_inbox",
-    label: "Cerebro inbox",
-    description:
-      "Use the cerebro-fork inbox UI in place of upstream multica's inbox.",
-  },
   {
     key: "cerebro_access_control",
     label: "Cerebro access control",
@@ -65,5 +61,17 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Cerebro MCP guide",
     description:
       "Show the cerebro-fork MCP setup guide in the runtimes and docs panels.",
+  },
+  {
+    key: "cerebro_channels",
+    label: "Channels",
+    description:
+      "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
+  },
+  {
+    key: "cerebro_web_push",
+    label: "Web Push notifications",
+    description:
+      "Enable browser/PWA push notifications for new inbox items, comments, and mentions.",
   },
 ];

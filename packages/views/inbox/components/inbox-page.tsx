@@ -39,7 +39,8 @@ import {
   useDeleteInboxFolder,
   useAddInboxFolderItem,
   useSetInboxFolderParent,
-} from "@multica/core/inbox/folders";
+// CEREBRO-PATCH(inbox-page-folders): inbox folders moved to @multica/cerebro-inbox in Phase 6
+} from "@multica/cerebro-inbox/core/folders";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { ChannelDetail, NewMessageModal } from "../../channels";

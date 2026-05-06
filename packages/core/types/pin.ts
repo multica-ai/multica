@@ -1,5 +1,4 @@
-// CEREBRO-PATCH(core-types-pin): cerebro adds chat_session to upstream's pinnable item types
-export type PinnedItemType = "issue" | "project" | "channel" | "dm" | "chat_session";
+export type PinnedItemType = "issue" | "project" | "channel" | "dm";
 
 export interface PinnedItem {
   id: string;

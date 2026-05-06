@@ -16,6 +16,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+// CEREBRO-PATCH(notifications-tab-imports): rerouted from @multica/core/notifications to cerebro-notifications/core (Phase 6 relocation)
 import {
   type Channel,
   type ChannelChoice,
@@ -25,7 +26,7 @@ import {
   getChannelTransport,
   type RoutingKey,
   type AutoSubscribeReason,
-} from "@multica/core/notifications";
+} from "@multica/cerebro-notifications/core";
 import { PushNotificationsSection } from "./push-notifications-section";
 
 // Notification rows grouped the way the channel-first mockup shows them.

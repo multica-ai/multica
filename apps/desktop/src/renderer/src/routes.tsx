@@ -26,14 +26,7 @@ import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
 import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
-import { InboxPage as UpstreamInboxPage } from "@multica/views/inbox";
-import { CerebroInboxPage } from "@multica/cerebro-inbox";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-
-function InboxRoute() {
-  const useCerebro = useFeatureFlag("cerebro_inbox");
-  return useCerebro ? <CerebroInboxPage /> : <UpstreamInboxPage />;
-}
+import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage } from "@multica/cerebro-users/views";
@@ -172,7 +165,7 @@ export const appRoutes: RouteObject[] = [
             element: <MemberDetailRoute />,
             handle: { title: "Member" },
           },
-          { path: "inbox", element: <InboxRoute />, handle: { title: "Inbox" } },
+          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "notifications",
             element: <NotificationsPage />,
