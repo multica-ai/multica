@@ -67,6 +67,11 @@ func TestRuntimeSetWatcherFanOut(t *testing.T) {
 // MUL-1744: a slow ClaimTask for one runtime must not delay claims on any
 // other runtime. The serial pre-isolation pollLoop would have blocked the
 // fast runtime behind the slow one's HTTP request.
+//
+// MaxConcurrentTasks is deliberately set to 1 — the strict case GPT-Boy
+// flagged on review. Holding the only slot during a slow claim would make
+// the fast runtime starve, so this guards both the per-goroutine refactor
+// AND the slot-acquired-after-claim invariant.
 func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -103,7 +108,7 @@ func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 		ServerBaseURL:      srv.URL,
 		HeartbeatInterval:  time.Hour, // disable WS-suppression effects
 		PollInterval:       50 * time.Millisecond,
-		MaxConcurrentTasks: 4,
+		MaxConcurrentTasks: 1,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,6 +142,78 @@ func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
 			t.Fatalf("fast runtime made only %d claims while slow runtime blocked; expected ≥3", fastClaims.Load())
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+// TestPollLoopShutdownWaitsForPollersBeforeTaskWG is a race-detector
+// regression for the WaitGroup misuse GPT-Boy flagged: pollLoop must not
+// call taskWG.Wait while a poller goroutine could still execute
+// taskWG.Add(1). The supervisor uses a separate pollerWG that this test
+// implicitly exercises by running shutdown concurrently with a task being
+// dispatched.
+func TestPollLoopShutdownWaitsForPollersBeforeTaskWG(t *testing.T) {
+	t.Parallel()
+
+	taskID := "00000000-0000-0000-0000-000000000001"
+	releaseClaim := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(path, "/tasks/claim"):
+			// Block until the test releases. When released, return a real task
+			// so the poller proceeds into the slot/dispatch path — exactly the
+			// window where taskWG.Add(1) races with shutdown's taskWG.Wait.
+			select {
+			case <-releaseClaim:
+			case <-r.Context().Done():
+				w.Write([]byte(`{"task":null}`))
+				return
+			}
+			w.Write([]byte(`{"task":{"id":"` + taskID + `","runtime_id":"runtime-1","issue_id":"issue-1","agent":{"name":"test"}}}`))
+		case strings.HasSuffix(path, "/start"):
+			w.Write([]byte(`{}`))
+		case strings.HasSuffix(path, "/fail"):
+			w.Write([]byte(`{}`))
+		case strings.HasSuffix(path, "/complete"):
+			w.Write([]byte(`{}`))
+		case strings.HasSuffix(path, "/progress"):
+			w.Write([]byte(`{}`))
+		default:
+			w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       50 * time.Millisecond,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{
+		workspaceID: "ws-1",
+		runtimeIDs:  []string{"runtime-1"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pollDone := make(chan error, 1)
+	go func() {
+		pollDone <- d.pollLoop(ctx, nil)
+	}()
+
+	// Let the poller enter ClaimTask, then trigger shutdown right as the
+	// claim is about to return a task. The race is the window between
+	// ClaimTask returning and taskWG.Add(1) executing.
+	time.Sleep(100 * time.Millisecond)
+	close(releaseClaim)
+	cancel()
+
+	select {
+	case <-pollDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pollLoop did not return within shutdown deadline")
 	}
 }
 

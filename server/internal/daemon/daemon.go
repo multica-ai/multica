@@ -1168,7 +1168,8 @@ func (d *Daemon) triggerRestart() {
 // stall mode reported in MUL-1744.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
+	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
+	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
 
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
@@ -1197,7 +1198,11 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 			pctx, pcancel := context.WithCancel(ctx)
 			wakeup := make(chan struct{}, 1)
 			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
-			go d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+			pollerWG.Add(1)
+			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
+				defer pollerWG.Done()
+				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+			}(rid, pctx, wakeup)
 		}
 	}
 
@@ -1210,6 +1215,12 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 			for _, h := range pollers {
 				h.cancel()
 			}
+			// Wait for all pollers to fully return before waiting on taskWG.
+			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
+			// could race with taskWG.Wait when the counter is zero, which
+			// is an undefined sync.WaitGroup misuse.
+			pollerWG.Wait()
+
 			waitDone := make(chan struct{})
 			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
@@ -1238,6 +1249,12 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 // poll cadence and wakeup channel so that a slow HTTP claim for this runtime
 // cannot delay any other runtime's claims.
 //
+// Critically, the execution slot is acquired AFTER ClaimTask returns, not
+// before. Holding a slot during the claim's HTTP roundtrip would let one
+// stuck runtime starve every other runtime out of the shared slot pool —
+// catastrophic when MaxConcurrentTasks is small (e.g. 1, the default for
+// many local setups).
+//
 // pollerCtx is cancelled when this runtime is removed from the watched set
 // (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
 // passed to handleTask so an in-flight task is not killed just because the
@@ -1255,26 +1272,8 @@ func (d *Daemon) runRuntimePoller(
 			return
 		}
 
-		// Acquire a task slot before issuing a claim. If the daemon is at
-		// capacity, sleep until either a slot frees up (other runtimes won't
-		// signal us, so we retry on the next poll tick) or a wakeup arrives.
-		var slot int
-		select {
-		case slot = <-sem:
-			// Got a slot.
-		case <-pollerCtx.Done():
-			return
-		default:
-			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
-			}
-			continue
-		}
-
 		task, err := d.client.ClaimTask(pollerCtx, rid)
 		if err != nil {
-			sem <- slot
 			if pollerCtx.Err() == nil {
 				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
 			}
@@ -1285,11 +1284,23 @@ func (d *Daemon) runRuntimePoller(
 		}
 
 		if task == nil {
-			sem <- slot
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
+		}
+
+		// We have a claimed task. Now block on slot acquisition. Other
+		// runtimes' pollers continue to claim freely while we wait — only
+		// the dispatch step is bounded by MaxConcurrentTasks. The claimed
+		// task already moved to dispatched state on the server, so if we
+		// fail to acquire a slot before shutdown the runtime sweeper will
+		// fail it as runtime_offline once deregister flips us offline.
+		var slot int
+		select {
+		case slot = <-sem:
+		case <-pollerCtx.Done():
+			return
 		}
 
 		taskTarget := task.IssueID
