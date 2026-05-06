@@ -265,6 +265,10 @@ function FolderTreeItem({
   onToggle,
   onSelect,
   onMoveArtifact,
+  onMoveFolder,
+  onRename,
+  onDelete,
+  onNewSubfolder,
 }: {
   node: FolderNode;
   depth: number;
@@ -273,55 +277,123 @@ function FolderTreeItem({
   onToggle: (id: string) => void;
   onSelect: (id: string | null) => void;
   onMoveArtifact: (artifactId: string, folderId: string | null) => void;
+  onMoveFolder: (folderId: string, parentId: string | null) => void;
+  onRename: (folder: ArtifactFolder) => void;
+  onDelete: (folder: ArtifactFolder) => void;
+  onNewSubfolder: (parentId: string) => void;
 }) {
   const isOpen = expanded.has(node.id);
   const isActive = currentId === node.id;
   const [dragOver, setDragOver] = React.useState(false);
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => onSelect(node.id)}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          const id = e.dataTransfer.getData("text/multica-artifact");
-          if (id) onMoveArtifact(id, node.id);
-        }}
-        className={cn(
-          "group flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
-          isActive && "bg-accent font-medium",
-          dragOver && "bg-accent/70 ring-1 ring-primary/50",
-        )}
-        style={{ paddingLeft: 8 + depth * 12 }}
-      >
-        {node.children.length > 0 ? (
-          <span
-            role="button"
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggle(node.id);
-            }}
-            className="flex size-4 items-center justify-center text-muted-foreground"
+      <ContextMenu>
+        <ContextMenuTrigger
+          render={<div />}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("text/multica-folder", node.id);
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const artifactId = e.dataTransfer.getData("text/multica-artifact");
+            if (artifactId) {
+              onMoveArtifact(artifactId, node.id);
+              return;
+            }
+            const folderId = e.dataTransfer.getData("text/multica-folder");
+            if (folderId && folderId !== node.id) {
+              onMoveFolder(folderId, node.id);
+            }
+          }}
+          className={cn(
+            "group flex cursor-grab items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent active:cursor-grabbing",
+            isActive && "bg-accent font-medium",
+            dragOver && "bg-accent/70 ring-1 ring-primary/50",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => onSelect(node.id)}
+            className="flex w-full items-center gap-1 text-left"
+            style={{ paddingLeft: depth * 12 }}
           >
-            {isOpen ? (
-              <ChevronDown className="size-3.5" />
+            {node.children.length > 0 ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(node.id);
+                }}
+                className="flex size-4 items-center justify-center text-muted-foreground"
+              >
+                {isOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+              </span>
             ) : (
-              <ChevronRight className="size-3.5" />
+              <span className="size-4" />
             )}
-          </span>
-        ) : (
-          <span className="size-4" />
-        )}
-        <FolderIcon className="size-4 text-muted-foreground" />
-        <span className="truncate">{node.name}</span>
-      </button>
+            <FolderIcon className="size-4 text-muted-foreground" />
+            <span className="flex-1 truncate">{node.name}</span>
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                  aria-label={`Actions for ${node.name}`}
+                />
+              }
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal className="size-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => onRename(node)}>
+                <Pencil className="mr-2 size-3.5" /> Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onNewSubfolder(node.id)}>
+                <FolderPlus className="mr-2 size-3.5" /> New subfolder
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() => onDelete(node)}
+              >
+                <Trash2 className="mr-2 size-3.5" /> Delete folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => onRename(node)}>
+            <Pencil className="mr-2 size-3.5" /> Rename
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onNewSubfolder(node.id)}>
+            <FolderPlus className="mr-2 size-3.5" /> New subfolder
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            className="text-destructive"
+            onSelect={() => onDelete(node)}
+          >
+            <Trash2 className="mr-2 size-3.5" /> Delete folder
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {isOpen && node.children.length > 0 && (
         <div>
           {node.children.map((c) => (
@@ -334,6 +406,10 @@ function FolderTreeItem({
               onToggle={onToggle}
               onSelect={onSelect}
               onMoveArtifact={onMoveArtifact}
+              onMoveFolder={onMoveFolder}
+              onRename={onRename}
+              onDelete={onDelete}
+              onNewSubfolder={onNewSubfolder}
             />
           ))}
         </div>
@@ -429,6 +505,11 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [query, setQuery] = React.useState("");
   const [newFolderOpen, setNewFolderOpen] = React.useState(false);
+  // Parent for the "New folder" dialog: null = current folder context,
+  // otherwise an explicit folder id (e.g. when invoked from a tree item).
+  const [newFolderParent, setNewFolderParent] = React.useState<
+    string | null | undefined
+  >(undefined);
   const [renameTarget, setRenameTarget] = React.useState<ArtifactFolder | null>(
     null,
   );
@@ -517,6 +598,22 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     if (artifactId) {
       moveArtifact.mutate({ id: artifactId, data: { folder_id: target } });
     }
+  };
+
+  // Move a folder by changing its parent. Backend rejects self-parenting; we
+  // skip the trivial no-op here (descendant cycles are still server-checked).
+  const handleMoveFolder = (folderId: string, parentId: string | null) => {
+    if (folderId && folderId !== parentId) {
+      updateFolder.mutate({
+        id: folderId,
+        data: { parent_id: parentId ?? "" },
+      });
+    }
+  };
+
+  const openNewFolderDialog = (parent?: string | null) => {
+    setNewFolderParent(parent);
+    setNewFolderOpen(true);
   };
 
   const handleRename = async () => {
@@ -633,7 +730,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           variant="ghost"
           size="icon"
           className="size-6"
-          onClick={() => setNewFolderOpen(true)}
+          onClick={() => openNewFolderDialog()}
           title="New folder"
         >
           <FolderPlus className="size-3.5" />
@@ -649,8 +746,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            const id = e.dataTransfer.getData("text/multica-artifact");
-            if (id) handleMoveArtifact(id, null);
+            const artifactId = e.dataTransfer.getData("text/multica-artifact");
+            if (artifactId) {
+              handleMoveArtifact(artifactId, null);
+              return;
+            }
+            const movedFolderId = e.dataTransfer.getData("text/multica-folder");
+            if (movedFolderId) handleMoveFolder(movedFolderId, null);
           }}
           className={cn(
             "flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm hover:bg-accent",
@@ -674,6 +776,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               onPick?.();
             }}
             onMoveArtifact={handleMoveArtifact}
+            onMoveFolder={handleMoveFolder}
+            onRename={(folder) => {
+              setRenameTarget(folder);
+              setRenameDraft(folder.name);
+            }}
+            onDelete={setDeleteFolderTarget}
+            onNewSubfolder={(parent) => openNewFolderDialog(parent)}
           />
         ))}
       </div>
@@ -811,7 +920,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setNewFolderOpen(true)}
+              onClick={() => openNewFolderDialog()}
             >
               <FolderPlus className="mr-1 size-4" />
               <span className="hidden sm:inline">New folder</span>
@@ -920,12 +1029,28 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
               {childFolders.map((f) => (
                 <ContextMenu key={f.id}>
                   <ContextMenuTrigger
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/multica-folder", f.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
                     onClick={() => setFolderId(f.id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                       e.preventDefault();
-                      const id = e.dataTransfer.getData("text/multica-artifact");
-                      if (id) handleMoveArtifact(id, f.id);
+                      const artifactId = e.dataTransfer.getData(
+                        "text/multica-artifact",
+                      );
+                      if (artifactId) {
+                        handleMoveArtifact(artifactId, f.id);
+                        return;
+                      }
+                      const movedFolderId = e.dataTransfer.getData(
+                        "text/multica-folder",
+                      );
+                      if (movedFolderId && movedFolderId !== f.id) {
+                        handleMoveFolder(movedFolderId, f.id);
+                      }
                     }}
                     className="flex cursor-pointer items-center gap-3 border-b border-border/50 px-4 py-2.5 text-left hover:bg-accent/50 md:col-span-8 md:grid md:grid-cols-subgrid md:gap-0 md:border-b-0 md:px-6 md:py-2"
                   >
@@ -1189,8 +1314,11 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
 
       <NewFolderDialog
         open={newFolderOpen}
-        onOpenChange={setNewFolderOpen}
-        parentId={folderId}
+        onOpenChange={(open) => {
+          setNewFolderOpen(open);
+          if (!open) setNewFolderParent(undefined);
+        }}
+        parentId={newFolderParent === undefined ? folderId : newFolderParent}
       />
 
       <Dialog
