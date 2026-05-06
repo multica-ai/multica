@@ -28,6 +28,8 @@ import {
   type AutoSubscribeReason,
 } from "@multica/cerebro-notifications/core";
 import { PushNotificationsSection } from "./push-notifications-section";
+// CEREBRO-PATCH(web-push-flag-gate): hide Mobile (Web Push) channel row when feature is disabled
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 // Notification rows grouped the way the channel-first mockup shows them.
 // Each row has a stable `prefId` so the inbox "turn this off" shortcut
@@ -232,6 +234,11 @@ export function NotificationsTab() {
   const [savingTransport, setSavingTransport] = useState<string | null>(null);
   const [savingAutoSub, setSavingAutoSub] =
     useState<AutoSubscribeReason | null>(null);
+  // CEREBRO-PATCH(web-push-flag-gate): drop the Mobile (Web Push) channel row when disabled
+  const webPushEnabled = useFeatureFlag("cerebro_web_push");
+  const channelMeta = webPushEnabled
+    ? CHANNEL_META
+    : CHANNEL_META.filter((m) => m.channel !== "mobile");
 
   const handleChannelToggle = async (
     channel: Channel,
@@ -342,7 +349,7 @@ export function NotificationsTab() {
         onChange={handleAutoSubscribeChange}
       />
 
-      {CHANNEL_META.map((meta) => (
+      {channelMeta.map((meta) => (
         <ChannelSection
           key={meta.channel}
           meta={meta}

@@ -23,7 +23,8 @@
   "dependencies": {
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/views": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

@@ -6,6 +6,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+// CEREBRO-PATCH(web-push-flag-gate): subscription UI hidden when cerebro_web_push is OFF
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 // Push state machine — covers everything from "browser doesn't support it" to
 // "user has actively denied permission" so the UI explains what's happening.
@@ -96,7 +98,14 @@ async function readyServiceWorker(): Promise<ServiceWorkerRegistration> {
   );
 }
 
+// CEREBRO-PATCH(web-push-flag-gate): wrapper hides the entire section when feature is disabled
 export function PushNotificationsSection() {
+  const webPushEnabled = useFeatureFlag("cerebro_web_push");
+  if (!webPushEnabled) return null;
+  return <PushNotificationsSectionInner />;
+}
+
+function PushNotificationsSectionInner() {
   const [state, setState] = useState<State>({ kind: "loading" });
   const iosHint = isIOSNonStandalone();
 
