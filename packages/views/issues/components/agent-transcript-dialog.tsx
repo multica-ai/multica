@@ -517,7 +517,7 @@ const TranscriptEventRow = ({
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
     (item.type === "tool_result" && item.output && item.output.length > 0) ||
     (item.type === "thinking" && item.content && item.content.length > 0) ||
-    (item.type === "text" && item.content && item.content.split("\n").length > 1) ||
+    (item.type === "text" && item.content && item.content.length > 0) ||
     (item.type === "error" && item.content && item.content.length > 0);
 
   return (
