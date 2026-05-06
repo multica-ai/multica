@@ -683,6 +683,14 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+          // Recover missed chat:done / task:completed while disconnected — pending
+          // + messages use staleTime:Infinity and otherwise never refetch.
+          qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+          qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+          qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
+          qc.invalidateQueries({ queryKey: ["chat", "messages"] });
+          qc.invalidateQueries({ queryKey: ["chat", "pending-task"] });
+          qc.invalidateQueries({ queryKey: ["task-messages"] });
         }
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       } catch (e) {
