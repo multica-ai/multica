@@ -454,13 +454,6 @@ type TaskUsage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
-type FixedLoginCode struct {
-	UserID    pgtype.UUID        `json:"user_id"`
-	CodeHash  string             `json:"code_hash"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
 type User struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`
@@ -500,14 +493,22 @@ type Workspace struct {
 }
 
 type WorkspaceInvitation struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	InviterID     pgtype.UUID        `json:"inviter_id"`
-	InviteeEmail  string             `json:"invitee_email"`
-	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
-	Role          string             `json:"role"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
 }

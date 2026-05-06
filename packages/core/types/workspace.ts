@@ -80,3 +80,31 @@ export interface Invitation {
   inviter_email?: string;
   workspace_name?: string;
 }
+
+export interface InviteLink {
+  id: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  inviter_id?: string;
+  inviter_name?: string;
+  inviter_email?: string;
+  role: Exclude<MemberRole, "owner">;
+  status: "valid" | "expired" | "revoked" | "used_up";
+  error?: "expired" | "revoked" | "used_up";
+  created_at?: string;
+  updated_at?: string;
+  expires_at: string;
+  max_uses: number;
+  used_count: number;
+  revoked_at?: string | null;
+  last_used_at?: string | null;
+  token?: string;
+  invite_url?: string;
+}
+
+export interface CreateInviteLinkRequest {
+  role?: Exclude<MemberRole, "owner">;
+  expires_at?: string;
+  ttl_hours?: number;
+  max_uses?: number;
+}

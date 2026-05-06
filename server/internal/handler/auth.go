@@ -3,14 +3,11 @@ package handler
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -92,24 +89,6 @@ func generateCode() (string, error) {
 	}
 	n := binary.BigEndian.Uint32(buf[:]) % 1000000
 	return fmt.Sprintf("%06d", n), nil
-}
-
-func fixedLoginCodeHash(code string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
-	return hex.EncodeToString(sum[:])
-}
-
-func fixedLoginCodeMatches(storedHash, code string) bool {
-	normalized := strings.TrimSpace(strings.ToLower(storedHash))
-	normalized = strings.TrimPrefix(normalized, "sha256:")
-
-	got, err := hex.DecodeString(normalized)
-	if err != nil || len(got) != sha256.Size {
-		return false
-	}
-
-	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
-	return subtle.ConstantTimeCompare(got, sum[:]) == 1
 }
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
@@ -310,82 +289,6 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
 }
 
-func (h *Handler) verifyFixedLoginCode(ctx context.Context, email, code string) (db.User, bool, error) {
-	user, err := h.Queries.GetUserByEmail(ctx, email)
-	if err != nil {
-		if isNotFound(err) {
-			return db.User{}, false, nil
-		}
-		return db.User{}, false, err
-	}
-
-	fixedCode, err := h.Queries.GetFixedLoginCodeByUserID(ctx, user.ID)
-	if err != nil {
-		if isNotFound(err) {
-			return db.User{}, false, nil
-		}
-		return db.User{}, false, err
-	}
-
-	if !fixedLoginCodeMatches(fixedCode.CodeHash, code) {
-		return db.User{}, false, nil
-	}
-
-	return user, true, nil
-}
-
-func (h *Handler) completeEmailLogin(w http.ResponseWriter, r *http.Request, user db.User, isNew bool, authMethod string) {
-	if isNew {
-		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
-		if authMethod != "" {
-			evt.Properties["auth_method"] = authMethod
-		}
-		h.Analytics.Capture(evt)
-	}
-
-	// Auto-create email binding for email-login users.
-	_, _ = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
-		UserID:                user.ID,
-		Provider:              "email",
-		ExternalUserID:        user.Email,
-		DisplayName:           strToText(user.Email),
-		AccessTokenEncrypted:  pgtype.Text{},
-		RefreshTokenEncrypted: pgtype.Text{},
-		TokenExpiresAt:        pgtype.Timestamptz{},
-		Status:                "active",
-		Metadata:              []byte("{}"),
-	})
-
-	tokenString, err := h.issueJWT(user)
-	if err != nil {
-		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", user.Email)...)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
-	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
-		slog.Warn("failed to set auth cookies", "error", err)
-	}
-
-	// Set CloudFront signed cookies for CDN access.
-	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
-			http.SetCookie(w, cookie)
-		}
-	}
-
-	attrs := append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)
-	if authMethod != "" {
-		attrs = append(attrs, "auth_method", authMethod)
-	}
-	slog.Info("user logged in", attrs...)
-	writeJSON(w, http.StatusOK, LoginResponse{
-		Token: tokenString,
-		User:  userToResponse(user),
-	})
-}
-
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req VerifyCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -398,17 +301,6 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	if email == "" || code == "" {
 		writeError(w, http.StatusBadRequest, "email and code are required")
-		return
-	}
-
-	fixedUser, ok, err := h.verifyFixedLoginCode(r.Context(), email, code)
-	if err != nil {
-		slog.Error("fixed login code lookup failed", "email", email, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to verify code")
-		return
-	}
-	if ok {
-		h.completeEmailLogin(w, r, fixedUser, false, "fixed_code")
 		return
 	}
 
@@ -440,7 +332,47 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
-	h.completeEmailLogin(w, r, user, isNew, "email_code")
+	if isNew {
+		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+	}
+
+	// Auto-create email binding for email-login users.
+	_, _ = h.Queries.UpsertExternalAccountBinding(r.Context(), db.UpsertExternalAccountBindingParams{
+		UserID:                user.ID,
+		Provider:              "email",
+		ExternalUserID:        email,
+		DisplayName:           strToText(email),
+		AccessTokenEncrypted:  pgtype.Text{},
+		RefreshTokenEncrypted: pgtype.Text{},
+		TokenExpiresAt:        pgtype.Timestamptz{},
+		Status:                "active",
+		Metadata:              []byte("{}"),
+	})
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
+	if err := auth.SetAuthCookiesForRequest(w, r, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
+	// Set CloudFront signed cookies for CDN access.
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{
+		Token: tokenString,
+		User:  userToResponse(user),
+	})
 }
 
 func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
@@ -505,59 +437,29 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
 	}
 
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"code":          {req.Code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	})
+	gToken, err := exchangeGoogleCode(r.Context(), req.Code, clientID, clientSecret, redirectURI)
 	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google oauth token exchange returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+			return
+		}
 		slog.Error("google oauth token exchange failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
 		return
 	}
-	defer tokenResp.Body.Close()
 
-	tokenBody, err := io.ReadAll(tokenResp.Body)
+	gUser, err := fetchGoogleUserInfo(r.Context(), gToken.AccessToken)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to read Google token response")
-		return
-	}
-
-	if tokenResp.StatusCode != http.StatusOK {
-		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
-		return
-	}
-
-	var gToken googleTokenResponse
-	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
-
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google userinfo returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+			return
+		}
 		slog.Error("google userinfo fetch failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
 		return
 	}
 

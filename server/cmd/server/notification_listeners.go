@@ -80,6 +80,31 @@ type notificationContext struct {
 	IssueIdentifier string
 }
 
+func resolveNotificationActorName(ctx context.Context, queries *db.Queries, actorType, actorID string) string {
+	actorType = strings.TrimSpace(actorType)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return ""
+	}
+
+	switch actorType {
+	case "member":
+		user, err := queries.GetUser(ctx, parseUUID(actorID))
+		if err != nil {
+			return ""
+		}
+		return firstValue(user.Name, user.Email)
+	case "agent":
+		agent, err := queries.GetAgent(ctx, parseUUID(actorID))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(agent.Name)
+	default:
+		return ""
+	}
+}
+
 func buildNotificationContext(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID, appOrigin string) notificationContext {
 	if workspaceID == "" || issueID == "" {
 		return notificationContext{}
@@ -161,6 +186,7 @@ func recordMentionNotification(
 	body string,
 	link string,
 	issueIdentifier string,
+	actorName string,
 	details []byte,
 ) {
 	if len(details) == 0 {
@@ -176,6 +202,9 @@ func recordMentionNotification(
 		"issue_id":         issueID,
 		"issue_identifier": issueIdentifier,
 		"comment_id":       commentID,
+		"actor_type":       e.ActorType,
+		"actor_id":         e.ActorID,
+		"actor_name":       actorName,
 		"details":          json.RawMessage(details),
 	})
 	if err != nil {
@@ -634,6 +663,7 @@ func notifyMentionedMembers(
 	}
 
 	notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID, appOrigin)
+	actorName := resolveNotificationActorName(ctx, queries, e.ActorType, e.ActorID)
 
 	for id := range recipientIDs {
 		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
@@ -670,7 +700,7 @@ func notifyMentionedMembers(
 			Payload:     map[string]any{"item": resp},
 		})
 
-		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
+		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, actorName, details)
 	}
 }
 
