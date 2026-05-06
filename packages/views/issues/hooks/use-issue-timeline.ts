@@ -103,11 +103,15 @@ export function useIssueTimeline(
   // Flatten pages → ASC array for the legacy UI consumer. pages are DESC
   // newest-first; the consumer (issue-detail.tsx) renders chronologically
   // (oldest at top). Concat → DESC; reverse once at the end → ASC.
+  // Always returns an array; backend may serialise an empty entries field as
+  // null (Go nil slice → JSON null) on issues with no activity, so guard
+  // each page's entries before iterating (#BRY-53).
   const timeline = useMemo<TimelineEntry[]>(() => {
     if (!data) return [];
     const flat: TimelineEntry[] = [];
     for (const page of data.pages) {
-      for (const entry of page.entries) flat.push(entry);
+      const entries = Array.isArray(page.entries) ? page.entries : [];
+      for (const entry of entries) flat.push(entry);
     }
     return flat.reverse();
   }, [data]);
