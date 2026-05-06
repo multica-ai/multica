@@ -40,10 +40,14 @@ type CreateTimeEntryRequest struct {
 	StopTime *string `json:"stop_time"`
 }
 
-// UpdateTimeEntryRequest allows patching description and/or issue link.
+// UpdateTimeEntryRequest allows patching description, issue link, and start/stop times.
+// All fields are optional. Duration is recalculated automatically when start or stop changes.
 type UpdateTimeEntryRequest struct {
 	Description *string `json:"description"`
 	IssueID     *string `json:"issue_id"`
+	// StartTime and StopTime are ISO 8601 / RFC 3339. Only valid for stopped entries.
+	StartTime *string `json:"start_time"`
+	StopTime  *string `json:"stop_time"`
 }
 
 // timeEntryToResponse converts a db.TimeEntry row into the public response shape.
@@ -267,7 +271,26 @@ func (h *Handler) UpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry, err := h.timeEntrySvc().UpdateTimeEntry(r.Context(), workspaceID, userID, entryID, req.Description, req.IssueID)
+	// Parse optional timestamps.
+	var startTime, stopTime *time.Time
+	if req.StartTime != nil && *req.StartTime != "" {
+		t, err := time.Parse(time.RFC3339, *req.StartTime)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid start_time format (use RFC 3339)")
+			return
+		}
+		startTime = &t
+	}
+	if req.StopTime != nil && *req.StopTime != "" {
+		t, err := time.Parse(time.RFC3339, *req.StopTime)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid stop_time format (use RFC 3339)")
+			return
+		}
+		stopTime = &t
+	}
+
+	entry, err := h.timeEntrySvc().UpdateTimeEntry(r.Context(), workspaceID, userID, entryID, req.Description, req.IssueID, startTime, stopTime)
 	if err != nil {
 		if errors.Is(err, service.ErrTimeEntryNotFound) {
 			writeError(w, http.StatusNotFound, "time entry not found")

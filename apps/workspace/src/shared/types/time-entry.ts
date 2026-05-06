@@ -30,6 +30,10 @@ export interface CreateTimeEntryRequest {
 export interface UpdateTimeEntryRequest {
   description?: string;
   issue_id?: string | null;
+  /** ISO 8601. Only for stopped entries. */
+  start_time?: string;
+  /** ISO 8601. Only for stopped entries. */
+  stop_time?: string;
 }
 
 export interface ListTimeEntriesResponse {

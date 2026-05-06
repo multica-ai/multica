@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useRef } from "react";
-import { Clock, Play, Square, Trash2 } from "lucide-react";
+import { Clock, Play, Square, Pencil } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TimeEntry } from "@/shared/types";
 import {
@@ -9,9 +9,9 @@ import {
   useTimeEntriesQuery,
   useStartTimerMutation,
   useStopTimerMutation,
-  useDeleteTimeEntryMutation,
 } from "../hooks/use-time-tracking";
 import { LiveDuration, formatDuration } from "../components/LiveDuration";
+import { TimeEntryEditSheet } from "../components/TimeEntryEditSheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -139,11 +139,22 @@ function RunningTimerCard({ entry }: { entry: TimeEntry }) {
 
 // ── Entry row ─────────────────────────────────────────────────────────────────
 
-function EntryRow({ entry, isRunning }: { entry: TimeEntry; isRunning: boolean }) {
-  const deleteMutation = useDeleteTimeEntryMutation();
-
+function EntryRow({
+  entry,
+  isRunning,
+  onEdit,
+}: {
+  entry: TimeEntry;
+  isRunning: boolean;
+  onEdit: (entry: TimeEntry) => void;
+}) {
   return (
-    <div className="flex items-center gap-3 py-2 group text-sm">
+    <button
+      type="button"
+      className="flex w-full items-center gap-3 py-2 text-sm text-left group hover:bg-muted/40 transition-colors rounded px-1 -mx-1"
+      onClick={() => onEdit(entry)}
+      aria-label="Edit time entry"
+    >
       <div className="min-w-0 flex-1">
         {entry.description ? (
           <span className="text-foreground">{entry.description}</span>
@@ -158,22 +169,8 @@ function EntryRow({ entry, isRunning }: { entry: TimeEntry; isRunning: boolean }
           {formatDuration(entry.duration_seconds)}
         </span>
       )}
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-        disabled={deleteMutation.isPending}
-        onClick={() =>
-          deleteMutation.mutate(
-            { id: entry.id, issueId: entry.issue_id },
-            { onError: () => toast.error("Failed to delete entry") },
-          )
-        }
-        aria-label="Delete entry"
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
-    </div>
+      <Pencil className="size-3.5 shrink-0 opacity-0 group-hover:opacity-60 transition-opacity text-muted-foreground" />
+    </button>
   );
 }
 
@@ -189,6 +186,9 @@ function EntryRow({ entry, isRunning }: { entry: TimeEntry; isRunning: boolean }
 export function MyTimePage() {
   const { data: currentEntry } = useCurrentTimerQuery();
   const { data: listData, isLoading } = useTimeEntriesQuery({ limit: 200 });
+
+  // Controls which entry is open in the edit sheet.
+  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
 
   // API returns TimeEntry[] directly
   const entries: TimeEntry[] = listData ?? [];
@@ -255,6 +255,7 @@ export function MyTimePage() {
                         <EntryRow
                           entry={entry}
                           isRunning={entry.id === currentEntry?.id}
+                          onEdit={setEditingEntry}
                         />
                       </div>
                     ))}
@@ -265,6 +266,12 @@ export function MyTimePage() {
           )}
         </div>
       </div>
+
+      {/* Time entry edit sheet */}
+      <TimeEntryEditSheet
+        entry={editingEntry}
+        onClose={() => setEditingEntry(null)}
+      />
     </div>
   );
 }

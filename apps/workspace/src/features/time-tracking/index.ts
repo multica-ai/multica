@@ -5,3 +5,4 @@ export { useTimeTrackingSync } from "./hooks/use-time-tracking-sync";
 export { LiveDuration, formatDuration, getElapsedSeconds } from "./components/LiveDuration";
 export { GlobalTimerWidget } from "./components/GlobalTimerWidget";
 export { IssueTimerSection } from "./components/IssueTimerSection";
+export { TimeEntryEditSheet } from "./components/TimeEntryEditSheet";
