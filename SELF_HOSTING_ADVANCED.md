@@ -25,14 +25,37 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Resend](https://resend.com).
+Multica uses email-based magic link authentication. You can choose between **Postmark** and **Resend** as your email provider.
+
+#### Provider selection
+
+The backend picks a provider based on which environment variables are set:
+
+| Priority | Condition | Provider used |
+|----------|-----------|---------------|
+| 1 | `POSTMARK_SERVER_TOKEN` is set | Postmark |
+| 2 | `RESEND_API_KEY` is set | Resend |
+| 3 | Neither is set | Fallback — codes printed to backend logs (dev only) |
+
+If both variables are set, **Postmark takes precedence** and a warning is logged at startup.
+
+#### Postmark
+
+| Variable | Description |
+|----------|-------------|
+| `POSTMARK_SERVER_TOKEN` | Postmark server API token |
+| `POSTMARK_FROM_EMAIL` | Sender address (default: `noreply@multica.ai`) |
+
+> **Important:** Postmark requires a verified sender signature or domain. Sending from an unverified address will fail with a 422 error. Verify your sender in the [Postmark account portal](https://account.postmarkapp.com/signature_domains) before going live.
+
+#### Resend
 
 | Variable | Description |
 |----------|-------------|
 | `RESEND_API_KEY` | Your Resend API key |
-| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
+| `RESEND_FROM_EMAIL` | Sender address (default: `noreply@multica.ai`) |
 
-> **Note:** If Resend is not configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
+> **Note:** If neither provider is configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
 
 ### Google OAuth (Optional)
 
