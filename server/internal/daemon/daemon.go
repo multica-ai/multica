@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1435,6 +1436,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Ensure the multica CLI bypasses any local HTTP proxy (e.g. Clash, Charles)
+	// when calling the Multica API. Agents inherit the host's HTTPS_PROXY setting
+	// which is often a localhost proxy; inside sandboxed runtimes (Codex) that
+	// blocks localhost, causing every multica CLI call to fail. We inject NO_PROXY
+	// covering the server hostname so the CLI always connects directly.
+	if u, err := url.Parse(d.cfg.ServerBaseURL); err == nil && u.Hostname() != "" {
+		noProxy := u.Hostname()
+		if existing := os.Getenv("NO_PROXY"); existing != "" {
+			noProxy = existing + "," + noProxy
+		} else if existing := os.Getenv("no_proxy"); existing != "" {
+			noProxy = existing + "," + noProxy
+		}
+		agentEnv["NO_PROXY"] = noProxy
+		agentEnv["no_proxy"] = noProxy
 	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for

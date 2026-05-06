@@ -495,6 +495,10 @@ func mergeEnv(base []string, extra map[string]string) []string {
 		if isFilteredChildEnvKey(key) {
 			continue
 		}
+		// Skip keys that are explicitly set in extra — extra takes precedence.
+		if _, overridden := extra[key]; overridden {
+			continue
+		}
 		env = append(env, entry)
 	}
 	for k, v := range extra {
