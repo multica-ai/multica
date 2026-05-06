@@ -26,6 +26,7 @@ import {
   Plus,
   Check,
   BookOpenText,
+  BookOpen,
   SquarePen,
   CircleUser,
   FolderKanban,
@@ -103,6 +104,7 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "memory"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -117,6 +119,7 @@ const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "issues", label: "Issues", icon: ListTodo },
   { key: "projects", label: "Projects", icon: FolderKanban },
+  { key: "memory", label: "Memory", icon: BookOpen },
   { key: "autopilots", label: "Autopilot", icon: Zap },
   { key: "agents", label: "Agents", icon: Bot },
 ];

@@ -5,6 +5,7 @@ import {
   Bot,
   Monitor,
   BookOpenText,
+  BookOpen,
   Settings,
   X,
   Plus,
@@ -39,6 +40,7 @@ const TAB_ICONS: Record<string, LucideIcon> = {
   Bot,
   Monitor,
   BookOpenText,
+  BookOpen,
   Settings,
 };
 
