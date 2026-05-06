@@ -620,6 +620,16 @@ async function clearToken(): Promise<void> {
   await removeProfileUserId(active.name);
 }
 
+/**
+ * Public alias used by the local-reset orchestrator. The IPC handler still
+ * routes through the file-private `clearToken`; this export lets main-process
+ * code (which can't `ipcRenderer.invoke`) reuse the same logic without
+ * duplicating the path probing.
+ */
+export async function clearDaemonToken(): Promise<void> {
+  await clearToken();
+}
+
 async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
   if (operationInProgress) {
     return { success: false, error: "Another daemon operation is in progress" };

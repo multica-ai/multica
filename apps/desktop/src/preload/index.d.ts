@@ -1,6 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 
 import type { LocalStackStatus } from "../shared/local-stack-types";
+import type { ResetResult } from "../shared/local-reset-types";
 import type { LocalDataPaths } from "../main/local-data-paths";
 import type { LocalDiagnostics } from "../main/local-diagnostics";
 
@@ -90,6 +91,13 @@ interface LocalDiagnosticsAPI {
   ) => Promise<{ ok: boolean; error?: string }>;
 }
 
+interface LocalResetAPI {
+  /** Wipe app-owned local data and return a per-target outcome report.
+   *  Never touches user repo checkouts or Electron's persisted preferences;
+   *  the main-process orchestrator enforces the path whitelist. */
+  reset: () => Promise<ResetResult>;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -109,6 +117,7 @@ declare global {
     daemonAPI: DaemonAPI;
     localStackAPI: LocalStackAPI;
     localDiagnosticsAPI: LocalDiagnosticsAPI;
+    localResetAPI: LocalResetAPI;
     updater: UpdaterAPI;
   }
 }

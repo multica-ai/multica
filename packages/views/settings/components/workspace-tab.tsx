@@ -37,6 +37,7 @@ import { setCurrentWorkspace, useProductCapabilities } from "@multica/core/platf
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { ResetLocalDataDialog } from "./reset-local-data-dialog";
 
 export function WorkspaceTab() {
   const user = useAuthStore((s) => s.user);
@@ -48,8 +49,14 @@ export function WorkspaceTab() {
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
   const hasOnboarded = useHasOnboarded();
-  const { collaboration } = useProductCapabilities();
+  const capabilities = useProductCapabilities();
+  const { collaboration } = capabilities;
   const allowLeaveWorkspace = collaboration.allowLeaveWorkspace;
+  // Local-only product replaces "Delete workspace" (which would orphan the
+  // sole local space) with a "Reset local data" power-user flow that wipes
+  // app-owned data dirs so the next launch bootstraps a fresh space.
+  const showResetLocalData =
+    capabilities.mode === "local" && capabilities.settings.showResetLocalData;
 
   /**
    * Send the user to a safe URL BEFORE the leave/delete mutation fires.
@@ -107,6 +114,7 @@ export function WorkspaceTab() {
     onConfirm: () => Promise<void>;
   } | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -165,6 +173,39 @@ export function WorkspaceTab() {
         }
       },
     });
+  };
+
+  const handleResetLocalData = async () => {
+    // Local-only flow — the desktop bridge owns the heavy lifting (stop
+    // stack, wipe Postgres data dir, clear daemon token, etc). We just
+    // dispatch and surface the outcome. We deliberately don't auto-restart
+    // the app — that's a heavy follow-up and user intent is clearer when
+    // they restart manually after seeing the toast.
+    const bridge = (
+      window as unknown as {
+        localResetAPI?: { reset: () => Promise<{ ok: boolean; removed: string[] }> };
+      }
+    ).localResetAPI;
+    if (!bridge) {
+      toast.error("Local reset is not available in this build.");
+      return;
+    }
+    setActionId("reset-local-data");
+    try {
+      const result = await bridge.reset();
+      if (result.ok || result.removed.length > 0) {
+        toast.success(
+          "Local data reset. Restart Multica to bootstrap a fresh workspace.",
+        );
+      } else {
+        toast.error("Reset partially completed; see diagnostics.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setActionId(null);
+      setResetDialogOpen(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -287,7 +328,34 @@ export function WorkspaceTab() {
               </div>
             )}
 
-            {isOwner && (
+            {showResetLocalData ? (
+              // Local-only mode: there's only ever one space, and the
+              // backend has no other tenants — "Delete workspace" doesn't
+              // make sense. Replace it with a debug-grade reset that
+              // wipes the on-disk data so the next launch bootstraps fresh.
+              <div
+                className={
+                  "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" +
+                  (allowLeaveWorkspace ? " border-t pt-3" : "")
+                }
+              >
+                <div>
+                  <p className="text-sm font-medium text-destructive">Reset local data</p>
+                  <p className="text-xs text-muted-foreground">
+                    Wipe the local database and logs so Multica bootstraps a
+                    fresh workspace on next launch.
+                  </p>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setResetDialogOpen(true)}
+                  disabled={actionId === "reset-local-data"}
+                >
+                  {actionId === "reset-local-data" ? "Resetting..." : "Reset local data..."}
+                </Button>
+              </div>
+            ) : isOwner ? (
               <div
                 className={
                   "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" +
@@ -309,7 +377,7 @@ export function WorkspaceTab() {
                   {actionId === "delete-workspace" ? "Deleting..." : "Delete workspace"}
                 </Button>
               </div>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       </section>
@@ -347,6 +415,19 @@ export function WorkspaceTab() {
           setDeleteDialogOpen(open);
         }}
         onConfirm={handleConfirmDelete}
+      />
+
+      <ResetLocalDataDialog
+        loading={actionId === "reset-local-data"}
+        open={resetDialogOpen}
+        onOpenChange={(open) => {
+          // Same guard as the delete dialog — don't let the user dismiss
+          // mid-reset (the bridge is single-shot; cancelling here doesn't
+          // unwind the supervisor stop / rm -rf already in flight).
+          if (actionId === "reset-local-data" && !open) return;
+          setResetDialogOpen(open);
+        }}
+        onConfirm={handleResetLocalData}
       />
     </div>
   );

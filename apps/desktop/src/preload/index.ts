@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 
 import type { LocalStackStatus } from "../shared/local-stack-types";
+import type { ResetResult } from "../shared/local-reset-types";
 import type { LocalDataPaths } from "../main/local-data-paths";
 import type { LocalDiagnostics } from "../main/local-diagnostics";
 
@@ -166,6 +167,14 @@ const localStackAPI = {
   },
 };
 
+const localResetAPI = {
+  /** Wipe app-owned local data (postgres cluster, daemon logs, app logs).
+   *  Stops the local stack first; never touches user repo checkouts or
+   *  Electron's persisted preferences. Best-effort — see ResetResult for
+   *  per-target outcomes. */
+  reset: (): Promise<ResetResult> => ipcRenderer.invoke("localReset:reset"),
+};
+
 const localDiagnosticsAPI = {
   /** Live diagnostics snapshot — re-collected on each call. */
   get: (): Promise<LocalDiagnostics> =>
@@ -210,6 +219,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("localStackAPI", localStackAPI);
   contextBridge.exposeInMainWorld("localDiagnosticsAPI", localDiagnosticsAPI);
+  contextBridge.exposeInMainWorld("localResetAPI", localResetAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
@@ -222,6 +232,8 @@ if (process.contextIsolated) {
   window.localStackAPI = localStackAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.localDiagnosticsAPI = localDiagnosticsAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.localResetAPI = localResetAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }

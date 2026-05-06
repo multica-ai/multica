@@ -1,10 +1,11 @@
 import { app, BrowserWindow, ipcMain, nativeImage, Notification, shell } from "electron";
 import { homedir } from "os";
 import { join } from "path";
+import { rm } from "fs/promises";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
-import { setupDaemonManager } from "./daemon-manager";
+import { setupDaemonManager, clearDaemonToken } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
@@ -19,6 +20,7 @@ import {
   type LocalDataPaths,
 } from "./local-data-paths";
 import { createDiagnosticsCollector } from "./local-diagnostics";
+import { performLocalReset } from "./local-reset";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -402,6 +404,30 @@ if (!gotTheLock) {
         const result = await shell.openPath(target);
         return result === "" ? { ok: true } : { ok: false, error: result };
       },
+    );
+
+    // --- Local data reset --------------------------------------------------
+    // Power-user "nuke local Multica state" flow (Phase 5, Task 13). Stops
+    // the local stack, clears the daemon token, then rm -rf's only the
+    // app-owned subdirectories under the user-data root. Never touches
+    // appConfig (Electron's persisted state) or arbitrary user repo
+    // checkouts — those guards live in performLocalReset itself.
+    ipcMain.handle("localReset:reset", () =>
+      performLocalReset({
+        paths: diagnosticsPaths,
+        runner: {
+          stopStack: () => localStackSupervisor!.stop(),
+          removeDir: (target) =>
+            rm(target, { recursive: true, force: true }),
+          clearDaemonToken: () => clearDaemonToken(),
+        },
+        logger: {
+          // eslint-disable-next-line no-console
+          info: (msg) => console.log(msg),
+          // eslint-disable-next-line no-console
+          error: (msg, err) => console.error(msg, err),
+        },
+      }),
     );
 
     createWindow();

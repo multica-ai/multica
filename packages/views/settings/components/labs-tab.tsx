@@ -13,6 +13,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useProductCapabilities } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
+import { ResetLocalDataDialog } from "./reset-local-data-dialog";
 
 export function LabsTab() {
   const workspace = useCurrentWorkspace();
@@ -87,7 +88,92 @@ export function LabsTab() {
       </section>
 
       {capabilities.settings.showDiagnostics && <LocalDiagnosticsSection />}
+      {capabilities.settings.showResetLocalData && <ResetLocalDataSection />}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reset local data — power-user shortcut. The Danger Zone in the Workspace
+// tab has a heavier card-shaped entry; here we render a slimmer list-row so
+// the Labs tab stays scannable. Same dialog component, same bridge call —
+// the wiring is intentionally duplicated rather than abstracted because each
+// site's framing differs (Danger Zone vs. Lab tools) and pulling the trigger
+// up would force one shape onto both.
+// ---------------------------------------------------------------------------
+
+function ResetLocalDataSection() {
+  const [open, setOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  const handleConfirm = async () => {
+    const bridge = (
+      window as unknown as {
+        localResetAPI?: {
+          reset: () => Promise<{ ok: boolean; removed: string[] }>;
+        };
+      }
+    ).localResetAPI;
+    if (!bridge) {
+      toast.error("Local reset is not available in this build.");
+      return;
+    }
+    setRunning(true);
+    try {
+      const result = await bridge.reset();
+      if (result.ok || result.removed.length > 0) {
+        toast.success(
+          "Local data reset. Restart Multica to bootstrap a fresh workspace.",
+        );
+      } else {
+        toast.error("Reset partially completed; see diagnostics.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setRunning(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <section className="space-y-4">
+      <h2 className="text-sm font-semibold">Local data</h2>
+
+      <Card>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Reset local data</p>
+              <p className="text-sm text-muted-foreground">
+                Wipe the local database and stack logs so Multica bootstraps a
+                fresh workspace on next launch. Repository checkouts and app
+                preferences stay untouched.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setOpen(true)}
+              disabled={running}
+            >
+              {running ? "Resetting..." : "Reset..."}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <ResetLocalDataDialog
+        loading={running}
+        open={open}
+        onOpenChange={(next) => {
+          if (running && !next) return;
+          setOpen(next);
+        }}
+        onConfirm={handleConfirm}
+      />
+    </section>
   );
 }
 

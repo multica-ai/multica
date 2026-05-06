@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -74,6 +75,32 @@ vi.mock("../../navigation", () => ({
 
 vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
+}));
+
+// Render the reset dialog as a tiny test stub: a button that calls onConfirm
+// when the dialog is open. This bypasses the typed-confirmation friction
+// (covered by reset-local-data-dialog.test.tsx) so we can focus on the
+// workspace-tab wiring (button visibility, bridge call, toast).
+vi.mock("./reset-local-data-dialog", () => ({
+  ResetLocalDataDialog: ({
+    open,
+    onConfirm,
+  }: {
+    open: boolean;
+    onConfirm: () => void;
+  }) =>
+    open ? (
+      <button data-testid="reset-confirm" onClick={onConfirm}>
+        Confirm reset (test stub)
+      </button>
+    ) : null,
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -156,5 +183,71 @@ describe("WorkspaceTab capability gating", () => {
     expect(
       screen.getByRole("button", { name: /leave workspace/i }),
     ).toBeInTheDocument();
+  });
+
+  it("renders Reset local data instead of Delete workspace when local capabilities apply", () => {
+    // ownerMembers makes the user the owner — under non-local capabilities
+    // this would surface the Delete-workspace destructive button. Under
+    // local capabilities the swap kicks in.
+    mockUseQuery.mockReturnValue({ data: ownerMembers, isFetched: true });
+
+    render(
+      <ProductCapabilitiesProvider capabilities={LOCAL_PRODUCT_CAPABILITIES}>
+        <WorkspaceTab />
+      </ProductCapabilitiesProvider>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /reset local data/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /delete workspace/i }),
+    ).toBeNull();
+  });
+
+  it("hides the Reset action when capabilities disable showResetLocalData", () => {
+    mockUseQuery.mockReturnValue({ data: ownerMembers, isFetched: true });
+    const cappedCapabilities: ProductCapabilities = {
+      ...LOCAL_PRODUCT_CAPABILITIES,
+      settings: {
+        ...LOCAL_PRODUCT_CAPABILITIES.settings,
+        showResetLocalData: false,
+      },
+    };
+
+    render(
+      <ProductCapabilitiesProvider capabilities={cappedCapabilities}>
+        <WorkspaceTab />
+      </ProductCapabilitiesProvider>,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /reset local data/i }),
+    ).toBeNull();
+  });
+
+  it("invokes the localResetAPI bridge when the user confirms the reset", async () => {
+    mockUseQuery.mockReturnValue({ data: ownerMembers, isFetched: true });
+
+    const reset = vi.fn().mockResolvedValue({ ok: true, removed: ["/x"] });
+    Object.defineProperty(window, "localResetAPI", {
+      configurable: true,
+      value: { reset },
+    });
+
+    const user = userEvent.setup();
+    render(
+      <ProductCapabilitiesProvider capabilities={LOCAL_PRODUCT_CAPABILITIES}>
+        <WorkspaceTab />
+      </ProductCapabilitiesProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /reset local data/i }),
+    );
+    // The mocked dialog renders a confirm button while open.
+    await user.click(screen.getByTestId("reset-confirm"));
+
+    expect(reset).toHaveBeenCalledTimes(1);
   });
 });
