@@ -132,8 +132,13 @@ if [ ! -f "$NEXT_NEW/BUILD_ID" ]; then
   exit 1
 fi
 
-echo "Atomic swap: stopping frontend, renaming .next, restarting…"
-launchctl bootout gui/$(id -u)/com.multica.frontend 2>/dev/null || true
+echo "Atomic swap: killing next-server, renaming .next, restarting…"
+# Kill the running next-server so it can't observe the .next/ rename
+# midway. We do NOT bootout/bootstrap the launchd job — that race
+# (bootout still settling when bootstrap runs) made earlier deploys
+# exit 37 from a follow-up kickstart against a not-yet-loaded service.
+# launchctl kickstart -k below is enough: it kills any current
+# next-server and starts a fresh one on the just-swapped .next/.
 pkill -f next-server 2>/dev/null || true
 sleep 1
 
@@ -144,12 +149,13 @@ fi
 mv "$NEXT_NEW" "$NEXT_LIVE"
 
 echo "Restarting launchd jobs…"
-launchctl kickstart -k gui/$(id -u)/com.multica.backend
-# Bring the frontend back up on the freshly swapped .next/. bootstrap
-# is idempotent — bootout above tore the job out, so we load it back
-# before kickstart can act on it.
-launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.multica.frontend.plist" 2>/dev/null || true
-launchctl kickstart -k gui/$(id -u)/com.multica.frontend
+# || true on every launchctl call: launchctl returns non-zero on
+# benign races (job in transition, kickstart between KeepAlive
+# respawns) and we don't want set -e to abort the deploy after
+# the swap has already happened. Real failures surface as a 4200
+# downtime — KeepAlive=true on the plist will keep retrying.
+launchctl kickstart -k gui/$(id -u)/com.multica.backend || true
+launchctl kickstart -k gui/$(id -u)/com.multica.frontend || true
 
 # Async cleanup — frontend is already up, this is just disk hygiene.
 rm -rf "$NEXT_OLD" &
