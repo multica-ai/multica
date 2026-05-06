@@ -7,13 +7,12 @@
     "move_failed": "移动 issue 失败"
   },
   "status": {
-    "backlog": "设计",
-    "todo": "未开始",
-    "in_progress": "开发中",
-    "in_review": "测试中",
-    "review": "复核",
+    "backlog": "待规划",
+    "todo": "待办",
+    "in_progress": "进行中",
+    "in_review": "审核中",
     "done": "已完成",
-    "blocked": "待处理",
+    "blocked": "已阻塞",
     "cancelled": "已取消"
   },
   "priority": {
