@@ -134,6 +134,7 @@ describe("resolveBuildMatrix", () => {
       ),
     ).toEqual([
       { platform: "mac", arch: "arm64" },
+      { platform: "mac", arch: "x64" },
       { platform: "win", arch: "x64" },
       { platform: "win", arch: "arm64" },
       { platform: "linux", arch: "x64" },
