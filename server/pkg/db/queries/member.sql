@@ -11,9 +11,18 @@ WHERE id = $1;
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: GetLocalOwnerMember :one
+SELECT * FROM member
+WHERE user_id = $1 AND workspace_id = $2;
+
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: CreateLocalOwnerMember :one
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
 RETURNING *;
 
 -- name: UpdateMemberRole :one

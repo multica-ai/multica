@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createLocalUser = `-- name: CreateLocalUser :one
+INSERT INTO "user" (name, email, avatar_url, onboarded_at, starter_content_state)
+VALUES ($1, $2, $3, now(), 'skipped_legacy')
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state
+`
+
+type CreateLocalUserParams struct {
+	Name      string      `json:"name"`
+	Email     string      `json:"email"`
+	AvatarUrl pgtype.Text `json:"avatar_url"`
+}
+
+func (q *Queries) CreateLocalUser(ctx context.Context, arg CreateLocalUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createLocalUser, arg.Name, arg.Email, arg.AvatarUrl)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
@@ -25,6 +56,30 @@ type CreateUserParams struct {
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.AvatarUrl)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+	)
+	return i, err
+}
+
+const getLocalUserByEmail = `-- name: GetLocalUserByEmail :one
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state FROM "user"
+WHERE email = $1
+`
+
+func (q *Queries) GetLocalUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getLocalUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -110,6 +165,34 @@ type JoinCloudWaitlistParams struct {
 // in Step 3. Repeating the call overwrites email + reason.
 func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistParams) (User, error) {
 	row := q.db.QueryRow(ctx, joinCloudWaitlist, arg.ID, arg.CloudWaitlistEmail, arg.CloudWaitlistReason)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+	)
+	return i, err
+}
+
+const markLocalUserOnboarded = `-- name: MarkLocalUserOnboarded :one
+UPDATE "user" SET
+    onboarded_at = COALESCE(onboarded_at, now()),
+    starter_content_state = COALESCE(starter_content_state, 'skipped_legacy'),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state
+`
+
+func (q *Queries) MarkLocalUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, markLocalUserOnboarded, id)
 	var i User
 	err := row.Scan(
 		&i.ID,

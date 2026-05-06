@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createLocalOwnerMember = `-- name: CreateLocalOwnerMember :one
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+RETURNING id, workspace_id, user_id, role, created_at
+`
+
+type CreateLocalOwnerMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) CreateLocalOwnerMember(ctx context.Context, arg CreateLocalOwnerMemberParams) (Member, error) {
+	row := q.db.QueryRow(ctx, createLocalOwnerMember, arg.WorkspaceID, arg.UserID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
@@ -43,6 +67,29 @@ DELETE FROM member WHERE id = $1
 func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteMember, id)
 	return err
+}
+
+const getLocalOwnerMember = `-- name: GetLocalOwnerMember :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+`
+
+type GetLocalOwnerMemberParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetLocalOwnerMember(ctx context.Context, arg GetLocalOwnerMemberParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getLocalOwnerMember, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getMember = `-- name: GetMember :one

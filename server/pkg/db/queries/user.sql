@@ -6,9 +6,18 @@ WHERE id = $1;
 SELECT * FROM "user"
 WHERE email = $1;
 
+-- name: GetLocalUserByEmail :one
+SELECT * FROM "user"
+WHERE email = $1;
+
 -- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: CreateLocalUser :one
+INSERT INTO "user" (name, email, avatar_url, onboarded_at, starter_content_state)
+VALUES ($1, $2, $3, now(), 'skipped_legacy')
 RETURNING *;
 
 -- name: UpdateUser :one
@@ -22,6 +31,14 @@ RETURNING *;
 -- name: MarkUserOnboarded :one
 UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkLocalUserOnboarded :one
+UPDATE "user" SET
+    onboarded_at = COALESCE(onboarded_at, now()),
+    starter_content_state = COALESCE(starter_content_state, 'skipped_legacy'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

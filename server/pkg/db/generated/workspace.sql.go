@@ -11,6 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createLocalWorkspace = `-- name: CreateLocalWorkspace :one
+INSERT INTO workspace (name, slug, description, context, issue_prefix)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
+`
+
+type CreateLocalWorkspaceParams struct {
+	Name        string      `json:"name"`
+	Slug        string      `json:"slug"`
+	Description pgtype.Text `json:"description"`
+	Context     pgtype.Text `json:"context"`
+	IssuePrefix string      `json:"issue_prefix"`
+}
+
+func (q *Queries) CreateLocalWorkspace(ctx context.Context, arg CreateLocalWorkspaceParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, createLocalWorkspace,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+		arg.Context,
+		arg.IssuePrefix,
+	)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Context,
+		&i.Repos,
+		&i.IssuePrefix,
+		&i.IssueCounter,
+	)
+	return i, err
+}
+
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
@@ -57,6 +96,30 @@ DELETE FROM workspace WHERE id = $1
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
+}
+
+const getLocalWorkspaceBySlug = `-- name: GetLocalWorkspaceBySlug :one
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+WHERE slug = $1
+`
+
+func (q *Queries) GetLocalWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error) {
+	row := q.db.QueryRow(ctx, getLocalWorkspaceBySlug, slug)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Context,
+		&i.Repos,
+		&i.IssuePrefix,
+		&i.IssueCounter,
+	)
+	return i, err
 }
 
 const getWorkspace = `-- name: GetWorkspace :one

@@ -12,7 +12,16 @@ WHERE id = $1;
 SELECT * FROM workspace
 WHERE slug = $1;
 
+-- name: GetLocalWorkspaceBySlug :one
+SELECT * FROM workspace
+WHERE slug = $1;
+
 -- name: CreateWorkspace :one
+INSERT INTO workspace (name, slug, description, context, issue_prefix)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: CreateLocalWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
