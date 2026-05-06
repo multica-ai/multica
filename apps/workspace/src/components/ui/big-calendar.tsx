@@ -23,11 +23,21 @@ import {
   Calendar as RBCalendar,
   type CalendarProps,
 } from "react-big-calendar";
-import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const dndModule = require("react-big-calendar/lib/addons/dragAndDrop");
 import type {
   withDragAndDropProps,
   EventInteractionArgs,
 } from "react-big-calendar/lib/addons/dragAndDrop";
+
+// Resolve CJS default — Vite may double-wrap: { default: fn } or fn directly.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveDefault(mod: any): (component: any) => any {
+  if (typeof mod === "function") return mod;
+  if (typeof mod?.default === "function") return mod.default;
+  throw new Error("react-big-calendar withDragAndDrop could not be resolved");
+}
+const withDragAndDrop = resolveDefault(dndModule);
 
 // ── date-fns localizer (reused by all calender instances) ─────────────────────
 const localizer = dateFnsLocalizer({
