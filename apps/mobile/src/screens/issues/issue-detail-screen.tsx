@@ -921,6 +921,9 @@ function CommentSheet({
 }) {
   const canSubmit = comment.trim().length > 0 && !createPending && !uploading;
   const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
 
   return (
     <Modal
@@ -935,7 +938,8 @@ function CommentSheet({
           styles.sheet,
           {
             marginBottom: keyboardHeight,
-            paddingBottom: Math.max(bottomInset, spacing.md),
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
           },
         ]}>
           <View style={styles.sheetHandle} />
@@ -1047,7 +1051,11 @@ function MentionTextInput({
         value={value}
       />
       {showSuggestions ? (
-        <View style={styles.mentionSuggestions}>
+        <ScrollView
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+          style={styles.mentionSuggestions}
+        >
           {suggestions.map((target) => (
             <Pressable
               key={`${target.type}-${target.id}`}
@@ -1067,7 +1075,7 @@ function MentionTextInput({
               </View>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
     </View>
   );
@@ -2365,6 +2373,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
+    maxHeight: 224,
     overflow: "hidden",
   },
   mentionSuggestionRow: {
