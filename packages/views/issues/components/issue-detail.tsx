@@ -196,6 +196,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showGoToEnd, setShowGoToEnd] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -674,7 +675,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </PageHeader>
 
         {/* Content — scrollable */}
-        <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+        <div
+          ref={scrollContainerRef}
+          className="relative flex-1 overflow-y-auto"
+          onScroll={() => {
+            const el = scrollContainerRef.current;
+            if (!el) return;
+            setShowGoToEnd(el.scrollHeight - el.scrollTop - el.clientHeight > 200);
+          }}
+        >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -1031,6 +1040,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           </div>
         </div>
+
+          {showGoToEnd && (
+            <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
+              <button
+                onClick={() => {
+                  const el = scrollContainerRef.current;
+                  if (el) {
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  }
+                }}
+                className="pointer-events-auto flex items-center gap-1 rounded-full bg-background border shadow-md px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowDown className="h-3 w-3" />
+                Go to end
+              </button>
+            </div>
+          )}
         </div>
       </div>
   );
