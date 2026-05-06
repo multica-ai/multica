@@ -299,6 +299,22 @@
       "queued_prefix": "{{when}}排队"
     }
   },
+  "transcript": {
+    "dialog_title": "智能体执行记录",
+    "status_running": "进行中",
+    "status_completed": "已完成",
+    "status_failed": "失败",
+    "filter": "筛选",
+    "clear_filters": "清除筛选",
+    "tool_calls_other": "{{count}} 次工具调用",
+    "events_other": "{{count}} 个事件",
+    "events_filtered": "{{shown}} / {{total}} 个事件",
+    "copy_all": "全部复制",
+    "copy_filtered": "复制筛选结果",
+    "copied": "已复制",
+    "waiting_events": "等待事件中…",
+    "no_data": "未记录执行数据。"
+  },
   "task_failure": {
     "agent_error": "智能体执行出错",
     "timeout": "task 超时",

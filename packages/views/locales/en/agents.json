@@ -305,6 +305,24 @@
       "queued_prefix": "Queued {{when}}"
     }
   },
+  "transcript": {
+    "dialog_title": "Agent Execution Transcript",
+    "status_running": "Running",
+    "status_completed": "Completed",
+    "status_failed": "Failed",
+    "filter": "Filter",
+    "clear_filters": "Clear filters",
+    "tool_calls_one": "{{count}} tool call",
+    "tool_calls_other": "{{count}} tool calls",
+    "events_one": "{{count}} events",
+    "events_other": "{{count}} events",
+    "events_filtered": "{{shown}} of {{total}} events",
+    "copy_all": "Copy all",
+    "copy_filtered": "Copy filtered",
+    "copied": "Copied",
+    "waiting_events": "Waiting for events...",
+    "no_data": "No execution data recorded."
+  },
   "task_failure": {
     "agent_error": "Agent execution error",
     "timeout": "Task timed out",

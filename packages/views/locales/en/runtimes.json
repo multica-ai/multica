@@ -136,6 +136,10 @@
       "timeout": "Timeout"
     }
   },
+  "charts": {
+    "heatmap_less": "Less",
+    "heatmap_more": "More"
+  },
   "list": {
     "col_runtime": "Runtime",
     "col_health": "Health",

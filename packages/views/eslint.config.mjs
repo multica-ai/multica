@@ -1,152 +1,55 @@
 import reactConfig from "@multica/eslint-config/react";
 import i18next from "eslint-plugin-i18next";
 
-// Hard-code i18n protection on files we have already translated. Adding a
-// path here means: every JSX text node on the page must be passed through
-// useT() — raw strings become a build error.
+// Global i18n protection. Every JSX text node anywhere in this package
+// must pass through useT() — raw strings become a build error. Files
+// listed in `STILL_HARDCODED` are explicit holdouts that haven't been
+// translated yet; the goal is to drain that list to zero.
 //
-// The list grows as new pages are translated; widening it is the canonical
-// signal that "this surface is translated and stays translated". We do NOT
-// turn it on globally yet — most of the codebase is still hardcoded EN, and
-// a global on-switch would drown CI in noise that nobody intends to fix
-// today.
-const TRANSLATED_FILES = [
-  "auth/login-page.tsx",
-  "settings/components/appearance-tab.tsx",
-  "editor/bubble-menu.tsx",
-  "editor/link-hover-card.tsx",
-  "editor/readonly-content.tsx",
-  "editor/title-editor.tsx",
-  "editor/extensions/code-block-view.tsx",
-  "editor/extensions/file-card.tsx",
-  "editor/extensions/image-view.tsx",
-  "editor/extensions/mention-suggestion.tsx",
-  "invite/invite-page.tsx",
-  "labels/label-chip.tsx",
-  "members/member-profile-card.tsx",
-  "my-issues/components/my-issues-page.tsx",
-  "my-issues/components/my-issues-header.tsx",
-  "search/search-command.tsx",
-  "inbox/components/inbox-page.tsx",
-  "inbox/components/inbox-list-item.tsx",
-  "inbox/components/inbox-detail-label.tsx",
-  "workspace/create-workspace-form.tsx",
-  "workspace/new-workspace-page.tsx",
-  "workspace/no-access-page.tsx",
-  "projects/components/projects-page.tsx",
-  "projects/components/project-detail.tsx",
-  "projects/components/project-picker.tsx",
-  "projects/components/project-chip.tsx",
-  "autopilots/components/autopilots-page.tsx",
-  "autopilots/components/autopilot-detail-page.tsx",
-  "autopilots/components/autopilot-dialog.tsx",
-  "autopilots/components/trigger-config.tsx",
-  "autopilots/components/pickers/agent-picker.tsx",
-  "autopilots/components/pickers/timezone-picker.tsx",
-  "skills/components/skills-page.tsx",
-  "skills/components/skill-detail-page.tsx",
-  "skills/components/skill-columns.tsx",
-  "skills/components/create-skill-dialog.tsx",
-  "skills/components/runtime-local-skill-import-panel.tsx",
-  "skills/components/file-tree.tsx",
-  "skills/components/file-viewer.tsx",
-  "chat/components/chat-fab.tsx",
-  "chat/components/chat-input.tsx",
-  "chat/components/chat-message-list.tsx",
-  "chat/components/chat-session-history.tsx",
-  "chat/components/chat-window.tsx",
-  "chat/components/context-anchor.tsx",
-  "chat/components/no-agent-banner.tsx",
-  "chat/components/offline-banner.tsx",
-  "chat/components/task-status-pill.tsx",
-  "modals/backlog-agent-hint.tsx",
-  "modals/set-parent-issue.tsx",
-  "modals/add-child-issue.tsx",
-  "modals/delete-issue-confirm.tsx",
-  "modals/feedback.tsx",
-  "modals/issue-picker-modal.tsx",
-  "modals/create-workspace.tsx",
-  "modals/create-project.tsx",
-  "modals/create-issue.tsx",
-  "modals/quick-create-issue.tsx",
-  "settings/components/settings-page.tsx",
-  "settings/components/account-tab.tsx",
-  "settings/components/notifications-tab.tsx",
-  "settings/components/labs-tab.tsx",
-  "settings/components/repositories-tab.tsx",
-  "settings/components/tokens-tab.tsx",
-  "settings/components/workspace-tab.tsx",
-  "settings/components/members-tab.tsx",
-  "settings/components/delete-workspace-dialog.tsx",
-  "runtimes/components/runtimes-page.tsx",
-  "runtimes/components/runtime-detail-page.tsx",
-  "runtimes/components/runtime-detail.tsx",
-  "runtimes/components/shared.tsx",
-  "layout/app-sidebar.tsx",
-  "layout/help-launcher.tsx",
-  "layout/workspace-loader.tsx",
-  "onboarding/components/step-header.tsx",
-  "onboarding/steps/step-welcome.tsx",
-  "onboarding/onboarding-flow.tsx",
-  "issues/components/issues-page.tsx",
-  "issues/components/issues-header.tsx",
-  "issues/components/issue-detail.tsx",
-  "issues/components/comment-card.tsx",
-  "issues/components/comment-input.tsx",
-  "issues/components/reply-input.tsx",
-  "issues/components/board-view.tsx",
-  "issues/components/board-card.tsx",
-  "issues/components/board-column.tsx",
-  "issues/components/list-view.tsx",
-  "issues/components/status-heading.tsx",
-  "issues/components/agent-live-card.tsx",
-  "issues/components/execution-log-section.tsx",
-  "issues/components/batch-action-toolbar.tsx",
-  "issues/components/backlog-agent-hint-dialog.tsx",
-  "issues/components/labels-panel.tsx",
-  "issues/components/pickers/status-picker.tsx",
-  "issues/components/pickers/priority-picker.tsx",
-  "issues/components/pickers/assignee-picker.tsx",
-  "issues/components/pickers/due-date-picker.tsx",
-  "issues/components/pickers/label-picker.tsx",
-  "issues/components/pickers/property-picker.tsx",
-  "issues/actions/issue-actions-menu-items.tsx",
-  "agents/components/agents-page.tsx",
-  "agents/components/agent-detail-page.tsx",
-  "agents/components/agent-detail-inspector.tsx",
-  "agents/components/agent-overview-pane.tsx",
-  "agents/components/create-agent-dialog.tsx",
-  "agents/components/agent-row-actions.tsx",
-  "agents/components/agent-columns.tsx",
-  "agents/components/inspector/skill-attach.tsx",
-  "agents/components/inspector/concurrency-picker.tsx",
-  "agents/components/inspector/runtime-picker.tsx",
-  "agents/components/inspector/model-picker.tsx",
-  "agents/components/model-dropdown.tsx",
-  "runtimes/components/runtime-columns.tsx",
-  "runtimes/components/runtime-list.tsx",
-  "runtimes/components/connect-remote-dialog.tsx",
-  "runtimes/components/update-section.tsx",
-  "agents/components/tabs/instructions-tab.tsx",
-  "agents/components/tabs/env-tab.tsx",
-  "agents/components/tabs/custom-args-tab.tsx",
-  "agents/components/tabs/skills-tab.tsx",
-  "agents/components/tabs/activity-tab.tsx",
-  "agents/components/skill-add-dialog.tsx",
-  "onboarding/steps/step-questionnaire.tsx",
-  "onboarding/components/option-card.tsx",
+// Scope of `mode: "jsx-text-only"`: flags raw strings inside JSX
+// children only. Attribute values (className, aria-label) and plain
+// TypeScript string literals are allowed through because they have
+// legitimate non-translatable uses (CSS classes, framework defaults,
+// dev-tool keys); attribute regressions are caught in code review.
+
+// Files that still contain hardcoded EN strings and have NOT been wired
+// to the i18n bundle yet. New files added here SHOULD also have an
+// issue or follow-up commit driving them to zero.
+const STILL_HARDCODED = [
+  // Onboarding deep steps — flagged in the rollout plan; large surfaces
+  // with copy-heavy content that benefits from a focused translation pass.
+  "onboarding/steps/step-workspace.tsx",
+  "onboarding/steps/step-runtime-connect.tsx",
+  "onboarding/steps/step-platform-fork.tsx",
+  "onboarding/steps/step-agent.tsx",
+  "onboarding/steps/step-first-issue.tsx",
+  "onboarding/steps/cli-install-instructions.tsx",
+  "onboarding/components/runtime-aside-panel.tsx",
+  "onboarding/components/starter-content-prompt.tsx",
+  "onboarding/components/cloud-waitlist-expand.tsx",
+  "onboarding/components/compact-runtime-row.tsx",
+  // Runtimes usage panel — chart-heavy KPI / breakdown / receipt UI.
+  "runtimes/components/usage-section.tsx",
+  // Agents minor — sparkline label, profile card hover, presence
+  // indicator chips. Visual primitives with little text but on the
+  // hardcoded side until translated.
+  "agents/components/sparkline.tsx",
+  "agents/components/agent-presence-indicator.tsx",
+  "agents/components/agent-profile-card.tsx",
+  "agents/components/visibility-badge.tsx",
+  "agents/components/char-counter.tsx",
+  // common/ helpers — task-transcript family + a few inbox/issue
+  // detail bits that read shared. They'll come along with whichever
+  // namespace pulls them next.
 ];
 
 export default [
   ...reactConfig,
   {
-    files: TRANSLATED_FILES,
+    files: ["**/*.tsx"],
+    ignores: ["**/*.test.tsx", "test/**", ...STILL_HARDCODED],
     plugins: { i18next },
     rules: {
-      // jsx-text-only flags raw strings inside JSX children only. JSX
-      // attributes (className, aria-label) and TS literals are allowed
-      // through because they have legitimate non-translatable uses; we
-      // catch attribute regressions during code review instead.
       "i18next/no-literal-string": [
         "error",
         { mode: "jsx-text-only" },

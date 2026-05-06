@@ -37,5 +37,8 @@
   "empty": {
     "no_results": "No results found.",
     "type_to_search": "Type to search issues and projects"
+  },
+  "trigger": {
+    "label": "Search..."
   }
 }

@@ -131,6 +131,10 @@
       "timeout": "超时"
     }
   },
+  "charts": {
+    "heatmap_less": "少",
+    "heatmap_more": "多"
+  },
   "list": {
     "col_runtime": "运行时",
     "col_health": "健康度",

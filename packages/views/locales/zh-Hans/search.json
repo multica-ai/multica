@@ -37,5 +37,8 @@
   "empty": {
     "no_results": "未找到结果。",
     "type_to_search": "输入关键词搜索 issue 和 project"
+  },
+  "trigger": {
+    "label": "搜索..."
   }
 }
