@@ -220,6 +220,22 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	return workspaces, nil
 }
 
+// IssueSummary holds the minimal issue metadata needed for notification text.
+type IssueSummary struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	Title      string `json:"title"`
+}
+
+// GetIssue returns minimal issue metadata for notification enrichment.
+func (c *Client) GetIssue(ctx context.Context, issueID string) (*IssueSummary, error) {
+	var resp IssueSummary
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/issues/%s", issueID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
 type IssueGCStatus struct {
 	Status    string    `json:"status"`

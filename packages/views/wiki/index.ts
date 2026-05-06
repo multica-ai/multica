@@ -1,0 +1,1 @@
+export { WikiPage } from "./components";

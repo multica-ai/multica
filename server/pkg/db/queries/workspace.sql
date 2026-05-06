@@ -22,6 +22,7 @@ UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
+    wiki_content = COALESCE(sqlc.narg('wiki_content'), wiki_content),
     settings = COALESCE(sqlc.narg('settings'), settings),
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
