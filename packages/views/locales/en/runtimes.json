@@ -72,7 +72,11 @@
       "deleting": "Deleting..."
     },
     "toast_deleted": "Runtime deleted",
-    "toast_delete_failed": "Failed to delete runtime"
+    "toast_delete_failed": "Failed to delete runtime",
+    "running_chip_one": "· {{count}} running",
+    "running_chip_other": "· {{count}} running",
+    "queued_chip_one": "· {{count}} queued",
+    "queued_chip_other": "· {{count}} queued"
   },
   "detail_page": {
     "not_found_title": "Runtime not found",

@@ -14,7 +14,27 @@
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
-    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents."
+    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents.",
+    "illustration": {
+      "card1_actor_name": "You",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " can you draft a short launch post? Pull from ",
+      "card1_body_suffix": "'s interview findings.",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "On it. Pulling Research's quotes, drafting around the \"time saved\" angle…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "This week's user interviews summarized — 12 calls, 4 recurring themes, 3 pull-quotes.",
+      "card3_timestamp": "15 min ago",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Reviewed Monday's draft — left 4 notes on tone. Standing by for the new one.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "Shipped the export feature ",
+      "card5_body_suffix": " flagged. Preview link in the PR.",
+      "card5_mention_you": "@you",
+      "card5_timestamp": "just now"
+    }
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding"

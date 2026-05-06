@@ -14,7 +14,27 @@
     "continue_on_web": "在 web 端继续",
     "start_exploring": "开始探索",
     "skip_existing": "我之前做过了",
-    "illustration_caption": "每个 issue、每条对话、每个决策——团队和智能体共享同一份上下文。"
+    "illustration_caption": "每个 issue、每条对话、每个决策——团队和智能体共享同一份上下文。",
+    "illustration": {
+      "card1_actor_name": "你",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " 能不能起草一篇简短的发布文？参考 ",
+      "card1_body_suffix": " 的访谈结论。",
+      "card1_mention_content": "@内容智能体",
+      "card1_mention_research": "@研究智能体",
+      "card2_actor_name": "内容智能体",
+      "card2_body": "好的，正在拉取研究智能体的引述，围绕「节省的时间」展开…",
+      "card3_actor_name": "研究智能体",
+      "card3_body": "本周用户访谈整理完成 —— 12 通电话、4 个反复出现的主题、3 段可引用语。",
+      "card3_timestamp": "15 分钟前",
+      "card4_actor_name": "审稿智能体",
+      "card4_body": "已审完周一那版草稿 —— 留了 4 条语气批注。等新一版。",
+      "card5_actor_name": "编码智能体",
+      "card5_body_prefix": "已发布 ",
+      "card5_body_suffix": " 标记的导出功能，PR 里附了预览链接。",
+      "card5_mention_you": "@你",
+      "card5_timestamp": "刚刚"
+    }
   },
   "errors": {
     "skip_failed": "完成上手引导失败"

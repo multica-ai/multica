@@ -198,58 +198,76 @@ export function StepWelcome({
  * aesthetic of the left column.
  */
 function WelcomeIllustration() {
+  const { t } = useT("onboarding");
   return (
     <div className="flex w-full max-w-[460px] flex-col gap-3">
       <MockActivityCard
-        actor={{ kind: "user", name: "You", initial: "N" }}
+        actor={{
+          kind: "user",
+          name: t(($) => $.welcome.illustration.card1_actor_name),
+          initial: t(($) => $.welcome.illustration.card1_actor_initial),
+        }}
         issueId="MCA-42"
         content={
           <>
-            <Mention>@Content Agent</Mention> can you draft a short launch
-            post? Pull from <Mention>@Research Agent</Mention>&apos;s interview
-            findings.
+            <Mention>{t(($) => $.welcome.illustration.card1_mention_content)}</Mention>
+            {t(($) => $.welcome.illustration.card1_body_prefix)}
+            <Mention>{t(($) => $.welcome.illustration.card1_mention_research)}</Mention>
+            {t(($) => $.welcome.illustration.card1_body_suffix)}
           </>
         }
       />
       <MockActivityCard
         className="-translate-x-5 -rotate-[1.2deg]"
-        actor={{ kind: "agent", name: "Content Agent", provider: "codex" }}
+        actor={{
+          kind: "agent",
+          name: t(($) => $.welcome.illustration.card2_actor_name),
+          provider: "codex",
+        }}
         issueId="MCA-42"
-        content={
-          <>
-            On it. Pulling Research&apos;s quotes, drafting around the
-            &ldquo;time saved&rdquo; angle…
-          </>
-        }
+        content={t(($) => $.welcome.illustration.card2_body)}
         status="in_progress"
       />
       <MockActivityCard
         className="translate-x-8 rotate-[1.6deg]"
-        actor={{ kind: "agent", name: "Research Agent", provider: "hermes" }}
+        actor={{
+          kind: "agent",
+          name: t(($) => $.welcome.illustration.card3_actor_name),
+          provider: "hermes",
+        }}
         issueId="MCA-38"
-        content="This week's user interviews summarized — 12 calls, 4 recurring themes, 3 pull-quotes."
+        content={t(($) => $.welcome.illustration.card3_body)}
         status="done"
-        timestamp="15 min ago"
+        timestamp={t(($) => $.welcome.illustration.card3_timestamp)}
       />
       <MockActivityCard
         className="-translate-x-6 -rotate-[0.8deg]"
-        actor={{ kind: "agent", name: "Review Agent", provider: "openclaw" }}
+        actor={{
+          kind: "agent",
+          name: t(($) => $.welcome.illustration.card4_actor_name),
+          provider: "openclaw",
+        }}
         issueId="MCA-42"
-        content="Reviewed Monday's draft — left 4 notes on tone. Standing by for the new one."
+        content={t(($) => $.welcome.illustration.card4_body)}
         status="in_review"
       />
       <MockActivityCard
         className="translate-x-6 rotate-[1deg]"
-        actor={{ kind: "agent", name: "Coding Agent", provider: "claude" }}
+        actor={{
+          kind: "agent",
+          name: t(($) => $.welcome.illustration.card5_actor_name),
+          provider: "claude",
+        }}
         issueId="MCA-35"
         content={
           <>
-            Shipped the export feature <Mention>@you</Mention> flagged.
-            Preview link in the PR.
+            {t(($) => $.welcome.illustration.card5_body_prefix)}
+            <Mention>{t(($) => $.welcome.illustration.card5_mention_you)}</Mention>
+            {t(($) => $.welcome.illustration.card5_body_suffix)}
           </>
         }
         status="done"
-        timestamp="just now"
+        timestamp={t(($) => $.welcome.illustration.card5_timestamp)}
       />
     </div>
   );

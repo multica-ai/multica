@@ -68,7 +68,7 @@ export function LabsTab() {
                   <p className="text-sm text-muted-foreground">
                     {t(($) => $.labs.co_authored_by_description_prefix)}{" "}
                     <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                      Co-authored-by: multica-agent &lt;github@multica.ai&gt;
+                      {"Co-authored-by: multica-agent <github@multica.ai>"}
                     </code>{" "}
                     {t(($) => $.labs.co_authored_by_description_suffix)}
                   </p>

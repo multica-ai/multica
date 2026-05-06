@@ -21,6 +21,19 @@
     "loading_named_prefix": "正在加载"
   },
   "sidebar": {
-    "unpin_tooltip": "取消固定"
+    "unpin_tooltip": "取消固定",
+    "workspaces_label": "工作区",
+    "create_workspace": "创建工作区",
+    "pending_invitations_label": "待处理的邀请",
+    "invitation_workspace_fallback": "工作区",
+    "invitation_join": "加入",
+    "invitation_decline": "拒绝",
+    "log_out": "退出登录",
+    "new_issue": "新建 issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "固定",
+    "workspace_group": "工作区",
+    "configure_group": "配置",
+    "unread_overflow": "99+"
   }
 }

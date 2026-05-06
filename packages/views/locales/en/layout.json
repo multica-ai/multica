@@ -21,6 +21,19 @@
     "loading_named_prefix": "Loading"
   },
   "sidebar": {
-    "unpin_tooltip": "Unpin"
+    "unpin_tooltip": "Unpin",
+    "workspaces_label": "Workspaces",
+    "create_workspace": "Create workspace",
+    "pending_invitations_label": "Pending invitations",
+    "invitation_workspace_fallback": "Workspace",
+    "invitation_join": "Join",
+    "invitation_decline": "Decline",
+    "log_out": "Log out",
+    "new_issue": "New Issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Pinned",
+    "workspace_group": "Workspace",
+    "configure_group": "Configure",
+    "unread_overflow": "99+"
   }
 }

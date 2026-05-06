@@ -275,6 +275,7 @@ function HeroCard({
   cliVersion: string | null;
   daemonShort: string | null;
 }) {
+  const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
   const device = runtime.device_info ? parseDeviceInfo(runtime.device_info) : null;
   const hasTechDetails = !!cliVersion || !!daemonShort;
@@ -293,7 +294,7 @@ function HeroCard({
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
-              last seen {lastSeen}
+              {t(($) => $.detail.last_seen, { when: lastSeen })}
             </span>
           </div>
         </div>
@@ -358,7 +359,7 @@ function HeroCard({
                 showDetails ? "rotate-90" : ""
               }`}
             />
-            Technical details
+            {t(($) => $.detail.technical_details)}
           </button>
           {showDetails && (
             <dl className="grid grid-cols-1 gap-y-2 border-t bg-muted/30 px-4 py-3 sm:grid-cols-2">
@@ -410,19 +411,21 @@ function ServingAgentsCard({
   presenceMap: Map<string, AgentPresenceDetail>;
   agentHref: (agentId: string) => string;
 }) {
+  const { t } = useT("runtimes");
+  const { t: tAgents } = useT("agents");
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">Serving</span>
+        <span className="text-xs font-semibold">{t(($) => $.detail.serving_title)}</span>
         <span className="text-xs text-muted-foreground">
-          {agents.length} agent{agents.length === 1 ? "" : "s"}
+          {t(($) => $.detail.serving_count, { count: agents.length })}
         </span>
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">
           <Cpu className="h-5 w-5 text-muted-foreground/40" />
           <p className="mt-2 text-xs text-muted-foreground">
-            No agents are bound to this runtime yet.
+            {t(($) => $.detail.no_agents)}
           </p>
         </div>
       ) : (
@@ -432,6 +435,7 @@ function ServingAgentsCard({
             const av = detail
               ? availabilityConfig[detail.availability]
               : availabilityConfig.offline;
+            const avLabel = tAgents(($) => $.availability[detail?.availability ?? "offline"]);
             const wl = detail ? workloadConfig[detail.workload] : null;
             const running = detail?.runningCount ?? 0;
             const queued = detail?.queuedCount ?? 0;
@@ -449,7 +453,7 @@ function ServingAgentsCard({
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-                      <span className={av.textClass}>{av.label}</span>
+                      <span className={av.textClass}>{avLabel}</span>
                     </span>
                     {wl && detail && detail.workload !== "idle" && (
                       <span className={`inline-flex items-center gap-1 ${wl.textClass}`}>
@@ -457,12 +461,12 @@ function ServingAgentsCard({
                         <wl.icon
                           className={`h-3 w-3 ${detail.workload === "working" ? "animate-spin" : ""}`}
                         />
-                        {wl.label}
+                        {tAgents(($) => $.workload[detail.workload])}
                         {running > 0 && (
-                          <span className="text-muted-foreground">· {running} running</span>
+                          <span className="text-muted-foreground">{t(($) => $.detail.running_chip, { count: running })}</span>
                         )}
                         {queued > 0 && (
-                          <span className="text-muted-foreground">· {queued} queued</span>
+                          <span className="text-muted-foreground">{t(($) => $.detail.queued_chip, { count: queued })}</span>
                         )}
                       </span>
                     )}
@@ -491,17 +495,18 @@ function DiagnosticsCard({
   canDelete: boolean;
   onDelete: () => void;
 }) {
+  const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">Diagnostics</span>
+        <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
         {isLocal && (
           <div>
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-              CLI
+              {t(($) => $.detail.diagnostics_cli)}
             </div>
             <UpdateSection
               runtimeId={runtime.id}
@@ -520,7 +525,7 @@ function DiagnosticsCard({
               onClick={onDelete}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Delete runtime
+              {t(($) => $.detail.delete_button)}
             </Button>
           </div>
         )}

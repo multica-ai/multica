@@ -71,7 +71,9 @@
       "deleting": "删除中..."
     },
     "toast_deleted": "已删除运行时",
-    "toast_delete_failed": "删除运行时失败"
+    "toast_delete_failed": "删除运行时失败",
+    "running_chip_other": "· {{count}} 个进行中",
+    "queued_chip_other": "· {{count}} 个排队中"
   },
   "detail_page": {
     "not_found_title": "未找到运行时",
