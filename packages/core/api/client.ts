@@ -1009,7 +1009,7 @@ export class ApiClient {
     });
   }
 
-  async archiveChatSession(id: string): Promise<void> {
+  async deleteChatSession(id: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 

@@ -51,6 +51,7 @@ export type WSEventType =
   | "chat:message"
   | "chat:done"
   | "chat:session_read"
+  | "chat:session_deleted"
   | "project:created"
   | "project:updated"
   | "project:deleted"
@@ -277,6 +278,10 @@ export interface ChatDonePayload {
 }
 
 export interface ChatSessionReadPayload {
+  chat_session_id: string;
+}
+
+export interface ChatSessionDeletedPayload {
   chat_session_id: string;
 }
 

@@ -11,16 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const archiveChatSession = `-- name: ArchiveChatSession :exec
-UPDATE chat_session SET status = 'archived', updated_at = now()
-WHERE id = $1
-`
-
-func (q *Queries) ArchiveChatSession(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, archiveChatSession, id)
-	return err
-}
-
 const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -146,6 +136,21 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.ForceFreshSession,
 	)
 	return i, err
+}
+
+const deleteChatSession = `-- name: DeleteChatSession :exec
+DELETE FROM chat_session WHERE id = $1
+`
+
+// Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
+// chat_session_id on agent_task_queue is set NULL by FK so completed/failed
+// task history survives the session being removed. Callers must cancel any
+// in-flight tasks for the session BEFORE deletion (see TaskService.
+// CancelTasksByChatSession) so the daemon does not keep running work whose
+// result has nowhere to land.
+func (q *Queries) DeleteChatSession(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatSession, id)
+	return err
 }
 
 const getChatMessage = `-- name: GetChatMessage :one

@@ -364,6 +364,22 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 	return nil
 }
 
+// CancelTasksByChatSession cancels active tasks tied to a chat session.
+// Mirrors CancelTasksByTriggerComment: must run BEFORE the chat_session row
+// is deleted, because the FK ON DELETE SET NULL would otherwise nullify
+// chat_session_id and we'd lose the ability to reach those tasks.
+func (s *TaskService) CancelTasksByChatSession(ctx context.Context, chatSessionID pgtype.UUID) error {
+	cancelled, err := s.Queries.CancelAgentTasksByChatSession(ctx, chatSessionID)
+	if err != nil {
+		return err
+	}
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return nil
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {

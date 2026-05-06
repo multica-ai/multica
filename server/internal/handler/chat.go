@@ -174,7 +174,12 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
 }
 
-func (h *Handler) ArchiveChatSession(w http.ResponseWriter, r *http.Request) {
+// DeleteChatSession hard-deletes a chat session owned by the caller. Pending
+// tasks for the session are cancelled first so the daemon doesn't keep
+// running work whose result has nowhere to land. chat_message rows cascade
+// out via FK; agent_task_queue.chat_session_id is set NULL by FK so
+// completed/failed task history survives.
+func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -187,10 +192,22 @@ func (h *Handler) ArchiveChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.ArchiveChatSession(r.Context(), session.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to archive chat session")
+	// Cancel in-flight tasks BEFORE deleting the session — once the row is
+	// gone the FK ON DELETE SET NULL strips chat_session_id and we can no
+	// longer reach those tasks to cancel them.
+	if err := h.TaskService.CancelTasksByChatSession(r.Context(), session.ID); err != nil {
+		slog.Warn("cancel tasks for deleted chat session failed", "session_id", sessionID, "error", err)
+	}
+
+	if err := h.Queries.DeleteChatSession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
 		return
 	}
+
+	resolvedSessionID := uuidToString(session.ID)
+	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
+		ChatSessionID: resolvedSessionID,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -235,10 +252,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Load chat session.
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
-		return
-	}
-	if session.Status != "active" {
-		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
 	}
 

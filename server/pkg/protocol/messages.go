@@ -87,6 +87,13 @@ type ChatSessionReadPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+// ChatSessionDeletedPayload is broadcast when a chat session is hard-deleted
+// so other tabs/devices drop it from their session lists and reset the active
+// pointer if it referenced the deleted session.
+type ChatSessionDeletedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share

@@ -26,7 +26,6 @@ import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
   chatSessionsOptions,
-  allChatSessionsOptions,
   chatMessagesOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
@@ -62,7 +61,6 @@ export function ChatWindow() {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId ?? ""),
   );
@@ -82,12 +80,6 @@ export function ChatWindow() {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
-
-  // Check if current session is archived
-  const currentSession = activeSessionId
-    ? allSessions.find((s) => s.id === activeSessionId)
-    : null;
-  const isSessionArchived = currentSession?.status === "archived";
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
@@ -470,13 +462,12 @@ export function ChatWindow() {
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
-      {/* Input — disabled for archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
+      {/* Input — locked out entirely when there's no agent (the EmptyState
+       *  above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
         noAgent={noAgent}
         agentName={activeAgent?.name}
         topSlot={<ContextAnchorCard />}

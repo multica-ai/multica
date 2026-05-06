@@ -46,9 +46,14 @@ SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     updated_at = now()
 WHERE id = sqlc.arg('id');
 
--- name: ArchiveChatSession :exec
-UPDATE chat_session SET status = 'archived', updated_at = now()
-WHERE id = $1;
+-- name: DeleteChatSession :exec
+-- Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
+-- chat_session_id on agent_task_queue is set NULL by FK so completed/failed
+-- task history survives the session being removed. Callers must cancel any
+-- in-flight tasks for the session BEFORE deletion (see TaskService.
+-- CancelTasksByChatSession) so the daemon does not keep running work whose
+-- result has nowhere to land.
+DELETE FROM chat_session WHERE id = $1;
 
 -- name: TouchChatSession :exec
 UPDATE chat_session SET updated_at = now()
