@@ -78,7 +78,15 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		// Only treat pgx.ErrNoRows as a real "task gone" signal — daemon
+		// uses this 404 to interrupt the running agent, so a transient DB
+		// error must not be reported as a deletion.
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, false
+		}
+		slog.Warn("get agent task failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load task")
 		return db.AgentTaskQueue{}, false
 	}
 
