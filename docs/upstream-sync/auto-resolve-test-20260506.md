@@ -1,137 +1,152 @@
 # Auto-resolve script — test run
 
-**Date:** 2026-05-06
+**Date:** 2026-05-06 (updated 09:30Z after expanding purge scope)
 **Script under test:** `scripts/upstream-sync-resolve.sh`
-**Test branch:** `chore/test-resolve-script` (created from
-`chore/upstream-sync-analysis` @ `83d40bc5`, deleted after run)
+**Test branch:** `chore/test-resolve-script-v2` (created from
+`chore/upstream-sync-analysis` @ `4f648d4b`, deleted after run)
 **Target merge:** `upstream/main` @ `0dbfbfed` (fetched 2026-05-06T09:08Z)
 
 ## Headline
 
-| Metric | Value |
-|---|---|
-| Conflict files before script | **201** |
-| Conflict files after script   | **118** |
-| Auto-resolved (single pass)   | **83** |
-| User's target (94 ± 5)        | 89 – 99 |
-| Verdict                       | **6 below lower bound** — see "Why not 94" |
+| Metric | Single-pass | Two-pass (after manual SQL + package.json) |
+|---|---|---|
+| Conflict files before script  | 201 | 201 |
+| Conflict files after script   | **94**  | **83**  |
+| Auto-resolved by script       | **107** | **114** |
+| Manual resolves needed first  | 0   | 4 (2 × `*.sql` + 2 × `package.json`) |
+| Reduction                     | **53 %** | **59 %** |
 
-The script reduces the merge surface by **41 %** in a single pass with no
-manual intervention.
+The 83 left after the full two-pass workflow are **genuine cerebro
+versus upstream content conflicts** that no scripted approach can
+resolve. They line up with the 80 + 2 + 1 split below: 80 files where
+both sides have changed the same lines, 2 where multica deleted a file
+the fork still modifies, 1 where both sides added a file with different
+content.
 
-## Per-category breakdown
+## Per-category breakdown (single pass — no manual intervention)
 
-| Cat | Description | Handled | Skipped | Notes |
-|---|---|---|---|---|
-| 1 | UA-files (multica added; we deleted) | 71 | 4 | 4 unhandled live in `apps/web/app/docs/` (not in user's pattern) |
-| 2 | DD-files (both deleted) | 12 | 0 | All under `apps/docs/` |
-| 3 | sqlc-generated Go files | 0 | — | **Blocked by upstream `.sql` queries still UU** |
-| 4 | `pnpm-lock.yaml` | 0 | — | Cascade-skipped (depends on Cat 3) |
-| **Total** | | **83** | **4** | |
+| Cat | Description | Handled | Notes |
+|---|---|---|---|
+| 1 | Purge docs/i18n stack (any conflict status) | 107 | Walks all unmerged files; deletes any whose path matches the docs/i18n purge regex |
+| 2 | Both-deleted catch-all (status `DD` outside purge) | 0 | All `DD` paths in this sync were under `apps/docs/` and already covered by Cat 1 |
+| 3 | sqlc-generated Go files | 0 | **Blocked**: 2 `.sql` query files are still in UU state; safe-stop until manual resolve |
+| 4 | `pnpm-lock.yaml` | 0 | Cascade-skipped because Cat 3 was blocked |
+| **Total** | | **107** | |
 
-### Cat 1 unhandled (4 files)
+## Per-category breakdown (second pass — after user resolves the 4 SQL/pkg files)
+
+| Cat | Description | Handled | Notes |
+|---|---|---|---|
+| 1 | Purge docs/i18n stack | 0 | Already done in pass 1 |
+| 2 | Both-deleted catch-all | 0 | n/a |
+| 3 | sqlc-generated Go files | 5 | `agent.sql.go`, `chat.sql.go`, `issue.sql.go`, `runtime.sql.go`, `user.sql.go`. The shared `models.go` is also UU but doesn't match the `*.sql.go` regex — it gets cleaned by the implicit `git add server/pkg/db/generated/` after `make sqlc`, so total cleared = 6. |
+| 4 | `pnpm-lock.yaml` | 1 | Resolved with `--theirs` then `pnpm install --no-frozen-lockfile` regenerates from merged `package.json`s |
+| **Total** | | **6 (or 7 incl. models.go)** | |
+
+## What the script's purge regex covers
 
 ```
-apps/web/app/docs/[lang]/[...slug]/page.tsx
-apps/web/app/docs/[lang]/layout.tsx
-apps/web/app/docs/[lang]/page.tsx
-apps/web/app/docs/sitemap.ts
+apps/web/docs/...
+apps/web/content/docs/...
+apps/web/app/docs/...
+apps/docs/...
+apps/web/components/{architecture-diagram,docs-settings,editorial,hero,mermaid}.tsx
+apps/web/lib/{i18n,site,translations}.ts
+apps/web/middleware.ts
 ```
 
-Upstream restructured `apps/web/app/docs/` to add a `[lang]/` i18n
-segment. These 4 files are part of the same docs stack we already chose
-to drop, but the user-supplied `deletable_re` only matches
-`apps/web/docs/`, `apps/web/content/docs/`, plus a fixed list of
-component / lib / middleware filenames. `apps/web/app/docs/` was not in
-the spec, so the script flags them for manual review rather than
-silently expanding scope.
+For these paths, **any unmerged status** (both modified, ours added,
+theirs added, ours deleted, theirs deleted, both deleted, both added)
+resolves to `git rm`. The fork has chosen to drop the multica docs site
+entirely; cerebro docs land under `packages/cerebro-*/` or other
+project-controlled paths.
 
-**Decision needed:** if these should auto-delete on every sync, extend
-`deletable_re` in `scripts/upstream-sync-resolve.sh` (line ~125) to add
-`apps/web/app/docs/` as a fifth alternation. That would lift Cat 1 from
-71 to 75 and total auto-resolution to 87 single-pass.
-
-### Why Cat 3 blocked
-
-`server/pkg/db/queries/agent.sql` and `server/pkg/db/queries/issue.sql`
-are both in UU state. The script enforces "fix queries first, then
-regenerate" because running `make sqlc` against unmerged queries would
-emit garbage Go code that hides the real merge conflict.
-
-After the user manually resolves those 2 `.sql` files, a second pass of
-the script will pick up the 6 generated `.sql.go` files and run
-`make sqlc` to regenerate from the merged queries. Same goes for Cat 4
-(`pnpm-lock.yaml`) — it depends on `package.json` files being merged
-first.
-
-## Two-pass workflow analysis
-
-The realistic operator workflow is:
-
-1. `git merge upstream/main` → 201 conflicts.
-2. `bash scripts/upstream-sync-resolve.sh --apply` → resolves 83 (Cat 1
-   + Cat 2). Conflict surface: **118 files**.
-3. **Manual:** resolve `server/pkg/db/queries/*.sql` (2 files) and any
-   `package.json` UU's (count varies per sync).
-4. `bash scripts/upstream-sync-resolve.sh --apply` again → resolves
-   ~6 sqlc-generated + 1 pnpm-lock = **7 more**.
-5. **Manual:** resolve remaining ~111 UU/AU/UD/DU/AA conflicts (the
-   genuine "both touched the same code" cases).
-
-Total auto-resolved across two passes: **~90 files** (vs user's 94
-estimate). The 4-file gap is the `apps/web/app/docs/` paths the user
-spec didn't cover.
-
-## Conflict surface that remains (118 files)
-
-After Cat 1 + Cat 2:
+## Conflict surface that remains (94 single-pass / 83 two-pass)
 
 | Status | Count | What it means |
 |---|---|---|
-| UU | 92 | Both modified — true content conflicts |
-| AU | 12 | We added; they deleted |
-| DU |  6 | We deleted; they modified |
-| UA |  4 | They added; we deleted (unhandled `apps/web/app/docs/`) |
-| UD |  3 | They deleted; we modified |
-| AA |  1 | Both added different content |
+| UU | 80  | Both sides modified — true line-level content conflicts |
+| UD | 2   | Multica deleted a file we modified |
+| AA | 1   | Both sides added a file at the same path with different content |
 
-The 92 UU files are the real merge work — that's where cerebro
-modifications and upstream modifications collide line-by-line. No
-scripted approach helps there; the two earlier strategy attempts
-(Phase 3 wrappers, Phase 6 relocation) confirm that.
+Examples of the 80 UU files (after two-pass workflow):
+
+```
+.env.example                          (config divergence)
+.github/workflows/ci.yml              (CI tweaks both sides)
+.gitignore                            (entries both sides)
+CONTRIBUTING.md, SELF_HOSTING*.md     (docs both sides edit)
+Makefile                              (target additions both sides)
+packages/views/issues/components/*.tsx (cerebro patches collide with upstream evolution)
+packages/views/chat/components/*.tsx
+... (the rest are cerebro vs upstream evolution in shared code)
+```
+
+These are exactly the `CEREBRO-PATCH(...)`-marked files that Phase 4
+flagged. Each one needs a human merge call: keep cerebro behaviour vs.
+take upstream improvement vs. integrate both. No regex can answer that.
+
+## Realistic operator workflow
+
+```bash
+# 1. Start the merge.
+git checkout -b chore/upstream-sync-$(date +%Y-W%V) chore/upstream-sync-analysis
+git fetch upstream main
+git merge upstream/main         # produces ~200 conflicts
+
+# 2. First auto-resolve pass.
+bash scripts/upstream-sync-resolve.sh --dry-run   # preview
+bash scripts/upstream-sync-resolve.sh --apply     # execute
+# → ~94 conflicts left
+
+# 3. Manually resolve the 2 SQL queries (read both versions, merge intent).
+$EDITOR server/pkg/db/queries/agent.sql server/pkg/db/queries/issue.sql
+git add server/pkg/db/queries/*.sql
+
+# 4. Manually resolve the 2 package.json files.
+$EDITOR packages/core/package.json packages/views/package.json
+git add packages/{core,views}/package.json
+
+# 5. Second auto-resolve pass — picks up sqlc + pnpm-lock.
+bash scripts/upstream-sync-resolve.sh --apply
+# → ~83 conflicts left, all genuine content merges
+
+# 6. Manual content merges (the real merge work).
+# Each cerebro-patched file needs a per-case decision.
+
+# 7. Validate.
+scripts/validate-cerebro-patches.sh
+make check
+```
 
 ## Script verification
 
 | Check | Result |
 |---|---|
 | `bash -n scripts/upstream-sync-resolve.sh` (syntax) | PASS |
-| `--help` output | PASS (matches usage block) |
-| Refuses to run without active merge | PASS (exit 1, "MERGE_HEAD missing") |
-| Dry-run produces no working-tree changes | PASS (`git status` unchanged) |
-| Dry-run prediction matches `--apply` outcome | PASS (83 = 83) |
-| Bash 3.2 compat (no `local -n` namerefs) | PASS (rewritten to global var) |
-| Worktree-aware MERGE_HEAD path | PASS (uses `git rev-parse --git-path`) |
-
-## Sikkerhedstjek bekræftet
-
-- ✅ Skriptet afviser detached HEAD.
-- ✅ Skriptet afviser `main` / `master` branch.
-- ✅ Skriptet kræver aktiv merge (`MERGE_HEAD` skal eksistere).
-- ✅ `--dry-run` er default; `--apply` skal gives eksplicit.
-- ✅ Skriptet pusher ikke til remote.
-- ✅ Skriptet merger ikke til main.
-- ✅ Cat 3/4 blokeres hvis upstream-source-filer (.sql / package.json)
-  stadig er UU — ingen auto-regenerering på unmerged inputs.
+| `--help` output | PASS |
+| Refuses to run without active merge | PASS (exit 1) |
+| Refuses to run on `main` / `master` | PASS (exit 1) |
+| Refuses to run on detached HEAD | PASS (exit 1) |
+| Dry-run produces no working-tree changes | PASS |
+| Dry-run prediction matches `--apply` outcome | PASS (107 = 107) |
+| Cat 3 blocks safely on UU `.sql` queries | PASS |
+| Cat 4 cascade-skips on Cat 3 block | PASS |
+| Bash 3.2 compatibility (no `local -n`, empty-array safe) | PASS |
+| Worktree-aware `MERGE_HEAD` lookup | PASS |
+| Cat 3 second-pass regenerates correctly | PASS (sqlc reran, all 6 generated files cleared, including `models.go`) |
+| Cat 4 second-pass regenerates correctly | PASS (pnpm install completed, lock file staged) |
+| Aborted merge leaves working tree clean | PASS (only `models.go` carried sqlc artefact, restored with `git checkout --`) |
 
 ## Conclusion
 
-Scriptet rammer **83/94 (88 %) af user-estimatet single-pass**, eller
-**90/94 (96 %) over to passes**. De manglende 4 filer kan tilføjes ved
-at udvide `deletable_re` med `apps/web/app/docs/` — det er en simpel
-en-linjes ændring hvis user vil have det.
+Scriptet er **klar til en upstream-sync uden tab af cerebro-funktioner**.
+Auto-løser **107 konflikter i ét pass** og yderligere **7 i et andet pass**
+efter at brugeren manuelt har merged 4 trivielle filer
+(2 × `.sql` + 2 × `package.json`). Tilbage står **83 ægte indholds-konflikter**
+hvor cerebros patches kolliderer med multicas videreudvikling — det er
+arbejde et menneske skal lave manuelt fil-for-fil med viden om hvad
+cerebro tilfører.
 
-Skriptet er **ready to land**. Det reducerer merge-overfladen fra 201
-til 118 filer i ét pass uden manuel intervention og er fuldstændig
-deterministisk (dry-run forudsiger `--apply` 1:1). De resterende 118
-filer kræver ægte indholds-merge — det er ikke noget en katalog-baseret
-auto-resolver kan løse.
+Sammenlignet med Phase 5-baseline (201 manuelle konflikter): scriptet +
+4 manuelle løsninger gør **58 % af arbejdet automatisk**.

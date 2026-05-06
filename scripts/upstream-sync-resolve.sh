@@ -11,18 +11,23 @@
 #
 # Categories handled (in order):
 #
-#   1. UA-files (multica added; we deleted) — auto-deletes the docs/i18n stack
-#      we explicitly chose to drop. Other UA paths are reported for manual
-#      review.
+#   1. Purge docs/i18n stack — for every path under
+#      apps/{web/docs, web/content/docs, web/app/docs, docs} and the
+#      explicit single-file list (architecture-diagram.tsx,
+#      docs-settings.tsx, editorial.tsx, hero.tsx, mermaid.tsx, lib/i18n.ts,
+#      lib/site.ts, lib/translations.ts, middleware.ts), `git rm` the file
+#      regardless of unmerged status. The fork has chosen to drop the
+#      multica docs site entirely; cerebro docs land elsewhere.
 #
-#   2. DD-files (both deleted) — finalizes the deletion in the index.
+#   2. Both-deleted catch-all — any other path where both sides deleted the
+#      same file (status DD) and that wasn't already handled by category 1.
 #
 #   3. UU sqlc-generated Go files in server/pkg/db/generated/ — runs
 #      `git checkout --ours` then regenerates with `make sqlc`. Skipped if any
-#      .sql query file is still UU (resolve queries manually first).
+#      .sql query file is still in conflict (resolve queries manually first).
 #
 #   4. pnpm-lock.yaml — runs `git checkout --theirs` then regenerates with
-#      `pnpm install`. Skipped if any package.json file is still UU.
+#      `pnpm install`. Skipped if any package.json file is still in conflict.
 #
 # See docs/upstream-sync/COMPLETION-REPORT.md for the analysis that motivated
 # the four-category split.
@@ -118,46 +123,57 @@ TOTAL_BEFORE="$(count_conflicts)"
 echo "==> Conflict files before: $TOTAL_BEFORE"
 echo
 
-# ---------- Category 1: UA-files (multica added; we deleted) ----------
-echo "==> Category 1: UA-files (multica added; we deleted)"
+# ---------- Category 1: Purge docs/i18n stack ----------
+echo "==> Category 1: Purge docs/i18n stack (any conflict status)"
 
-# Known-deletable: the docs/i18n stack we already chose to drop.
-deletable_re='^(apps/web/docs/|apps/web/content/docs/|apps/web/components/(architecture-diagram|docs-settings|editorial|hero|mermaid)\.tsx$|apps/web/lib/(i18n|site|translations)\.ts$|apps/web/middleware\.ts$)'
+# Paths that the fork has chosen to drop entirely. For these, any unmerged
+# state resolves to "delete it" — we don't follow upstream's docs evolution.
+purge_re='^(apps/web/docs/|apps/web/content/docs/|apps/web/app/docs/|apps/docs/|apps/web/components/(architecture-diagram|docs-settings|editorial|hero|mermaid)\.tsx$|apps/web/lib/(i18n|site|translations)\.ts$|apps/web/middleware\.ts$)'
 
-read_paths_with_status "UA"
-ua_paths=("${READ_PATHS_OUT[@]}")
+# Walk every unmerged path; pick the ones that match purge_re.
+purge_paths=()
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  status="${line:0:2}"
+  case "$status" in
+    DD|AU|UD|UA|DU|AA|UU)
+      path="${line:3}"
+      if [[ "$path" =~ $purge_re ]]; then
+        purge_paths+=("$path")
+      fi
+      ;;
+  esac
+done < <(git status --porcelain)
 
-cat1_resolved=0
-ua_skipped_paths=()
-
-for path in "${ua_paths[@]}"; do
-  if [[ "$path" =~ $deletable_re ]]; then
+cat1_resolved="${#purge_paths[@]}"
+if [[ $cat1_resolved -gt 0 ]]; then
+  for path in "${purge_paths[@]}"; do
     do_cmd git rm -f -- "$path"
-    cat1_resolved=$((cat1_resolved + 1))
-  else
-    ua_skipped_paths+=("$path")
-  fi
-done
-
-cat1_skipped="${#ua_skipped_paths[@]}"
-echo "  Auto-deletable: $cat1_resolved    Manual review: $cat1_skipped"
-if [[ $cat1_skipped -gt 0 ]]; then
-  for p in "${ua_skipped_paths[@]}"; do
-    echo "    [manual] $p"
   done
 fi
+echo "  Purged: $cat1_resolved"
 echo
 
-# ---------- Category 2: DD-files (both deleted) ----------
-echo "==> Category 2: DD-files (both deleted)"
+# ---------- Category 2: Both-deleted catch-all ----------
+echo "==> Category 2: Both-deleted catch-all (status DD, outside purge paths)"
 
 read_paths_with_status "DD"
-dd_paths=("${READ_PATHS_OUT[@]}")
-cat2_resolved="${#dd_paths[@]}"
 
-for path in "${dd_paths[@]}"; do
-  do_cmd git rm -f -- "$path"
-done
+dd_remaining=()
+if [[ ${#READ_PATHS_OUT[@]} -gt 0 ]]; then
+  for path in "${READ_PATHS_OUT[@]}"; do
+    if [[ ! "$path" =~ $purge_re ]]; then
+      dd_remaining+=("$path")
+    fi
+  done
+fi
+
+cat2_resolved="${#dd_remaining[@]}"
+if [[ $cat2_resolved -gt 0 ]]; then
+  for path in "${dd_remaining[@]}"; do
+    do_cmd git rm -f -- "$path"
+  done
+fi
 echo "  Handled: $cat2_resolved"
 echo
 
@@ -184,12 +200,11 @@ else
     | grep -E '^UU server/pkg/db/generated/.*\.sql\.go$' || true)
 
   cat3_resolved="${#gen_paths[@]}"
-  for path in "${gen_paths[@]}"; do
-    do_cmd git checkout --ours -- "$path"
-    do_cmd git add -- "$path"
-  done
-
   if [[ $cat3_resolved -gt 0 ]]; then
+    for path in "${gen_paths[@]}"; do
+      do_cmd git checkout --ours -- "$path"
+      do_cmd git add -- "$path"
+    done
     do_cmd make sqlc
     if [[ "$DRY_RUN" == "false" ]]; then
       git add server/pkg/db/generated/ 2>/dev/null || true

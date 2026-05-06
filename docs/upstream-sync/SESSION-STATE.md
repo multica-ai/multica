@@ -6,11 +6,11 @@
 
 ```yaml
 status: COMPLETED            # NOT_STARTED | RUNNING | PAUSED | COMPLETED | HALTED
-current_phase: "Phase 6 NO-GO + auto-resolve script landed (reduces sync conflict surface 201→118)"
+current_phase: "Phase 6 NO-GO + auto-resolve script v2 (purge scope expanded; 201→94 single-pass, 201→83 two-pass)"
 current_task: "AWAITING USER REVIEW + CONFIRMATION before landing chore/upstream-sync-analysis to main"
-last_iteration_at: "2026-05-06T09:10:00Z"
-total_iterations: 16           # 8 phase-5 + 7 phase-6 + 1 auto-resolve script
-total_tokens_estimate: 4250000 # ~3.7M phase 1-5 + ~500k phase 6 + ~50k script
+last_iteration_at: "2026-05-06T09:30:00Z"
+total_iterations: 17           # 8 phase-5 + 7 phase-6 + 2 auto-resolve script versions
+total_tokens_estimate: 4300000 # ~3.7M phase 1-5 + ~500k phase 6 + ~100k script
 ```
 
 ## Pause reason (if status = PAUSED)
@@ -197,6 +197,7 @@ open_prs: []
 2026-05-06T06:22:00Z | Phase 6 chunk 7 | NO-GO_reverted | Attempted cmd_mcp*.go relocation to internal/cerebro/mcp/cli/. Build failed: 5 unexported helpers (resolveProfile, resolveToken, resolveServerURL, resolveWorkspaceID, version) defined in cmd_agent.go/cmd_auth.go and used 15+ places in package main. Reverted cleanly (git checkout HEAD --).
 2026-05-06T06:25:00Z | Phase 6 chunk 13 | NO-GO | Validation merge upstream/main: 201 conflict files (UNCHANGED from Phase 5). Plan's hypothesis was wrong: net-new fork files don't conflict. The real source is upstream-modified files where cerebro also patches. Loop STOPPED per user instruction; Phase 6 still produced 37 file relocations + 5 NEW packages (cerebro-profile, cerebro-chat, cerebro-budgets, cerebro-preferences, cerebro-runtime/views) as durable wins.
 2026-05-06T09:10:00Z | post-Phase-6 | auto_resolve_script_GO | scripts/upstream-sync-resolve.sh landed (4 categories: UA-deletable docs/i18n stack, DD both-deleted, sqlc-generated Go files, pnpm-lock.yaml). Hard safety guards: rejects detached HEAD + main/master branch + missing MERGE_HEAD; --dry-run is default. Verified on test-branch merge: reduces conflict surface 201→118 single-pass (83 auto-resolved = 41 % reduction). 4 UA files in apps/web/app/docs/ flagged for manual review (not in user's deletable pattern; can be added later). Cat 3+4 cascade-skipped because .sql queries are also UU (safety: don't regenerate from unmerged inputs). Test report: docs/upstream-sync/auto-resolve-test-20260506.md.
+2026-05-06T09:30:00Z | post-Phase-6 | purge_scope_expanded | User confirmed dropping multica docs entirely (cerebro docs land elsewhere). Cat 1 refactored from "UA-only with deletable_re" to "purge any conflict status under purge_re". Added apps/web/app/docs/ + apps/docs/ to the path list. Single-pass auto-resolution: 107 (vs 83 previous, vs user's 94 estimate). Two-pass total: 114 auto + 4 manual = 118 of 201 (59 % reduction); leaves 83 genuine cerebro-vs-upstream content conflicts. Verified second-pass Cat 3+4 regeneration works correctly. Script is READY for a real upstream sync without losing cerebro features. Updated test report with two-pass numbers.
 ```
 
 ## Eval results (most recent per phase)
