@@ -7,9 +7,15 @@
  * Usage:
  *   import { BigCalendar } from "@/components/ui/big-calendar";
  *   <BigCalendar events={events} defaultView="month" ... />
+ *
+ * DnD variant:
+ *   import { BigDnDCalendar } from "@/components/ui/big-calendar";
+ *   <BigDnDCalendar events={events} onEventDrop={...} onEventResize={...} ... />
  */
 import "react-big-calendar/lib/css/react-big-calendar.css";
+import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
 
+import React from "react";
 import { dateFnsLocalizer } from "react-big-calendar";
 import { format, parse, startOfWeek, getDay } from "date-fns";
 import { enUS } from "date-fns/locale";
@@ -17,6 +23,11 @@ import {
   Calendar as RBCalendar,
   type CalendarProps,
 } from "react-big-calendar";
+import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
+import type {
+  withDragAndDropProps,
+  EventInteractionArgs,
+} from "react-big-calendar/lib/addons/dragAndDrop";
 
 // ── date-fns localizer (reused by all calender instances) ─────────────────────
 const localizer = dateFnsLocalizer({
@@ -26,6 +37,9 @@ const localizer = dateFnsLocalizer({
   getDay,
   locales: { "en-US": enUS },
 });
+
+// DnD-wrapped calendar created once at module level to avoid re-creation on render.
+const DnDRBCalendar = withDragAndDrop(RBCalendar);
 
 // ── Themed component ──────────────────────────────────────────────────────────
 
@@ -51,3 +65,35 @@ export function BigCalendar<TEvent extends object = object>({
     </div>
   );
 }
+
+// ── DnD-enabled variant ───────────────────────────────────────────────────────
+
+export type BigDnDCalendarProps<TEvent extends object = object> = Omit<
+  CalendarProps<TEvent>,
+  "localizer"
+> &
+  withDragAndDropProps<TEvent> & {
+    /** Optional extra className on the outer container. */
+    className?: string;
+  };
+
+/**
+ * Drag-and-drop enabled calendar component with shadcn theme applied.
+ * Supports `onEventDrop`, `onEventResize`, `draggableAccessor`, `resizableAccessor`.
+ */
+export function BigDnDCalendar<TEvent extends object = object>({
+  className,
+  ...props
+}: BigDnDCalendarProps<TEvent>) {
+  // DnDRBCalendar doesn't support generic type arguments in JSX — cast to satisfy TypeScript.
+  const Calendar = DnDRBCalendar as React.ComponentType<
+    BigDnDCalendarProps<TEvent> & { localizer: typeof localizer }
+  >;
+  return (
+    <div className={`rbc-theme ${className ?? ""}`}>
+      <Calendar localizer={localizer} {...props} />
+    </div>
+  );
+}
+
+export type { EventInteractionArgs };

@@ -247,3 +247,42 @@
 .rbc-theme .rbc-agenda-event-cell {
   color: var(--foreground);
 }
+
+/* =============================================================================
+ * Time tracking calendar customizations
+ * ============================================================================= */
+
+/* Transparent event boxes — CalendarEventCard handles all visual styling */
+.rbc-theme .rbc-event,
+.rbc-theme .rbc-event.rbc-selected {
+  background-color: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Hide RBC's built-in time range label — our card shows its own duration */
+.rbc-theme .rbc-event-label {
+  display: none;
+}
+
+/* Running entry: diagonal stripe pattern using primary color */
+.rbc-theme .calendar-event-running {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--primary) 20%, transparent) 0px,
+    color-mix(in srgb, var(--primary) 20%, transparent) 4px,
+    color-mix(in srgb, var(--primary) 8%, transparent) 4px,
+    color-mix(in srgb, var(--primary) 8%, transparent) 12px
+  );
+}
+
+/* DnD: hide default resize handle icon, keep cursor only */
+.rbc-theme .rbc-addons-dnd-resize-ns-icon {
+  display: none;
+}
+
+/* DnD: semi-transparent drag preview */
+.rbc-theme .rbc-addons-dnd-drag-preview {
+  opacity: 0.6;
+}
