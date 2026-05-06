@@ -81,6 +81,7 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
+  ACTIVE_BOARD_STATUSES: ["todo", "in_progress", "in_review", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -383,7 +384,7 @@ describe("IssuesPage (shared)", () => {
 
     await screen.findByText("Implement auth");
     expect(screen.getByText("Design landing page")).toBeInTheDocument();
-    expect(screen.getByText("Write tests")).toBeInTheDocument();
+    expect(screen.queryByText("Write tests")).not.toBeInTheDocument();
   });
 
   it("renders board column headers", async () => {
@@ -396,7 +397,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Backlog");
+    await screen.findByText("Todo");
     expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
   });

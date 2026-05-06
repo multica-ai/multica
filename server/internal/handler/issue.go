@@ -25,33 +25,34 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels             *[]LabelResponse        `json:"labels,omitempty"`
+	Labels           *[]LabelResponse       `json:"labels,omitempty"`
+	WorkspaceControl *WorkspaceControlState `json:"workspace_control,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -285,7 +286,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -682,6 +683,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			resp[i].Labels = &labels
 		}
+		h.attachWorkspaceControlStates(ctx, resp, ids)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -753,6 +755,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		resp[i].Labels = &labels
 	}
+	h.attachWorkspaceControlStates(ctx, resp, ids)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -768,6 +771,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	resp.WorkspaceControl = h.workspaceControlStateForIssue(r.Context(), issue)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
 		detailLabels = []LabelResponse{}
@@ -814,6 +818,11 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
 	}
+	childIDs := make([]pgtype.UUID, len(children))
+	for i, child := range children {
+		childIDs[i] = child.ID
+	}
+	h.attachWorkspaceControlStates(r.Context(), resp, childIDs)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -1043,16 +1052,16 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1288,16 +1297,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1325,6 +1334,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+	workspaceControlFields := workspaceControlProtectedFields(rawFields)
+	workspaceControlBinding, workspaceControlBound, policyErr := enforceWorkspaceControlPolicy(prevIssue, "update", workspaceControlFields)
+	if policyErr != nil {
+		writeError(w, http.StatusForbidden, policyErr.Error())
+		return
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -1469,6 +1484,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if workspaceControlBound && len(workspaceControlFields) > 0 {
+		resp.WorkspaceControl = h.enqueueWorkspaceControlMutation(r.Context(), issue, workspaceControlBinding, "update", workspaceControlFields, map[string]any{
+			"issue_id":      resp.ID,
+			"identifier":    resp.Identifier,
+			"title":         resp.Title,
+			"description":   resp.Description,
+			"status":        resp.Status,
+			"priority":      resp.Priority,
+			"assignee_type": resp.AssigneeType,
+			"assignee_id":   resp.AssigneeID,
+			"position":      resp.Position,
+		}, actorType, actorID)
+	}
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -1628,6 +1656,11 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	binding, bound, policyErr := enforceWorkspaceControlPolicy(issue, "delete", []string{"delete"})
+	if policyErr != nil {
+		writeError(w, http.StatusForbidden, policyErr.Error())
+		return
+	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
@@ -1649,6 +1682,13 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// identifier-style payload ("MUL-123") would leave stale entries on
 	// other clients after an identifier-path delete.
 	resolvedID := uuidToString(issue.ID)
+	if bound {
+		h.enqueueWorkspaceControlMutation(r.Context(), issue, binding, "delete", []string{"delete"}, map[string]any{
+			"issue_id":   resolvedID,
+			"identifier": h.getIssuePrefix(r.Context(), issue.WorkspaceID) + "-" + strconv.Itoa(int(issue.Number)),
+			"title":      issue.Title,
+		}, actorType, actorID)
+	}
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
@@ -1719,6 +1759,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
 		return
 	}
+	workspaceControlFields := workspaceControlProtectedFields(rawUpdates)
 
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -1736,6 +1777,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
+			continue
+		}
+		workspaceControlBinding, workspaceControlBound, policyErr := enforceWorkspaceControlPolicy(prevIssue, "update", workspaceControlFields)
+		if policyErr != nil {
 			continue
 		}
 
@@ -1863,6 +1908,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if workspaceControlBound && len(workspaceControlFields) > 0 {
+			resp.WorkspaceControl = h.enqueueWorkspaceControlMutation(r.Context(), issue, workspaceControlBinding, "update", workspaceControlFields, map[string]any{
+				"issue_id":      resp.ID,
+				"identifier":    resp.Identifier,
+				"title":         resp.Title,
+				"description":   resp.Description,
+				"status":        resp.Status,
+				"priority":      resp.Priority,
+				"assignee_type": resp.AssigneeType,
+				"assignee_id":   resp.AssigneeID,
+				"position":      resp.Position,
+			}, actorType, actorID)
+		}
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))

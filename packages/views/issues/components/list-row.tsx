@@ -52,6 +52,7 @@ export const ListRow = memo(function ListRow({
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const workspaceControl = issue.workspace_control;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -83,6 +84,20 @@ export const ListRow = memo(function ListRow({
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
+            {(workspaceControl?.status || workspaceControl?.source_id) && (
+              <span
+                className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                  workspaceControl.status === "apply-failed"
+                    ? "border-destructive/30 bg-destructive/10 text-destructive"
+                    : workspaceControl.status === "pending"
+                      ? "border-primary/25 bg-primary/10 text-primary"
+                      : "border-border bg-muted text-muted-foreground"
+                }`}
+                title={workspaceControl.error ?? workspaceControl.source_id}
+              >
+                {workspaceControl.status ?? (workspaceControl.writable ? "workspace" : "read-only")}
+              </span>
+            )}
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
