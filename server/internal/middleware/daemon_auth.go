@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -149,7 +150,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					writeError(w, http.StatusUnauthorized, "invalid token")
 					return
 				}
-
+				if !requireActiveUser(r.Context(), queries, pat.UserID, w, "daemon_auth") {
+					return
+				}
 				userID := uuidToString(pat.UserID)
 				r.Header.Set("X-User-ID", userID)
 
@@ -189,6 +192,10 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			sub, ok := claims["sub"].(string)
 			if !ok || strings.TrimSpace(sub) == "" {
 				writeError(w, http.StatusUnauthorized, "invalid claims")
+				return
+			}
+			subUUID, _ := util.ParseUUID(sub)
+			if !requireActiveUser(r.Context(), queries, subUUID, w, "daemon_auth") {
 				return
 			}
 			r.Header.Set("X-User-ID", sub)

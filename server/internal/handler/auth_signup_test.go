@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -62,7 +63,17 @@ type mockRow struct {
 }
 
 func (m *mockRow) Scan(dest ...interface{}) error {
-	return m.err
+	if m.err != nil {
+		return m.err
+	}
+	// Generated GetUserByEmail row.Scan order ends with account_status.
+	// Default to active so tests simulating "user found" pass UserMayAuthenticate.
+	if n := len(dest); n > 0 {
+		if p, ok := dest[n-1].(*string); ok {
+			*p = auth.AccountStatusActive
+		}
+	}
+	return nil
 }
 
 func TestFindOrCreateUserGating(t *testing.T) {

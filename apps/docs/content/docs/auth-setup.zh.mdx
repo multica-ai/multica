@@ -90,7 +90,7 @@ graph TD
     D -- 否 --> Block
 `} />
 
-**已经登录过的老用户永远可以再次登录**——signup 白名单只对**首次注册**生效，不拦截老用户。
+**状态为 `active` 的已有用户可以再次登录**——signup 白名单只对**首次注册**生效。若账号被设为 `account_status = 'suspended'`，则无法登录或使用 API（见下文 [暂停用户](#暂停用户自托管)）。
 
 - **`ALLOWED_EMAILS`**（最高优先级）—— 显式邮箱白名单，逗号分隔。**非空时只有列表里的邮箱能注册**。
 - **`ALLOWED_EMAIL_DOMAINS`**—— 域名白名单，逗号分隔（例如 `company.io,partner.com`）。
@@ -120,6 +120,37 @@ graph TD
 要邀请一个还没注册的外部协作者：临时把他们的邮箱加到 `ALLOWED_EMAILS`，等他们注册 + 接受邀请之后再把这条移掉。
 
 邀请的创建和使用见 [成员与权限](/members-roles)。
+
+## 暂停用户（自托管）
+
+Signup 白名单和 `ALLOW_SIGNUP` 只管**新用户注册**。要对**已经存在**的账号撤销访问（离职、凭据泄露、合规），又不想删 `user` 行破坏外键，可在 PostgreSQL 里把 `account_status` 设为 `suspended`。
+
+**被暂停后**
+
+- 不能发验证码、不能完成 Google 登录、不能访问 `/api/me`、不能签发 CLI token；用 JWT 或 PAT 调 API 也会被拒。
+- **WebSocket**：新连接会被拒绝。**已经建立的连接**会继续收事件，直到客户端断开重连——重连时连接期校验会拒绝它。HTTP 请求在下一次调用时立即失败。
+- 暂停后，已有 JWT 会在**下一次**受鉴权的 HTTP 请求时失效（服务端每次会读用户行）。
+- **暂停不会使其失效**：如果你的自托管启用了 S3 + CloudFront（`CF_*` 环境变量），登录时签发的 CloudFront 签名 Cookie（约 30 天 TTL）以及已经下发的 presigned URL，会一直有效到自然过期。暂停只阻断 API、JWT 与新 CLI token，但不会撤销已经签发的 CDN 凭证。对于高风险下线（凭据泄露），除了暂停账号外，应同时轮换 CloudFront key-pair。
+
+**HTTP 响应**：`403`，JSON 形如：
+
+```json
+{"error":"this account has been suspended","code":"ACCOUNT_SUSPENDED"}
+```
+
+`code` 字段稳定，便于客户端分支处理。
+
+**SQL 示例**（在应用库执行，注意邮箱与库里一致、一般为小写）：
+
+```sql
+UPDATE "user" SET account_status = 'suspended', updated_at = now()
+WHERE lower(email) = lower('user@company.com');
+
+UPDATE "user" SET account_status = 'active', updated_at = now()
+WHERE lower(email) = lower('user@company.com');
+```
+
+允许的值：`active`、`suspended`（数据库 `CHECK` 约束）。
 
 ## 下一步
 
