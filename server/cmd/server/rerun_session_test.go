@@ -19,11 +19,17 @@ func setupRerunTestFixture(t *testing.T) (string, string, string) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
+	// Filter on archived_at IS NULL because sibling integration tests
+	// (e.g. comment_trigger_integration_test.go) archive their throwaway
+	// agents in the same workspace at cleanup time. Without this filter
+	// `LIMIT 1` can land on a stale archived row and the rerun service
+	// rejects it with "agent is archived".
 	if err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
 		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE u.email = $1 AND a.archived_at IS NULL
+		ORDER BY a.created_at ASC
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("failed to find test agent: %v", err)

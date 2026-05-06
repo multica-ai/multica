@@ -13,7 +13,11 @@ import (
 func TestBootstrapEnsuresLocalIdentityAndSpaceIdempotently(t *testing.T) {
 	ctx := context.Background()
 	pool := openBootstrapTestPool(t)
-	defer pool.Close()
+	// Register pool.Close FIRST so it runs LAST (t.Cleanup is LIFO). The
+	// fixture cleanup callback registered next must run while the pool is
+	// still open. Using defer would close the pool BEFORE t.Cleanup callbacks
+	// fire, which produced "closed pool" errors during cleanup.
+	t.Cleanup(func() { pool.Close() })
 
 	cleanupLocalBootstrapFixture(t, pool)
 	t.Cleanup(func() { cleanupLocalBootstrapFixture(t, pool) })
