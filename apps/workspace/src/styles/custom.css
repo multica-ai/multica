@@ -51,18 +51,18 @@
   container-type: inline-size;
 }
 
- */ Base reset: use shadcn surface / text tokens /* 
+/* Base reset: use shadcn surface / text tokens */
 .rbc-theme .rbc-calendar {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans, inherit);
-  font-size: 0.8125rem; /*  matches app body */13px 
+  font-size: 0.8125rem; /* 13px — matches app body */
   border-radius: var(--radius);
   border: 1px solid var(--border);
   overflow: hidden;
 }
 
- */ Toolbar /* 
+/* Toolbar */
 .rbc-theme .rbc-toolbar {
   display: flex;
   align-items: center;
@@ -102,7 +102,7 @@
   border-color: var(--primary);
 }
 
- */ Headers / date cells /* 
+/* Headers / date cells */
 .rbc-theme .rbc-header {
   padding: 0.375rem 0.5rem;
   font-size: 0.75rem;
@@ -130,10 +130,10 @@
 }
 
 .rbc-theme .rbc-off-range-bg {
-  background-color: var(--muted) / 0.4;
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
 }
 
- */ Month view grid /* 
+/* Month view grid */
 .rbc-theme .rbc-month-view {
   border: none;
 }
@@ -150,7 +150,7 @@
   background-color: color-mix(in srgb, var(--muted) 40%, transparent);
 }
 
- */ Time grid (day / week views) /* 
+/* Time grid (day / week views) */
 .rbc-theme .rbc-time-view {
   border: none;
 }
@@ -160,7 +160,7 @@
 }
 
 .rbc-theme .rbc-timeslot-group {
-  border-bottom: 1px solid var(--border) / 0.5;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   min-height: 2.5rem;
 }
 
@@ -182,7 +182,7 @@
   height: 2px;
 }
 
- */ Events /* 
+/* Events */
 .rbc-theme .rbc-event {
   background-color: var(--primary);
   color: var(--primary-foreground);
@@ -218,12 +218,12 @@
   cursor: pointer;
 }
 
- */ Today highlight /* 
+/* Today highlight */
 .rbc-theme .rbc-today {
   background-color: color-mix(in srgb, var(--primary) 6%, transparent);
 }
 
- */ Agenda view /* 
+/* Agenda view */
 .rbc-theme .rbc-agenda-view table.rbc-agenda-table {
   border: 1px solid var(--border);
   border-radius: var(--radius);
