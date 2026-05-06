@@ -17,24 +17,22 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 
 	mustContain := []string{
-		// rule 1a: strip verbal routing meta-instructions
-		"Routing meta-instructions to the issue-creating agent itself",
-		// rule 1b: strip pure conversational fillers
-		"Pure conversational fillers with no information",
-		// rule 1c: cc mentions must keep the mention link in the description body,
-		// since `multica issue create` has no --subscriber flag and the platform
-		// auto-subscribes via mention parsing — see PR review feedback that
-		// originally exposed this gap
-		"CC mentions are special",
-		"the platform auto-subscribes members",
-		// rule 2: emit Context only when references were actually fetched
-		"include this section ONLY when the input cited external references",
-		"Do NOT emit a Context section to:",
-		"Apologize for resources you could not fetch",
-		// rule 3: pre-existing high-fidelity invariants must remain
-		"Faithfully restate what the user wants done",
-		"NEVER invent requirements",
+		// high-fidelity invariant
+		"Faithfully restate what the user wants",
 		"Preserve specific names, identifiers, file paths",
+		// strip non-spec material: verbal routing wrappers + conversational fillers
+		"verbal routing wrappers about creating the issue",
+		"pure conversational fillers",
+		// cc routing must survive: mention link stays in description so the
+		// auto-subscribe path fires (multica issue create has no --subscriber flag)
+		"CC exception",
+		"auto-subscribes members",
+		// context section is conditional and must not be an apology log
+		"include ONLY when the input cited external resources",
+		"never use it as an apology log",
+		// hard rules
+		"never invent requirements",
+		"never reduce multi-sentence input",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
