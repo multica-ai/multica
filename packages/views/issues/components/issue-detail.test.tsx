@@ -515,4 +515,90 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  describe("execution log task-change actions", () => {
+    const completedTaskWithWorktree = {
+      id: "task-1",
+      agent_id: "agent-1",
+      runtime_id: "runtime-1",
+      issue_id: "issue-1",
+      status: "completed",
+      priority: 0,
+      dispatched_at: "2026-01-18T00:00:00Z",
+      started_at: "2026-01-18T00:01:00Z",
+      completed_at: "2026-01-18T00:05:00Z",
+      created_at: "2026-01-18T00:00:00Z",
+      result: {
+        worktrees: [
+          {
+            repo_url: "https://github.com/multica/repo.git",
+            path: "/tmp/agent/worktree",
+            branch_name: "agents/task-1",
+            requested_ref: "main",
+            base_ref: "main",
+          },
+        ],
+      },
+      error: null,
+      trigger_summary: "Run a thing",
+    };
+
+    function renderIssueDetailWithActions(actions?: any) {
+      const queryClient = createTestQueryClient();
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" taskChangeActions={actions} />
+        </QueryClientProvider>,
+      );
+    }
+
+    beforeEach(() => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([completedTaskWithWorktree]);
+    });
+
+    it("renders 'Open worktree' and 'Review & apply' buttons when adapter is provided", async () => {
+      const actions = {
+        pickCheckoutDirectory: vi.fn(),
+        previewApplyTaskDiff: vi.fn(),
+        applyTaskDiff: vi.fn(),
+        openPath: vi.fn(),
+      };
+      renderIssueDetailWithActions(actions);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      });
+
+      // Past runs are collapsed by default — expand to reveal the row.
+      const showPast = await screen.findByRole("button", { name: /Show past runs/i });
+      fireEvent.click(showPast);
+
+      expect(
+        await screen.findByRole("button", { name: /open worktree/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /review & apply/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders no apply controls when no adapter is provided (web case)", async () => {
+      renderIssueDetailWithActions(undefined);
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      });
+
+      // Expand past runs if any (the collapse toggle is present whenever past
+      // tasks exist).
+      const showPast = await screen.findByRole("button", { name: /Show past runs/i });
+      fireEvent.click(showPast);
+
+      expect(
+        screen.queryByRole("button", { name: /open worktree/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /review & apply/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

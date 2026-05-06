@@ -46,6 +46,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import type { TaskChangeActions } from "./task-change-actions";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -146,13 +147,19 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+  /**
+   * Adapter for the desktop-only "Open worktree" + "Review & apply" affordance
+   * shown under completed task rows in the execution log. Web omits this
+   * prop and the apply UI never renders.
+   */
+  taskChangeActions?: TaskChangeActions;
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, taskChangeActions }: IssueDetailProps) {
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -520,7 +527,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
+      <ExecutionLogSection issueId={id} taskChangeActions={taskChangeActions} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (

@@ -16,6 +16,10 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import {
+  TaskChangeActionsRow,
+  type TaskChangeActions,
+} from "./task-change-actions";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
@@ -53,6 +57,13 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  /**
+   * Adapter for the desktop-only diff preview/apply flow. When provided,
+   * each completed task row with worktree metadata gets an "Open
+   * worktree" + "Review & apply" affordance underneath. Web omits this
+   * prop entirely and the apply UI never renders.
+   */
+  taskChangeActions?: TaskChangeActions;
 }
 
 // Past-runs sort priority: failed first (needs attention), then
@@ -64,7 +75,10 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({
+  issueId,
+  taskChangeActions,
+}: ExecutionLogSectionProps) {
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
 
@@ -161,7 +175,19 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} />
+                    <div key={task.id}>
+                      <PastRow task={task} />
+                      {taskChangeActions &&
+                        task.status === "completed" &&
+                        task.result?.worktrees?.map((wt) => (
+                          <TaskChangeActionsRow
+                            key={wt.path}
+                            task={task}
+                            worktree={wt}
+                            actions={taskChangeActions}
+                          />
+                        ))}
+                    </div>
                   ))}
                 </div>
               )}
