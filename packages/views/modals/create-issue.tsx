@@ -328,6 +328,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
               <FileUploadButton
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                onEmbedImage={(file) => descEditorRef.current?.uploadFile(file, { embedImage: true })}
               />
               <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
                 {submitting ? "Creating..." : "Create Issue"}

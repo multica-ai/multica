@@ -270,6 +270,7 @@ function CommentRow({
             <FileUploadButton
               size="sm"
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+              onEmbedImage={(file) => editEditorRef.current?.uploadFile(file, { embedImage: true })}
             />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
@@ -482,6 +483,7 @@ function CommentCard({
                   <FileUploadButton
                     size="sm"
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+                    onEmbedImage={(file) => editEditorRef.current?.uploadFile(file, { embedImage: true })}
                   />
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>

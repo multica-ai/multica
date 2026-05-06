@@ -121,6 +121,7 @@ function ReplyInput({
           <FileUploadButton
             size="sm"
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+            onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
           />
           <button
             type="button"

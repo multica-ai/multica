@@ -73,6 +73,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         <FileUploadButton
           size="sm"
           onSelect={(file) => editorRef.current?.uploadFile(file)}
+          onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
         />
         <Button
           size="icon-sm"

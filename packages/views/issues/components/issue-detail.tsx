@@ -1424,6 +1424,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <FileUploadButton
                   size="sm"
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  onEmbedImage={(file) => descEditorRef.current?.uploadFile(file, { embedImage: true })}
                 />
               </div>
               {descDragOver && <FileDropOverlay />}
