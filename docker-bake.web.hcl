@@ -19,6 +19,15 @@ variable "IMG_SHA" {
   default = "latest"
 }
 
+# DEV_TAG is injected by dev.yml as an env var (dev-<full-sha>).
+# When present it causes a second tag to be pushed alongside the plain SHA tag
+# so that ArgoCD Image Updater on the dev environment can filter on the "^dev-"
+# prefix and never accidentally pick up a prod/main image.
+# Defaults to empty string — docker/bake-action ignores empty tags.
+variable "DEV_TAG" {
+  default = ""
+}
+
 variable "REMOTE_API_URL" {
   default = "http://agentfarm-backend:8080"
 }
@@ -45,7 +54,7 @@ target "default" {
   context    = "."
   dockerfile = "Dockerfile.web"
   platforms  = ["linux/arm64"]
-  tags       = ["${APP_IMAGE}:${IMG_SHA}"]
+  tags       = compact(["${APP_IMAGE}:${IMG_SHA}", DEV_TAG != "" ? "${APP_IMAGE}:${DEV_TAG}" : ""])
   args = {
     REMOTE_API_URL                 = "${REMOTE_API_URL}"
     NEXT_PUBLIC_GOOGLE_CLIENT_ID   = "${NEXT_PUBLIC_GOOGLE_CLIENT_ID}"
