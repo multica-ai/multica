@@ -1454,6 +1454,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		NeedsWSLPath:   entry.NeedsWSLPath,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +15,28 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// windowsToWSLPath converts a Windows drive-letter path (e.g. C:\Users\...)
+// to the corresponding WSL mount path (/mnt/c/Users/...). Paths that are not
+// drive-letter paths (UNC, empty, already POSIX) are returned unchanged.
+// This is a pure function — the caller decides whether to call it based on
+// the NeedsWSLPath flag, not runtime.GOOS.
+func windowsToWSLPath(windowsPath string) string {
+	vol := filepath.VolumeName(windowsPath)
+	if vol == "" {
+		return windowsPath
+	}
+	// Only translate drive-letter paths (e.g. "C:"). UNC paths like
+	// \\host\share have a VolumeName without a colon — don't attempt
+	// to translate those.
+	if len(vol) != 2 || vol[1] != ':' {
+		return windowsPath // not a drive-letter path; return as-is
+	}
+	driveLetter := strings.ToLower(string(vol[0]))
+	rest := strings.TrimPrefix(windowsPath, vol)
+	rest = filepath.ToSlash(rest)
+	return fmt.Sprintf("/mnt/%s%s", driveLetter, rest)
+}
 
 // hermesBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol
@@ -181,6 +204,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
+		} else if b.cfg.NeedsWSLPath {
+			cwd = windowsToWSLPath(cwd)
 		}
 
 		if opts.ResumeSessionID != "" {
