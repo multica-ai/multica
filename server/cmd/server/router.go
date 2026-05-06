@@ -184,6 +184,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
+	// HTTP streaming fallback for clients behind proxies that block WebSocket Upgrade.
+	r.Get("/sse", func(w http.ResponseWriter, r *http.Request) {
+		realtime.HandleEventStream(hub, mc, pr, slugResolver, w, r)
+	})
 
 	// Local file serving (when using local storage)
 	if local, ok := store.(*storage.LocalStorage); ok {

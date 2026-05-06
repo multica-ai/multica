@@ -50,6 +50,8 @@ _features/
 
 # runtime
 *.pid
+backups/
+deploy/certs/
 
 # platform specific
 *.dmg
