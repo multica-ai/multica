@@ -27,6 +27,7 @@ func BuildPrompt(task Task) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s` returns the latest 50 by default — pass --limit or --since to scope older windows. Long issues can have thousands of comments; do not fetch everything blindly.\n", task.IssueID)
 	return b.String()
 }
 
@@ -120,6 +121,7 @@ func buildCommentPrompt(task Task) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
+	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s` returns the latest 50 by default — pass --limit or --since to scope older windows. Long issues can have thousands of comments; do not fetch everything blindly.\n\n", task.IssueID)
 	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
 	return b.String()
 }

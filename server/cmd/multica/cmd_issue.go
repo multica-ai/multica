@@ -255,7 +255,7 @@ func init() {
 
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
-	issueCommentListCmd.Flags().Int("limit", 0, "Maximum number of comments to return (0 = all)")
+	issueCommentListCmd.Flags().Int("limit", 50, "Maximum number of comments to return (0 = server default of 50, max ~100 depending on server)")
 	issueCommentListCmd.Flags().Int("offset", 0, "Number of comments to skip")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
 
