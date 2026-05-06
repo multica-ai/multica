@@ -14,11 +14,16 @@ type State =
   | { kind: "unsupported"; reason: string }
   | { kind: "server-disabled" }
   | { kind: "denied" }
+  | { kind: "check-failed"; reason: string }
   | { kind: "off"; publicKey: string }
   | { kind: "on"; publicKey: string; endpoint: string }
   | { kind: "busy"; publicKey: string };
 
 const VAPID_KEY_LENGTH_HINT = 88;
+// navigator.serviceWorker.ready can wait forever if registration silently
+// failed (network blip, iOS PWA quirk, browser bug). Cap the wait so we end
+// up in "check-failed" with a Retry button instead of a forever spinner.
+const SW_READY_TIMEOUT_MS = 8000;
 
 function detectUnsupportedReason(): string | null {
   if (typeof window === "undefined") return null;
@@ -64,6 +69,33 @@ function urlBase64ToBuffer(base64: string): ArrayBuffer {
   return buffer;
 }
 
+// Wrap a promise with a timeout so a hung browser API can't lock the UI in
+// the loading state. Rejects with the given message if the underlying promise
+// hasn't settled within `ms`.
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+async function readyServiceWorker(): Promise<ServiceWorkerRegistration> {
+  return withTimeout(
+    navigator.serviceWorker.ready,
+    SW_READY_TIMEOUT_MS,
+    "Background service for this page didn't start. Reload and try again.",
+  );
+}
+
 export function PushNotificationsSection() {
   const [state, setState] = useState<State>({ kind: "loading" });
   const iosHint = isIOSNonStandalone();
@@ -74,6 +106,8 @@ export function PushNotificationsSection() {
       setState({ kind: "unsupported", reason });
       return;
     }
+
+    setState({ kind: "loading" });
 
     try {
       const cfg = await api.getPushPublicKey();
@@ -92,7 +126,7 @@ export function PushNotificationsSection() {
         return;
       }
 
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyServiceWorker();
       const existing = await reg.pushManager.getSubscription();
       if (existing) {
         setState({ kind: "on", publicKey: cfg.publicKey, endpoint: existing.endpoint });
@@ -100,8 +134,8 @@ export function PushNotificationsSection() {
         setState({ kind: "off", publicKey: cfg.publicKey });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to check push status");
-      setState({ kind: "server-disabled" });
+      const message = err instanceof Error ? err.message : "Failed to check push status";
+      setState({ kind: "check-failed", reason: message });
     }
   }, []);
 
@@ -122,7 +156,7 @@ export function PushNotificationsSection() {
         return;
       }
 
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyServiceWorker();
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToBuffer(state.publicKey),
@@ -156,7 +190,7 @@ export function PushNotificationsSection() {
     setState({ kind: "busy", publicKey });
 
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await readyServiceWorker();
       const sub = await reg.pushManager.getSubscription();
       const endpoint = sub?.endpoint ?? state.endpoint;
       if (sub) await sub.unsubscribe();
@@ -184,6 +218,7 @@ export function PushNotificationsSection() {
             iosHint={iosHint}
             onEnable={enable}
             onDisable={disable}
+            onRetry={() => void refresh()}
           />
         </CardContent>
       </Card>
@@ -196,9 +231,10 @@ interface PushBodyProps {
   iosHint: boolean;
   onEnable: () => void;
   onDisable: () => void;
+  onRetry: () => void;
 }
 
-function PushBody({ state, iosHint, onEnable, onDisable }: PushBodyProps) {
+function PushBody({ state, iosHint, onEnable, onDisable, onRetry }: PushBodyProps) {
   if (state.kind === "loading") {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -230,6 +266,17 @@ function PushBody({ state, iosHint, onEnable, onDisable }: PushBodyProps) {
       <div className="text-sm text-muted-foreground">
         You've blocked notifications for this site in your browser settings.
         Re-enable them there to use push.
+      </div>
+    );
+  }
+
+  if (state.kind === "check-failed") {
+    return (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">{state.reason}</p>
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
       </div>
     );
   }
