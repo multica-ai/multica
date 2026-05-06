@@ -30,7 +30,7 @@ import {
   X,
   Zap,
   FolderKanban,
-  MessageSquare,
+  Hash,
   FileText,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
@@ -137,6 +137,19 @@ function DraftDot() {
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
 }
 
+// Channels and DMs live in the issue table (kind in 'channel' | 'dm') so until
+// they get dedicated pages, route them through issueDetail.
+function pinHref(p: ReturnType<typeof useWorkspacePaths>, pin: PinnedItem): string {
+  switch (pin.item_type) {
+    case "project":
+      return p.projectDetail(pin.item_id);
+    case "issue":
+    case "channel":
+    case "dm":
+      return p.issueDetail(pin.item_id);
+  }
+}
+
 function SortablePinItem({ pin, href, pathname, onUnpin, onNavigate }: { pin: PinnedItem; href: string; pathname: string; onUnpin: () => void; onNavigate: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
   const wasDragged = useRef(false);
@@ -147,7 +160,12 @@ function SortablePinItem({ pin, href, pathname, onUnpin, onNavigate }: { pin: Pi
 
   const style = { transform: CSS.Transform.toString(transform), transition };
   const isActive = pathname === href;
-  const label = pin.item_type === "issue" && pin.identifier ? `${pin.identifier} ${pin.title}` : pin.title;
+  const label =
+    pin.item_type === "issue" && pin.identifier
+      ? `${pin.identifier} ${pin.title}`
+      : pin.item_type === "channel"
+        ? `#${pin.title}`
+        : pin.title;
 
   return (
     <SidebarMenuItem
@@ -177,8 +195,10 @@ function SortablePinItem({ pin, href, pathname, onUnpin, onNavigate }: { pin: Pi
         {pin.item_type === "issue" && pin.status ? (
           /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
           <StatusIcon status={pin.status as IssueStatus} className="!size-3.5 shrink-0" />
-        ) : pin.item_type === "chat_session" ? (
-          <MessageSquare className="!size-3.5 shrink-0" />
+        ) : pin.item_type === "channel" ? (
+          <Hash className="!size-3.5 shrink-0" />
+        ) : pin.item_type === "dm" ? (
+          <ActorAvatar name={pin.title} initials={(pin.title || "?").charAt(0).toUpperCase()} size={14} />
         ) : (
           <span className="flex size-3.5 shrink-0 items-center justify-center text-xs leading-none">{pin.icon || "📁"}</span>
         )}
@@ -545,7 +565,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <SortablePinItem
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : pin.item_type === "chat_session" ? `${p.inbox()}?chat=${pin.item_id}` : p.projectDetail(pin.item_id)}
+                              href={pinHref(p, pin)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               onNavigate={handleNavClick}

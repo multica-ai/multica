@@ -1,4 +1,4 @@
-export type PinnedItemType = "issue" | "project" | "chat_session";
+export type PinnedItemType = "issue" | "project" | "channel" | "dm";
 
 export interface PinnedItem {
   id: string;
