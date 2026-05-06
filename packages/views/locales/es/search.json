@@ -1,0 +1,44 @@
+{
+  "title": "Búsqueda",
+  "description": "Buscar páginas, tareas y proyectos",
+  "placeholder": "Escribe un comando o busca...",
+  "groups": {
+    "pages": "Páginas",
+    "commands": "Comandos",
+    "switch_workspace": "Cambiar espacio de trabajo",
+    "projects": "Proyectos",
+    "issues": "Tareas",
+    "recent": "Reciente"
+  },
+  "pages": {
+    "inbox": "Bandeja de entrada",
+    "my_issues": "Mis tareas",
+    "issues": "Tareas",
+    "projects": "Proyectos",
+    "agents": "Agentes",
+    "runtimes": "Entornos de ejecución",
+    "skills": "Habilidades",
+    "settings": "Configuración"
+  },
+  "commands": {
+    "current_theme_aria": "Tema actual",
+    "new_issue": "Nueva tarea",
+    "new_project": "Nuevo proyecto",
+    "copy_issue_link": "Copiar enlace de tarea",
+    "copy_identifier": "Copiar identificador ({{identifier}})",
+    "switch_to_light": "Cambiar a tema claro",
+    "switch_to_dark": "Cambiar a tema oscuro",
+    "use_system_theme": "Usar tema del sistema"
+  },
+  "toast": {
+    "link_copied": "Enlace copiado",
+    "copied_identifier": "Copiado {{identifier}}"
+  },
+  "empty": {
+    "no_results": "No se encontraron resultados.",
+    "type_to_search": "Escribe para buscar tareas y proyectos"
+  },
+  "trigger": {
+    "label": "Buscar..."
+  }
+}

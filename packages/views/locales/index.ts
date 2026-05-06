@@ -49,6 +49,31 @@ import zhHansTimeTracking from "./zh-Hans/time-tracking.json";
 import zhHansWorkCalendars from "./zh-Hans/work-calendars.json";
 import zhHansRedmine from "./zh-Hans/redmine.json";
 import zhHansIntegrations from "./zh-Hans/integrations.json";
+import esCommon from "./es/common.json";
+import esAuth from "./es/auth.json";
+import esSettings from "./es/settings.json";
+import esIssues from "./es/issues.json";
+import esAgents from "./es/agents.json";
+import esEditor from "./es/editor.json";
+import esOnboarding from "./es/onboarding.json";
+import esInvite from "./es/invite.json";
+import esLabels from "./es/labels.json";
+import esMembers from "./es/members.json";
+import esMyIssues from "./es/my-issues.json";
+import esSearch from "./es/search.json";
+import esInbox from "./es/inbox.json";
+import esWorkspace from "./es/workspace.json";
+import esProjects from "./es/projects.json";
+import esAutopilots from "./es/autopilots.json";
+import esSkills from "./es/skills.json";
+import esChat from "./es/chat.json";
+import esModals from "./es/modals.json";
+import esRuntimes from "./es/runtimes.json";
+import esLayout from "./es/layout.json";
+import esTimeTracking from "./es/time-tracking.json";
+import esWorkCalendars from "./es/work-calendars.json";
+import esRedmine from "./es/redmine.json";
+import esIntegrations from "./es/integrations.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -107,5 +132,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     "work-calendars": zhHansWorkCalendars,
     redmine: zhHansRedmine,
     integrations: zhHansIntegrations,
+  },
+  es: {
+    common: esCommon,
+    auth: esAuth,
+    settings: esSettings,
+    issues: esIssues,
+    agents: esAgents,
+    editor: esEditor,
+    onboarding: esOnboarding,
+    invite: esInvite,
+    labels: esLabels,
+    members: esMembers,
+    "my-issues": esMyIssues,
+    search: esSearch,
+    inbox: esInbox,
+    workspace: esWorkspace,
+    projects: esProjects,
+    autopilots: esAutopilots,
+    skills: esSkills,
+    chat: esChat,
+    modals: esModals,
+    runtimes: esRuntimes,
+    layout: esLayout,
+    "time-tracking": esTimeTracking,
+    "work-calendars": esWorkCalendars,
+    redmine: esRedmine,
+    integrations: esIntegrations,
   },
 };

@@ -1,0 +1,38 @@
+{
+  "page": {
+    "breadcrumb": "Mis tareas",
+    "workspace_fallback": "Espacio de trabajo",
+    "empty_title": "No hay tareas asignadas a ti",
+    "empty_description": "Las tareas que crees o te sean asignadas aparecerán aquí."
+  },
+  "header": {
+    "scope": {
+      "assigned_label": "Asignadas",
+      "assigned_description": "Tareas asignadas a mí",
+      "created_label": "Creadas",
+      "created_description": "Tareas que he creado",
+      "agents_label": "Mis agentes",
+      "agents_description": "Tareas asignadas a mis agentes"
+    },
+    "filter_button": "Filtrar",
+    "filter_status": "Estado",
+    "filter_priority": "Prioridad",
+    "issue_count_one": "{{count}} tarea",
+    "issue_count_other": "{{count}} tareas",
+    "reset_filters": "Restablecer todos los filtros",
+    "display_settings": "Ajustes de visualización",
+    "ordering": "Ordenar",
+    "ascending": "Ascendente",
+    "descending": "Descendente",
+    "card_properties": "Propiedades de la tarjeta",
+    "view_board": "Vista de tablero",
+    "view_list": "Vista de lista",
+    "view_label": "Vista",
+    "view_board_short": "Tablero",
+    "view_list_short": "Lista",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Error al mover la tarea"
+  }
+}

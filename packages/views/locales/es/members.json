@@ -1,0 +1,14 @@
+{
+  "role": {
+    "owner": "Propietario",
+    "admin": "Administrador",
+    "member": "Miembro"
+  },
+  "card": {
+    "unavailable": "Miembro no disponible",
+    "agents_section": "Agentes ({{count}})",
+    "detail_link": "Detalle →",
+    "more_agents_one": "y {{count}} agente más",
+    "more_agents_other": "y {{count}} agentes más"
+  }
+}

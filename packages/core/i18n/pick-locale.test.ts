@@ -36,6 +36,12 @@ describe("matchLocale", () => {
     expect(matchLocale(["zh-Hant"])).toBe("zh-Hans");
   });
 
+  it("matches Spanish locale tags", () => {
+    expect(matchLocale(["es"])).toBe("es");
+    expect(matchLocale(["es-ES"])).toBe("es");
+    expect(matchLocale(["es-MX"])).toBe("es");
+  });
+
   it("uses the first supported candidate when multiple appear", () => {
     expect(matchLocale(["fr", "zh-Hans", "en"])).toBe("zh-Hans");
   });

@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "inbox": "Bandeja de entrada",
+    "my_issues": "Mis tareas",
+    "issues": "Tareas",
+    "projects": "Proyectos",
+    "autopilots": "Autopiloto",
+    "agents": "Agentes",
+    "time_tracking": "Registro de tiempo",
+    "runtimes": "Entornos de ejecución",
+    "skills": "Habilidades",
+    "settings": "Configuración"
+  },
+  "help": {
+    "trigger": "Ayuda",
+    "docs": "Documentación",
+    "changelog": "Registro de cambios",
+    "feedback": "Comentarios"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Cargando espacio de trabajo…",
+    "loading_named_prefix": "Cargando"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Desfijar",
+    "workspaces_label": "Espacios de trabajo",
+    "create_workspace": "Crear espacio de trabajo",
+    "pending_invitations_label": "Invitaciones pendientes",
+    "invitation_workspace_fallback": "Espacio de trabajo",
+    "invitation_join": "Unirse",
+    "invitation_decline": "Rechazar",
+    "log_out": "Cerrar sesión",
+    "new_issue": "Nueva tarea",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Fijados",
+    "workspace_group": "Espacio de trabajo",
+    "configure_group": "Configurar",
+    "unread_overflow": "99+"
+  }
+}

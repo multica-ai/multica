@@ -10,6 +10,7 @@
       "title": "Language",
       "english": "English",
       "chinese": "中文",
+      "spanish": "Spanish",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     }
   },

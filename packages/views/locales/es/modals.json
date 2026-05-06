@@ -1,0 +1,136 @@
+{
+  "common": {
+    "back": "Atrás",
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "expand_tooltip": "Expandir",
+    "collapse_tooltip": "Contraer"
+  },
+  "create_workspace": {
+    "title": "Crear un nuevo espacio de trabajo",
+    "description": "Los espacios de trabajo son entornos compartidos donde los equipos pueden trabajar en proyectos y tareas."
+  },
+  "delete_issue": {
+    "title": "Eliminar tarea",
+    "description": "Esto eliminará permanentemente esta tarea y todos sus comentarios. Esta acción no se puede deshacer.",
+    "hint": "Cualquier miembro del espacio de trabajo puede eliminar tareas.",
+    "cancel": "Cancelar",
+    "confirm": "Eliminar",
+    "deleting": "Eliminando...",
+    "toast_deleted": "Tarea eliminada",
+    "toast_delete_failed": "Error al eliminar la tarea"
+  },
+  "feedback": {
+    "title": "Comentarios",
+    "description": "Nos encantaría saber qué funciona, qué no, o qué te gustaría ver próximamente.",
+    "placeholder": "Cuéntanos tu experiencia, errores que hayas encontrado, o funciones que te gustaría ver…",
+    "toast_uploading": "Por favor espera a que terminen las subidas…",
+    "toast_too_long": "El mensaje es demasiado largo",
+    "toast_sent": "¡Gracias por los comentarios!",
+    "toast_failed": "Error al enviar los comentarios",
+    "send": "Enviar comentarios",
+    "sending": "Enviando…"
+  },
+  "issue_picker": {
+    "search_placeholder": "Buscar tareas...",
+    "searching": "Buscando...",
+    "no_results": "No se encontraron tareas.",
+    "prompt_to_search": "Escribe para buscar tareas"
+  },
+  "set_parent": {
+    "title": "Establecer tarea padre",
+    "description": "Busca una tarea para establecerla como padre de esta tarea",
+    "toast_failed": "Error al actualizar la tarea",
+    "toast_success": "Se estableció {{identifier}} como tarea padre"
+  },
+  "add_child": {
+    "title": "Añadir sub-tarea",
+    "description": "Busca una tarea para añadirla como sub-tarea",
+    "toast_failed": "Error al añadir sub-tarea",
+    "toast_success": "Se añadió {{identifier}} como sub-tarea"
+  },
+  "backlog_hint": {
+    "toast_status_failed": "Error al actualizar el estado"
+  },
+  "create_project": {
+    "title": "Nuevo proyecto",
+    "title_breadcrumb": "Nuevo proyecto",
+    "icon_tooltip": "Elegir icono",
+    "title_placeholder": "Título del proyecto",
+    "description_placeholder": "Añadir descripción...",
+    "lead": "Responsable",
+    "no_lead": "Sin responsable",
+    "lead_placeholder": "Asignar responsable...",
+    "members_group": "Miembros",
+    "agents_group": "Agentes",
+    "no_results": "Sin resultados",
+    "submit": "Crear proyecto",
+    "submitting": "Creando...",
+    "toast_created": "Proyecto creado",
+    "toast_failed": "Error al crear el proyecto",
+    "repos_pill": "Repos",
+    "repos_pill_count_one": "{{count}} repo",
+    "repos_pill_count_other": "{{count}} repos",
+    "repos_heading": "Adjuntar repositorios de GitHub a este proyecto",
+    "repos_empty": "Sin repos a nivel de espacio de trabajo todavía. Pega una URL abajo para adjuntar uno de forma puntual.",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "Añadir",
+    "repos_selected": "Seleccionado"
+  },
+  "create_issue": {
+    "sr_manual": "Nueva tarea",
+    "sr_agent": "Crear tarea rápida",
+    "manual_breadcrumb": "Crear manualmente",
+    "agent_breadcrumb": "Crear con agente",
+    "title_placeholder": "Título de la tarea",
+    "description_placeholder": "Añadir descripción...",
+    "more_options_aria": "Más opciones",
+    "submit": "Crear tarea",
+    "submitting": "Creando...",
+    "toast_created": "Tarea creada",
+    "view_issue": "Ver tarea",
+    "toast_failed": "Error al crear la tarea",
+    "toast_link_subissues_all_failed": "Error al vincular sub-tareas",
+    "toast_link_subissues_partial": "Error al vincular {{failed}} de {{total}} sub-tareas",
+    "switch_to_agent": "Cambiar a agente",
+    "switch_to_agent_tooltip": "Cambiar a crear con agente — describe en una línea y deja que el agente la registre",
+    "switch_to_manual": "Cambiar a manual",
+    "switch_to_manual_tooltip": "Cambiar a creación manual — rellena los campos tú mismo",
+    "create_another": "Crear otra",
+    "remove_parent_aria": "Eliminar padre",
+    "remove_subissue_aria": "Eliminar sub-tarea {{identifier}}",
+    "subissue_of": "Sub-tarea de {{identifier}}",
+    "subissue_chip": "Sub-tarea: {{identifier}}",
+    "parent_with_id": "Padre: {{identifier}}",
+    "set_parent": "Establecer tarea padre...",
+    "add_subissue": "Añadir sub-tarea...",
+    "remove_parent": "Eliminar padre",
+    "set_parent_picker": {
+      "title": "Establecer tarea padre",
+      "description": "Busca una tarea para establecerla como padre de la nueva tarea"
+    },
+    "add_subissue_picker": {
+      "title": "Añadir sub-tarea",
+      "description": "Busca una tarea para añadirla como sub-tarea de la nueva tarea"
+    },
+    "agent": {
+      "created_by": "Creado por",
+      "select_agent_aria": "Seleccionar agente",
+      "pick_an_agent": "Elige un agente…",
+      "no_agents": "No hay agentes disponibles.",
+      "version_missing": "El daemon de este agente no reporta una versión de CLI. Crear con agente necesita CLI de Multica ≥ {{min}}. Actualiza el daemon y reconéctate, o cambia a creación manual.",
+      "version_below": "El CLI del daemon de este agente es {{current}} — Crear con agente necesita ≥ {{min}}. Actualiza el daemon, o cambia a creación manual.",
+      "prompt_placeholder": "Dile al agente qué hacer, p. ej. «que Bohan arregle la lentitud de carga de la bandeja de entrada en el proyecto Web»",
+      "submit": "Crear",
+      "sending": "Enviando…",
+      "uploading": "Subiendo…",
+      "sent_label": "Enviado",
+      "sent_count": "{{count}} enviados",
+      "version_blocked_tooltip": "El CLI del daemon debe ser ≥ {{min}}",
+      "toast_sent": "Enviado al agente — recibirás una notificación en la bandeja de entrada cuando esté listo",
+      "error_agent_unavailable_fallback": "El agente no está disponible. Elige otro agente.",
+      "error_daemon_version": "El CLI del daemon de este agente ({{current}}) es inferior al requerido {{min}}. Actualiza el daemon para usar Crear con agente.",
+      "error_unknown": "Error al enviar. Inténtalo de nuevo."
+    }
+  }
+}

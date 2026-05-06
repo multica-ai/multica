@@ -1,0 +1,232 @@
+{
+  "page": {
+    "title": "Autopiloto",
+    "new_autopilot": "Nuevo autopiloto",
+    "start_blank": "Empezar desde cero",
+    "table": {
+      "name": "Nombre",
+      "agent": "Agente",
+      "mode": "Modo",
+      "status": "Estado",
+      "last_run": "Última ejecución"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "Sin autopiloto todavía",
+      "hint": "Programa tareas recurrentes para tus agentes de IA. Elige una plantilla o empieza desde cero."
+    }
+  },
+  "status": {
+    "active": "Activo",
+    "paused": "En pausa",
+    "archived": "Archivado"
+  },
+  "execution_mode": {
+    "create_issue": "Crear tarea",
+    "run_only": "Solo ejecutar"
+  },
+  "relative_date": {
+    "today": "Hoy",
+    "one_day_ago": "Hace 1 día",
+    "days_ago": "Hace {{count}} días",
+    "months_ago": "Hace {{count}} meses"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Resumen diario de noticias",
+      "summary": "Buscar y resumir las noticias del día para el equipo"
+    },
+    "pr_review": {
+      "title": "Recordatorio de revisión de PR",
+      "summary": "Marcar las pull requests pendientes que necesitan revisión"
+    },
+    "bug_triage": {
+      "title": "Clasificación de errores",
+      "summary": "Evaluar y priorizar nuevos informes de errores"
+    },
+    "weekly_progress": {
+      "title": "Informe de progreso semanal",
+      "summary": "Compilar un resumen semanal del progreso del equipo"
+    },
+    "dependency_audit": {
+      "title": "Auditoría de dependencias",
+      "summary": "Analizar vulnerabilidades de seguridad y paquetes desactualizados"
+    },
+    "documentation_check": {
+      "title": "Revisión de documentación",
+      "summary": "Revisar los cambios recientes en busca de carencias en la documentación"
+    }
+  },
+  "detail": {
+    "not_found": "Autopiloto no encontrado",
+    "pause_aria": "Pausar autopiloto",
+    "activate_aria": "Activar autopiloto",
+    "edit": "Editar",
+    "run_now": "Ejecutar ahora",
+    "running": "Ejecutando...",
+    "toast_triggered": "Autopiloto activado",
+    "toast_trigger_failed": "Error al activar el autopiloto",
+    "section_properties": "Propiedades",
+    "section_triggers": "Desencadenadores",
+    "section_run_history": "Historial de ejecuciones",
+    "section_danger": "Zona de peligro",
+    "field_agent": "Agente",
+    "field_output_mode": "Modo de salida",
+    "field_prompt": "Instrucción",
+    "add_trigger": "Añadir desencadenador",
+    "no_triggers": "Sin desencadenadores configurados. Añade una programación para ejecutar automáticamente.",
+    "no_runs": "Sin ejecuciones todavía. Haz clic en «Ejecutar ahora» para activar manualmente.",
+    "delete_button": "Eliminar autopiloto",
+    "toast_deleted": "Autopiloto eliminado",
+    "toast_delete_failed": "Error al eliminar el autopiloto",
+    "delete_dialog": {
+      "title": "Eliminar autopiloto",
+      "description": "Esto eliminará permanentemente «{{title}}», junto con sus desencadenadores e historial de ejecuciones. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    }
+  },
+  "run_status": {
+    "issue_created": "Tarea creada",
+    "running": "Ejecutando",
+    "completed": "Completado",
+    "failed": "Fallido"
+  },
+  "run": {
+    "issue_linked": "Tarea vinculada",
+    "view_log": "Ver registro de ejecución"
+  },
+  "trigger_row": {
+    "disabled_badge": "Desactivado",
+    "next_label": "Próximo: {{date}}",
+    "toast_deleted": "Desencadenador eliminado",
+    "toast_delete_failed": "Error al eliminar el desencadenador",
+    "delete_dialog": {
+      "title": "Eliminar desencadenador",
+      "description": "Este desencadenador se eliminará y el autopiloto dejará de activarse con esta programación. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Añadir desencadenador",
+    "label_field": "Etiqueta (opcional)",
+    "label_placeholder": "p. ej. Mañana entre semana",
+    "submit": "Añadir desencadenador",
+    "submitting": "Añadiendo...",
+    "toast_added": "Desencadenador añadido",
+    "toast_add_failed": "Error al añadir el desencadenador"
+  },
+  "dialog": {
+    "sr_create": "Nuevo autopiloto",
+    "sr_edit": "Editar autopiloto",
+    "header_create": "Nuevo autopiloto",
+    "header_edit": "Editar autopiloto",
+    "subtitle": "Una tarea recurrente de IA",
+    "expand": "Expandir",
+    "collapse": "Contraer",
+    "close": "Cerrar",
+    "title_placeholder": "Nombre del autopiloto",
+    "runbook_label": "Guía de ejecución",
+    "runbook_hint": "Leída por el agente en cada ejecución",
+    "description_placeholder": "# Objetivo\n¿Qué debe lograr el agente?\n\n# Contexto\n¿Para quién es esto? ¿Alguna restricción?\n\n# Pasos\n1. …\n2. …",
+    "auto_run_hint": "Una vez guardado, se ejecuta automáticamente hasta que se pause.",
+    "cancel": "Cancelar",
+    "create": "Crear autopiloto",
+    "save": "Guardar",
+    "creating": "Creando...",
+    "saving": "Guardando...",
+    "toast_created": "Autopiloto creado",
+    "toast_create_partial": "Autopiloto creado, pero la programación no se pudo guardar",
+    "toast_create_failed": "Error al crear el autopiloto",
+    "toast_updated": "Autopiloto actualizado",
+    "toast_update_partial": "Autopiloto actualizado, pero la programación no se pudo guardar",
+    "toast_update_failed": "Error al actualizar el autopiloto",
+    "section_agent": "Agente",
+    "select_agent": "Seleccionar agente",
+    "section_output_mode": "Modo de salida",
+    "section_schedule": "Programación",
+    "schedule_disabled_reason": "Este autopiloto tiene múltiples programaciones — edítalas en la página de detalle.",
+    "next_run_label": "Próxima ejecución:",
+    "output_modes": {
+      "create_issue": {
+        "label": "Crear tarea",
+        "description": "Cada ejecución crea una tarea registrada"
+      },
+      "run_only": {
+        "label": "Solo ejecutar",
+        "description": "Ejecución silenciosa, sin tarea creada"
+      }
+    },
+    "frequency_long": {
+      "hourly": "Cada hora",
+      "daily": "Cada día",
+      "weekdays": "Cada día laboral",
+      "weekly": "Cada semana",
+      "custom": "Cron personalizado"
+    },
+    "days": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "Cada hora",
+      "daily": "Diario",
+      "weekdays": "Días laborables",
+      "weekly": "Días",
+      "custom": "Personalizado"
+    },
+    "days_short": {
+      "sun": "Dom",
+      "mon": "Lun",
+      "tue": "Mar",
+      "wed": "Mié",
+      "thu": "Jue",
+      "fri": "Vie",
+      "sat": "Sáb"
+    },
+    "cron_label": "Expresión Cron",
+    "cron_hint": "Cron estándar de 5 campos (min hora dom mes dow)",
+    "minute_label": "Minuto",
+    "time_label": "Hora",
+    "timezone_label": "Zona horaria",
+    "days_label": "Días",
+    "summary": {
+      "hourly": "Cada hora · :{{min}}",
+      "daily": "Diario {{time}}",
+      "weekdays": "Días laborables {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Cron personalizado",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "Se ejecuta cada hora a :{{min}}",
+      "daily": "Se ejecuta diariamente a {{time}} {{offset}}",
+      "weekdays": "Se ejecuta los días laborables a {{time}} {{offset}}",
+      "weekly": "Se ejecuta cada {{days}} a {{time}} {{offset}}",
+      "custom": "Programación personalizada: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Filtrar agentes...",
+    "select_agent": "Seleccionar agente"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Buscar zona horaria..."
+  }
+}

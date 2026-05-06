@@ -1,0 +1,118 @@
+{
+  "fab": {
+    "running": "Multica está trabajando...",
+    "unread_one": "{{count}} chat sin leer",
+    "unread_other": "{{count}} chats sin leer",
+    "default": "Preguntar a Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Crea un agente para empezar a chatear",
+    "placeholder_archived": "Esta sesión está archivada",
+    "placeholder_named": "Dile a {{name}} qué hacer…",
+    "placeholder_default": "Dime qué hacer…"
+  },
+  "message_list": {
+    "show_details": "Mostrar detalles",
+    "replied_in": "Respondió en {{elapsed}}",
+    "failed_after": "Falló después de {{elapsed}}",
+    "task_failed_fallback": "La tarea falló",
+    "tools_one": "{{count}} herramienta",
+    "tools_other": "{{count}} herramientas",
+    "tool_result_named": "Resultado de {{tool}}: ",
+    "tool_result_unnamed": "resultado: ",
+    "process_steps_one": "{{count}} paso",
+    "process_steps_other": "{{count}} pasos",
+    "copy_action": "Copiar",
+    "copied_toast": "Copiado",
+    "copy_failed_toast": "Error al copiar"
+  },
+  "session_history": {
+    "back_tooltip": "Atrás",
+    "header": "Historial de chat",
+    "empty": "Sin sesiones de chat todavía",
+    "untitled": "Sin título",
+    "time": {
+      "just_now": "ahora mismo",
+      "minutes": "hace {{count}}m",
+      "hours": "hace {{count}}h",
+      "days": "hace {{count}}d"
+    },
+    "row_delete_aria": "Eliminar sesión de chat",
+    "row_delete_tooltip": "Eliminar",
+    "delete_dialog": {
+      "title": "Eliminar sesión de chat",
+      "description_with_title": "«{{title}}» y sus mensajes se eliminarán permanentemente. Esta acción no se puede deshacer.",
+      "description_default": "Esta sesión de chat y sus mensajes se eliminarán permanentemente. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "confirming": "Eliminando..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Nuevo chat",
+    "restore_tooltip": "Restaurar",
+    "expand_tooltip": "Expandir",
+    "minimize_tooltip": "Minimizar",
+    "another_running": "Otro chat está en marcha",
+    "another_unread": "Otro chat tiene respuestas sin leer",
+    "running": "En marcha",
+    "unread": "Sin leer",
+    "no_previous": "Sin chats anteriores",
+    "untitled": "Nuevo chat",
+    "my_agents": "Mis agentes",
+    "others": "Otros",
+    "no_agents": "Sin agentes",
+    "history_show_tooltip": "Historial de chat",
+    "history_back_tooltip": "Volver al chat"
+  },
+  "empty_state": {
+    "first_time_title": "Chatea con tus agentes",
+    "first_time_intro": "✨ Conocen tu espacio de trabajo —",
+    "first_time_pillars": "tareas, proyectos, habilidades",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Pide un resumen, planifica tu día, o delega una tarea rápida.",
+    "returning_title_named": "Hola, soy {{name}}",
+    "returning_title_default": "Bienvenido a Multica",
+    "returning_subtitle": "Prueba preguntar"
+  },
+  "starter_prompts": {
+    "list_open": "Lista mis tareas abiertas por prioridad",
+    "summarize_today": "Resume lo que hice hoy",
+    "plan_next": "Planifica en qué trabajar después"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "Nada que compartir con Multica en esta página",
+    "tooltip_off": "Deja que Multica sepa qué estás viendo",
+    "tooltip_on_issue": "Multica sabe que estás viendo {{label}} · Haz clic para desactivar",
+    "tooltip_on_project": "Multica sabe que estás viendo el proyecto «{{label}}» · Haz clic para desactivar",
+    "card_tooltip_issue_with_subtitle": "Multica sabe que estás viendo {{label}} — {{subtitle}}",
+    "card_tooltip_issue": "Multica sabe que estás viendo {{label}}",
+    "card_tooltip_project": "Multica sabe que estás viendo el proyecto «{{label}}»",
+    "aria_stop": "Dejar de compartir la página actual",
+    "aria_start": "Compartir la página actual con Multica"
+  },
+  "no_agent_banner": "Necesitas un agente para empezar a chatear.",
+  "offline_banner": {
+    "fallback_name": "el agente",
+    "unstable": "La conexión de {{name}} es inestable — las respuestas pueden retrasarse.",
+    "offline": "{{name}} está desconectado — tu mensaje se entregará cuando vuelva."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Desconectado",
+      "reconnecting": "Reconectando",
+      "queued": "En cola",
+      "starting_up": "Iniciando",
+      "thinking": "Pensando",
+      "typing": "Escribiendo"
+    },
+    "tools": {
+      "running_command": "Ejecutando un comando",
+      "reading_files": "Leyendo archivos",
+      "searching_code": "Buscando en el código",
+      "making_edits": "Realizando ediciones",
+      "searching_web": "Buscando en la web",
+      "fallback": "Trabajando"
+    }
+  }
+}

@@ -10,6 +10,7 @@
       "title": "语言",
       "english": "English",
       "chinese": "中文",
+      "spanish": "西班牙语",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
     }
   },

@@ -5,11 +5,13 @@ import { useConfigStore } from "@multica/core/config";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
 import { createEnDict } from "./en";
 import { createZhDict } from "./zh";
+import { createEsDict } from "./es";
 import type { LandingDict, Locale } from "./types";
 
 const dictionaryFactories: Record<Locale, (allowSignup: boolean) => LandingDict> = {
   en: createEnDict,
   zh: createZhDict,
+  es: createEsDict,
 };
 
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year

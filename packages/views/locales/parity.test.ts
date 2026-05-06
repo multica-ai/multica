@@ -5,20 +5,20 @@ import { describe, expect, it } from "vitest";
 import { RESOURCES } from "./index";
 
 // Schema-level guard: every key in the EN bundle must have a counterpart
-// in the zh-Hans bundle and vice-versa. Catches retrofit drift where a
-// new EN key lands without zh, which would silently fall back to the
-// English string in production.
+// in every non-EN bundle and vice-versa. Catches retrofit drift where a
+// new EN key lands without a translation, which would silently fall back
+// to the English string in production.
 //
 // i18next plural rule: EN uses `_one` + `_other`; zh only uses `_other`
-// because Chinese has no grammatical number. Normalize both forms to
-// `_other` before comparing so a `{ key_one, key_other }` pair in EN
-// matches a single `{ key_other }` in zh.
+// because Chinese has no grammatical number. ES uses both forms.
+// Normalize all plural forms to `_count` before comparing so a
+// { key_one, key_other } pair in EN matches a single { key_other } in zh.
 
 // Derive the canonical namespace list from disk so the test fails if a JSON
 // file ships without a matching RESOURCES entry. Without this guard the test
-// would still pass when both EN and zh-Hans skip a namespace (e.g. issues +
-// agents both unregistered), since the iteration happens over RESOURCES.en
-// itself — that's a tautology, not parity.
+// would still pass when both EN and a non-EN locale skip a namespace (e.g.
+// issues + agents both unregistered), since the iteration happens over
+// RESOURCES.en itself — that's a tautology, not parity.
 const LOCALES_DIR = dirname(fileURLToPath(import.meta.url));
 
 function jsonNamespacesIn(locale: string): string[] {
@@ -48,34 +48,43 @@ function keySet(bundle: Record<string, unknown>): Set<string> {
 }
 
 const en = RESOURCES.en;
-const zh = RESOURCES["zh-Hans"];
+const nonEnLocales = Object.keys(RESOURCES).filter((k) => k !== "en");
 
 describe("locale bundle parity", () => {
-  it("declares the same namespaces in EN and zh-Hans", () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
-  });
+  for (const locale of nonEnLocales) {
+    const loc = RESOURCES[locale as keyof typeof RESOURCES];
+
+    it(`declares the same namespaces in EN and ${locale}`, () => {
+      expect(Object.keys(en).sort()).toEqual(Object.keys(loc).sort());
+    });
+
+    it(`registers every JSON file in RESOURCES (${locale})`, () => {
+      expect(Object.keys(loc).sort()).toEqual(jsonNamespacesIn(locale));
+    });
+  }
 
   it("registers every JSON file in RESOURCES (EN)", () => {
     expect(Object.keys(en).sort()).toEqual(jsonNamespacesIn("en"));
   });
 
-  it("registers every JSON file in RESOURCES (zh-Hans)", () => {
-    expect(Object.keys(zh).sort()).toEqual(jsonNamespacesIn("zh-Hans"));
-  });
+  for (const locale of nonEnLocales) {
+    const loc = RESOURCES[locale as keyof typeof RESOURCES];
 
-  for (const ns of Object.keys(en)) {
-    it(`${ns}: zh-Hans covers every EN key`, () => {
-      const enKeys = keySet(en[ns] ?? {});
-      const zhKeys = keySet(zh[ns] ?? {});
-      const missing = [...enKeys].filter((k) => !zhKeys.has(k));
-      expect(missing).toEqual([]);
-    });
+    for (const ns of Object.keys(en)) {
+      it(`${ns}: ${locale} covers every EN key`, () => {
+        const enKeys = keySet(en[ns] ?? {});
+        const locKeys = keySet(loc[ns] ?? {});
+        const missing = [...enKeys].filter((k) => !locKeys.has(k));
+        expect(missing).toEqual([]);
+      });
 
-    it(`${ns}: EN covers every zh-Hans key`, () => {
-      const enKeys = keySet(en[ns] ?? {});
-      const zhKeys = keySet(zh[ns] ?? {});
-      const extra = [...zhKeys].filter((k) => !enKeys.has(k));
-      expect(extra).toEqual([]);
-    });
+      it(`${ns}: EN covers every ${locale} key`, () => {
+        const enKeys = keySet(en[ns] ?? {});
+        const locKeys = keySet(loc[ns] ?? {});
+        const extra = [...locKeys].filter((k) => !enKeys.has(k));
+        expect(extra).toEqual([]);
+      });
+    }
   }
 });
+

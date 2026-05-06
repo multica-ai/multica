@@ -1,0 +1,69 @@
+{
+  "page": {
+    "title": "Bandeja de entrada",
+    "back": "Bandeja de entrada"
+  },
+  "menu": {
+    "mark_all_read": "Marcar todo como leído",
+    "archive_all": "Archivar todo",
+    "archive_all_read": "Archivar todo lo leído",
+    "archive_completed": "Archivar completados"
+  },
+  "list": {
+    "empty": "Sin notificaciones",
+    "mark_done_tooltip": "Marcar como hecho",
+    "archive_tooltip": "Archivar",
+    "time": {
+      "just_now": "ahora mismo",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    }
+  },
+  "detail": {
+    "select_prompt": "Selecciona una notificación para ver los detalles",
+    "empty": "Tu bandeja de entrada está vacía",
+    "original_input": "Entrada original",
+    "edit_advanced": "Editar como formulario avanzado",
+    "archive": "Archivar"
+  },
+  "types": {
+    "issue_assigned": "Asignado",
+    "unassigned": "Desasignado",
+    "assignee_changed": "Responsable cambiado",
+    "status_changed": "Estado cambiado",
+    "priority_changed": "Prioridad cambiada",
+    "due_date_changed": "Fecha límite cambiada",
+    "new_comment": "Nuevo comentario",
+    "mentioned": "Mencionado",
+    "review_requested": "Revisión solicitada",
+    "task_completed": "Tarea completada",
+    "task_failed": "Tarea fallida",
+    "agent_blocked": "Agente bloqueado",
+    "agent_completed": "Agente completado",
+    "reaction_added": "Reaccionó",
+    "quick_create_done": "Creado con agente",
+    "quick_create_failed": "Error al crear con agente",
+    "time_not_logged": "Tiempo no registrado"
+  },
+  "labels": {
+    "set_status_to": "Establecer estado en",
+    "set_priority_to": "Establecer prioridad en",
+    "assigned_to": "Asignado a {{name}}",
+    "removed_assignee": "Responsable eliminado",
+    "set_due_date_to": "Fecha límite establecida en {{date}}",
+    "removed_due_date": "Fecha límite eliminada",
+    "reacted_to_comment": "Reaccionó {{emoji}} a tu comentario",
+    "created_with_agent": "Creado con agente: {{identifier}}",
+    "failed_with_detail": "Falló: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Error al marcar como leído",
+    "archive_failed": "Error al archivar",
+    "mark_done_failed": "Error al marcar como hecho",
+    "mark_all_read_failed": "Error al marcar todo como leído",
+    "archive_all_failed": "Error al archivar todo",
+    "archive_all_read_failed": "Error al archivar los elementos leídos",
+    "archive_completed_failed": "Error al archivar los completados"
+  }
+}

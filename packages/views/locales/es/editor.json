@@ -1,0 +1,62 @@
+{
+  "bubble_menu": {
+    "bold": "Negrita",
+    "italic": "Cursiva",
+    "strikethrough": "Tachado",
+    "code": "Código",
+    "link": "Enlace",
+    "list": "Lista",
+    "quote": "Cita",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Texto",
+      "normal_text": "Texto normal",
+      "heading_1": "Encabezado 1",
+      "heading_2": "Encabezado 2",
+      "heading_3": "Encabezado 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Lista con viñetas",
+      "ordered_list": "Lista numerada"
+    },
+    "sub_issue": {
+      "tooltip": "Crear sub-tarea desde la selección",
+      "created": "Creado {{identifier}}",
+      "create_failed": "Error al crear la sub-tarea"
+    }
+  },
+  "image": {
+    "view": "Ver imagen",
+    "download": "Descargar",
+    "copy_link": "Copiar enlace",
+    "delete": "Eliminar",
+    "link_copied": "Enlace copiado",
+    "copy_link_failed": "Error al copiar el enlace"
+  },
+  "link_hover": {
+    "copy_link": "Copiar enlace",
+    "open_link": "Abrir enlace",
+    "link_copied": "Enlace copiado",
+    "copy_failed": "Error al copiar"
+  },
+  "mention": {
+    "group_users": "Usuarios",
+    "group_issues": "Tareas",
+    "all_members": "Todos los miembros",
+    "searching": "Buscando...",
+    "no_results": "Sin resultados"
+  },
+  "code_block": {
+    "copy_code": "Copiar código"
+  },
+  "file_card": {
+    "uploading": "Subiendo {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Título"
+  },
+  "mermaid": {
+    "render_error": "No se puede renderizar el diagrama Mermaid.",
+    "rendering": "Renderizando diagrama…"
+  }
+}

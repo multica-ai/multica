@@ -1,0 +1,357 @@
+{
+  "page": {
+    "title": "Agentes",
+    "tagline": "Compañeros IA que recogen incidencias, comentan y actualizan el estado.",
+    "learn_more": "Saber más →",
+    "new_agent": "Nuevo agente",
+    "search_placeholder": "Buscar agentes…",
+    "show_archived": "Mostrar archivados ({{count}}) →",
+    "of_total": "{{visible}} de {{total}}",
+    "list_load_failed": "No se pudieron cargar los agentes",
+    "list_load_failed_default": "Algo salió mal al obtener la lista de agentes.",
+    "try_again": "Intentar de nuevo"
+  },
+  "scope": {
+    "mine": "Míos",
+    "all": "Todos"
+  },
+  "sort": {
+    "label_recent": "Actividad reciente",
+    "label_name": "Nombre",
+    "label_runs": "Más ejecuciones",
+    "label_created": "Creados recientemente"
+  },
+  "availability": {
+    "all": "Todos",
+    "online": "En línea",
+    "unstable": "Inestable",
+    "offline": "Sin conexión"
+  },
+  "workload": {
+    "working": "Trabajando",
+    "queued": "En cola",
+    "idle": "Inactivo"
+  },
+  "archived": {
+    "active_link": "Agentes activos",
+    "title": "Agentes archivados"
+  },
+  "empty": {
+    "title": "No hay agentes aún",
+    "description": "Crea un agente y asígnale incidencias, como cualquier compañero de equipo. Los agentes locales se ejecutan en tu máquina; los agentes en la nube se ejecutan en el runtime de Multica."
+  },
+  "no_matches": {
+    "title": "Sin coincidencias",
+    "search_archived": "Ningún agente archivado coincide con \"{{query}}\".",
+    "no_archived": "No hay agentes archivados aún.",
+    "search_active": "Ningún agente coincide con \"{{query}}\".",
+    "search_active_filtered": "Ningún agente coincide con \"{{query}}\" en este filtro.",
+    "no_filter_match": "Ningún agente coincide con este filtro."
+  },
+  "columns": {
+    "agent": "Agente",
+    "status": "Estado",
+    "workload": "Carga de trabajo",
+    "runtime": "Runtime",
+    "activity_7d": "Actividad (7d)",
+    "runs": "Ejecuciones"
+  },
+  "row": {
+    "you": "Tú",
+    "archived": "Archivado",
+    "no_description": "Sin descripción",
+    "fallback_runtime_cloud": "Nube",
+    "fallback_runtime_local": "Local",
+    "actions_aria": "Acciones de fila"
+  },
+  "activity_tooltip": {
+    "created_today": "Creado hoy",
+    "created_days_ago_one": "Creado hace {{count}} día",
+    "created_days_ago_other": "Creado hace {{count}} días",
+    "last_7_days": "Últimos 7 días",
+    "no_activity": "Sin actividad",
+    "runs_one": "{{count}} ejecución",
+    "runs_other": "{{count}} ejecuciones",
+    "failed_suffix": " · {{count}} fallidas ({{percent}}%)"
+  },
+  "row_actions": {
+    "cancel_all_tasks": "Cancelar todas las tareas",
+    "duplicate": "Duplicar",
+    "restore": "Restaurar",
+    "archive": "Archivar",
+    "agent_archived_toast": "Agente archivado",
+    "archive_failed_toast": "Error al archivar el agente",
+    "agent_restored_toast": "Agente restaurado",
+    "restore_failed_toast": "Error al restaurar el agente",
+    "no_tasks_to_cancel_toast": "No hay tareas activas para cancelar",
+    "cancelled_tasks_toast_one": "{{count}} tarea cancelada",
+    "cancelled_tasks_toast_other": "{{count}} tareas canceladas",
+    "cancel_failed_toast": "Error al cancelar las tareas",
+    "cancel_dialog_title": "¿Cancelar todas las tareas de \"{{name}}\"?",
+    "cancel_dialog_no_tasks": "No hay tareas activas para cancelar.",
+    "cancel_dialog_running_one": "{{count}} en ejecución",
+    "cancel_dialog_queued_one": "{{count}} en cola",
+    "cancel_dialog_impact_one": "Esto cancelará {{summary}} tarea.",
+    "cancel_dialog_impact_other": "Esto cancelará {{summary}} tareas.",
+    "cancel_dialog_running_note": " Las tareas en ejecución pueden tardar hasta 5 segundos en detenerse.",
+    "cancel_dialog_irreversible": " Las tareas canceladas no se pueden reanudar.",
+    "cancel_dialog_keep": "Mantenerlas",
+    "cancel_dialog_confirm": "Cancelar todas las tareas",
+    "archive_dialog_title": "¿Archivar \"{{name}}\"?",
+    "archive_dialog_description": "El agente no podrá ser asignado ni mencionado, y las tareas activas se cancelarán. Todo el historial se conserva y puedes restaurarlo más tarde.",
+    "archive_dialog_cancel": "Cancelar",
+    "archive_dialog_confirm": "Archivar"
+  },
+  "detail": {
+    "back_to_agents": "Agentes",
+    "back_to_agents_full": "Volver a agentes",
+    "not_found_title": "Agente no encontrado",
+    "not_found_default": "Este agente puede haber sido archivado o eliminado.",
+    "try_again": "Intentar de nuevo",
+    "archived_banner": "Este agente está archivado. No puede ser asignado ni mencionado.",
+    "restore": "Restaurar",
+    "archive_dialog_title": "¿Archivar agente?",
+    "archive_dialog_description": "\"{{name}}\" será archivado. No podrá ser asignado ni mencionado, pero todo el historial se conserva. Puedes restaurarlo más tarde.",
+    "archive_dialog_cancel": "Cancelar",
+    "archive_dialog_confirm": "Archivar",
+    "more_archive": "Archivar agente",
+    "agent_updated_toast": "Agente actualizado",
+    "update_failed_toast": "Error al actualizar el agente",
+    "agent_archived_toast": "Agente archivado",
+    "archive_failed_toast": "Error al archivar el agente",
+    "agent_restored_toast": "Agente restaurado",
+    "restore_failed_toast": "Error al restaurar el agente"
+  },
+  "inspector": {
+    "section_properties": "Propiedades",
+    "section_details": "Detalles",
+    "section_skills": "Habilidades",
+    "prop_runtime": "Runtime",
+    "prop_model": "Modelo",
+    "prop_visibility": "Visibilidad",
+    "prop_concurrency": "Concurrencia",
+    "prop_owner": "Propietario",
+    "prop_created": "Creado",
+    "prop_updated": "Actualizado",
+    "no_description_placeholder": "Sin descripción",
+    "change_avatar_aria": "Cambiar avatar",
+    "avatar_updated_toast": "Avatar actualizado",
+    "avatar_upload_failed_toast": "Error al subir el avatar",
+    "rename_title": "Renombrar agente",
+    "rename_placeholder": "Nombre del agente",
+    "rename_required": "El nombre es obligatorio",
+    "edit_description_title": "Editar descripción",
+    "description_placeholder": "¿Qué hace este agente?",
+    "save": "Guardar",
+    "cancel": "Cancelar"
+  },
+  "skill_attach": {
+    "trigger_aria": "Adjuntar una habilidad del espacio de trabajo",
+    "trigger_label": "Adjuntar"
+  },
+  "pickers": {
+    "concurrency_tooltip": "Concurrencia · {{value}} tareas simultáneas máx.",
+    "concurrency_range": "Máx. tareas simultáneas ({{min}}–{{max}})",
+    "runtime_none": "Sin runtime",
+    "runtime_tooltip": "Runtime · {{name}} · {{status}}",
+    "runtime_tooltip_none": "Runtime · ninguno seleccionado",
+    "runtime_online": "en línea",
+    "runtime_offline": "sin conexión",
+    "runtime_owned_by": "propiedad de {{name}}",
+    "runtime_empty": "Sin runtimes",
+    "model_default": "Predeterminado",
+    "model_tooltip": "Modelo · {{value}}",
+    "model_managed_by_runtime": "Gestionado por el runtime",
+    "model_search_placeholder": "Buscar o escribir un ID de modelo",
+    "model_discovering": "Descubriendo modelos…",
+    "model_default_badge": "predeterminado",
+    "model_empty": "No hay modelos disponibles",
+    "model_empty_with_dot": "No hay modelos disponibles.",
+    "model_custom_tooltip": "Usar \"{{value}}\" como ID de modelo personalizado",
+    "model_custom_use": "Usar \"{{value}}\"",
+    "model_clear": "Limpiar (usar predeterminado del proveedor)",
+    "model_clear_title": "Limpiar y usar el predeterminado del proveedor del runtime"
+  },
+  "model_dropdown": {
+    "label": "Modelo",
+    "select_runtime_first": "Selecciona primero un runtime",
+    "default_provider": "Predeterminado (proveedor)",
+    "runtime_offline_manual": "Runtime sin conexión — introducir manualmente",
+    "managed_by_runtime_title": "La selección del modelo es gestionada por este runtime.",
+    "managed_by_runtime_hint": "Configura el modelo en el host del runtime (p. ej. Hermes lo lee de su propio archivo de configuración).",
+    "discovery_failed": "descubrimiento fallido",
+    "clear_full": "Limpiar selección (usar predeterminado del proveedor)"
+  },
+  "tabs": {
+    "activity": "Actividad",
+    "instructions": "Instrucciones",
+    "skills": "Habilidades",
+    "environment": "Entorno",
+    "custom_args": "Args personalizados",
+    "discard_dialog_title": "¿Descartar cambios sin guardar?",
+    "discard_dialog_description": "Tienes cambios sin guardar en esta pestaña. Si sales ahora se descartarán.",
+    "discard_keep": "Seguir editando",
+    "discard_confirm": "Descartar cambios"
+  },
+  "create_dialog": {
+    "title_create": "Crear agente",
+    "title_duplicate": "Duplicar agente",
+    "description_create": "Crea un nuevo agente IA para tu espacio de trabajo.",
+    "description_duplicate": "Crea un nuevo agente basado en \"{{name}}\". Las instrucciones, el entorno y las habilidades se copian automáticamente.",
+    "name_label": "Nombre",
+    "name_placeholder": "p. ej. Agente de Investigación Profunda",
+    "description_label": "Descripción",
+    "description_placeholder": "¿Qué hace este agente?",
+    "visibility_label": "Visibilidad",
+    "runtime_label": "Entorno",
+    "runtime_filter_mine": "Míos",
+    "runtime_filter_all": "Todos",
+    "runtime_loading": "Cargando runtimes...",
+    "runtime_none": "No hay runtime disponible",
+    "runtime_register_first": "Registra un runtime antes de crear un agente",
+    "runtime_cloud_badge": "Nube",
+    "duplicate_copy_suffix": " (Copia)",
+    "create": "Crear",
+    "creating": "Creando...",
+    "cancel": "Cancelar",
+    "create_failed_toast": "Error al crear el agente"
+  },
+  "tab_body": {
+    "common": {
+      "save": "Guardar",
+      "add": "Añadir",
+      "unsaved_changes": "Cambios sin guardar"
+    },
+    "instructions": {
+      "intro": "Define la identidad y el estilo de trabajo de este agente. Se inyecta en el contexto del agente para cada tarea. Se admite Markdown.",
+      "placeholder": "Define el rol, la experiencia y el estilo de trabajo de este agente.\n\n# Ejemplo\nEres un ingeniero frontend especializado en React y TypeScript.\n\n## Estilo de trabajo\n- Escribe PRs pequeños y enfocados — un commit por cambio lógico\n- Prefiere la composición sobre la herencia\n- Siempre añade pruebas unitarias para los nuevos componentes\n\n## Restricciones\n- No modifiques los tipos de shared/ sin aprobación explícita\n- Sigue los patrones de componentes existentes en features/"
+    },
+    "env": {
+      "intro_readonly": "Se inyectan en el proceso del agente al iniciarse. Los valores están ocultos — solo el propietario del agente o el administrador del espacio de trabajo pueden verlos y editarlos.",
+      "empty_readonly": "No hay variables de entorno configuradas.",
+      "intro_prefix": "Se inyectan en el proceso del agente al iniciarse (p. ej. ",
+      "intro_separator": ", ",
+      "intro_suffix": ").",
+      "key_placeholder": "CLAVE",
+      "value_placeholder": "valor",
+      "show_value_aria": "Mostrar valor",
+      "hide_value_aria": "Ocultar valor",
+      "remove_aria": "Eliminar variable",
+      "duplicate_keys_toast": "Claves de variables de entorno duplicadas",
+      "saved_toast": "Variables de entorno guardadas",
+      "save_failed_toast": "Error al guardar las variables de entorno"
+    },
+    "custom_args": {
+      "intro": "Argumentos CLI adicionales añadidos al comando del agente al iniciarse. Los flags de varios tokens pueden compartir una fila — se dividirán por espacios en blanco antes de pasarlos al CLI.",
+      "launch_mode_prefix": "Modo de inicio: ",
+      "launch_mode_args_placeholder": "<tus args>",
+      "input_placeholder": "--flag valor",
+      "remove_aria": "Eliminar argumento",
+      "saved_toast": "Argumentos personalizados guardados",
+      "save_failed_toast": "Error al guardar los argumentos personalizados"
+    },
+    "skills": {
+      "intro": "Habilidades del espacio de trabajo asignadas a este agente. Las habilidades del runtime local siempre están disponibles automáticamente.",
+      "add_action": "Añadir habilidad",
+      "import_hint": "Al importar se crea una copia en el espacio de trabajo que tu equipo puede editar y reutilizar.",
+      "empty_title": "No hay habilidades asignadas",
+      "empty_hint": "Añade habilidades del espacio de trabajo para compartir el conocimiento del equipo con este agente.",
+      "remove_failed_toast": "Error al eliminar la habilidad",
+      "add_dialog_title": "Añadir habilidad",
+      "add_dialog_description": "Selecciona una habilidad del espacio de trabajo para asignar a este agente.",
+      "add_dialog_empty": "Todas las habilidades del espacio de trabajo ya están asignadas.",
+      "add_dialog_cancel": "Cancelar",
+      "add_failed_toast": "Error al añadir la habilidad"
+    },
+    "activity": {
+      "section_now": "Ahora",
+      "section_last_30d": "Últimos 30 días",
+      "section_recent": "Trabajo reciente",
+      "subtitle_no_active": "Sin trabajo activo",
+      "subtitle_active_one": "{{count}} tarea activa",
+      "subtitle_active_other": "{{count}} tareas activas",
+      "subtitle_performance": "Rendimiento",
+      "subtitle_no_recent": "Nada finalizado aún",
+      "subtitle_recent_progress": "{{shown}} de {{total}}",
+      "subtitle_recent_latest": "{{count}} más recientes",
+      "empty_now": "Este agente no está ejecutando nada ahora mismo.",
+      "empty_30d": "Sin finalizaciones en los últimos 30 días.",
+      "empty_recent": "Este agente no ha completado nada aún.",
+      "show_more": "Mostrar más →",
+      "runs_one": "ejecución",
+      "runs_other": "ejecuciones",
+      "success_pct": "{{percent}}% de éxito",
+      "avg_duration": "media {{value}}",
+      "failed_count": "{{count}} fallidas",
+      "source_issue": "Incidencia",
+      "source_chat": "Chat",
+      "source_autopilot": "Autopiloto",
+      "source_untracked": "Sin seguimiento",
+      "source_quick_create": "Creación rápida",
+      "source_creating_issue": "Creando incidencia",
+      "source_chat_session": "Sesión de chat",
+      "source_autopilot_run": "Ejecución autopiloto",
+      "issue_short_fallback": "Incidencia {{prefix}}…",
+      "triggered_by": "Disparado por",
+      "open_issue_aria": "Abrir incidencia",
+      "open_issue_tooltip": "Abrir incidencia",
+      "transcript_tooltip": "Ver transcripción",
+      "cancel_task_aria": "Cancelar tarea",
+      "cancel_task_tooltip": "Cancelar tarea",
+      "cancelling_tooltip": "Cancelando…",
+      "cancel_failed_toast": "Error al cancelar la tarea",
+      "started_prefix": "Iniciado {{when}}",
+      "dispatched_prefix": "Enviado {{when}}",
+      "queued_prefix": "En cola {{when}}"
+    }
+  },
+  "char_counter": {
+    "over_limit": " · {{count}} sobre el límite"
+  },
+  "presence": {
+    "queue_badge": "+{{count}} en cola"
+  },
+  "visibility": {
+    "private": {
+      "label": "Personal",
+      "tooltip": "Personal · solo tú y los admins del espacio de trabajo pueden usar este agente"
+    },
+    "workspace": {
+      "label": "Espacio de trabajo",
+      "tooltip": "Espacio de trabajo · todos en este espacio de trabajo pueden usar este agente"
+    }
+  },
+  "profile_card": {
+    "unavailable": "Agente no disponible",
+    "detail_link": "Detalle →",
+    "runtime_label": "Runtime",
+    "skills_label": "Habilidades",
+    "owner_label": "Propietario",
+    "unknown_runtime": "Runtime desconocido"
+  },
+  "transcript": {
+    "dialog_title": "Transcripción de ejecución del agente",
+    "status_running": "Ejecutando",
+    "status_completed": "Completado",
+    "status_failed": "Fallido",
+    "filter": "Filtrar",
+    "clear_filters": "Limpiar filtros",
+    "tool_calls_one": "{{count}} llamada a herramienta",
+    "tool_calls_other": "{{count}} llamadas a herramienta",
+    "events_one": "{{count}} evento",
+    "events_other": "{{count}} eventos",
+    "events_filtered": "{{shown}} de {{total}} eventos",
+    "copy_all": "Copiar todo",
+    "copy_filtered": "Copiar filtrados",
+    "copied": "Copiado",
+    "waiting_events": "Esperando eventos...",
+    "no_data": "No se registraron datos de ejecución."
+  },
+  "task_failure": {
+    "agent_error": "Error de ejecución del agente",
+    "timeout": "La tarea agotó el tiempo de espera",
+    "runtime_offline": "Daemon sin conexión",
+    "runtime_recovery": "Daemon reiniciado",
+    "manual": "Cancelado por el usuario"
+  }
+}

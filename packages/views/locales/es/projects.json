@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "Proyectos",
+    "new_project": "Nuevo proyecto",
+    "empty": "Sin proyectos todavía",
+    "create_first": "Crea tu primer proyecto"
+  },
+  "table": {
+    "name": "Nombre",
+    "priority": "Prioridad",
+    "status": "Estado",
+    "progress": "Progreso",
+    "lead": "Responsable",
+    "created": "Creado"
+  },
+  "status": {
+    "planned": "Planificado",
+    "in_progress": "En curso",
+    "paused": "En pausa",
+    "completed": "Completado",
+    "cancelled": "Cancelado"
+  },
+  "priority": {
+    "urgent": "Urgente",
+    "high": "Alta",
+    "medium": "Media",
+    "low": "Baja",
+    "none": "Sin prioridad"
+  },
+  "lead": {
+    "no_lead": "Sin responsable",
+    "assign_placeholder": "Asignar responsable...",
+    "members_group": "Miembros",
+    "agents_group": "Agentes",
+    "no_results": "Sin resultados"
+  },
+  "relative_date": {
+    "today": "Hoy",
+    "one_day_ago": "Hace 1 día",
+    "days_ago": "Hace {{count}} días",
+    "months_ago": "Hace {{count}} meses"
+  },
+  "detail": {
+    "not_found": "Proyecto no encontrado",
+    "breadcrumb_fallback": "Proyectos",
+    "title_placeholder": "Título del proyecto",
+    "icon_tooltip": "Cambiar icono",
+    "pin_tooltip": "Fijar en la barra lateral",
+    "unpin_tooltip": "Desfijar de la barra lateral",
+    "sidebar_tooltip": "Alternar barra lateral",
+    "copy_link": "Copiar enlace",
+    "delete_action": "Eliminar proyecto",
+    "section_properties": "Propiedades",
+    "section_progress": "Progreso",
+    "section_description": "Descripción",
+    "description_placeholder": "Añadir descripción...",
+    "empty_issues_title": "No hay tareas vinculadas",
+    "empty_issues_hint": "Crea una nueva tarea o asigna las existentes a este proyecto.",
+    "empty_issues_new_button": "Nueva tarea",
+    "toast_link_copied": "Enlace copiado",
+    "toast_project_deleted": "Proyecto eliminado",
+    "toast_move_issue_failed": "Error al mover la tarea"
+  },
+  "resources": {
+    "section_header": "Recursos",
+    "empty": "Sin recursos adjuntos.",
+    "add_button": "Añadir recurso",
+    "popover_title": "Adjuntar un repositorio de GitHub",
+    "attached_badge": "adjunto",
+    "remove_tooltip": "Eliminar",
+    "url_placeholder": "https://github.com/owner/repo",
+    "url_submit": "Añadir",
+    "toast_attached": "Repositorio adjuntado",
+    "toast_attach_failed": "Error al adjuntar",
+    "toast_removed": "Recurso eliminado",
+    "toast_remove_failed": "Error al eliminar recurso"
+  },
+  "delete_dialog": {
+    "title": "Eliminar proyecto",
+    "description": "Esto eliminará el proyecto. Las tareas no se eliminarán pero se desvincularán.",
+    "confirm": "Eliminar",
+    "cancel": "Cancelar"
+  },
+  "picker": {
+    "no_project": "Sin proyecto",
+    "remove": "Quitar del proyecto",
+    "empty": "Sin proyectos todavía"
+  },
+  "chip": {
+    "fallback_label": "Proyecto"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "title": "Integraciones",
+  "key_saved": "Clave guardada",
+  "remove_key": "Eliminar clave",
+  "no_integrations": "No hay integraciones configuradas para este espacio de trabajo todavía. Pide a un administrador que configure una primero.",
+  "api_keys_title": "Claves de API de integración",
+  "api_keys_desc": "Tus claves de API personales para cada integración habilitada. Solo se usan para tu cuenta.",
+  "redmine_name": "Redmine",
+  "redmine_desc": "Vincula proyectos y tareas de Multica a Redmine.",
+  "open": "Abrir",
+  "instance_url": "URL de la instancia",
+  "remove": "Eliminar",
+  "save": "Guardar",
+  "saving": "Guardando...",
+  "admin_only": "Solo los administradores y propietarios pueden gestionar integraciones."
+}

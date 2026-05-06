@@ -1,0 +1,197 @@
+{
+  "page": {
+    "title": "Entornos de ejecución",
+    "tagline": "Máquinas y trabajadores en la nube ejecutando sesiones de CLI para tus agentes.",
+    "learn_more": "Más información →",
+    "connect_remote": "Conectar máquina remota",
+    "search_placeholder": "Buscar entornos…",
+    "scope_mine": "Míos",
+    "scope_all": "Todos",
+    "live": "En vivo",
+    "live_tooltip": "Actualizaciones en tiempo real · detección de desconexión hasta 75s",
+    "filter_all": "Todos",
+    "filter_all_description": "Todos los entornos en esta vista",
+    "empty": {
+      "title": "Sin entornos de ejecución todavía",
+      "hint": "Desktop escanea automáticamente tu máquina local. Para AWS EC2 u otras máquinas remotas, conéctalas usando el asistente de configuración."
+    },
+    "no_matches": {
+      "title": "Sin coincidencias",
+      "with_query": "Ningún entorno coincide con «{{query}}»{{filterSuffix}}.",
+      "with_query_filter_suffix": " en este filtro",
+      "no_query": "Ningún entorno coincide con este filtro.",
+      "try_widening": " Prueba ampliar el ámbito o borrar los filtros."
+    },
+    "bootstrapping": {
+      "title": "Iniciando entorno local…",
+      "hint": "Esto suele tardar unos segundos. Tu daemon se está registrando en el espacio de trabajo."
+    }
+  },
+  "health": {
+    "online": {
+      "label": "En línea",
+      "description": "Latido recibido en los últimos 45s. Listo para despachar tareas."
+    },
+    "recently_lost": {
+      "label": "Pérdida reciente",
+      "description": "Contacto perdido hace menos de 5 minutos — suele ser un breve fallo de red."
+    },
+    "offline": {
+      "label": "Desconectado",
+      "description": "Sin latido durante más de 5 minutos. Reinicia el daemon o investiga el host."
+    },
+    "about_to_gc": {
+      "label": "A punto de ser eliminado",
+      "description": "Desconectado 6+ días. Se elimina automáticamente a los 7 días a menos que se reconecte."
+    }
+  },
+  "detail": {
+    "all_runtimes": "Todos los entornos",
+    "read_only": "Solo lectura",
+    "delete_aria": "Eliminar entorno",
+    "delete_tooltip": "Eliminar entorno",
+    "delete_button": "Eliminar entorno",
+    "last_seen": "visto por última vez {{when}}",
+    "fact_owner": "Propietario",
+    "fact_device": "Dispositivo",
+    "fact_runtime": "Entorno",
+    "technical_details": "Detalles técnicos",
+    "fact_daemon_cli": "CLI del daemon",
+    "fact_daemon_id": "ID del daemon",
+    "serving_title": "Sirviendo",
+    "serving_count_one": "{{count}} agente",
+    "serving_count_other": "{{count}} agentes",
+    "no_agents": "Ningún agente está vinculado a este entorno todavía.",
+    "diagnostics_title": "Diagnóstico",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "Eliminar entorno",
+      "description": "¿Estás seguro de que quieres eliminar «{{name}}»? Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    },
+    "toast_deleted": "Entorno eliminado",
+    "toast_delete_failed": "Error al eliminar el entorno",
+    "running_chip_one": "· {{count}} en ejecución",
+    "running_chip_other": "· {{count}} en ejecución",
+    "queued_chip_one": "· {{count}} en cola",
+    "queued_chip_other": "· {{count}} en cola"
+  },
+  "detail_page": {
+    "not_found_title": "Entorno no encontrado",
+    "not_found_hint": "Puede haber sido eliminado o puede que no tengas acceso."
+  },
+  "running_one": "{{count}} en ejecución",
+  "running_other": "{{count}} en ejecución",
+  "queued_one": "{{count}} en cola",
+  "queued_other": "{{count}} en cola",
+  "connect": {
+    "title": "Conectar una máquina remota",
+    "description": "Ejecuta estos comandos en tu máquina remota (p. ej. AWS EC2) para instalar el CLI de Multica y registrarla como entorno.",
+    "step1": "1. Instalar el CLI",
+    "step2": "2. Configurar",
+    "step3": "3. Iniciar sesión con un token de acceso personal",
+    "step3_hint_prefix": "Crea uno en ",
+    "step3_hint_destination": "Configuración → Tokens",
+    "step3_hint_suffix": ".",
+    "step4": "4. Iniciar el daemon",
+    "security_label": "Seguridad: ",
+    "security_body": "Usa un rol IAM de EC2 o credenciales de mínimo privilegio. Nunca pongas claves de root en el agente ",
+    "security_body_suffix": ". El daemon solo usa conexiones salientes — no se necesitan puertos de entrada.",
+    "troubleshooting": "Resolución de problemas",
+    "trouble_check_status": "Verificar estado: ",
+    "trouble_view_logs": "Ver registros: ",
+    "trouble_verify_provider": "Verificar proveedor: ",
+    "trouble_remote_note_prefix": "Desktop solo escanea automáticamente tu máquina local. Las máquinas remotas deben ejecutar ",
+    "trouble_remote_note_suffix": " por separado.",
+    "cancel": "Cancelar",
+    "started_daemon": "He iniciado el daemon",
+    "waiting_title": "Esperando el entorno…",
+    "waiting_description": "Escuchando para que tu daemon remoto se registre. Esta página se actualiza automáticamente — no es necesario actualizar.",
+    "waiting_hint_prefix": "Ejecuta ",
+    "waiting_hint_suffix": " en la máquina remota para verificar que está funcionando.",
+    "back": "Atrás",
+    "success_title": "¡Entorno conectado!",
+    "success_description": "Tu máquina remota se ha registrado como entorno. Ahora puedes crear un agente que despache tareas a ella.",
+    "view_runtime": "Ver entorno",
+    "create_agent": "Crear un agente"
+  },
+  "update": {
+    "cli_version_label": "Versión de CLI:",
+    "version_unknown": "desconocido",
+    "managed_by_desktop": "Gestionado por Desktop",
+    "managed_by_desktop_title": "El binario de CLI está gestionado por Multica Desktop — actualiza Desktop para actualizar el CLI.",
+    "latest": "Última versión",
+    "available": "disponible",
+    "action": "Actualizar",
+    "retry": "Reintentar",
+    "unknown_error": "Error desconocido",
+    "initiate_failed": "Error al iniciar la actualización",
+    "status": {
+      "pending": "Esperando el daemon...",
+      "running": "Actualizando...",
+      "completed": "Actualización completada. El daemon se está reiniciando...",
+      "failed": "Actualización fallida",
+      "timeout": "Tiempo de espera agotado"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Menos",
+    "heatmap_more": "Más"
+  },
+  "list": {
+    "col_runtime": "Entorno",
+    "col_health": "Estado",
+    "col_owner": "Propietario",
+    "col_agents": "Agentes",
+    "col_workload": "Carga de trabajo",
+    "col_cost": "Coste · 7d",
+    "col_cli": "CLI",
+    "cost_delta_flat": "estable",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Actualización disponible",
+    "cli_update_available_tooltip": "Actualización disponible: {{version}}",
+    "row_actions_aria": "Acciones de fila",
+    "delete_action": "Eliminar",
+    "delete_permission_hint": "Solo el propietario del entorno y los administradores del espacio de trabajo pueden eliminarlo",
+    "delete_admin_hint": "Solo el propietario del entorno y los administradores del espacio de trabajo pueden eliminar un entorno."
+  },
+  "usage": {
+    "period_label": "Período",
+    "kpi_cost_label": "Coste · {{days}}D",
+    "kpi_cost_delta": "{{sign}}{{pct}}% vs anterior",
+    "kpi_cache_label": "Ahorro de caché · {{days}}D",
+    "kpi_cache_hint": "{{pct}}% de aciertos · {{reads}} lecturas",
+    "kpi_tokens_label": "Tokens · {{days}}D",
+    "kpi_tokens_hint": "entrada {{input}} · salida {{output}}",
+    "when_title": "Cuándo gastó este entorno",
+    "when_tab_daily": "Diario",
+    "when_tab_hourly": "Por horas",
+    "when_tab_heatmap": "Mapa de calor",
+    "heatmap_caption": "Últimas 26 semanas · intensidad diaria en $ (selector de período ignorado aquí)",
+    "legend_input": "Entrada",
+    "legend_output": "Salida",
+    "legend_cache_write": "Escritura de caché",
+    "empty_no_usage": "Sin uso en este período.",
+    "empty_pricing_missing": "Tokens registrados pero precio faltante para:",
+    "empty_pricing_hint": "Añadir a MODEL_PRICING en packages/views/runtimes/utils.ts",
+    "empty_zero_cost": "Tokens registrados pero el cálculo de coste devolvió $0.",
+    "cost_by_title_agent": "Coste por agente",
+    "cost_by_title_model": "Coste por modelo",
+    "cost_by_tab_agent": "Por agente",
+    "cost_by_tab_model": "Por modelo",
+    "cost_by_caption_agent_one": "{{count}} agente en este entorno",
+    "cost_by_caption_agent_other": "{{count}} agentes en este entorno",
+    "cost_by_caption_model_one": "{{count}} modelo usado",
+    "cost_by_caption_model_other": "{{count}} modelos usados",
+    "daily_breakdown_toggle": "Tabla de desglose diario",
+    "table_date": "Fecha",
+    "table_model": "Modelo",
+    "table_input": "Entrada",
+    "table_output": "Salida",
+    "table_cache_r": "Caché L",
+    "table_cache_w": "Caché E",
+    "no_data": "Sin datos de uso todavía"
+  }
+}

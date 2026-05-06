@@ -1,0 +1,29 @@
+{
+  "create_form": {
+    "name_label": "Nombre del espacio de trabajo",
+    "name_placeholder": "Mi espacio de trabajo",
+    "url_label": "URL del espacio de trabajo",
+    "url_placeholder": "mi-espacio",
+    "submit": "Crear espacio de trabajo",
+    "submitting": "Creando...",
+    "errors": {
+      "slug_format": "Solo letras minúsculas, números y guiones",
+      "slug_taken": "Esa URL de espacio de trabajo ya está en uso.",
+      "slug_conflict_toast": "Elige una URL diferente para el espacio de trabajo",
+      "create_failed": "Error al crear el espacio de trabajo"
+    }
+  },
+  "new_page": {
+    "back": "Atrás",
+    "log_out": "Cerrar sesión",
+    "title": "Bienvenido a Multica",
+    "description": "Un espacio de trabajo donde tú y tus compañeros de IA trabajáis juntos — tomando tareas, dejando comentarios, compartiendo el mismo contexto.",
+    "invite_hint": "Puedes invitar a compañeros una vez que tu espacio de trabajo esté listo."
+  },
+  "no_access": {
+    "title": "Espacio de trabajo no disponible",
+    "description": "Este espacio de trabajo no existe o no tienes acceso.",
+    "go_to_workspaces": "Ir a mis espacios de trabajo",
+    "sign_in_different": "Iniciar sesión con un usuario diferente"
+  }
+}

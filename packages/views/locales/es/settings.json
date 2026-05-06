@@ -1,0 +1,220 @@
+{
+  "preferences": {
+    "theme": {
+      "title": "Tema",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "language": {
+      "title": "Idioma",
+      "english": "English",
+      "chinese": "中文",
+      "spanish": "Español",
+      "sync_failed": "Idioma guardado en este dispositivo, pero no se pudo sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior."
+    }
+  },
+  "page": {
+    "title": "Configuración",
+    "my_account": "Mi cuenta",
+    "workspace_fallback": "Espacio de trabajo",
+    "tabs": {
+      "profile": "Perfil",
+      "preferences": "Preferencias",
+      "notifications": "Notificaciones",
+      "tokens": "Tokens API",
+      "general": "General",
+      "repositories": "Repositorios",
+      "labs": "Labs",
+      "members": "Miembros",
+      "user_integrations": "Integraciones",
+      "work_calendars": "Calendarios laborales",
+      "integrations": "Integraciones"
+    }
+  },
+  "account": {
+    "section_profile": "Perfil",
+    "click_avatar_hint": "Clic para subir avatar",
+    "name_label": "Nombre",
+    "save": "Actualizar perfil",
+    "saving": "Actualizando...",
+    "toast_avatar_updated": "Avatar actualizado",
+    "toast_avatar_failed": "Error al subir el avatar",
+    "toast_profile_updated": "Perfil actualizado",
+    "toast_profile_failed": "Error al actualizar el perfil"
+  },
+  "notifications": {
+    "title": "Notificaciones del buzón",
+    "description": "Controla qué eventos generan notificaciones en el buzón. Los tipos de eventos silenciados se filtran silenciosamente — aún puedes verlos visitando la incidencia directamente.",
+    "toast_failed": "Error al actualizar la configuración de notificaciones",
+    "groups": {
+      "assignments": {
+        "label": "Asignaciones",
+        "description": "Cuando te asignan o desasignan de una incidencia"
+      },
+      "status_changes": {
+        "label": "Cambios de estado",
+        "description": "Cuando una incidencia que sigues cambia de estado (p. ej. por hacer, en progreso, completado)"
+      },
+      "comments": {
+        "label": "Comentarios y menciones",
+        "description": "Nuevos comentarios en incidencias que sigues, o cuando alguien te @menciona"
+      },
+      "updates": {
+        "label": "Prioridad y fecha límite",
+        "description": "Cuando cambia la prioridad o la fecha límite en incidencias que sigues"
+      },
+      "agent_activity": {
+        "label": "Actividad del agente",
+        "description": "Cuando una tarea del agente se completa o falla"
+      },
+      "time_tracking": {
+        "label": "Recordatorios de registro de tiempo",
+        "description": "Recordatorio diario cuando no has registrado las horas requeridas según el calendario laboral"
+      }
+    },
+    "system": {
+      "title": "Notificaciones del sistema",
+      "description": "Controla los banners de notificación nativos del SO que se muestran cuando Multica está en segundo plano.",
+      "label": "Mostrar notificaciones del sistema",
+      "hint": "Muestra un banner del sistema operativo para nuevos elementos del buzón cuando la app no está en primer plano."
+    }
+  },
+  "tokens": {
+    "title": "Tokens API",
+    "description": "Los tokens de acceso personal permiten que el CLI y las integraciones externas se autentiquen con tu cuenta.",
+    "name_placeholder": "Nombre del token (p. ej. Mi CLI)",
+    "expiry": {
+      "30": "30 días",
+      "90": "90 días",
+      "365": "1 año",
+      "never": "Sin caducidad"
+    },
+    "create": "Crear",
+    "creating": "Creando...",
+    "toast_load_failed": "Error al cargar los tokens",
+    "toast_create_failed": "Error al crear el token",
+    "toast_revoked": "Token revocado",
+    "toast_revoke_failed": "Error al revocar el token",
+    "metadata_prefix": "{{prefix}}... · Creado {{created}} · {{lastUsed}}",
+    "last_used_with_date": "Último uso {{date}}",
+    "last_used_never": "Nunca usado",
+    "expires_with_date": " · Caduca {{date}}",
+    "revoke_aria": "Revocar {{name}}",
+    "revoke_tooltip": "Revocar",
+    "revoke_dialog": {
+      "title": "Revocar token",
+      "description": "Este token será revocado permanentemente y ya no podrá usarse. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Revocar"
+    },
+    "created_dialog": {
+      "title": "Token creado",
+      "description": "Copia tu token de acceso personal ahora. No podrás volver a verlo.",
+      "copy_tooltip": "Copiar token",
+      "done": "Listo"
+    }
+  },
+  "workspace": {
+    "section_general": "General",
+    "name_label": "Nombre",
+    "description_label": "Descripción",
+    "description_placeholder": "¿En qué se centra este espacio de trabajo?",
+    "context_label": "Contexto",
+    "context_placeholder": "Información de fondo y contexto para los agentes IA que trabajan en este espacio de trabajo",
+    "slug_label": "Slug",
+    "save": "Guardar",
+    "saving": "Guardando...",
+    "manage_hint": "Solo los admins y propietarios pueden actualizar la configuración del espacio de trabajo.",
+    "toast_saved": "Configuración del espacio de trabajo guardada",
+    "toast_save_failed": "Error al guardar la configuración del espacio de trabajo",
+    "danger_zone": "Zona de peligro",
+    "leave_title": "Abandonar espacio de trabajo",
+    "leave_sole_owner": "Eres el único propietario. Primero promueve a otro miembro como propietario, o elimina el espacio de trabajo.",
+    "leave_sole_member": "Eres el único miembro. Elimina el espacio de trabajo para salir.",
+    "leave_default": "Eliminarte de este espacio de trabajo.",
+    "leave_button": "Abandonar espacio de trabajo",
+    "leaving": "Abandonando...",
+    "leave_confirm_title": "Abandonar espacio de trabajo",
+    "leave_confirm_description": "¿Abandonar {{name}}? Perderás el acceso hasta ser reinvitado.",
+    "toast_leave_failed": "Error al abandonar el espacio de trabajo",
+    "delete_title": "Eliminar espacio de trabajo",
+    "delete_description": "Eliminar permanentemente este espacio de trabajo y sus datos.",
+    "delete_button": "Eliminar espacio de trabajo",
+    "deleting": "Eliminando...",
+    "toast_delete_failed": "Error al eliminar el espacio de trabajo",
+    "confirm_cancel": "Cancelar",
+    "confirm_action": "Confirmar"
+  },
+  "delete_workspace_dialog": {
+    "title": "Eliminar espacio de trabajo",
+    "description": "Esta acción no se puede deshacer. Todas las incidencias, agentes y datos se eliminarán permanentemente.",
+    "type_to_confirm_prefix": "Para confirmar, escribe",
+    "type_to_confirm_suffix": " a continuación.",
+    "cancel": "Cancelar",
+    "confirm": "Eliminar espacio de trabajo",
+    "deleting": "Eliminando..."
+  },
+  "labs": {
+    "section_git": "Git",
+    "co_authored_by_label": "Trailer Co-authored-by",
+    "co_authored_by_description_prefix": "Añadir automáticamente",
+    "co_authored_by_description_suffix": "a los commits realizados por agentes.",
+    "toast_failed": "Error al actualizar la configuración"
+  },
+  "repositories": {
+    "section_title": "Repositorios",
+    "description": "Repositorios Git asociados a este espacio de trabajo. Los agentes los usan para clonar y trabajar en el código.",
+    "url_placeholder": "https://git.example.com/org/repo.git",
+    "description_placeholder": "Descripción (p. ej. Backend Go + Frontend Next.js)",
+    "add": "Añadir repositorio",
+    "save": "Guardar",
+    "saving": "Guardando...",
+    "manage_hint": "Solo los admins y propietarios pueden gestionar los repositorios.",
+    "toast_saved": "Repositorios guardados",
+    "toast_save_failed": "Error al guardar los repositorios"
+  },
+  "members": {
+    "section_title": "Miembros ({{count}})",
+    "invite_title": "Invitar miembro",
+    "invite_email_placeholder": "usuario@empresa.com",
+    "invite_button": "Invitar",
+    "inviting": "Invitando...",
+    "toast_invitation_sent": "Invitación enviada",
+    "toast_invitation_failed": "Error al enviar la invitación",
+    "no_members": "No se encontraron miembros.",
+    "pending_title": "Invitaciones pendientes ({{count}})",
+    "pending_status": "Pendiente",
+    "revoke_invitation_tooltip": "Revocar invitación",
+    "revoke_invitation_title": "Revocar invitación",
+    "revoke_invitation_description": "¿Revocar la invitación a {{email}}? Ya no podrán unirse a este espacio de trabajo.",
+    "toast_invitation_revoked": "Invitación revocada",
+    "toast_invitation_revoke_failed": "Error al revocar la invitación",
+    "toast_role_updated": "Rol actualizado",
+    "toast_role_failed": "Error al actualizar el miembro",
+    "toast_member_removed": "Miembro eliminado",
+    "toast_member_remove_failed": "Error al eliminar el miembro",
+    "remove_member_title": "Eliminar {{name}}",
+    "remove_member_description": "¿Eliminar a {{name}} de {{workspace}}? Perderán el acceso a este espacio de trabajo.",
+    "confirm_cancel": "Cancelar",
+    "confirm_action": "Confirmar",
+    "change_role": "Cambiar rol",
+    "remove_action": "Eliminar del espacio de trabajo",
+    "cannot_demote_last_owner_title": "Primero promueve a otro miembro como propietario — un espacio de trabajo debe tener al menos un propietario.",
+    "cannot_demote_last_owner": "No se puede degradar al último propietario",
+    "roles": {
+      "owner": {
+        "label": "Propietario",
+        "description": "Acceso completo, gestiona toda la configuración"
+      },
+      "admin": {
+        "label": "Administrador",
+        "description": "Gestiona miembros y configuración"
+      },
+      "member": {
+        "label": "Miembro",
+        "description": "Crea y trabaja en incidencias"
+      }
+    }
+  }
+}
