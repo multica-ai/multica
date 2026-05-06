@@ -55,7 +55,7 @@ export function CreateAgentDialog({
   // When provided, the dialog opens in "Duplicate" mode: the visible
   // fields (name / description / runtime / visibility / model) are
   // pre-populated from this agent, and the hidden fields
-  // (instructions / custom_args / custom_env / max_concurrent_tasks)
+  // (instructions / custom_args / custom_env / mcp_config / max_concurrent_tasks)
   // are forwarded to the create call so the new agent is a true clone.
   // Skills are copied separately by the caller after createAgent
   // succeeds — they're not part of CreateAgentRequest.
@@ -114,7 +114,7 @@ export function CreateAgentDialog({
     setCreating(true);
     try {
       // When duplicating, forward the hidden config fields the template
-      // carries (instructions / custom_args / custom_env / max_concurrent_tasks)
+      // carries (instructions / custom_args / custom_env / mcp_config / max_concurrent_tasks)
       // so the clone is functional out of the box without the user
       // having to walk back through every settings tab. Skills are
       // copied by the caller in a follow-up setAgentSkills call.
@@ -135,6 +135,13 @@ export function CreateAgentDialog({
           Object.keys(template.custom_env).length > 0
         ) {
           data.custom_env = template.custom_env;
+        }
+        if (
+          !template.mcp_config_redacted &&
+          template.mcp_config &&
+          Object.keys(template.mcp_config).length > 0
+        ) {
+          data.mcp_config = template.mcp_config;
         }
         if (template.max_concurrent_tasks) {
           data.max_concurrent_tasks = template.max_concurrent_tasks;

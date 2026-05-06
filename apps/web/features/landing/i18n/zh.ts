@@ -563,7 +563,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         features: [
           "直接从编辑器气泡菜单将选中文本创建为子 Issue",
           "自部署实例账户门禁——`ALLOW_SIGNUP` 和 `ALLOWED_EMAIL_*` 环境变量限制注册",
-          "Agent 新增 `mcp_config` 字段恢复 MCP 支持",
+          "Agent 新增 `mcp_config` 字段和 MCP tab，可在界面配置 Claude Code MCP server",
           "桌面应用每小时检查更新，设置中新增手动检查按钮",
         ],
         fixes: [

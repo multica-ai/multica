@@ -89,6 +89,23 @@ Arguments are passed as-is, not through a shell (no injection risk), but whether
 `custom_env` and `custom_args` have no hard caps, but in practice **keep each under 10 entries**. Too many makes the command line long, slows startup, and gets harder to maintain.
 </Callout>
 
+## MCP configuration (mcp_config)
+
+**MCP configuration** (`mcp_config`) lets an agent connect Claude Code to Model Context Protocol servers. Add it from the agent detail page's **MCP** tab as a JSON object:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+Only Claude Code currently consumes this field. Other runtimes accept the saved config but ignore it at execution time, so use a Claude Code runtime when the agent depends on MCP servers. See [AI coding tools comparison → MCP configuration](/providers#mcp-configuration-only-claude-code-actually-reads-it).
+
 ## Visibility
 
 - **Workspace** (`workspace`) — any member of the workspace can assign it
