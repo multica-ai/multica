@@ -85,6 +85,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
+  const issueProjectId = issue?.project_id ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -138,8 +139,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("create-issue", {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
+      ...(issueProjectId ? { project_id: issueProjectId } : {}),
     });
-  }, [openModal, issueId, issueIdentifier]);
+  }, [openModal, issueId, issueIdentifier, issueProjectId]);
 
   const openSetParent = useCallback(() => {
     if (!issueId) return;
