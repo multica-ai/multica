@@ -161,6 +161,7 @@ function makeDataTransfer(initial: Record<string, string> = {}) {
       store.set(type, value);
     }),
     getData: vi.fn((type: string) => store.get(type) ?? ""),
+    setDragImage: vi.fn(),
     effectAllowed: "uninitialized",
   };
 }
@@ -257,5 +258,29 @@ describe("FileManagerPage drag-and-drop", () => {
     expect(screen.getAllByLabelText("Actions for Sales").length).toBeGreaterThan(
       1,
     );
+  });
+
+  it("dragging an artifact uses a compact drag image, not the full row", () => {
+    renderPage();
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(artifactRow("Daily sales report"), { dataTransfer });
+
+    expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
+    const ghost = dataTransfer.setDragImage.mock.calls[0]![0] as HTMLElement;
+    // Custom ghost — narrow pill labelled with the artifact title — replaces
+    // the 820px-wide grid row that the browser would otherwise screenshot.
+    expect(ghost.getAttribute("data-drag-ghost")).toBe("artifact");
+    expect(ghost.textContent).toContain("Daily sales report");
+  });
+
+  it("dragging a folder uses a folder-flavoured drag image", () => {
+    renderPage();
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(rowFor("Reports"), { dataTransfer });
+
+    expect(dataTransfer.setDragImage).toHaveBeenCalledTimes(1);
+    const ghost = dataTransfer.setDragImage.mock.calls[0]![0] as HTMLElement;
+    expect(ghost.getAttribute("data-drag-ghost")).toBe("folder");
+    expect(ghost.textContent).toContain("Reports");
   });
 });

@@ -155,6 +155,47 @@ function formatDate(iso: string): string {
   });
 }
 
+// HTML5 drag uses the dragged element as drag image by default. Our row
+// elements span the full grid width (820px+) which produces a giant ghost
+// covering the drop targets. Replace it with a compact pill — icon + label.
+function setCompactDragImage(
+  e: React.DragEvent,
+  label: string,
+  variant: "artifact" | "folder",
+) {
+  if (typeof document === "undefined") return;
+  const ghost = document.createElement("div");
+  ghost.setAttribute("data-drag-ghost", variant);
+  ghost.style.cssText = [
+    "position: fixed",
+    "top: -1000px",
+    "left: -1000px",
+    "display: inline-flex",
+    "align-items: center",
+    "gap: 6px",
+    "max-width: 280px",
+    "padding: 4px 10px",
+    "border-radius: 6px",
+    "background: var(--popover, #fff)",
+    "color: var(--popover-foreground, #111)",
+    "border: 1px solid var(--border, #e5e7eb)",
+    "box-shadow: 0 4px 10px rgba(0,0,0,0.15)",
+    "font: 500 13px/1.2 system-ui, -apple-system, sans-serif",
+    "white-space: nowrap",
+    "overflow: hidden",
+    "text-overflow: ellipsis",
+    "pointer-events: none",
+    "z-index: 9999",
+  ].join(";");
+  const icon = variant === "folder" ? "\u{1F4C1}" : "\u{1F4C4}"; // 📁 / 📄
+  ghost.textContent = `${icon}  ${label}`;
+  document.body.appendChild(ghost);
+  e.dataTransfer.setDragImage(ghost, 12, 12);
+  // Browser snapshots the element synchronously on dragstart; remove it on
+  // the next microtask so it never lingers in the DOM.
+  setTimeout(() => ghost.remove(), 0);
+}
+
 function ScopeBadge({ artifact }: { artifact: Artifact }) {
   const wsPaths = useWorkspacePaths();
   // Prefer the strongest connection: scope-issue > scope-project > origin-issue > workspace.
@@ -294,6 +335,7 @@ function FolderTreeItem({
           onDragStart={(e) => {
             e.dataTransfer.setData("text/multica-folder", node.id);
             e.dataTransfer.effectAllowed = "move";
+            setCompactDragImage(e, node.name, "folder");
           }}
           onDragOver={(e) => {
             e.preventDefault();
@@ -1033,6 +1075,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     onDragStart={(e) => {
                       e.dataTransfer.setData("text/multica-folder", f.id);
                       e.dataTransfer.effectAllowed = "move";
+                      setCompactDragImage(e, f.name, "folder");
                     }}
                     onClick={() => setFolderId(f.id)}
                     onDragOver={(e) => e.preventDefault()}
@@ -1145,6 +1188,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     onDragStart={(e) => {
                       e.dataTransfer.setData("text/multica-artifact", a.id);
                       e.dataTransfer.effectAllowed = "move";
+                      setCompactDragImage(e, a.title, "artifact");
                     }}
                     onClick={() => router.push(wsPaths.documentDetail(a.id))}
                     onDoubleClick={() =>
