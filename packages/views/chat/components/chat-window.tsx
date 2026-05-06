@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, History } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -36,6 +36,7 @@ import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
+import { ChatSessionHistory } from "./chat-session-history";
 import {
   ContextAnchorButton,
   ContextAnchorCard,
@@ -58,6 +59,8 @@ export function ChatWindow() {
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const showHistory = useChatStore((s) => s.showHistory);
+  const setShowHistory = useChatStore((s) => s.setShowHistory);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -412,6 +415,24 @@ export function ChatWindow() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className="text-muted-foreground data-[active=true]:bg-accent"
+                  data-active={showHistory ? "true" : undefined}
+                  onClick={() => setShowHistory(!showHistory)}
+                />
+              }
+            >
+              <History />
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {showHistory ? "Back to chat" : "Chat history"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   className="text-muted-foreground"
                   onClick={toggleExpand}
                 />
@@ -441,58 +462,67 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* Messages / skeleton / empty state */}
-      {showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : hasMessages ? (
-        <ChatMessageList
-          messages={messages}
-          pendingTask={pendingTask}
-          availability={availability}
-        />
+      {/* History panel takes over the body when toggled — surfaces the
+       *  per-row delete button. Hidden by default; the input + banners
+       *  are skipped here because the panel has its own affordances. */}
+      {showHistory ? (
+        <ChatSessionHistory />
       ) : (
-        <EmptyState
-          hasSessions={sessions.length > 0}
-          agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
-        />
-      )}
+        <>
+          {/* Messages / skeleton / empty state */}
+          {showSkeleton ? (
+            <ChatMessageSkeleton />
+          ) : hasMessages ? (
+            <ChatMessageList
+              messages={messages}
+              pendingTask={pendingTask}
+              availability={availability}
+            />
+          ) : (
+            <EmptyState
+              hasSessions={sessions.length > 0}
+              agentName={activeAgent?.name}
+              onPickPrompt={(text) => handleSend(text)}
+            />
+          )}
 
-      {/* Status banner above the input — single mutually-exclusive slot.
-       *  Priority: no-agent > offline / unstable. Agent presence is the
-       *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. ContextAnchorCard stays in
-       *  topSlot because that's per-message context, not session state.
-       *
-       *  We key off `noAgent` (the resolved-empty state) rather than
-       *  `!activeAgent`, so the loading window between mount and the
-       *  first agent-list response stays banner-free. */}
-      {noAgent ? (
-        <NoAgentBanner />
-      ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
-      )}
+          {/* Status banner above the input — single mutually-exclusive slot.
+           *  Priority: no-agent > offline / unstable. Agent presence is the
+           *  hard prerequisite (you can't send anything without one), so it
+           *  always wins over a presence hint. ContextAnchorCard stays in
+           *  topSlot because that's per-message context, not session state.
+           *
+           *  We key off `noAgent` (the resolved-empty state) rather than
+           *  `!activeAgent`, so the loading window between mount and the
+           *  first agent-list response stays banner-free. */}
+          {noAgent ? (
+            <NoAgentBanner />
+          ) : (
+            <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+          )}
 
-      {/* Input — disabled for legacy archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
-      <ChatInput
-        onSend={handleSend}
-        onStop={handleStop}
-        isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
-        noAgent={noAgent}
-        agentName={activeAgent?.name}
-        topSlot={<ContextAnchorCard />}
-        leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
+          {/* Input — disabled for legacy archived sessions; locked out entirely
+           *  when there's no agent (the EmptyState above carries the CTA). */}
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStop}
+            isRunning={!!pendingTaskId}
+            disabled={isSessionArchived}
+            noAgent={noAgent}
+            agentName={activeAgent?.name}
+            topSlot={<ContextAnchorCard />}
+            leftAdornment={
+              <AgentDropdown
+                agents={availableAgents}
+                activeAgent={activeAgent}
+                userId={user?.id}
+                onSelect={handleSelectAgent}
+              />
+            }
+            rightAdornment={<ContextAnchorButton />}
           />
-        }
-        rightAdornment={<ContextAnchorButton />}
-      />
+        </>
+      )}
     </motion.div>
   );
 }
