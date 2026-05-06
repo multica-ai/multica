@@ -54,6 +54,9 @@ export class MulticaClient {
   async post<T>(path: string, body: unknown, opts: RequestOptions = {}): Promise<T> {
     return this.request<T>("POST", path, { ...opts, body });
   }
+  async put<T>(path: string, body: unknown, opts: RequestOptions = {}): Promise<T> {
+    return this.request<T>("PUT", path, { ...opts, body });
+  }
   async patch<T>(path: string, body: unknown, opts: RequestOptions = {}): Promise<T> {
     return this.request<T>("PATCH", path, { ...opts, body });
   }

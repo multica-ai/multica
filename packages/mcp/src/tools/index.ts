@@ -11,12 +11,14 @@ import { channelTools } from "./channels.js";
 import { projectTools } from "./projects.js";
 import { labelTools } from "./labels.js";
 import { autopilotTools } from "./autopilots.js";
+import { memoryTools } from "./memory.js";
 
 export const allTools: RegisteredTool[] = [
   ...issueTools,
   ...agentTools,
   ...channelTools,
   ...projectTools,
+  ...memoryTools,
   ...labelTools,
   ...autopilotTools,
   ...workspaceTools,
