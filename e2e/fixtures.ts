@@ -133,6 +133,14 @@ export class TestApiClient {
     return issue;
   }
 
+  async createComment(issueId: string, content: string) {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+    return res.json();
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }

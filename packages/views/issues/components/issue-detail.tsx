@@ -294,7 +294,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { repliesByParent, groups };
+    // Reverse top-level groups so the newest root comment / activity batch
+    // sits at the top of the Activity section. Threads (replies under a
+    // root comment) stay ASC — `repliesByParent` is untouched, and
+    // CommentCard.collectReplies walks it in insertion order.
+    const reversed = groups.slice().reverse();
+
+    return { repliesByParent, groups: reversed };
   }, [timeline]);
 
   const {
@@ -946,7 +952,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 card is just a header-style "agent is working" anchor. */}
             <AgentLiveCard key={id} issueId={id} />
 
-            {/* Timeline entries */}
+            {/* Comment input sits above the timeline so newest-first reads
+                naturally: type at the top, see your comment appear at the
+                top, no scroll-to-bottom required. */}
+            <div className="mt-4">
+              <CommentInput issueId={id} onSubmit={submitComment} />
+            </div>
+
+            {/* Timeline entries (newest-first; see timelineView memo) */}
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
@@ -1015,11 +1028,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </div>
                 );
               })}
-            </div>
-
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
             </div>
           </div>
         </div>

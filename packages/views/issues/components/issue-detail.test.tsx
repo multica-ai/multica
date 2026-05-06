@@ -515,4 +515,167 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  // ----------------------------------------------------------------------
+  // Timeline order — newest-first reverse on top-level groups (PUL-12).
+  // Threads under a root comment stay chronological; only top-level groups
+  // are reversed. Replies live inside CommentCard's <CollapsibleContent>
+  // which renders children regardless of open state, so we can still query
+  // their `comment-${id}` wrappers from the DOM.
+  // ----------------------------------------------------------------------
+
+  function rootComment(id: string, content: string, created_at: string): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      content,
+      parent_id: null,
+      created_at,
+      updated_at: created_at,
+      comment_type: "comment",
+    };
+  }
+
+  function reply(id: string, parentId: string, content: string, created_at: string): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      content,
+      parent_id: parentId,
+      created_at,
+      updated_at: created_at,
+      comment_type: "comment",
+    };
+  }
+
+  function activity(id: string, created_at: string): TimelineEntry {
+    return {
+      type: "activity",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      action: "description_updated",
+      created_at,
+      details: {},
+    };
+  }
+
+  function rootCommentIdsInOrder(container: HTMLElement): string[] {
+    // Top-level wrappers in the Activity section are direct children of
+    // `<div class="mt-4 flex flex-col gap-3">`. Root comments wrap each
+    // CommentCard with `id="comment-${entry.id}"`; reply wrappers also use
+    // that id but live deeper inside CommentCard, so a top-level-only walk
+    // is what we need.
+    const timelineRoot = container.querySelector(
+      "div.mt-4.flex.flex-col.gap-3",
+    );
+    if (!timelineRoot) return [];
+    return Array.from(timelineRoot.children)
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && el.id.startsWith("comment-"))
+      .map((el) => el.id.replace(/^comment-/, ""));
+  }
+
+  it("renders mixed activities + root comments newest-first", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      rootComment("c-old", "oldest comment", "2026-01-01T00:00:00Z"),
+      activity("a-1", "2026-01-02T00:00:00Z"),
+      rootComment("c-mid", "middle comment", "2026-01-03T00:00:00Z"),
+      activity("a-2", "2026-01-04T00:00:00Z"),
+      rootComment("c-new", "newest comment", "2026-01-05T00:00:00Z"),
+    ]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("newest comment")).toBeInTheDocument();
+    });
+
+    expect(rootCommentIdsInOrder(container)).toEqual(["c-new", "c-mid", "c-old"]);
+  });
+
+  it("preserves chronological order of replies under a reversed root", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      rootComment("parent", "the root", "2026-01-01T00:00:00Z"),
+      reply("r-first", "parent", "first reply", "2026-01-02T00:00:00Z"),
+      reply("r-second", "parent", "second reply", "2026-01-03T00:00:00Z"),
+      rootComment("later", "another root", "2026-01-04T00:00:00Z"),
+    ]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("another root")).toBeInTheDocument();
+    });
+
+    // Top-level: newer root before older root.
+    expect(rootCommentIdsInOrder(container)).toEqual(["later", "parent"]);
+
+    // Replies under "parent" stay ASC: first then second. Reply wrappers
+    // live inside the parent's CommentCard subtree.
+    const parentCard = container.querySelector("#comment-parent");
+    expect(parentCard).not.toBeNull();
+    const replyIds = Array.from(
+      parentCard!.querySelectorAll('[id^="comment-r-"]'),
+    ).map((el) => (el as HTMLElement).id);
+    expect(replyIds).toEqual(["comment-r-first", "comment-r-second"]);
+  });
+
+  it("renders activities-only timeline without crashing", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      activity("a-1", "2026-01-01T00:00:00Z"),
+      activity("a-2", "2026-01-02T00:00:00Z"),
+      activity("a-3", "2026-01-03T00:00:00Z"),
+    ]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Consecutive activities collapse into one group, so reversing groups
+    // is a no-op for this case. We just want to verify no crash and that
+    // no root comments appear in the timeline section.
+    expect(rootCommentIdsInOrder(container)).toEqual([]);
+  });
+
+  it("reverses a comments-only timeline so newest is first", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      rootComment("c-1", "first", "2026-01-01T00:00:00Z"),
+      rootComment("c-2", "second", "2026-01-02T00:00:00Z"),
+      rootComment("c-3", "third", "2026-01-03T00:00:00Z"),
+    ]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("third")).toBeInTheDocument();
+    });
+
+    expect(rootCommentIdsInOrder(container)).toEqual(["c-3", "c-2", "c-1"]);
+  });
+
+  it("renders an empty timeline without crashing", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(rootCommentIdsInOrder(container)).toEqual([]);
+  });
+
+  it("renders a single comment unchanged (reverse is a no-op)", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      rootComment("only", "lonely comment", "2026-01-01T00:00:00Z"),
+    ]);
+
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("lonely comment")).toBeInTheDocument();
+    });
+
+    expect(rootCommentIdsInOrder(container)).toEqual(["only"]);
+  });
 });
