@@ -289,12 +289,12 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         title: "Full i18n Rollout, Long-Issue Timeline & System Notifications Toggle",
         changes: [],
         features: [
-          "English / Simplified Chinese coverage rolled out across the web app — 21 namespaces translated, with per-user locale persisted to your account",
-          "Settings has a System Notifications toggle so you can opt out of OS-level notifications without leaving the app",
-          "Chat sessions can now be deleted, and the History panel is one click away from the chat header",
-          "Server-side runtime liveness moved to Redis (with a DB fallback), so online / offline state reflects reality faster",
-          "Desktop reads runtime self-host configuration, smoothing private deployments",
-          "CLI gains `--assignee-id` / `--to-id` / `--user-id` flags for unambiguous targeting when names collide",
+          "Web app fully translated to Simplified Chinese (21 namespaces), with per-user locale",
+          "System Notifications toggle in Settings",
+          "Delete chat sessions; History panel surfaced on the chat header",
+          "Runtime liveness backed by Redis, with DB fallback",
+          "Desktop loads runtime self-host config",
+          "CLI adds `--assignee-id` / `--to-id` / `--user-id` for unambiguous targeting",
         ],
         improvements: [
           "Settings 'Appearance' tab is renamed to 'Preferences', and the active tab is reflected in the URL so deep links work",

@@ -289,12 +289,12 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "i18n 全量铺开、长 Issue Timeline 提速与系统通知开关",
         changes: [],
         features: [
-          "Web 端完成英文 / 简体中文双语全量铺开 —— 21 个命名空间译文齐全，用户语言偏好自动随账号同步",
-          "设置中新增 System Notifications 开关，可在不退出应用的前提下关闭系统级通知",
-          "Chat 会话支持删除，Chat header 一键直达 History 面板",
-          "Server 侧 runtime 在线判断改走 Redis（DB 兜底），上下线状态反映更及时",
-          "Desktop 支持读取 runtime 自托管配置，私有化部署体验更顺",
-          "CLI 新增 `--assignee-id` / `--to-id` / `--user-id` flag，重名场景下定位更精准",
+          "Web 端完成简中翻译，21 个命名空间齐全，语言偏好按账号同步",
+          "Settings 新增 System Notifications 开关",
+          "支持删除 Chat 会话，History 面板移至 chat header",
+          "Runtime 在线判断改走 Redis（DB 兜底）",
+          "Desktop 支持加载 runtime 自托管配置",
+          "CLI 新增 `--assignee-id` / `--to-id` / `--user-id`，重名时定位更准",
         ],
         improvements: [
           "Settings 的 Appearance Tab 改名为 Preferences，并把当前激活的 Tab 反映到 URL，深链可分享",
