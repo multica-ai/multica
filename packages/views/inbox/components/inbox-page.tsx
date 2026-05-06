@@ -40,6 +40,9 @@ import {
   useAddInboxFolderItem,
   useSetInboxFolderParent,
 } from "@multica/core/inbox/folders";
+import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
+import { channelListOptions } from "@multica/core/channels";
+import { ChannelDetail, NewMessageModal } from "../../channels";
 import { IssueDetail } from "../../issues/components";
 import { useNavigation } from "../../navigation";
 import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
@@ -61,8 +64,9 @@ import {
   ChevronRight,
   ChevronDown,
   FolderPlus,
+  MessageSquarePlus,
 } from "lucide-react";
-import type { InboxItem, InboxItemType, InboxFolder, InboxFolderItemType } from "@multica/core/types";
+import type { Channel, InboxItem, InboxItemType, InboxFolder, InboxFolderItemType } from "@multica/core/types";
 import {
   chatSessionsOptions,
   chatSessionsInFolderOptions,
@@ -92,7 +96,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, timeAgo } from "./inbox-list-item";
+import { ChannelListItem, InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
 import { InboxChatPanel } from "./inbox-chat-panel";
 
@@ -238,6 +242,21 @@ export function InboxPage() {
   // contain that session — e.g. an archived chat opened via deep link.
   const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
 
+  // Channels (multi-party + DMs) — these are issues with kind != 'issue', so
+  // any inbox row with the same issue_id is folded into the channel row.
+  const { data: channels = [] } = useQuery({
+    ...channelListOptions(wsId),
+    enabled: !isArchivedView && !isFolderView,
+  });
+  const channelMap = useMemo(
+    () => new Map(channels.map((c) => [c.id, c])),
+    [channels],
+  );
+
+  const view = useInboxViewStore((s) => s.view);
+  const setView = useInboxViewStore((s) => s.setView);
+  const [showNewMessage, setShowNewMessage] = useState(false);
+
   const createFolder = useCreateInboxFolder();
   const renameFolder = useRenameInboxFolder();
   const deleteFolder = useDeleteInboxFolder();
@@ -358,6 +377,24 @@ export function InboxPage() {
   const handleNewChat = () => {
     setSelectedKey("chat", "new-chat");
   };
+
+  // Cmd/Ctrl+Shift+M opens the new-message modal globally. Shift is added
+  // because plain Cmd+M is the macOS minimize-window shortcut and Cmd+N
+  // collides with new-window/new-doc bindings in the desktop app.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.key.toLowerCase() === "m" &&
+        e.shiftKey &&
+        (e.metaKey || e.ctrlKey)
+      ) {
+        e.preventDefault();
+        setShowNewMessage(true);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   // -- Drag and drop ---------------------------------------------------------
 
@@ -486,6 +523,10 @@ export function InboxPage() {
       : "Inbox";
   const showBack = isFolderView || isArchivedView;
 
+  const showViewSwitch = !isFolderView && !isArchivedView;
+  const currentViewLabel =
+    INBOX_VIEW_OPTIONS.find((o) => o.value === view)?.label ?? "All";
+
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex min-w-0 items-center gap-2">
@@ -501,20 +542,64 @@ export function InboxPage() {
           </Button>
         )}
         <h1 className="truncate text-sm font-semibold">{headerTitle}</h1>
-        {!isFolderView && !isArchivedView && unreadCount > 0 && (
+        {showViewSwitch && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                />
+              }
+            >
+              {currentViewLabel}
+              <ChevronDown className="size-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-auto">
+              {INBOX_VIEW_OPTIONS.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onClick={() => setView(opt.value as InboxView)}
+                >
+                  <span className="w-4 text-muted-foreground">
+                    {view === opt.value ? "✓" : ""}
+                  </span>
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {showViewSwitch && unreadCount > 0 && (
           <span className="text-xs text-muted-foreground">{unreadCount}</span>
         )}
       </div>
       <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground"
-          onClick={handleNewChat}
-          title="New message"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                title="New message"
+              />
+            }
+          >
+            <Plus className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={() => setShowNewMessage(true)}>
+              <MessageSquarePlus className="h-4 w-4" />
+              New message…
+              <span className="ml-2 text-xs text-muted-foreground">⌘⇧M</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleNewChat}>
+              <Bot className="h-4 w-4" />
+              Chat with agent
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -606,10 +691,20 @@ export function InboxPage() {
 
   type MergedEntry =
     | { kind: "chat"; id: string; time: number; session: typeof chatSessions[number] }
-    | { kind: "notif"; id: string; time: number; item: InboxItem };
+    | { kind: "notif"; id: string; time: number; item: InboxItem }
+    | { kind: "channel"; id: string; time: number; channel: Channel };
 
   const mergedEntries = useMemo<MergedEntry[]>(() => {
     const entries: MergedEntry[] = [];
+    // Channels first so we know which inbox items to swallow.
+    for (const channel of channels) {
+      entries.push({
+        kind: "channel",
+        id: channel.id,
+        time: new Date(channel.updated_at).getTime(),
+        channel,
+      });
+    }
     for (const session of chatSessions) {
       entries.push({
         kind: "chat",
@@ -619,6 +714,9 @@ export function InboxPage() {
       });
     }
     for (const item of items) {
+      // Don't double-count: inbox notifications about a channel-issue's
+      // comments are surfaced via the channel row + unread_count badge.
+      if (item.issue_id && channelMap.has(item.issue_id)) continue;
       entries.push({
         kind: "notif",
         id: item.id,
@@ -628,9 +726,35 @@ export function InboxPage() {
     }
     entries.sort((a, b) => b.time - a.time);
     return entries;
-  }, [chatSessions, items]);
+  }, [chatSessions, items, channels, channelMap]);
+
+  const filteredEntries = useMemo<MergedEntry[]>(
+    () => mergedEntries.filter((entry) => matchesView(entry, view)),
+    [mergedEntries, view],
+  );
 
   const renderEntry = (entry: MergedEntry) => {
+    if (entry.kind === "channel") {
+      const channel = entry.channel;
+      return (
+        <DraggableRow
+          key={`channel:${channel.id}`}
+          draggableId={`channel:${channel.id}`}
+        >
+          <ChannelListItem
+            channel={channel}
+            isSelected={channel.id === selectedKey}
+            onClick={() => setSelectedKey("issue", channel.id)}
+            onArchive={() => {
+              // Channels currently archive via the issue API by archiving any
+              // inbox row attached to them — same behavior as issues.
+              const itemForChannel = items.find((i) => i.issue_id === channel.id);
+              if (itemForChannel) handleArchive(itemForChannel.id);
+            }}
+          />
+        </DraggableRow>
+      );
+    }
     if (entry.kind === "chat") {
       const session = entry.session;
       const agent = agentMap.get(session.agent_id);
@@ -713,6 +837,14 @@ export function InboxPage() {
             isFallback: false,
           };
         }
+        if (entry.kind === "channel" && entry.channel.project_id) {
+          const proj = projectMap.get(entry.channel.project_id);
+          return {
+            key: entry.channel.project_id,
+            label: proj?.title ?? "Unknown project",
+            isFallback: false,
+          };
+        }
         return { key: "__no_project__", label: "No project", isFallback: true };
       }
       if (mode === "agent") {
@@ -724,10 +856,25 @@ export function InboxPage() {
             isFallback: false,
           };
         }
-        if (entry.item.actor_type === "agent" && entry.item.actor_id) {
-          const agent = agentMap.get(entry.item.actor_id);
+        if (entry.kind === "notif") {
+          if (entry.item.actor_type === "agent" && entry.item.actor_id) {
+            const agent = agentMap.get(entry.item.actor_id);
+            return {
+              key: entry.item.actor_id,
+              label: agent?.name ?? "Unknown agent",
+              isFallback: false,
+            };
+          }
+          return { key: "__no_agent__", label: "No agent", isFallback: true };
+        }
+        // Channels — bucket by the (single) agent participant if any.
+        const agentParticipant = entry.channel.participants.find(
+          (p) => p.user_type === "agent",
+        );
+        if (agentParticipant) {
+          const agent = agentMap.get(agentParticipant.user_id);
           return {
-            key: entry.item.actor_id,
+            key: agentParticipant.user_id,
             label: agent?.name ?? "Unknown agent",
             isFallback: false,
           };
@@ -737,6 +884,11 @@ export function InboxPage() {
       if (mode === "type") {
         if (entry.kind === "chat") {
           return { key: "__chat__", label: "Chats", isFallback: true };
+        }
+        if (entry.kind === "channel") {
+          return entry.channel.kind === "dm"
+            ? { key: "__dm__", label: "Direct messages", isFallback: true }
+            : { key: "__channel__", label: "Channels", isFallback: true };
         }
         const t = entry.item.type;
         return {
@@ -768,7 +920,7 @@ export function InboxPage() {
   const groupedEntries = useMemo<Group[] | null>(() => {
     if (groupBy.primary === "none") return null;
     const primaryMap = new Map<string, Group>();
-    for (const entry of mergedEntries) {
+    for (const entry of filteredEntries) {
       const p = bucketize(groupBy.primary, entry);
       let pg = primaryMap.get(p.key);
       if (!pg) {
@@ -799,7 +951,7 @@ export function InboxPage() {
     const top = Array.from(primaryMap.values());
     sortGroups(top);
     return top;
-  }, [mergedEntries, groupBy, bucketize]);
+  }, [filteredEntries, groupBy, bucketize]);
 
   const renderGroup = (
     group: Group,
@@ -841,15 +993,19 @@ export function InboxPage() {
 
   const listBody = (
     <div>
-      {mergedEntries.length === 0 ? (
+      {filteredEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm">{emptyMessage}</p>
+          <p className="text-sm">
+            {mergedEntries.length === 0
+              ? emptyMessage
+              : `Nothing in ${INBOX_VIEW_OPTIONS.find((o) => o.value === view)?.label.toLowerCase()}`}
+          </p>
         </div>
       ) : groupedEntries ? (
         groupedEntries.map((group) => renderGroup(group, 0, ""))
       ) : (
-        mergedEntries.map(renderEntry)
+        filteredEntries.map(renderEntry)
       )}
     </div>
   );
@@ -883,7 +1039,15 @@ export function InboxPage() {
     />
   );
 
-  const detailContent = selectedChatSession || selectedKey === "new-chat" ? (
+  const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
+
+  const detailContent = selectedChannel ? (
+    <ChannelDetail
+      key={selectedChannel.id}
+      channelId={selectedChannel.id}
+      initialChannel={selectedChannel}
+    />
+  ) : selectedChatSession || selectedKey === "new-chat" ? (
     <InboxChatPanel
       key={selectedChatSession?.id ?? "new"}
       sessionId={selectedChatSession?.id ?? null}
@@ -973,22 +1137,29 @@ export function InboxPage() {
     }
 
     return (
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex flex-1 flex-col min-h-0">
-          {listHeader}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {listBody}
-          </div>
-          {folderSection}
-        </div>
-        <DragOverlay>
-          {activeDrag && (
-            <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
-              {activeDrag.label}
+      <>
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className="flex flex-1 flex-col min-h-0">
+            {listHeader}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {listBody}
             </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+            {folderSection}
+          </div>
+          <DragOverlay>
+            {activeDrag && (
+              <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
+                {activeDrag.label}
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
+        <NewMessageModal
+          open={showNewMessage}
+          onClose={() => setShowNewMessage(false)}
+          onCreated={(channel) => setSelectedKey("issue", channel.id)}
+        />
+      </>
     );
   }
 
@@ -1025,42 +1196,86 @@ export function InboxPage() {
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-          <div className="flex flex-col border-r h-full">
-            {listHeader}
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {listBody}
-            </div>
-            {folderSection}
-          </div>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel id="detail" minSize="40%">
-          <div className="flex flex-col min-h-0 h-full">
-            {detailContent ?? (
-              <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-                <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-                <p className="text-sm">
-                  {items.length === 0
-                    ? "Your inbox is empty"
-                    : "Select a notification to view details"}
-                </p>
+    <>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
+            <div className="flex flex-col border-r h-full">
+              {listHeader}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {listBody}
               </div>
-            )}
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      <DragOverlay>
-        {activeDrag && (
-          <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
-            {activeDrag.label}
-          </div>
-        )}
-      </DragOverlay>
-    </DndContext>
+              {folderSection}
+            </div>
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="detail" minSize="40%">
+            <div className="flex flex-col min-h-0 h-full">
+              {detailContent ?? (
+                <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                  <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+                  <p className="text-sm">
+                    {items.length === 0 && channels.length === 0
+                      ? "Your inbox is empty"
+                      : "Select a conversation to view it"}
+                  </p>
+                </div>
+              )}
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+        <DragOverlay>
+          {activeDrag && (
+            <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
+              {activeDrag.label}
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
+      <NewMessageModal
+        open={showNewMessage}
+        onClose={() => setShowNewMessage(false)}
+        onCreated={(channel) => setSelectedKey("issue", channel.id)}
+      />
+    </>
   );
+}
+
+/**
+ * Filter rule for the view-switch dropdown. Returns true when the entry
+ * should be visible in the given view.
+ *
+ * - `unread`: anything with at least one unread signal — inbox dots, channel
+ *   unread_count, chat has_unread.
+ * - `mentioned`: only inbox items of type 'mentioned'.
+ * - `issues|channels|dms`: by entry kind.
+ */
+function matchesView(
+  entry:
+    | { kind: "chat"; session: { has_unread?: boolean } }
+    | { kind: "notif"; item: InboxItem }
+    | { kind: "channel"; channel: Channel },
+  view: InboxView,
+): boolean {
+  switch (view) {
+    case "all":
+      return true;
+    case "unread":
+      if (entry.kind === "chat") return !!entry.session.has_unread;
+      if (entry.kind === "notif") return !entry.item.read;
+      return entry.channel.unread_count > 0;
+    case "mentioned":
+      return entry.kind === "notif" && entry.item.type === "mentioned";
+    case "issues":
+      return entry.kind === "notif";
+    case "channels":
+      return entry.kind === "channel" && entry.channel.kind === "channel";
+    case "dms":
+      // Chat sessions are 1:1 agent chats — group them with DMs since
+      // mentally the user's "DM" view is "every 1:1 thread I have".
+      if (entry.kind === "chat") return true;
+      return entry.kind === "channel" && entry.channel.kind === "dm";
+  }
 }
 
 // -----------------------------------------------------------------------------

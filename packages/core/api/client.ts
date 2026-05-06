@@ -60,6 +60,8 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
+  Channel,
+  CreateChannelRequest,
   Project,
   ProjectMember,
   CreateProjectRequest,
@@ -607,6 +609,22 @@ export class ApiClient {
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
+    });
+  }
+
+  // Channels (multi-party chat — issues with kind in channel,dm)
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
     });
   }
 
