@@ -193,6 +193,9 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "qoder":
+      // No dedicated SVG yet — QoderCLI uses the generic runtime icon until we add branding.
+      return <Monitor className={className} />;
     default:
       return <Monitor className={className} />;
   }

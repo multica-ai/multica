@@ -257,6 +257,24 @@ export function ChatWindow() {
         messageId: result.message_id,
         taskId: result.task_id,
       });
+      // Reconcile the optimistic user row synchronously so the message cache
+      // matches the server row while the authoritative refetch is in flight.
+      qc.setQueryData<ChatMessage[]>(
+        chatKeys.messages(sessionId),
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === optimistic.id || m.id === result.message_id
+              ? {
+                  ...m,
+                  id: result.message_id,
+                  task_id: result.task_id,
+                  created_at: result.created_at,
+                }
+              : m,
+          );
+        },
+      );
       // Replace the temporary task_id with the server's real one (so the WS
       // task: handlers can match against it) and snap the anchor to the
       // server's created_at — keeping the elapsed-seconds reading stable.

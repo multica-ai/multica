@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1766,6 +1768,98 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
+var terminalReportBackoffs = []time.Duration{
+	0,
+	500 * time.Millisecond,
+	2 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+}
+
+var terminalReportTimeout = 45 * time.Second
+
+func (d *Daemon) reportTerminalTaskResult(
+	ctx context.Context,
+	taskLog *slog.Logger,
+	taskID string,
+	action string,
+	fn func(context.Context) error,
+) error {
+	var lastErr error
+	for attempt, wait := range terminalReportBackoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				taskLog.Error("terminal task report cancelled",
+					"action", action, "task_id", shortID(taskID), "attempt", attempt, "error", ctx.Err())
+				if lastErr != nil {
+					return lastErr
+				}
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				taskLog.Info("terminal task report succeeded after retry",
+					"action", action, "task_id", shortID(taskID), "attempt", attempt+1)
+			}
+			return nil
+		}
+		lastErr = err
+
+		if ctx.Err() != nil {
+			taskLog.Error("terminal task report timed out",
+				"action", action, "task_id", shortID(taskID), "attempt", attempt+1, "error", err)
+			return err
+		}
+		if !isTransientTerminalReportError(err) {
+			taskLog.Error("terminal task report rejected — not retrying",
+				"action", action, "task_id", shortID(taskID), "attempt", attempt+1, "error", err)
+			return err
+		}
+		if attempt == len(terminalReportBackoffs)-1 {
+			break
+		}
+
+		taskLog.Warn("terminal task report failed — will retry",
+			"action", action, "task_id", shortID(taskID), "attempt", attempt+1, "error", err)
+	}
+
+	taskLog.Error("terminal task report exhausted retries",
+		"action", action, "task_id", shortID(taskID), "error", lastErr)
+	return lastErr
+}
+
+func isTransientTerminalReportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "unexpected eof")
+}
+
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
@@ -1831,18 +1925,25 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
+	// Dedicated context for terminal server callbacks. It is intentionally not
+	// derived from the poller context: the local agent has already finished, so
+	// daemon shutdown/restart should not cancel the authoritative Complete/Fail
+	// report mid-flight. terminalReportTimeout still bounds the retry loop.
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), terminalReportTimeout)
+	defer reportCancel()
+
 	// Final pre-completion check: if the server already moved the task to
 	// "cancelled" or deleted the row outright, skip reporting — the
 	// complete/fail callbacks would fail anyway. Reuse shouldInterruptAgent
 	// so this guard honors the same signals as the in-flight watcher.
-	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
+	if status, err := d.client.GetTaskStatus(reportCtx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
 	}
 
 	// Report usage independently so it's captured even for failed/blocked tasks.
 	if len(result.Usage) > 0 {
-		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
+		if err := d.client.ReportTaskUsage(reportCtx, task.ID, result.Usage); err != nil {
 			taskLog.Warn("report task usage failed", "error", err)
 		}
 	}

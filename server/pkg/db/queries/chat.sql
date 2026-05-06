@@ -77,6 +77,12 @@ INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reaso
 VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
 RETURNING *;
 
+-- name: AttachTaskToChatMessage :exec
+-- Links the triggering user utterance to the chat task row for traceability and
+-- post-send cache reconciliation. Streaming-stop state remains server-owned via
+-- pending-task queries and terminal task lifecycle events.
+UPDATE chat_message SET task_id = $2 WHERE id = $1 AND chat_session_id = $3;
+
 -- name: ListChatMessages :many
 SELECT * FROM chat_message
 WHERE chat_session_id = $1

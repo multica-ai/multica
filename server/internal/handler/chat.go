@@ -373,6 +373,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.Queries.AttachTaskToChatMessage(r.Context(), db.AttachTaskToChatMessageParams{
+		ID:            msg.ID,
+		TaskID:        task.ID,
+		ChatSessionID: session.ID,
+	}); err != nil {
+		slog.Warn("attach task to user chat message failed", "session_id", sessionID, "error", err)
+	}
+
 	// Touch session updated_at.
 	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
