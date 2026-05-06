@@ -148,6 +148,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   todo: TodoIcon,
   in_progress: InProgressIcon,
   in_review: InReviewIcon,
+  review: InReviewIcon,
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,
