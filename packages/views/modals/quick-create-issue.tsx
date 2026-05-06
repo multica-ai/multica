@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronRight, Maximize2, Minimize2, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,10 +56,14 @@ export function AgentCreatePanel({
   onClose,
   onSwitchMode,
   data,
+  isExpanded,
+  setIsExpanded,
 }: {
   onClose: () => void;
   onSwitchMode?: () => void;
   data?: Record<string, unknown> | null;
+  isExpanded: boolean;
+  setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
   const workspaceName = useCurrentWorkspace()?.name;
@@ -260,20 +265,37 @@ export function AgentCreatePanel({
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
-          {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
-              keyboard focus, and the dialog's focus trap briefly lands focus
-              on the first focusable element on mount, causing the tooltip to
-              auto-pop every open. */}
-          <button
-            type="button"
-            onClick={onClose}
-            title={t(($) => $.common.close)}
-            aria-label={t(($) => $.common.close)}
-            className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-          >
-            <XIcon className="size-4" />
-          </button>
-        </div>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  >
+                    {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom">
+                {isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
+            </Tooltip>
+          </div>        </div>
 
         {/* Agent picker */}
         <div className="px-5 pt-1 pb-2 shrink-0">
