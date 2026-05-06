@@ -364,6 +364,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Memory artifacts — workspace-scoped knowledge primitives
+			// (wiki pages, agent notes, runbooks, decision logs). Single
+			// polymorphic table; `kind` query param filters per surface.
+			r.Route("/api/memory", func(r chi.Router) {
+				r.Get("/", h.ListMemoryArtifacts)
+				r.Post("/", h.CreateMemoryArtifact)
+				r.Get("/search", h.SearchMemoryArtifacts)
+				r.Get("/by-anchor/{anchorType}/{anchorId}", h.ListMemoryArtifactsByAnchor)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetMemoryArtifact)
+					r.Put("/", h.UpdateMemoryArtifact)
+					r.Delete("/", h.DeleteMemoryArtifact)
+					r.Post("/archive", h.ArchiveMemoryArtifact)
+					r.Post("/restore", h.RestoreMemoryArtifact)
+				})
+			})
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
