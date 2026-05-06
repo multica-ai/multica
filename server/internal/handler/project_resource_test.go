@@ -168,6 +168,88 @@ func TestCreateProjectAttachesResources(t *testing.T) {
 	}
 }
 
+// TestProjectResourceCountBreadcrumb asserts the resource_count breadcrumb
+// surfaces on GetProject and ListProjects so agents know to call
+// /api/projects/{id}/resources without inlining the sub-collection.
+func TestProjectResourceCountBreadcrumb(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Resource count breadcrumb",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		r = withURLParam(r, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
+
+	getCount := func() int64 {
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.GetProject(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetProject: %d %s", w.Code, w.Body.String())
+		}
+		var resp ProjectResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode GetProject: %v", err)
+		}
+		return resp.ResourceCount
+	}
+	if got := getCount(); got != 0 {
+		t.Errorf("initial GetProject ResourceCount = %d, want 0", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "github_repo",
+		"resource_ref":  map[string]any{"url": "https://github.com/multica-ai/breadcrumb"},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectResource: %d %s", w.Code, w.Body.String())
+	}
+
+	if got := getCount(); got != 1 {
+		t.Errorf("after attach GetProject ResourceCount = %d, want 1", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjects: %d %s", w.Code, w.Body.String())
+	}
+	var list struct {
+		Projects []ProjectResponse `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode ListProjects: %v", err)
+	}
+	found := false
+	for _, p := range list.Projects {
+		if p.ID == project.ID {
+			found = true
+			if p.ResourceCount != 1 {
+				t.Errorf("ListProjects[%s].ResourceCount = %d, want 1", p.ID, p.ResourceCount)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("project %s not found in ListProjects response", project.ID)
+	}
+}
+
 func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{

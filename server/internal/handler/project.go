@@ -30,6 +30,11 @@ type ProjectResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 	IssueCount  int64   `json:"issue_count"`
 	DoneCount   int64   `json:"done_count"`
+	// ResourceCount is a breadcrumb pointing at the sub-collection at
+	// /api/projects/{id}/resources. Resources themselves stay out of this
+	// payload to keep parent metadata and child collections separate; clients
+	// that need the list call ListProjectResources directly.
+	ResourceCount int64 `json:"resource_count"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -54,6 +59,14 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 		return 0, 0
 	}
 	return stats[0].TotalCount, stats[0].DoneCount
+}
+
+func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype.UUID) int64 {
+	rows, err := h.Queries.GetProjectResourceCounts(ctx, []pgtype.UUID{projectID})
+	if err != nil || len(rows) == 0 {
+		return 0
+	}
+	return rows[0].ResourceCount
 }
 
 type CreateProjectRequest struct {
@@ -111,8 +124,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch issue stats for all projects
+	// Batch-fetch issue stats and resource counts for all projects
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -124,6 +138,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				statsMap[uuidToString(s.ProjectID)] = s
 			}
 		}
+		counts, err := h.Queries.GetProjectResourceCounts(r.Context(), projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -133,6 +153,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].IssueCount = s.TotalCount
 			resp[i].DoneCount = s.DoneCount
 		}
+		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -157,6 +178,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -304,20 +326,21 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":           resp.ID,
-		"workspace_id": resp.WorkspaceID,
-		"title":        resp.Title,
-		"description":  resp.Description,
-		"icon":         resp.Icon,
-		"status":       resp.Status,
-		"priority":     resp.Priority,
-		"lead_type":    resp.LeadType,
-		"lead_id":      resp.LeadID,
-		"created_at":   resp.CreatedAt,
-		"updated_at":   resp.UpdatedAt,
-		"issue_count":  resp.IssueCount,
-		"done_count":   resp.DoneCount,
-		"resources":    resourceResp,
+		"id":             resp.ID,
+		"workspace_id":   resp.WorkspaceID,
+		"title":          resp.Title,
+		"description":    resp.Description,
+		"icon":           resp.Icon,
+		"status":         resp.Status,
+		"priority":       resp.Priority,
+		"lead_type":      resp.LeadType,
+		"lead_id":        resp.LeadID,
+		"created_at":     resp.CreatedAt,
+		"updated_at":     resp.UpdatedAt,
+		"issue_count":    resp.IssueCount,
+		"done_count":     resp.DoneCount,
+		"resource_count": int64(len(resourceResp)),
+		"resources":      resourceResp,
 	})
 }
 
@@ -668,8 +691,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	// Batch-fetch issue stats
+	// Batch-fetch issue stats and resource counts
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
@@ -681,6 +705,12 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				statsMap[uuidToString(s.ProjectID)] = s
 			}
 		}
+		counts, err := h.Queries.GetProjectResourceCounts(ctx, projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
 	}
 
 	resp := make([]SearchProjectResponse, len(results))
@@ -690,6 +720,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			pr.IssueCount = s.TotalCount
 			pr.DoneCount = s.DoneCount
 		}
+		pr.ResourceCount = resourceCountMap[pr.ID]
 		spr := SearchProjectResponse{
 			ProjectResponse: pr,
 			MatchSource:     row.matchSource,
