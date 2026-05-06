@@ -17,9 +17,15 @@ import (
 const (
 	// sweepInterval is how often we check for stale runtimes and tasks.
 	sweepInterval = 30 * time.Second
-	// staleThresholdSeconds marks runtimes offline if no heartbeat for this long.
-	// The daemon heartbeat interval is 15s, so 45s = 3 missed heartbeats.
-	staleThresholdSeconds = 45.0
+	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
+	// long. Must be strictly greater than runtimeHeartbeatDBFlushInterval
+	// (60s in handler/daemon.go) plus one daemon heartbeat cycle (~15s) so
+	// the DB stale window never trips on an alive-but-DB-lagging runtime
+	// when the sweeper's Redis check errors and we fall back to the DB.
+	// 90s leaves a 15s buffer above the 75s worst-case DB age and still
+	// keeps detection latency for a genuinely-dead runtime under
+	// staleThreshold + sweepInterval = 120s.
+	staleThresholdSeconds = 90.0
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0

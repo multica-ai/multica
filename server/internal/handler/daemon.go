@@ -523,13 +523,12 @@ type DaemonHeartbeatRequest struct {
 // to claim, so we never start a claim we might have to abort.
 const heartbeatHasPendingTimeout = 1 * time.Second
 
-// runtimeLivenessTTL is how long a Redis liveness record stays valid. It must
-// be >= the runtime sweeper's stale threshold (45s); we set it equal so a
-// runtime that misses three heartbeats expires out of Redis at the same
-// instant the DB sweeper would mark it offline. Anything shorter would create
-// a window where Redis says "dead" but the DB still says "online", confusing
-// the sweeper filter.
-const runtimeLivenessTTL = 45 * time.Second
+// runtimeLivenessTTL is how long a Redis liveness record stays valid. Set
+// equal to the runtime sweeper's stale threshold so a runtime that stops
+// heartbeating expires out of Redis at the same instant the DB stale window
+// would mark it offline. Anything shorter would create a window where Redis
+// says "dead" but the DB still says "online", confusing the sweeper filter.
+const runtimeLivenessTTL = 90 * time.Second
 
 // runtimeHeartbeatDBFlushInterval is the maximum staleness we tolerate on
 // agent_runtime.last_seen_at while Redis is the active liveness source. When
@@ -538,16 +537,16 @@ const runtimeLivenessTTL = 45 * time.Second
 // DB-only fallback path (used when an IsAliveBatch call to Redis errors) does
 // not false-positive on alive-but-Redis-only runtimes.
 //
-// Must satisfy two bounds:
-//   - > 0 (otherwise the Redis path buys us nothing, every beat would write).
-//   - < the sweeper's stale threshold (45s in cmd/server/runtime_sweeper.go).
-//     The strict inequality is the load-bearing invariant: DB age for an
-//     alive runtime never exceeds this value, so a sweeper that falls back
-//     to the DB stale window cannot mistakenly mark it offline.
+// Load-bearing invariant: this must be strictly less than the sweeper's
+// stale threshold (90s in cmd/server/runtime_sweeper.go). DB age for an
+// alive runtime is bounded by flush + heartbeat_interval (~75s with 60s
+// flush + 15s daemon cadence), so a sweeper that falls back to the DB stale
+// window cannot mistakenly mark it offline.
 //
-// 30s sits at 2/3 of the 45s threshold, leaving one full heartbeat cycle
-// (15s) of buffer between the latest possible DB write and the stale cutoff.
-const runtimeHeartbeatDBFlushInterval = 30 * time.Second
+// At the default 15s daemon heartbeat cadence, a 60s flush means each
+// runtime writes the DB roughly once every four beats — a 4x reduction
+// versus rewriting on every beat.
+const runtimeHeartbeatDBFlushInterval = 60 * time.Second
 
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
