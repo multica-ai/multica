@@ -320,3 +320,37 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	}
 	return items, nil
 }
+
+const updateAttachmentSize = `-- name: UpdateAttachmentSize :one
+UPDATE attachment SET size_bytes = $2 WHERE id = $1 RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at
+`
+
+type UpdateAttachmentSizeParams struct {
+	ID        pgtype.UUID `json:"id"`
+	SizeBytes int64       `json:"size_bytes"`
+}
+
+// After a successful pre-signed S3 PUT, the client calls /confirm and
+// the handler sets the byte count to the value HeadObject reported.
+// The CreateAttachment that preceded the presign left size_bytes=0 as a
+// sentinel for "upload in progress"; this query flips it to the real
+// size and is idempotent — calling /confirm twice with the same byte
+// count is a no-op.
+func (q *Queries) UpdateAttachmentSize(ctx context.Context, arg UpdateAttachmentSizeParams) (Attachment, error) {
+	row := q.db.QueryRow(ctx, updateAttachmentSize, arg.ID, arg.SizeBytes)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.UploaderType,
+		&i.UploaderID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}

@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 type mockStorage struct{}
@@ -21,6 +24,21 @@ func (m *mockStorage) Delete(_ context.Context, _ string)        {}
 func (m *mockStorage) DeleteKeys(_ context.Context, _ []string)  {}
 func (m *mockStorage) KeyFromURL(rawURL string) string            { return rawURL }
 func (m *mockStorage) CdnDomain() string                         { return "cdn.example.com" }
+func (m *mockStorage) PublicURL(key string) string                { return fmt.Sprintf("https://cdn.example.com/%s", key) }
+func (m *mockStorage) PresignPut(_ context.Context, key string, _ string, _ string, _ time.Duration) (*storage.PresignedUpload, error) {
+	return &storage.PresignedUpload{
+		URL:       fmt.Sprintf("https://presign.example.com/%s?sig=mock", key),
+		Method:    "PUT",
+		Headers:   map[string]string{"Content-Type": "application/octet-stream"},
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}, nil
+}
+func (m *mockStorage) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
+	return fmt.Sprintf("https://presign.example.com/%s?sig=mock-get", key), nil
+}
+func (m *mockStorage) StatObject(_ context.Context, _ string) (int64, error) {
+	return 123456, nil
+}
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage

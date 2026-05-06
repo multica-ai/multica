@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type LocalStorage struct {
@@ -122,4 +123,36 @@ func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader 
 	}
 
 	return s.Upload(ctx, key, data, contentType, filename)
+}
+
+// PresignPut — not supported for the local backend because we have
+// no way to hand the caller a URL that bypasses this server. Callers
+// fall back to the body-upload path.
+func (s *LocalStorage) PresignPut(ctx context.Context, key string, contentType string, filename string, expiresIn time.Duration) (*PresignedUpload, error) {
+	return nil, ErrPresignUnsupported
+}
+
+// PresignGet — not supported. Local files are served by the same-
+// process /uploads/* handler; PublicURL points at that handler
+// directly (no signing involved).
+func (s *LocalStorage) PresignGet(ctx context.Context, key string, expiresIn time.Duration) (string, error) {
+	return "", ErrPresignUnsupported
+}
+
+// PublicURL returns the public (served-by-this-server) URL for an
+// already-staged file under the local upload dir.
+func (s *LocalStorage) PublicURL(key string) string {
+	return "/uploads/" + key
+}
+
+// StatObject returns the byte size of an already-uploaded object in
+// the local upload dir. Used by the /confirm endpoint, even though
+// local backends don't use presign themselves — keeping the interface
+// uniform makes call sites simpler.
+func (s *LocalStorage) StatObject(ctx context.Context, key string) (int64, error) {
+	fi, err := os.Stat(filepath.Join(s.uploadDir, key))
+	if err != nil {
+		return 0, fmt.Errorf("local StatObject: %w", err)
+	}
+	return fi.Size(), nil
 }
