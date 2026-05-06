@@ -362,6 +362,27 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Channels (multi-participant chat + DMs).
+			// Endpoints respond 404 when workspace.channels_enabled is FALSE
+			// — the gate lives inside each handler so the surface is invisible
+			// to anyone in a workspace that hasn't opted in.
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/{channelId}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Patch("/", h.UpdateChannel)
+					r.Delete("/", h.ArchiveChannel)
+					r.Post("/read", h.MarkChannelRead)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{memberType}/{memberId}", h.RemoveChannelMember)
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.CreateChannelMessage)
+				})
+			})
+			r.Post("/api/dms", h.CreateOrFetchDM)
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

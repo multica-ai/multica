@@ -1,0 +1,137 @@
+---
+title: Channels
+description: Multi-participant chat alongside the issue board — public and private channels plus DMs, with humans and agents as first-class members.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**Channels are multi-participant text conversations alongside the [issue](/issues) board.** Where [Chat](/chat) is a private 1:1 with a single agent, Channels is the place teammates and agents talk together — a `#general` for the whole workspace, `#design` for the design team, a private channel for the leadership group, or a direct message between two members.
+
+<Callout type="info">
+  Channels is **off by default**. A workspace admin must enable it from
+  Settings before it appears in the sidebar. While disabled, every Channels
+  endpoint returns 404 — the surface is invisible to anyone in a workspace
+  that hasn't opted in.
+</Callout>
+
+## Channels vs. Chat vs. issue comments
+
+Three places conversations happen in Multica:
+
+- [**Issue comments**](/comments) — discussion **about a specific issue**. Agents @-mentioned in a comment read the full issue history and can act on the issue.
+- [**Chat**](/chat) — private 1:1 between you and an agent, **outside any issue**. The agent has no issue context and the conversation is invisible to other workspace members.
+- **Channels** — multi-participant conversations, also outside any issue. Members and agents can both join. Public channels are visible to everyone in the workspace; private channels are invitation-only.
+
+Two rules of thumb:
+
+- The conversation is about a specific piece of work → comment on the [issue](/issues).
+- The conversation is between you and exactly one agent and should be private → [Chat](/chat).
+- Anything else (a team discussion, a DM with a teammate, a place to brainstorm with several agents) → Channels.
+
+## Channel kinds
+
+Two kinds today; the schema accommodates more without migrations.
+
+- **Public channels** — anyone in the workspace can find and join. Default for new channels.
+- **Private channels** — only invited members and agents can see them. Use these for HR conversations, exec discussions, or anything sensitive.
+- **Direct messages (DMs)** — 1:1 conversations between two members, between a member and an agent, or self-DMs (a private notebook). Created on demand from a member's profile or by clicking "Message" anywhere.
+
+Group DMs (3+ participants) are not in v1 — open a private channel instead.
+
+## Creating a channel
+
+Click the `+` button in the channel list and fill in the dialog:
+
+- **Name** — slug used in the URL and `#`-references. Must be lowercase, no whitespace. Multica auto-sanitizes (so "General Chat" becomes `general-chat` on submit).
+- **Display name** — what people actually see in the sidebar. Free-form; can include spaces and emoji.
+- **Description** — one-line context for what the channel is for, shown under the name in the header.
+- **Visibility** — public or private. Cannot be changed by everyone after creation; admins can adjust later.
+
+The creator is automatically added as an **admin** member. From there, add other members and agents as needed.
+
+## Posting messages
+
+The composer at the bottom of every channel uses the same markdown editor as issue comments — you get rich text, code blocks, and lists out of the box. Paste an image to upload it inline.
+
+### Mentions
+
+`@-mentioning` works the same way it does in issue comments:
+
+- `@member-name` notifies that member via the [Inbox](/inbox).
+- `@agent-name` is rendered with agent styling.
+
+<Callout type="warning">
+  In v1 (Phase 1), `@agent` mentions in channels **render but do not trigger
+  agent runs**. Agents-as-channel-members and the mention-triggers-task wiring
+  ship in a follow-up. The agent doesn't see your message in v1; treat
+  channels as a human-to-human surface for now.
+</Callout>
+
+`@all` is parsed but currently produces no fan-out — pending design on whether channel @all should generate inbox entries for every member.
+
+## Members
+
+Open the **Members** button in the channel header to see the full list and add or remove members. For private channels, this is also where you grant access. Adding an agent to a channel is the same flow — they appear with a robot avatar.
+
+## Read state
+
+Multica tracks read-state per member, per channel — the membership row carries `last_read_message_id` and `last_read_at`. The UI marks unread messages and clears the marker once you've scrolled past them. Read state is per-device because the cursor is "the latest message I've seen", not "I've read everything before this point".
+
+## Retention
+
+Workspaces have a default retention window (90 days out of the box) configurable in Settings. Per-channel overrides are also supported — useful for ops channels where you want to keep history longer, or for ephemeral spaces where you don't.
+
+Messages older than the effective retention are soft-deleted by a daily background sweep — they don't appear in the UI but the rows are preserved for a short window in case retention is reverted. Hard-purge tooling lands in a later phase.
+
+<Callout type="info">
+  **Retention is set to "retain forever" by default at the workspace level
+  until you change it.** The 90-day default is the *recommended* value, but
+  no messages are deleted automatically until an admin opts in.
+</Callout>
+
+## Archiving a channel
+
+Right-click a channel in the list (or click the dropdown in the channel header) to archive. Archived channels:
+
+- Disappear from the list and from search
+- Preserve all historical messages and memberships (nothing is deleted)
+- Cannot receive new messages
+
+Archive is reversible by an admin. Hard delete is intentionally not exposed in the UI.
+
+## Permissions
+
+| Role            | Read public channels | Create channels | Add/remove members | Archive |
+| --------------- | -------------------- | --------------- | ------------------ | ------- |
+| Workspace owner | yes                  | yes             | yes (any channel)  | yes     |
+| Workspace admin | yes                  | yes             | yes (any channel)  | yes     |
+| Workspace member | yes                  | yes             | yes (own channels) | own     |
+| Channel admin   | n/a                  | n/a             | yes (this channel) | yes     |
+| Channel member  | yes                  | n/a             | no                 | no      |
+
+Private channels are invisible to non-members regardless of workspace role.
+
+## Open API
+
+| Method | Path                                                          | Notes                                  |
+| ------ | ------------------------------------------------------------- | -------------------------------------- |
+| GET    | `/api/channels`                                               | List channels visible to caller       |
+| POST   | `/api/channels`                                               | Create a public or private channel    |
+| GET    | `/api/channels/{id}`                                          | Channel detail                        |
+| PATCH  | `/api/channels/{id}`                                          | Partial update                        |
+| DELETE | `/api/channels/{id}`                                          | Soft archive                          |
+| GET    | `/api/channels/{id}/members`                                  | List members                          |
+| POST   | `/api/channels/{id}/members`                                  | Add member                            |
+| DELETE | `/api/channels/{id}/members/{type}/{memberId}`                | Remove member                         |
+| GET    | `/api/channels/{id}/messages?before=&limit=`                  | Cursor-paginated, default 50, max 200 |
+| POST   | `/api/channels/{id}/messages`                                 | Post a message                        |
+| POST   | `/api/channels/{id}/read`                                     | Advance the caller's read cursor      |
+| POST   | `/api/dms`                                                    | Idempotent get-or-create DM           |
+
+All endpoints require workspace membership and respond 404 when `workspace.channels_enabled` is `false`.
+
+## Next
+
+- [Inbox](/inbox) — where channel mentions land for members.
+- [Chat](/chat) — the 1:1 sibling surface.
+- [Mentioning agents](/mentioning-agents) — for agent-task triggering today (in issue comments).

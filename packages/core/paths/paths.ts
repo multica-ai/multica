@@ -28,6 +28,8 @@ function workspaceScoped(slug: string) {
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     myIssues: () => `${ws}/my-issues`,
+    channels: () => `${ws}/channels`,
+    channelDetail: (id: string) => `${ws}/channels/${encode(id)}`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     skills: () => `${ws}/skills`,

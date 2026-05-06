@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, LogOut } from "lucide-react";
+import { Save, LogOut, MessageCircle } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -250,6 +251,25 @@ export function WorkspaceTab() {
         </Card>
       </section>
 
+      {/* Channels feature gate. Hidden from non-admins so we don't tease a
+          control they can't toggle. The full Channels feature lives behind
+          this single boolean — when off the sidebar entry hides and every
+          /api/channels endpoint 404s. See migration 065 + the channels spec
+          for the rest of the surface. */}
+      {canManageWorkspace && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Channels</h2>
+          </div>
+          <Card>
+            <CardContent className="space-y-3">
+              <ChannelsSettings workspace={workspace} />
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in
           after mount. */}
@@ -338,6 +358,70 @@ export function WorkspaceTab() {
           setDeleteDialogOpen(open);
         }}
         onConfirm={handleConfirmDelete}
+      />
+    </div>
+  );
+}
+
+interface ChannelsSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * ChannelsSettings — admin toggle for `workspace.channels_enabled`.
+ *
+ * Optimistic + reconciled: flips the local state immediately on click so
+ * the UI feels instant, then sends the PATCH and reconciles on response.
+ * On error we revert the toggle and surface a toast — the rest of the
+ * workspace settings card uses direct api.* calls (not useMutation) and
+ * we follow the same convention rather than introducing a one-off hook.
+ */
+function ChannelsSettings({ workspace }: ChannelsSettingsProps) {
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(workspace.channels_enabled);
+  const [pending, setPending] = useState(false);
+
+  // Reconcile when the workspace cache updates from elsewhere (WS event,
+  // another tab) so the switch never drifts from the source of truth.
+  useEffect(() => {
+    setEnabled(workspace.channels_enabled);
+  }, [workspace.channels_enabled]);
+
+  const handleToggle = async (next: boolean) => {
+    setEnabled(next);
+    setPending(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        channels_enabled: next,
+        channels_enabled_set: true,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success(next ? "Channels enabled" : "Channels disabled");
+    } catch (e) {
+      setEnabled(!next);
+      toast.error(e instanceof Error ? e.message : "Failed to update channels setting");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">Enable Channels</p>
+        <p className="text-xs text-muted-foreground">
+          Multi-participant chat alongside the issue board, with public
+          channels, private channels, and direct messages. When off, the
+          sidebar entry hides and Channels endpoints return 404.
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={handleToggle}
+        disabled={pending}
+        aria-label="Enable Channels"
       />
     </div>
   );
