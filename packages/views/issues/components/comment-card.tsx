@@ -37,6 +37,7 @@ import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,21 +79,22 @@ function DeleteCommentDialog({
   onConfirm: () => void;
   hasReplies?: boolean;
 }) {
+  const { t } = useT("issues");
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete comment</AlertDialogTitle>
+          <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {hasReplies
-              ? "This comment and all its replies will be permanently deleted. This cannot be undone."
-              : "This comment will be permanently deleted. This cannot be undone."}
+              ? t(($) => $.comment.delete_desc_with_replies)
+              : t(($) => $.comment.delete_desc)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            Delete
+            {t(($) => $.comment.delete_action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -174,6 +176,7 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
@@ -214,7 +217,7 @@ function CommentRow({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
@@ -259,10 +262,10 @@ function CommentRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
                 copyMarkdown(entry.content ?? "");
-                toast.success("Copied");
+                toast.success(t(($) => $.comment.copied_toast));
               }}>
                 <Copy className="h-3.5 w-3.5" />
-                Copy
+                {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
               {(canEditEntry || canDeleteEntry) && (
                 <>
@@ -270,14 +273,14 @@ function CommentRow({
                   {canEditEntry && (
                     <DropdownMenuItem onClick={startEdit}>
                       <Pencil className="h-3.5 w-3.5" />
-                      Edit
+                      {t(($) => $.comment.edit_action)}
                     </DropdownMenuItem>
                   )}
                   {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
                   {canDeleteEntry && (
                     <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                       <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      {t(($) => $.comment.delete_action)}
                     </DropdownMenuItem>
                   )}
                 </>
@@ -303,7 +306,7 @@ function CommentRow({
             <ContentEditor
               ref={editEditorRef}
               defaultValue={entry.content ?? ""}
-              placeholder="Edit comment..."
+              placeholder={t(($) => $.comment.edit_placeholder)}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
@@ -316,8 +319,8 @@ function CommentRow({
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
           </div>
           {isDragOver && <FileDropOverlay />}
@@ -360,6 +363,7 @@ function CommentCardImpl({
   onToggleReaction,
   highlightedCommentId,
 }: CommentCardProps) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
@@ -408,7 +412,7 @@ function CommentCardImpl({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
@@ -464,7 +468,7 @@ function CommentCardImpl({
             )}
             {!open && replyCount > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
-                {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                {t(($) => $.comment.reply_count, { count: replyCount })}
               </span>
             )}
 
@@ -485,10 +489,10 @@ function CommentCardImpl({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
                     copyMarkdown(entry.content ?? "");
-                    toast.success("Copied");
+                    toast.success(t(($) => $.comment.copied_toast));
                   }}>
                     <Copy className="h-3.5 w-3.5" />
-                    Copy
+                    {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
                   {(canEditEntry || canDeleteEntry) && (
                     <>
@@ -496,14 +500,14 @@ function CommentCardImpl({
                       {canEditEntry && (
                         <DropdownMenuItem onClick={startEdit}>
                           <Pencil className="h-3.5 w-3.5" />
-                          Edit
+                          {t(($) => $.comment.edit_action)}
                         </DropdownMenuItem>
                       )}
                       {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
                       {canDeleteEntry && (
                         <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                           <Trash2 className="h-3.5 w-3.5" />
-                          Delete
+                          {t(($) => $.comment.delete_action)}
                         </DropdownMenuItem>
                       )}
                     </>
@@ -535,7 +539,7 @@ function CommentCardImpl({
                   <ContentEditor
                     ref={editEditorRef}
                     defaultValue={entry.content ?? ""}
-                    placeholder="Edit comment..."
+                    placeholder={t(($) => $.comment.edit_placeholder)}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
@@ -548,8 +552,8 @@ function CommentCardImpl({
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
                   </div>
                 </div>
                 {parentDragOver && <FileDropOverlay />}
@@ -593,7 +597,7 @@ function CommentCardImpl({
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
-              placeholder="Leave a reply..."
+              placeholder={t(($) => $.reply.placeholder)}
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}

@@ -30,6 +30,7 @@ import { sortIssues } from "../utils/sort";
 import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
@@ -77,6 +78,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  projectId,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -95,6 +97,8 @@ export function ListView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** When set, the per-section "+" pre-fills the project on the create form. */
+  projectId?: string;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -282,6 +286,7 @@ export function ListView({
           orphanedChildIds={orphanedChildIds}
           dragEnabled={dragEnabled}
           myIssuesOpts={myIssuesOpts}
+          projectId={projectId}
         />
       ))}
     </Accordion.Root>
@@ -327,6 +332,7 @@ function StatusAccordionItem({
   orphanedChildIds,
   dragEnabled,
   myIssuesOpts,
+  projectId,
 }: {
   status: IssueStatus;
   issues: Issue[];
@@ -337,7 +343,9 @@ function StatusAccordionItem({
   orphanedChildIds: Set<string>;
   dragEnabled: boolean;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  projectId?: string;
 }) {
+  const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
@@ -425,14 +433,14 @@ function StatusAccordionItem({
                   onClick={() =>
                     useModalStore
                       .getState()
-                      .open("create-issue", { status })
+                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
                   }
                 />
               }
             >
               <Plus className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.list.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </Accordion.Header>
@@ -478,7 +486,7 @@ function StatusAccordionItem({
           </SortableContext>
         ) : (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.list.empty_status)}
           </p>
         )}
       </Accordion.Panel>

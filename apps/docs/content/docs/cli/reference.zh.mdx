@@ -221,10 +221,11 @@ multica workspace members <workspace-id>
 multica issue list
 multica issue list --status in_progress
 multica issue list --priority urgent --assignee "Agent Name"
+multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --limit 20 --output json
 ```
 
-Available filters: `--status`, `--priority`, `--assignee`, `--project`, `--limit`.
+Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
 
 ### Get Issue
 
@@ -237,9 +238,10 @@ multica issue get <id> --output json
 
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
+multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee`, `--parent`, `--project`, `--due-date`.
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. 脚本里如果已经拿到了 UUID（例如来自 `multica workspace members --output json`），传 `--assignee-id <uuid>`（与 `--assignee` 互斥）以精确锁定。
 
 ### Update Issue
 
@@ -251,8 +253,11 @@ multica issue update <id> --title "New title" --priority urgent
 
 ```bash
 multica issue assign <id> --to "Lambda"
+multica issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue assign <id> --unassign
 ```
+
+`--to-id <uuid>`（与 `--to` 互斥）按 UUID 精确分配；适合重名 workspace 下脚本化场景。
 
 ### Change Status
 

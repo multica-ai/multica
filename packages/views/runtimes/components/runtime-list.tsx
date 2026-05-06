@@ -21,6 +21,7 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { type RuntimeRow, createRuntimeColumns } from "./runtime-columns";
+import { useT } from "../../i18n";
 
 interface RuntimeWorkload {
   agentIds: string[];
@@ -84,6 +85,7 @@ export function RuntimeList({
 }) {
   void updatableIds;
 
+  const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
@@ -141,8 +143,9 @@ export function RuntimeList({
         latestCliVersion,
         wsId,
         now,
+        t,
       }),
-    [showOwner, latestCliVersion, wsId, now],
+    [showOwner, latestCliVersion, wsId, now, t],
   );
 
   const table = useReactTable({

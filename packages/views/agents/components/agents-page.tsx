@@ -45,6 +45,7 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
+import { useT } from "../../i18n";
 
 // Filter axes:
 //
@@ -63,14 +64,15 @@ type AvailabilityFilter = "all" | AgentAvailability;
 
 type SortKey = "recent" | "name" | "runs" | "created";
 const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
-const SORT_LABEL: Record<SortKey, string> = {
-  recent: "Recent activity",
-  name: "Name",
-  runs: "Most runs",
-  created: "Recently created",
+const SORT_LABEL_KEY: Record<SortKey, "label_recent" | "label_name" | "label_runs" | "label_created"> = {
+  recent: "label_recent",
+  name: "label_name",
+  runs: "label_runs",
+  created: "label_created",
 };
 
 export function AgentsPage() {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -351,8 +353,8 @@ export function AgentsPage() {
   ]);
 
   const columns = useMemo(
-    () => createAgentColumns({ onDuplicate: handleDuplicate }),
-    [handleDuplicate],
+    () => createAgentColumns({ onDuplicate: handleDuplicate, t }),
+    [handleDuplicate, t],
   );
 
   const table = useReactTable({
@@ -394,30 +396,7 @@ export function AgentsPage() {
 
   // ---- List request error ----
   if (listError) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} />
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <div>
-            <p className="text-sm font-medium">Couldn&rsquo;t load agents</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {listError instanceof Error
-                ? listError.message
-                : "Something went wrong fetching the agent list."}
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => refetchList()}
-          >
-            Try again
-          </Button>
-        </div>
-      </div>
-    );
+    return <ListError onCreate={() => setShowCreate(true)} listError={listError} onRetry={refetchList} />;
   }
 
   const showEmpty = totalActiveCount === 0 && archivedCount === 0;
@@ -510,38 +489,71 @@ function PageHeaderBar({
   totalCount: number;
   onCreate: () => void;
 }) {
+  const { t } = useT("agents");
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
         <Bot className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">Agents</h1>
+        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
         {totalCount > 0 && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
             {totalCount}
           </span>
         )}
-        {/* Tagline next to the title — mirrors Runtimes / Skills. Single
-            sentence + docs link, hidden below md so it never collides with
-            the title on narrow screens. The presence chip row below carries
-            the state-legend job, so the tagline only needs to anchor what
-            an agent IS, not what each colour means. */}
+        {/* Tagline next to the title — mirrors Runtimes / Skills. */}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
-          AI teammates that pick up issues, comment, and update status.{" "}
+          {t(($) => $.page.tagline)}{" "}
           <a
             href="https://multica.ai/docs/agents"
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Learn more →
+            {t(($) => $.page.learn_more)}
           </a>
         </p>
       </div>
       <Button type="button" size="sm" onClick={onCreate}>
         <Plus className="h-3 w-3" />
-        New agent
+        {t(($) => $.page.new_agent)}
       </Button>
     </PageHeader>
+  );
+}
+
+function ListError({
+  onCreate,
+  listError,
+  onRetry,
+}: {
+  onCreate: () => void;
+  listError: unknown;
+  onRetry: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <PageHeaderBar totalCount={0} onCreate={onCreate} />
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <div>
+          <p className="text-sm font-medium">{t(($) => $.page.list_load_failed)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {listError instanceof Error
+              ? listError.message
+              : t(($) => $.page.list_load_failed_default)}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onRetry}
+        >
+          {t(($) => $.page.try_again)}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -574,11 +586,7 @@ function ActiveToolbarRow({
   archivedCount: number;
   onShowArchived: () => void;
 }) {
-  // Layout: [Search] [Mine|All] ......... [Show archived] [N of M] [Sort ▼]
-  // Filter chips were removed (status / workload chips on a small team
-  // gain less than they cost), so the toolbar collapses to a single row.
-  // Visible/total count and the archived link inherit their old position
-  // from the deleted PresenceFilterRows.
+  const { t } = useT("agents");
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
       <div className="relative">
@@ -586,7 +594,7 @@ function ActiveToolbarRow({
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search agents…"
+          placeholder={t(($) => $.page.search_placeholder)}
           className="h-8 w-64 pl-8 text-sm"
         />
       </div>
@@ -598,11 +606,11 @@ function ActiveToolbarRow({
             onClick={onShowArchived}
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            Show archived ({archivedCount}) →
+            {t(($) => $.page.show_archived, { count: archivedCount })}
           </button>
         )}
         <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-          {visibleCount} of {totalCount}
+          {t(($) => $.page.of_total, { visible: visibleCount, total: totalCount })}
         </span>
         <SortDropdown sort={sort} setSort={setSort} />
       </div>
@@ -619,19 +627,18 @@ function ScopeSegment({
   setScope: (v: Scope) => void;
   counts: { all: number; mine: number };
 }) {
-  // Mine first — that's the more frequent scope (your own agents) and
-  // also the default selection, so it lives in the leading slot.
+  const { t } = useT("agents");
   return (
     <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
       <ScopeButton
         active={scope === "mine"}
-        label="Mine"
+        label={t(($) => $.scope.mine)}
         count={counts.mine}
         onClick={() => setScope("mine")}
       />
       <ScopeButton
         active={scope === "all"}
-        label="All"
+        label={t(($) => $.scope.all)}
         count={counts.all}
         onClick={() => setScope("all")}
       />
@@ -679,6 +686,7 @@ function SortDropdown({
   sort: SortKey;
   setSort: (v: SortKey) => void;
 }) {
+  const { t } = useT("agents");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -691,7 +699,7 @@ function SortDropdown({
         }
       >
         <ArrowUpDown className="h-3 w-3" />
-        {SORT_LABEL[sort]}
+        {t(($) => $.sort[SORT_LABEL_KEY[sort]])}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-auto">
         {SORT_KEYS.map((k) => (
@@ -700,7 +708,7 @@ function SortDropdown({
             onClick={() => setSort(k)}
             className="text-xs"
           >
-            {SORT_LABEL[k]}
+            {t(($) => $.sort[SORT_LABEL_KEY[k]])}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -724,12 +732,13 @@ function AvailabilityFilterRow({
   counts: Record<AgentAvailability, number>;
   totalCount: number;
 }) {
+  const { t } = useT("agents");
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
       <AvailabilityChip
         active={value === "all"}
         onClick={() => onChange("all")}
-        label="All"
+        label={t(($) => $.availability.all)}
         count={totalCount}
       />
       {availabilityOrder.map((a) => {
@@ -739,7 +748,7 @@ function AvailabilityFilterRow({
             key={a}
             active={value === a}
             onClick={() => onChange(a)}
-            label={cfg.label}
+            label={t(($) => $.availability[a])}
             count={counts[a]}
             dotClass={cfg.dotClass}
           />
@@ -798,6 +807,7 @@ function ArchivedToolbarRow({
   sort: SortKey;
   setSort: (v: SortKey) => void;
 }) {
+  const { t } = useT("agents");
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
       <button
@@ -806,10 +816,10 @@ function ArchivedToolbarRow({
         className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3 w-3" />
-        Active agents
+        {t(($) => $.archived.active_link)}
       </button>
       <span className="text-muted-foreground/40">/</span>
-      <span className="text-xs font-medium">Archived agents</span>
+      <span className="text-xs font-medium">{t(($) => $.archived.title)}</span>
       <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
         {archivedCount}
       </span>
@@ -825,19 +835,19 @@ function ArchivedToolbarRow({
 // ---------------------------------------------------------------------------
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useT("agents");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <Bot className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h2 className="mt-4 text-base font-semibold">No agents yet</h2>
+      <h2 className="mt-4 text-base font-semibold">{t(($) => $.empty.title)}</h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        Create an agent and assign it issues, like any teammate. Local agents
-        run on your machine; cloud agents run on Multica&rsquo;s runtime.
+        {t(($) => $.empty.description)}
       </p>
       <Button type="button" onClick={onCreate} size="sm" className="mt-5">
         <Plus className="h-3 w-3" />
-        New agent
+        {t(($) => $.page.new_agent)}
       </Button>
     </div>
   );
@@ -852,27 +862,27 @@ function NoMatches({
   search: string;
   scope: Scope;
 }) {
+  const { t } = useT("agents");
   const hasSearch = search.length > 0;
-  // "mine" is the only remaining narrowing dimension after chip filters
-  // were dropped — keep the wording aware of it so an empty Mine view
-  // doesn't suggest the workspace itself is empty.
   const hasFilter = scope === "mine";
 
   let body: string;
   if (view === "archived") {
     body = hasSearch
-      ? `No archived agents match "${search}".`
-      : "No archived agents yet.";
+      ? t(($) => $.no_matches.search_archived, { query: search })
+      : t(($) => $.no_matches.no_archived);
   } else if (hasSearch) {
-    body = `No agents match "${search}"${hasFilter ? " in this filter" : ""}.`;
+    body = hasFilter
+      ? t(($) => $.no_matches.search_active_filtered, { query: search })
+      : t(($) => $.no_matches.search_active, { query: search });
   } else {
-    body = "No agents match this filter.";
+    body = t(($) => $.no_matches.no_filter_match);
   }
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
       <Search className="h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm">No matches</p>
+      <p className="text-sm">{t(($) => $.no_matches.title)}</p>
       <p className="max-w-xs text-xs">{body}</p>
     </div>
   );

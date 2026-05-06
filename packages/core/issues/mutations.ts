@@ -23,6 +23,12 @@ import type {
   ListIssuesCache,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import {
+  mapAllEntries,
+  filterAllEntries,
+  prependToLatestPage,
+  type TimelineCacheData,
+} from "./timeline-cache";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -312,26 +318,27 @@ export function useCreateComment(issueId: string) {
       attachmentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds),
     onSuccess: (comment) => {
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => {
-          if (!old) return old;
-          const entry: TimelineEntry = {
-            type: "comment",
-            id: comment.id,
-            actor_type: comment.author_type,
-            actor_id: comment.author_id,
-            content: comment.content,
-            parent_id: comment.parent_id,
-            comment_type: comment.type,
-            reactions: comment.reactions ?? [],
-            attachments: comment.attachments ?? [],
-            created_at: comment.created_at,
-            updated_at: comment.updated_at,
-          };
-          if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
-        },
+      // Write into every paginated timeline cache that's currently at-latest
+      // (around-mode caches viewing older windows skip silently inside
+      // prependToLatestPage). Both the latest cache and any open around-mode
+      // window that has been scrolled all the way to the live tail get the
+      // optimistic entry; everything else falls back to invalidation.
+      const entry: TimelineEntry = {
+        type: "comment",
+        id: comment.id,
+        actor_type: comment.author_type,
+        actor_id: comment.author_id,
+        content: comment.content,
+        parent_id: comment.parent_id,
+        comment_type: comment.type,
+        reactions: comment.reactions ?? [],
+        attachments: comment.attachments ?? [],
+        created_at: comment.created_at,
+        updated_at: comment.updated_at,
+      };
+      qc.setQueriesData<TimelineCacheData>(
+        { queryKey: ["issues", "timeline", issueId] },
+        (old) => prependToLatestPage(old, entry),
       );
     },
     onSettled: () => {
@@ -346,18 +353,27 @@ export function useUpdateComment(issueId: string) {
     mutationFn: ({ commentId, content }: { commentId: string; content: string }) =>
       api.updateComment(commentId, content),
     onMutate: async ({ commentId, content }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
+      await qc.cancelQueries({ queryKey: ["issues", "timeline", issueId] });
+      // Snapshot every open timeline cache (latest + any around windows) so
+      // an error rollback restores them all atomically.
+      const prevSnapshots = qc.getQueriesData<TimelineCacheData>({
+        queryKey: ["issues", "timeline", issueId],
+      });
+      qc.setQueriesData<TimelineCacheData>(
+        { queryKey: ["issues", "timeline", issueId] },
         (old) =>
-          old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+          mapAllEntries(old, (e) =>
+            e.id === commentId ? { ...e, content } : e,
+          ),
       );
-      return { prev };
+      return { prevSnapshots };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      if (ctx?.prevSnapshots) {
+        for (const [key, prev] of ctx.prevSnapshots) {
+          qc.setQueryData(key, prev);
+        }
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
@@ -370,33 +386,45 @@ export function useDeleteComment(issueId: string) {
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+      await qc.cancelQueries({ queryKey: ["issues", "timeline", issueId] });
+      const prevSnapshots = qc.getQueriesData<TimelineCacheData>({
+        queryKey: ["issues", "timeline", issueId],
+      });
 
-      // Cascade: collect all child comment IDs
+      // Cascade: collect all child comment IDs across every loaded page.
       const toRemove = new Set<string>([commentId]);
-      if (prev) {
+      for (const [, data] of prevSnapshots) {
+        if (!data) continue;
         let changed = true;
         while (changed) {
           changed = false;
-          for (const e of prev) {
-            if (e.parent_id && toRemove.has(e.parent_id) && !toRemove.has(e.id)) {
-              toRemove.add(e.id);
-              changed = true;
+          for (const page of data.pages) {
+            for (const e of page.entries) {
+              if (
+                e.parent_id &&
+                toRemove.has(e.parent_id) &&
+                !toRemove.has(e.id)
+              ) {
+                toRemove.add(e.id);
+                changed = true;
+              }
             }
           }
         }
       }
 
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => old?.filter((e) => !toRemove.has(e.id)),
+      qc.setQueriesData<TimelineCacheData>(
+        { queryKey: ["issues", "timeline", issueId] },
+        (old) => filterAllEntries(old, (e) => toRemove.has(e.id)),
       );
-      return { prev };
+      return { prevSnapshots };
     },
     onError: (_err, _id, ctx) => {
-      if (ctx?.prev)
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      if (ctx?.prevSnapshots) {
+        for (const [key, prev] of ctx.prevSnapshots) {
+          qc.setQueryData(key, prev);
+        }
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });

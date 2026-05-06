@@ -39,12 +39,10 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
+import { useT } from "../../i18n";
 
 type Method = "chooser" | "manual" | "url" | "runtime";
 
-/** After create/import, seed the detail cache with the freshly-returned skill
- *  so the next navigation renders immediately — no extra round-trip. Also
- *  refreshes skills/agents lists since the new row needs to surface. */
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
   wsId: string,
@@ -55,8 +53,6 @@ function seedAfterCreate(
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
 }
 
-/** Matches only name-conflict errors so we don't confuse users with the
- *  "try a different name" hint when the real problem is something else. */
 function isNameConflictError(msg: string): boolean {
   return /\b(409|conflict|already exists|unique constraint)\b/i.test(msg);
 }
@@ -66,34 +62,19 @@ function isNameConflictError(msg: string): boolean {
 // ---------------------------------------------------------------------------
 
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
+  const { t } = useT("skills");
   const methods: {
     key: Method;
     icon: typeof Plus;
-    title: string;
-    desc: string;
+    titleKey: "manual" | "url" | "runtime";
   }[] = [
-    {
-      key: "manual",
-      icon: Plus,
-      title: "Create manually",
-      desc: "Start from a blank SKILL.md and write your own instructions.",
-    },
-    {
-      key: "url",
-      icon: Download,
-      title: "Import from URL",
-      desc: "Pull a published skill from ClawHub or Skills.sh.",
-    },
-    {
-      key: "runtime",
-      icon: HardDrive,
-      title: "Copy from runtime",
-      desc: "Promote a skill already installed on your local runtime.",
-    },
+    { key: "manual", icon: Plus, titleKey: "manual" },
+    { key: "url", icon: Download, titleKey: "url" },
+    { key: "runtime", icon: HardDrive, titleKey: "runtime" },
   ];
   return (
     <div className="grid gap-2 p-5">
-      {methods.map(({ key, icon: Icon, title, desc }) => (
+      {methods.map(({ key, icon: Icon, titleKey }) => (
         <button
           key={key}
           type="button"
@@ -104,8 +85,12 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
             <Icon className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">{title}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">{desc}</div>
+            <div className="text-sm font-medium">
+              {t(($) => $.create.method_card[`${titleKey}_title`])}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {t(($) => $.create.method_card[`${titleKey}_desc`])}
+            </div>
           </div>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
         </button>
@@ -125,6 +110,7 @@ function ManualForm({
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
 }) {
+  const { t } = useT("skills");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [name, setName] = useState("");
@@ -145,10 +131,10 @@ function ManualForm({
         description: description.trim(),
       });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill created");
+      toast.success(t(($) => $.create.manual.toast_created));
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create skill");
+      setError(err instanceof Error ? err.message : t(($) => $.create.manual.fallback_error));
       setLoading(false);
     }
   };
@@ -165,7 +151,7 @@ function ManualForm({
             htmlFor="create-skill-name"
             className="text-xs text-muted-foreground"
           >
-            Name
+            {t(($) => $.create.manual.name_label)}
           </Label>
           <Input
             id="create-skill-name"
@@ -175,13 +161,13 @@ function ManualForm({
               setName(e.target.value);
               setError("");
             }}
-            placeholder="e.g. review-helper"
+            placeholder={t(($) => $.create.manual.name_placeholder)}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Must be unique within the workspace.
+            {t(($) => $.create.manual.name_hint)}
           </p>
         </div>
 
@@ -191,13 +177,13 @@ function ManualForm({
             className="text-xs text-muted-foreground"
           >
             <Pencil className="h-3 w-3" />
-            Description
+            {t(($) => $.create.manual.description_label)}
           </Label>
           <Textarea
             id="create-skill-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="One sentence on when to assign this skill to an agent."
+            placeholder={t(($) => $.create.manual.description_placeholder)}
             rows={3}
             className="resize-none"
           />
@@ -212,7 +198,7 @@ function ManualForm({
             <span>
               {error}
               {isNameConflictError(error) && (
-                <> Try a different name and submit again.</>
+                <>{t(($) => $.create.manual.name_conflict_hint)}</>
               )}
             </span>
           </div>
@@ -227,7 +213,7 @@ function ManualForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {t(($) => $.create.manual.cancel)}
         </Button>
         <Button
           type="button"
@@ -238,10 +224,10 @@ function ManualForm({
           {loading ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Creating…
+              {t(($) => $.create.manual.submitting)}
             </>
           ) : (
-            "Create skill"
+            t(($) => $.create.manual.submit)
           )}
         </Button>
       </div>
@@ -280,8 +266,6 @@ function SourceCard({
       }`}
     >
       <div className="text-xs font-medium">{label}</div>
-      {/* Host example doubles as a "browse" link — brand-colored underline
-          matches the repo's convention for in-flow links (see editor CSS). */}
       <button
         type="button"
         onClick={() => openExternal(browseUrl)}
@@ -300,6 +284,7 @@ function UrlForm({
   onCreated: (skill: Skill) => void;
   onCancel: () => void;
 }) {
+  const { t } = useT("skills");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [url, setUrl] = useState("");
@@ -317,19 +302,19 @@ function UrlForm({
     try {
       const skill = await api.importSkill({ url: trimmed });
       seedAfterCreate(qc, wsId, skill);
-      toast.success("Skill imported");
+      toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
       setLoading(false);
     }
   };
 
   const submittingLabel = (() => {
-    if (!loading) return "Import";
-    if (source === "clawhub") return "Importing from ClawHub…";
-    if (source === "skills.sh") return "Importing from Skills.sh…";
-    return "Importing…";
+    if (!loading) return t(($) => $.create.url.import);
+    if (source === "clawhub") return t(($) => $.create.url.importing_clawhub);
+    if (source === "skills.sh") return t(($) => $.create.url.importing_skills_sh);
+    return t(($) => $.create.url.importing);
   })();
 
   return (
@@ -341,7 +326,7 @@ function UrlForm({
       >
         <div className="space-y-1.5">
           <Label htmlFor="import-url" className="text-xs text-muted-foreground">
-            Skill URL
+            {t(($) => $.create.url.url_label)}
           </Label>
           <Input
             id="import-url"
@@ -361,7 +346,7 @@ function UrlForm({
 
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
-            Supported sources
+            {t(($) => $.create.url.supported_sources)}
           </p>
           <div className="grid grid-cols-2 gap-2">
             <SourceCard
@@ -388,11 +373,7 @@ function UrlForm({
             <span>
               {error}
               {isNameConflictError(error) && (
-                <>
-                  {" "}
-                  The imported skill&rsquo;s name already exists — delete the
-                  existing one before retrying.
-                </>
+                <>{t(($) => $.create.url.name_conflict_hint)}</>
               )}
             </span>
           </div>
@@ -407,7 +388,7 @@ function UrlForm({
           onClick={onCancel}
           disabled={loading}
         >
-          Cancel
+          {t(($) => $.create.url.cancel)}
         </Button>
         <Button
           type="button"
@@ -436,21 +417,6 @@ function UrlForm({
 // Root dialog
 // ---------------------------------------------------------------------------
 
-const METHOD_TITLES: Record<Method, string> = {
-  chooser: "New skill",
-  manual: "Create manually",
-  url: "Import from URL",
-  runtime: "Copy from runtime",
-};
-
-const METHOD_DESCS: Record<Method, string> = {
-  chooser: "Choose how you want to add a skill to this workspace.",
-  manual: "Write a new SKILL.md from scratch.",
-  url: "Fetch a published skill by URL. Files are pulled server-side.",
-  runtime:
-    "Scan a local runtime and promote one of its on-disk skills into this workspace.",
-};
-
 export function CreateSkillDialog({
   onClose,
   onCreated,
@@ -458,6 +424,7 @@ export function CreateSkillDialog({
   onClose: () => void;
   onCreated?: (skill: Skill) => void;
 }) {
+  const { t } = useT("skills");
   const [method, setMethod] = useState<Method>("chooser");
 
   const handleCreated = (skill: Skill) => {
@@ -467,25 +434,15 @@ export function CreateSkillDialog({
 
   const wide = method === "runtime";
 
-  // Mount pattern mirrors CreateIssue / CreateProject: the parent conditionally
-  // renders this component and `<Dialog open>` is hard-coded. Toggling `open`
-  // via prop (controlled) causes a second data-open → data-closed flip with a
-  // tail re-render, which shows up as a "double blink" on close.
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         showCloseButton={false}
         className={cn(
           "flex flex-col gap-0 overflow-hidden p-0",
-          // Smooth width/height transition when switching between method
-          // dimensions — matches the CreateIssue modal's ease curve so the
-          // expand feels native rather than snapping.
           "!transition-all !duration-300 !ease-out",
           wide
-            ? // `min(600px, 85vh)` keeps the dialog from overflowing short
-              // viewports (smaller laptops) while still feeling generous on
-              // normal screens.
-              "!h-[min(600px,85vh)] !max-w-2xl !w-full"
+            ? "!h-[min(600px,85vh)] !max-w-2xl !w-full"
             : "!h-auto !max-h-[85vh] !max-w-md !w-full",
         )}
       >
@@ -500,21 +457,21 @@ export function CreateSkillDialog({
                       type="button"
                       onClick={() => setMethod("chooser")}
                       className="-ml-1 rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                      aria-label="Back to method chooser"
+                      aria-label={t(($) => $.create.back_aria)}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
                     </button>
                   }
                 />
-                <TooltipContent side="bottom">Back</TooltipContent>
+                <TooltipContent side="bottom">{t(($) => $.create.back)}</TooltipContent>
               </Tooltip>
             )}
             <div className="min-w-0">
               <DialogTitle className="truncate text-base font-medium">
-                {METHOD_TITLES[method]}
+                {t(($) => $.create.method[method].title)}
               </DialogTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {METHOD_DESCS[method]}
+                {t(($) => $.create.method[method].desc)}
               </p>
             </div>
           </div>
@@ -525,13 +482,13 @@ export function CreateSkillDialog({
                   type="button"
                   onClick={onClose}
                   className="rounded-sm p-1 text-muted-foreground opacity-70 transition-opacity hover:bg-accent/60 hover:opacity-100"
-                  aria-label="Close"
+                  aria-label={t(($) => $.create.close_aria)}
                 >
                   <XIcon className="h-3.5 w-3.5" />
                 </button>
               }
             />
-            <TooltipContent side="bottom">Close</TooltipContent>
+            <TooltipContent side="bottom">{t(($) => $.create.close)}</TooltipContent>
           </Tooltip>
         </div>
 

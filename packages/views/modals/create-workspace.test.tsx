@@ -2,6 +2,13 @@ import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enWorkspace from "../locales/en/workspace.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, workspace: enWorkspace },
+};
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateWorkspaceMutate = vi.hoisted(() => vi.fn());
@@ -35,6 +42,18 @@ vi.mock("sonner", () => ({
 
 import { CreateWorkspaceModal } from "./create-workspace";
 
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function renderModal(props: { onClose: () => void }) {
+  return render(<CreateWorkspaceModal {...props} />, { wrapper: I18nWrapper });
+}
+
 describe("CreateWorkspaceModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -42,7 +61,7 @@ describe("CreateWorkspaceModal", () => {
 
   it("auto-generates the slug until the user edits it", async () => {
     const user = userEvent.setup();
-    render(<CreateWorkspaceModal onClose={vi.fn()} />);
+    renderModal({ onClose: vi.fn() });
 
     const nameInput = screen.getByPlaceholderText("My Workspace");
     const slugInput = screen.getByPlaceholderText("my-workspace");
@@ -69,7 +88,7 @@ describe("CreateWorkspaceModal", () => {
       },
     );
 
-    render(<CreateWorkspaceModal onClose={vi.fn()} />);
+    renderModal({ onClose: vi.fn() });
 
     await user.type(screen.getByPlaceholderText("My Workspace"), "My Team");
     await user.click(screen.getByRole("button", { name: "Create workspace" }));
@@ -101,7 +120,7 @@ describe("CreateWorkspaceModal", () => {
       },
     );
 
-    render(<CreateWorkspaceModal onClose={onClose} />);
+    renderModal({ onClose });
 
     await user.type(screen.getByPlaceholderText("My Workspace"), "My Team");
     await user.click(screen.getByRole("button", { name: "Create workspace" }));

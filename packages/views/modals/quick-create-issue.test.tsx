@@ -192,7 +192,20 @@ vi.mock("sonner", () => ({
   },
 }));
 
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enModals from "../locales/en/modals.json";
 import { AgentCreatePanel } from "./quick-create-issue";
+
+const TEST_RESOURCES = { en: { common: enCommon, modals: enModals } };
+
+function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <AgentCreatePanel {...props} />
+    </I18nProvider>,
+  );
+}
 
 describe("AgentCreatePanel", () => {
   beforeEach(() => {
@@ -207,7 +220,7 @@ describe("AgentCreatePanel", () => {
   });
 
   it("loads the persisted prompt draft when no transient prompt is provided", () => {
-    render(<AgentCreatePanel onClose={vi.fn()} />);
+    renderPanel({ onClose: vi.fn() });
 
     expect(
       screen.getByPlaceholderText(
@@ -220,7 +233,7 @@ describe("AgentCreatePanel", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    render(<AgentCreatePanel onClose={onClose} />);
+    renderPanel({ onClose });
 
     const editor = screen.getByPlaceholderText(
       'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',

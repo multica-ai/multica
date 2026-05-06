@@ -303,6 +303,197 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 	}
 }
 
+func TestIsTaskNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "404 with task not found body",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/messages",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "404 with mixed-case body still matches",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"Task Not Found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "500 with same body is not task-not-found",
+			err: &requestError{
+				StatusCode: http.StatusInternalServerError,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with workspace-not-found body is not task-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"workspace not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "non-requestError",
+			err:  errors.New("network down"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isTaskNotFoundError(tc.err); got != tc.want {
+				t.Fatalf("isTaskNotFoundError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShouldInterruptAgent(t *testing.T) {
+	t.Parallel()
+
+	notFound := &requestError{
+		StatusCode: http.StatusNotFound,
+		Body:       `{"error":"task not found"}`,
+	}
+	transient := &requestError{
+		StatusCode: http.StatusBadGateway,
+		Body:       `<html>...</html>`,
+	}
+
+	cases := []struct {
+		name   string
+		status string
+		err    error
+		want   bool
+	}{
+		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "task deleted (404)", status: "", err: notFound, want: true},
+		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
+		{name: "no information yet", status: "", err: nil, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldInterruptAgent(tc.status, tc.err); got != tc.want {
+				t.Fatalf("shouldInterruptAgent(%q, %v) = %v, want %v", tc.status, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWatchTaskCancellation_TaskDeleted reproduces the zombie-task bug:
+// when the server deletes a task while it is running (issue removed,
+// agent reassigned, etc.), GetTaskStatus starts returning 404. Before the
+// fix the daemon kept polling and never interrupted the running agent —
+// codex would keep emitting tool calls for minutes against a dead task.
+//
+// After the fix, watchTaskCancellation must close its channel within a
+// few poll intervals so the caller can cancel the agent context.
+func TestWatchTaskCancellation_TaskDeleted(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"task not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-deleted", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+		// Expected: the watcher detected the 404 and signalled cancellation.
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchTaskCancellation did not signal cancellation when task was deleted (404)")
+	}
+}
+
+// TestWatchTaskCancellation_StatusCancelled keeps the existing behaviour
+// (server transitions task status to "cancelled") working alongside the
+// new 404 path.
+func TestWatchTaskCancellation_StatusCancelled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-cancelled", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchTaskCancellation did not signal cancellation when status=cancelled")
+	}
+}
+
+// TestWatchTaskCancellation_RunningTaskNotInterrupted ensures the watcher
+// does NOT trigger on transient errors or while the task is still running.
+func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-running", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+		t.Fatal("watchTaskCancellation should not signal cancellation while task is running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if calls.Load() < 5 {
+		t.Fatalf("expected the watcher to poll at least 5 times in 150ms, got %d", calls.Load())
+	}
+}
+
 func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 
