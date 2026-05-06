@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   ChevronRight,
   Clock,
@@ -131,7 +131,10 @@ export function IssueTimeSection({
     ...redmineActivitiesOptions(wsId),
     enabled: !!wsId,
   });
-  const activities = activitiesData?.activities ?? [];
+  const activities = useMemo(
+    () => activitiesData?.activities ?? [],
+    [activitiesData?.activities],
+  );
 
   const { data: linksData } = useQuery(
     issueIntegrationLinksOptions(wsId, issueId),
@@ -302,7 +305,7 @@ export function IssueTimeSection({
         onClick={() => setOpen(!open)}
       >
         <Clock className="size-3 shrink-0 text-muted-foreground" />
-        {t($ => $.ts_header)}
+        {t(($) => $.ts_header)}
         {totalMinutes > 0 && (
           <span className="ml-auto text-[10px] font-normal text-muted-foreground tabular-nums">
             {formatMinutes(totalMinutes)}
@@ -328,7 +331,9 @@ export function IssueTimeSection({
               disabled={isTimerOnThisIssue}
             >
               <Play className="size-3 mr-1" />
-              {isTimerOnThisIssue ? t($ => $.ts_timer_running) : t($ => $.ts_start_timer)}
+              {isTimerOnThisIssue
+                ? t(($) => $.ts_timer_running)
+                : t(($) => $.ts_start_timer)}
             </Button>
             <Button
               variant="outline"
@@ -337,7 +342,7 @@ export function IssueTimeSection({
               onClick={() => setQuickLogOpen(!quickLogOpen)}
             >
               <Plus className="size-3 mr-1" />
-              {t($ => $.ts_quick_log)}
+              {t(($) => $.ts_quick_log)}
             </Button>
           </div>
 
@@ -370,7 +375,9 @@ export function IssueTimeSection({
               </div>
               {totalMinutes > estimatedMinutes && (
                 <p className="text-[10px] text-destructive">
-                  {t($ => $.ts_over_budget, { amount: formatMinutes(totalMinutes - estimatedMinutes) })}
+                  {t(($) => $.ts_over_budget, {
+                    amount: formatMinutes(totalMinutes - estimatedMinutes),
+                  })}
                 </p>
               )}
             </div>
@@ -433,7 +440,7 @@ export function IssueTimeSection({
                   onClick={handleQuickLog}
                   disabled={createEntry.isPending}
                 >
-                  {t($ => $.ts_log_time)}
+                  {t(($) => $.ts_log_time)}
                 </Button>
               </div>
             </div>
@@ -454,7 +461,7 @@ export function IssueTimeSection({
                   bulkRetry.isPending && "animate-spin",
                 )}
               />
-              {t($ => $.ts_retry_failed_other, { count: failedCount })}
+              {t(($) => $.ts_retry_failed, { count: failedCount })}
             </Button>
           )}
 
@@ -532,7 +539,7 @@ export function IssueTimeSection({
                           className="text-[11px]"
                           onClick={() => setEditingId(null)}
                         >
-                          {t($ => $.ts_cancel)}
+                          {t(($) => $.ts_cancel)}
                         </Button>
                         <Button
                           size="xs"
@@ -540,7 +547,7 @@ export function IssueTimeSection({
                           onClick={handleSaveEdit}
                           disabled={updateEntry.isPending}
                         >
-                          {t($ => $.ts_save)}
+                          {t(($) => $.ts_save)}
                         </Button>
                       </div>
                     </div>
@@ -567,7 +574,7 @@ export function IssueTimeSection({
                       <>
                         <span className="text-muted-foreground">·</span>
                         <span className="text-muted-foreground truncate italic">
-                          "{entry.comment}"
+                          &quot;{entry.comment}&quot;
                         </span>
                       </>
                     )}

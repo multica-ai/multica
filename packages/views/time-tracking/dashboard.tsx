@@ -96,7 +96,7 @@ function SyncBadge({ status }: { status: TimeEntrySyncStatus }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="size-2.5" />
-        {t($ => $.sync_synced)}
+        {t(($) => $.sync_synced)}
       </span>
     );
   }
@@ -104,7 +104,7 @@ function SyncBadge({ status }: { status: TimeEntrySyncStatus }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
         <AlertCircle className="size-2.5" />
-        {t($ => $.sync_failed)}
+        {t(($) => $.sync_failed)}
       </span>
     );
   }
@@ -112,14 +112,14 @@ function SyncBadge({ status }: { status: TimeEntrySyncStatus }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
         <Loader2 className="size-2.5 animate-spin" />
-        {t($ => $.sync_pending)}
+        {t(($) => $.sync_pending)}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
       <MinusCircle className="size-2.5" />
-      {t($ => $.sync_not_linked)}
+      {t(($) => $.sync_not_linked)}
     </span>
   );
 }
@@ -178,10 +178,8 @@ function EmptyState() {
   return (
     <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
       <Clock className="h-10 w-10 text-muted-foreground/40" />
-      <p className="text-sm">{t($ => $.empty_title)}</p>
-      <p className="text-xs">
-        {t($ => $.empty_subtitle)}
-      </p>
+      <p className="text-sm">{t(($) => $.empty_title)}</p>
+      <p className="text-xs">{t(($) => $.empty_subtitle)}</p>
     </div>
   );
 }
@@ -210,7 +208,7 @@ function ViewSegment({
             : "text-muted-foreground hover:text-foreground",
         )}
       >
-        {t($ => $.view_weekly)}
+        {t(($) => $.view_weekly)}
       </button>
       <button
         type="button"
@@ -222,7 +220,7 @@ function ViewSegment({
             : "text-muted-foreground hover:text-foreground",
         )}
       >
-        {t($ => $.view_monthly)}
+        {t(($) => $.view_monthly)}
       </button>
     </div>
   );
@@ -245,25 +243,45 @@ export function TimeTrackingDashboard() {
 
   const weekLabel =
     weekOffset === 0
-      ? t($ => $.week_this)
+      ? t(($) => $.week_this)
       : weekOffset === -1
-        ? t($ => $.week_last)
+        ? t(($) => $.week_last)
         : range.label;
 
   const dailyChartConfig = useMemo(
-    () => ({ hours: { label: t($ => $.chart_hours_label), color: "var(--color-chart-1)" } }) satisfies ChartConfig,
+    () =>
+      ({
+        hours: {
+          label: t(($) => $.chart_hours_label),
+          color: "var(--color-chart-1)",
+        },
+      }) satisfies ChartConfig,
     [t],
   );
 
   const issueChartConfig = useMemo(
-    () => ({ hours: { label: t($ => $.chart_hours_label), color: "var(--color-chart-2)" } }) satisfies ChartConfig,
+    () =>
+      ({
+        hours: {
+          label: t(($) => $.chart_hours_label),
+          color: "var(--color-chart-2)",
+        },
+      }) satisfies ChartConfig,
     [t],
   );
 
-  const DAY_NAMES = useMemo(() => [
-    t($ => $.day_mon), t($ => $.day_tue), t($ => $.day_wed), t($ => $.day_thu),
-    t($ => $.day_fri), t($ => $.day_sat), t($ => $.day_sun),
-  ], [t]);
+  const DAY_NAMES = useMemo(
+    () => [
+      t(($) => $.day_mon),
+      t(($) => $.day_tue),
+      t(($) => $.day_wed),
+      t(($) => $.day_thu),
+      t(($) => $.day_fri),
+      t(($) => $.day_sat),
+      t(($) => $.day_sun),
+    ],
+    [t],
+  );
 
   const { data, isLoading } = useQuery({
     ...dashboardOptions(wsId, range.start, range.end),
@@ -304,7 +322,7 @@ export function TimeTrackingDashboard() {
       .slice()
       .sort((a, b) => b.total_minutes - a.total_minutes)
       .map((a, i) => ({
-        name: a.activity || t($ => $.no_activity),
+        name: a.activity || t(($) => $.no_activity),
         key: `act-${i}`,
         value: a.total_minutes,
         pct: total > 0 ? Math.round((a.total_minutes / total) * 100) : 0,
@@ -351,12 +369,12 @@ export function TimeTrackingDashboard() {
     );
     return {
       total: formatMinutes(data.total_minutes),
-      totalSub: t($ => $.kpi_entry_other, { count: data.entries.length }),
+      totalSub: t(($) => $.kpi_entry, { count: data.entries.length }),
       avg: avgMinutes > 0 ? formatMinutes(avgMinutes) : "—",
       avgSub:
         activeDays > 0
-          ? t($ => $.kpi_active_day_other, { count: activeDays })
-          : t($ => $.kpi_no_logged_days),
+          ? t(($) => $.kpi_active_day, { count: activeDays })
+          : t(($) => $.kpi_no_logged_days),
       peak:
         peak && peak.total_minutes > 0
           ? formatMinutes(peak.total_minutes)
@@ -371,10 +389,13 @@ export function TimeTrackingDashboard() {
   // Month navigation helpers
   const isCurrentMonth =
     monthYear === now.getFullYear() && monthIdx === now.getMonth();
-  const monthLabel = new Date(monthYear, monthIdx, 1).toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  const monthLabel = new Date(monthYear, monthIdx, 1).toLocaleDateString(
+    "en-US",
+    {
+      month: "long",
+      year: "numeric",
+    },
+  );
 
   function goToPreviousMonth() {
     if (monthIdx === 0) {
@@ -405,7 +426,7 @@ export function TimeTrackingDashboard() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-3">
           <Clock className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">{t($ => $.header)}</span>
+          <span className="text-sm font-medium">{t(($) => $.header)}</span>
           <ViewSegment mode={viewMode} setMode={setViewMode} />
         </div>
         <div className="flex items-center gap-1">
@@ -491,25 +512,25 @@ export function TimeTrackingDashboard() {
               {/* KPI row */}
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <KpiCard
-                  label={t($ => $.kpi_total_logged)}
+                  label={t(($) => $.kpi_total_logged)}
                   value={kpis!.total}
                   sub={kpis!.totalSub}
                   icon={Clock}
                 />
                 <KpiCard
-                  label={t($ => $.kpi_avg_per_day)}
+                  label={t(($) => $.kpi_avg_per_day)}
                   value={kpis!.avg}
                   sub={kpis!.avgSub}
                   icon={TrendingUp}
                 />
                 <KpiCard
-                  label={t($ => $.kpi_peak_day)}
+                  label={t(($) => $.kpi_peak_day)}
                   value={kpis!.peak}
                   sub={kpis!.peakSub}
                   icon={CalendarDays}
                 />
                 <KpiCard
-                  label={t($ => $.kpi_entries_label)}
+                  label={t(($) => $.kpi_entries_label)}
                   value={kpis!.entries}
                   sub={kpis!.entriesSub}
                   icon={Hash}
@@ -525,7 +546,9 @@ export function TimeTrackingDashboard() {
               >
                 {/* Daily breakdown */}
                 <div className="rounded-lg border bg-card p-5">
-                  <h2 className="mb-4 text-sm font-medium">{t($ => $.section_daily_breakdown)}</h2>
+                  <h2 className="mb-4 text-sm font-medium">
+                    {t(($) => $.section_daily_breakdown)}
+                  </h2>
                   <ChartContainer
                     config={dailyChartConfig}
                     className="h-60 w-full"
@@ -580,7 +603,9 @@ export function TimeTrackingDashboard() {
                 {/* Activity breakdown */}
                 {activityData.length > 0 && (
                   <div className="rounded-lg border bg-card p-5">
-                    <h2 className="mb-4 text-sm font-medium">{t($ => $.section_by_activity)}</h2>
+                    <h2 className="mb-4 text-sm font-medium">
+                      {t(($) => $.section_by_activity)}
+                    </h2>
                     <div className="flex items-center gap-5">
                       <ChartContainer
                         config={activityChartConfig}
@@ -649,7 +674,9 @@ export function TimeTrackingDashboard() {
               {/* Top issues */}
               {issueData.length > 0 && (
                 <div className="rounded-lg border bg-card p-5">
-                  <h2 className="mb-4 text-sm font-medium">{t($ => $.section_top_issues)}</h2>
+                  <h2 className="mb-4 text-sm font-medium">
+                    {t(($) => $.section_top_issues)}
+                  </h2>
                   <ChartContainer
                     config={issueChartConfig}
                     className="w-full"
@@ -709,9 +736,13 @@ export function TimeTrackingDashboard() {
               {/* Entries table */}
               <div className="rounded-lg border bg-card">
                 <div className="flex items-center justify-between border-b px-5 py-3">
-                  <h2 className="text-sm font-medium">{t($ => $.section_all_entries)}</h2>
+                  <h2 className="text-sm font-medium">
+                    {t(($) => $.section_all_entries)}
+                  </h2>
                   <span className="text-xs text-muted-foreground">
-                    {t($ => $.kpi_entry_other, { count: data!.entries.length })}
+                    {t(($) => $.kpi_entry, {
+                      count: data!.entries.length,
+                    })}
                   </span>
                 </div>
                 <div className="overflow-x-auto">
@@ -719,19 +750,19 @@ export function TimeTrackingDashboard() {
                     <thead>
                       <tr className="border-b bg-muted/30">
                         <th className="whitespace-nowrap px-5 py-2 text-left font-medium text-muted-foreground">
-                          {t($ => $.table_date)}
+                          {t(($) => $.table_date)}
                         </th>
                         <th className="px-4 py-2 text-left font-medium text-muted-foreground">
-                          {t($ => $.table_issue)}
+                          {t(($) => $.table_issue)}
                         </th>
                         <th className="whitespace-nowrap px-4 py-2 text-right font-medium text-muted-foreground">
-                          {t($ => $.table_duration)}
+                          {t(($) => $.table_duration)}
                         </th>
                         <th className="px-4 py-2 text-left font-medium text-muted-foreground">
-                          {t($ => $.table_activity)}
+                          {t(($) => $.table_activity)}
                         </th>
                         <th className="px-5 py-2 text-left font-medium text-muted-foreground">
-                          {t($ => $.table_sync)}
+                          {t(($) => $.table_sync)}
                         </th>
                       </tr>
                     </thead>
