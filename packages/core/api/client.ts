@@ -308,6 +308,24 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Bootstrap a session for local-only desktop builds. The server is
+   * responsible for owning the single local user/space; we just ask it
+   * for a fresh token to use for the rest of the session.
+   *
+   * A 404 from this endpoint means the server is NOT in local mode —
+   * the desktop app must surface that as a hard failure (the rest of
+   * its UI assumes a logged-in user). The error bubbles up so callers
+   * can decide how to handle it (typically: log + leave isLoading=false
+   * so the loading screen clears).
+   */
+  async localSession(): Promise<LoginResponse> {
+    return this.fetch("/auth/local-session", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }

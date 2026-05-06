@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CoreProvider } from "@multica/core/platform";
+import { CoreProvider, useProductCapabilities } from "@multica/core/platform";
+import { isLocalOnlyProduct } from "@multica/core/config";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
@@ -21,6 +22,8 @@ function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const qc = useQueryClient();
+  const capabilities = useProductCapabilities();
+  const localOnly = isLocalOnlyProduct(capabilities);
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
   // setQueryData sequentially. loginWithToken sets user+isLoading=false
   // as soon as getMe resolves, which would cause DesktopShell to mount
@@ -218,10 +221,15 @@ function AppContent() {
   // Pageview tracker sits at the app root so it covers every visible
   // surface (login, overlays, tab paths) — mounting it inside DesktopShell
   // would miss the logged-out and overlay states.
+  //
+  // In local mode the user is always populated post-bootstrap (the server
+  // mints a session for the local identity on /auth/local-session). If for
+  // some reason that hasn't resolved yet, the loading screen above already
+  // covers it — we never render the cloud login page.
   return (
     <>
       <PageviewTracker />
-      {user ? <DesktopShell /> : <DesktopLoginPage />}
+      {localOnly || user ? <DesktopShell /> : <DesktopLoginPage />}
     </>
   );
 }

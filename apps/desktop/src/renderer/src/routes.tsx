@@ -6,6 +6,9 @@ import {
   useMatches,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { workspaceKeys } from "@multica/core/workspace/queries";
+import type { Workspace } from "@multica/core/types";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
@@ -57,6 +60,25 @@ function PageShell() {
 }
 
 /**
+ * Index-route fallback. Tab routers are spawned with `initialEntries: ["/"]`
+ * (or whatever the persisted state holds), so a fresh tab can land here
+ * before App.tsx's tab-store machinery has switched the active workspace.
+ *
+ * In local mode the user always has exactly one space, so the right thing
+ * to do at "/" is jump straight into its issues list. We read the cached
+ * workspace list (seeded by the auth bootstrap in `auth-initializer.tsx`)
+ * — when it's present, redirect; when it's not yet, render null and let
+ * App.tsx's `useLayoutEffect` swap the tab path on the next render.
+ */
+function LocalIndexRedirect() {
+  const queryClient = useQueryClient();
+  const cached =
+    queryClient.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
+  if (cached.length === 0) return null;
+  return <Navigate to={`/${cached[0].slug}/issues`} replace />;
+}
+
+/**
  * Route definitions shared by all tabs.
  *
  * Every tab path is workspace-scoped: `/{slug}/{route}/...`. Pre-workspace
@@ -77,7 +99,7 @@ export const appRoutes: RouteObject[] = [
   {
     element: <PageShell />,
     children: [
-      { index: true, element: null },
+      { index: true, element: <LocalIndexRedirect /> },
       {
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
