@@ -79,6 +79,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "kilocode":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverKiloCodeModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -377,6 +381,22 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kiro-cli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
+	})
+}
+
+// discoverKiloCodeModels spins up a throwaway `kilo acp` process and
+// drives the same minimal ACP handshake as Kimi/Hermes. Kilo's ACP
+// implementation advertises models via the standard
+// `models.availableModels` / `models.currentModelId` block, so the
+// generic parser works unchanged.
+//
+// Failure modes (kilo missing, not logged in, config error) all
+// return an empty list so the UI falls back to manual entry.
+func discoverKiloCodeModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "kilo",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-kilocode-discovery-",
 	})
 }
 
