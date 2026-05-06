@@ -270,11 +270,13 @@
 .rbc-theme .calendar-event-running {
   background: repeating-linear-gradient(
     -45deg,
-    color-mix(in srgb, var(--primary) 20%, transparent) 0px,
-    color-mix(in srgb, var(--primary) 20%, transparent) 4px,
-    color-mix(in srgb, var(--primary) 8%, transparent) 4px,
-    color-mix(in srgb, var(--primary) 8%, transparent) 12px
+    color-mix(in srgb, var(--primary) 32%, var(--background)) 0px,
+    color-mix(in srgb, var(--primary) 32%, var(--background)) 4px,
+    color-mix(in srgb, var(--primary) 14%, var(--background)) 4px,
+    color-mix(in srgb, var(--primary) 14%, var(--background)) 12px
   );
+  border-left: 3px solid var(--primary);
+  border-radius: 3px;
 }
 
 /* DnD: hide default resize handle icon, keep cursor only */

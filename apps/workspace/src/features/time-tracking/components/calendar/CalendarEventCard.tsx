@@ -62,9 +62,10 @@ function CalendarEventCardImpl({
         fontSize: "0.75rem",
         position: "relative",
         cursor: "pointer",
-        backgroundColor: isRunning ? undefined : "color-mix(in srgb, var(--primary) 15%, transparent)",
-        borderLeft: "2px solid var(--primary)",
-        borderRadius: "2px",
+        backgroundColor: isRunning ? undefined : "color-mix(in srgb, var(--primary) 22%, var(--background))",
+        borderLeft: "3px solid var(--primary)",
+        borderRadius: "3px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         color: "var(--foreground)",
       }}
       onClick={handleClick}

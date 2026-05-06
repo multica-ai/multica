@@ -69,7 +69,8 @@ export function BigCalendar<TEvent extends object = object>({
   ...props
 }: BigCalendarProps<TEvent>) {
   return (
-    <div className={`rbc-theme ${className ?? ""}`}>
+    // h-full ensures height: "100%" on the inner Calendar resolves correctly.
+    <div className={`rbc-theme h-full ${className ?? ""}`}>
       <RBCalendar<TEvent> localizer={localizer} {...props} />
     </div>
   );
@@ -99,7 +100,8 @@ export function BigDnDCalendar<TEvent extends object = object>({
     BigDnDCalendarProps<TEvent> & { localizer: typeof localizer }
   >;
   return (
-    <div className={`rbc-theme ${className ?? ""}`}>
+    // h-full ensures height: "100%" on the inner Calendar resolves correctly.
+    <div className={`rbc-theme h-full ${className ?? ""}`}>
       <Calendar localizer={localizer} {...props} />
     </div>
   );
