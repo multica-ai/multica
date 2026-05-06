@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 
 const DEFAULT_E2E_NAME = "E2E User";
@@ -21,12 +21,16 @@ export async function loginAsDefault(page: Page): Promise<string> {
   );
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
+  await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
   await page.goto(`/${workspace.slug}/issues`);
-  await page.waitForURL("**/issues", { timeout: 10000 });
+  await page.waitForURL(/\/issues$/, { timeout: 10000 });
+  const startBlank = page.getByRole("button", { name: "Start blank workspace" });
+  if (await startBlank.waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false)) {
+    await startBlank.click();
+    await expect(startBlank).not.toBeVisible({ timeout: 5000 });
+  }
   return workspace.slug;
 }
 
