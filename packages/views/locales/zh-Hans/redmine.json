@@ -1,0 +1,8 @@
+{
+  "link_project_first": "请先关联 Redmine 项目以浏览问题。",
+  "no_issues": "未找到问题",
+  "no_projects": "未找到项目",
+  "section_header": "Redmine",
+  "link_to_issue": "关联 Redmine 问题",
+  "link_to_project": "关联 Redmine 项目"
+}

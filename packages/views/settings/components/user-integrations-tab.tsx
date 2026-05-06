@@ -11,6 +11,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceIntegrationsOptions, myCredentialOptions } from "@multica/core/integrations/queries";
 import { useUpsertMyCredential, useDeleteMyCredential } from "@multica/core/integrations/mutations";
 import type { IntegrationProvider } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 function CredentialRow({ provider, label }: { provider: IntegrationProvider; label: string }) {
   const wsId = useWorkspaceId();
@@ -18,6 +19,7 @@ function CredentialRow({ provider, label }: { provider: IntegrationProvider; lab
   const [apiKey, setApiKey] = useState("");
   const upsert = useUpsertMyCredential();
   const remove = useDeleteMyCredential();
+  const { t } = useT("integrations");
 
   const handleSave = async () => {
     if (!apiKey.trim()) {
@@ -50,7 +52,7 @@ function CredentialRow({ provider, label }: { provider: IntegrationProvider; lab
           <p className="text-sm font-medium">{label}</p>
           {credential?.has_key && (
             <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600">
-              Key saved
+              {t($ => $.key_saved)}
             </span>
           )}
         </div>
@@ -78,7 +80,7 @@ function CredentialRow({ provider, label }: { provider: IntegrationProvider; lab
               disabled={remove.isPending}
             >
               <Trash2 className="h-3 w-3" />
-              Remove key
+              {t($ => $.remove_key)}
             </Button>
           )}
           {!credential?.has_key && <span />}
@@ -100,13 +102,14 @@ export function UserIntegrationsTab() {
   const wsId = useWorkspaceId();
   const { data: integrationsData } = useQuery(workspaceIntegrationsOptions(wsId));
   const integrations = integrationsData?.integrations ?? [];
+  const { t } = useT("integrations");
 
   if (integrations.length === 0) {
     return (
       <div className="space-y-4">
-        <h2 className="text-sm font-semibold">Integrations</h2>
+        <h2 className="text-sm font-semibold">{t($ => $.title)}</h2>
         <p className="text-sm text-muted-foreground">
-          No integrations are configured for this workspace yet. Ask an admin to configure one first.
+          {t($ => $.no_integrations)}
         </p>
       </div>
     );
@@ -116,9 +119,9 @@ export function UserIntegrationsTab() {
     <div className="space-y-8">
       <section className="space-y-4">
         <div>
-          <h2 className="text-sm font-semibold">Integration API keys</h2>
+          <h2 className="text-sm font-semibold">{t($ => $.api_keys_title)}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Your personal API keys for each enabled integration. These are only used for your account.
+            {t($ => $.api_keys_desc)}
           </p>
         </div>
 

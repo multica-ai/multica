@@ -64,5 +64,14 @@
   "idle_body": "检测到 {{duration}} 无活动，计时器仍在 {{issue}} 上运行。",
   "idle_keep_running": "继续运行",
   "idle_subtract_idle": "停止并扣除空闲时间（{{duration}}）",
-  "idle_stop_all": "停止并记录所有时间"
+  "idle_stop_all": "停止并记录所有时间",
+  "ts_header": "时间",
+  "ts_timer_running": "计时中",
+  "ts_start_timer": "开始计时",
+  "ts_quick_log": "快速记录",
+  "ts_over_budget": "超出预算 {{amount}}",
+  "ts_log_time": "记录时间",
+  "ts_retry_failed_other": "重试 {{count}} 条失败记录",
+  "ts_cancel": "取消",
+  "ts_save": "保存"
 }

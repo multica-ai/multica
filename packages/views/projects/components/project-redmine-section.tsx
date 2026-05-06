@@ -9,6 +9,7 @@ import { api } from "@multica/core/api";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { toast } from "sonner";
 import type { RedmineProject } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // PropRow (mirrors the one in project-detail)
@@ -45,6 +46,7 @@ function LinkOrCreateProjectPopover({
   const [filter, setFilter] = useState("");
   const [creating, setCreating] = useState(false);
   const upsert = useUpsertProjectIntegrationLink();
+  const { t } = useT("redmine");
 
   const { data: projectsData, isLoading } = useQuery(redmineProjectsOptions(wsId));
   const redmineProjects: RedmineProject[] = projectsData?.projects ?? [];
@@ -136,7 +138,7 @@ function LinkOrCreateProjectPopover({
           </button>
         ))}
         {filtered.length === 0 && !isLoading && (
-          <p className="px-2 py-2 text-xs text-muted-foreground text-center">No projects found</p>
+          <p className="px-2 py-2 text-xs text-muted-foreground text-center">{t($ => $.no_projects)}</p>
         )}
       </div>
       <div className="border-t p-1">
@@ -168,6 +170,7 @@ interface ProjectRedmineSectionProps {
 export function ProjectRedmineSection({ wsId, projectId, projectTitle, projectDescription }: ProjectRedmineSectionProps) {
   const [open, setOpen] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const { t } = useT("redmine");
 
   const { data: integrationsData } = useQuery(workspaceIntegrationsOptions(wsId));
   const { data: linksData } = useQuery(projectIntegrationLinksOptions(wsId, projectId));
@@ -198,7 +201,7 @@ export function ProjectRedmineSection({ wsId, projectId, projectTitle, projectDe
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
         onClick={() => setOpen(!open)}
       >
-        Redmine
+        {t($ => $.section_header)}
         <ChevronRight
           className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
         />
@@ -238,7 +241,7 @@ export function ProjectRedmineSection({ wsId, projectId, projectTitle, projectDe
                     className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                   >
                     <Link2 className="h-3 w-3 shrink-0" />
-                    Link to Redmine project
+                    {t($ => $.link_to_project)}
                   </button>
                 }
               />

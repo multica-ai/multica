@@ -1,0 +1,16 @@
+{
+  "title": "集成",
+  "key_saved": "密钥已保存",
+  "remove_key": "删除密钥",
+  "no_integrations": "此工作区尚未配置集成。请联系管理员进行配置。",
+  "api_keys_title": "集成 API 密钥",
+  "api_keys_desc": "各集成的个人 API 密钥，仅用于您的账户。",
+  "redmine_name": "Redmine",
+  "redmine_desc": "将 Multica 项目和问题关联至 Redmine。",
+  "open": "打开",
+  "instance_url": "实例 URL",
+  "remove": "删除",
+  "save": "保存",
+  "saving": "保存中...",
+  "admin_only": "只有管理员和所有者可以管理集成。"
+}

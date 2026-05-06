@@ -1,0 +1,16 @@
+{
+  "title": "Integrations",
+  "key_saved": "Key saved",
+  "remove_key": "Remove key",
+  "no_integrations": "No integrations are configured for this workspace yet. Ask an admin to configure one first.",
+  "api_keys_title": "Integration API keys",
+  "api_keys_desc": "Your personal API keys for each enabled integration. These are only used for your account.",
+  "redmine_name": "Redmine",
+  "redmine_desc": "Link Multica projects and issues to Redmine.",
+  "open": "Open",
+  "instance_url": "Instance URL",
+  "remove": "Remove",
+  "save": "Save",
+  "saving": "Saving...",
+  "admin_only": "Only admins and owners can manage integrations."
+}

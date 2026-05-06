@@ -15,6 +15,7 @@ import {
   useUpsertWorkspaceIntegration,
   useDeleteWorkspaceIntegration,
 } from "@multica/core/integrations/mutations";
+import { useT } from "../../i18n";
 
 export function WorkspaceIntegrationsTab() {
   const user = useAuthStore((s) => s.user);
@@ -31,6 +32,7 @@ export function WorkspaceIntegrationsTab() {
   const [instanceURL, setInstanceURL] = useState(redmineIntegration?.instance_url ?? "");
   const upsert = useUpsertWorkspaceIntegration();
   const remove = useDeleteWorkspaceIntegration();
+  const { t } = useT("integrations");
 
   // Sync local state when data loads
   if (redmineIntegration && instanceURL === "" && redmineIntegration.instance_url) {
@@ -63,16 +65,16 @@ export function WorkspaceIntegrationsTab() {
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Integrations</h2>
+        <h2 className="text-sm font-semibold">{t($ => $.title)}</h2>
 
         {/* Redmine */}
         <Card>
           <CardContent className="space-y-4">
             <div className="flex items-start justify-between">
               <div className="space-y-0.5">
-                <p className="text-sm font-medium">Redmine</p>
+                <p className="text-sm font-medium">{t($ => $.redmine_name)}</p>
                 <p className="text-xs text-muted-foreground">
-                  Link Multica projects and issues to Redmine.
+                  {t($ => $.redmine_desc)}
                 </p>
               </div>
               {redmineIntegration && (
@@ -83,13 +85,13 @@ export function WorkspaceIntegrationsTab() {
                   className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                 >
                   <ExternalLink className="h-3 w-3" />
-                  Open
+                  {t($ => $.open)}
                 </a>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Instance URL</label>
+              <label className="text-xs text-muted-foreground">{t($ => $.instance_url)}</label>
               <Input
                 type="url"
                 placeholder="https://redmine.example.com"
@@ -111,7 +113,7 @@ export function WorkspaceIntegrationsTab() {
                     disabled={remove.isPending}
                   >
                     <Trash2 className="h-3 w-3" />
-                    Remove
+                    {t($ => $.remove)}
                   </Button>
                 )}
                 {!redmineIntegration && <span />}
@@ -121,14 +123,14 @@ export function WorkspaceIntegrationsTab() {
                   disabled={upsert.isPending}
                 >
                   <Save className="h-3 w-3" />
-                  {upsert.isPending ? "Saving..." : "Save"}
+                  {upsert.isPending ? t($ => $.saving) : t($ => $.save)}
                 </Button>
               </div>
             )}
 
             {!canManage && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can manage integrations.
+                {t($ => $.admin_only)}
               </p>
             )}
           </CardContent>

@@ -68,5 +68,15 @@
   "idle_body": "No activity detected for {{duration}}. Timer is still running on {{issue}}.",
   "idle_keep_running": "Keep running",
   "idle_subtract_idle": "Stop & subtract idle time ({{duration}})",
-  "idle_stop_all": "Stop & log everything"
+  "idle_stop_all": "Stop & log everything",
+  "ts_header": "Time",
+  "ts_timer_running": "Timer running",
+  "ts_start_timer": "Start timer",
+  "ts_quick_log": "Quick log",
+  "ts_over_budget": "Over budget by {{amount}}",
+  "ts_log_time": "Log time",
+  "ts_retry_failed_one": "Retry {{count}} failed entry",
+  "ts_retry_failed_other": "Retry {{count}} failed entries",
+  "ts_cancel": "Cancel",
+  "ts_save": "Save"
 }
