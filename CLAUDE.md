@@ -259,6 +259,22 @@ Canonical examples: `components/window-overlay.tsx`, `pages/login.tsx`.
 
 UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (drag strip, `useImmersiveMode`, tab system interaction, traffic-light accommodation) lives in desktop-only code. Violating this split always produces platform divergence — if a button exists on desktop but not on web for the same flow, it's a signal the UX escaped into platform code.
 
+## Browser smoke-testing
+
+When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI features, the URL in the browser tab decides which server you are testing — **not** which checkout you have open in the editor.
+
+**ALWAYS verify the smoke-test target before drawing conclusions:**
+
+1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
+2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
+   - `sara.tailbde0.ts.net/...` → sara.local mac mini (separate checkout, often on `main`)
+   - `app.multica.io` / `*.firtal.com` → production
+   - any tailscale `.ts.net` host → another machine
+3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
+4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
+
+If a smoke test result conflicts with this rule (you "tested it" but were on the wrong host), discard the result. The cost of running again on the right host is low; the cost of shipping based on a false signal is high.
+
 ## UI/UX Rules
 
 - Prefer shadcn components over custom implementations. Install via `pnpm ui:add <component>` from project root — adds to `packages/ui/components/ui/`. All components use Base UI primitives (`@base-ui/react`), not Radix.
