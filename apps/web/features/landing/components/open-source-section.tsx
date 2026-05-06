@@ -37,21 +37,36 @@ export function OpenSourceSection() {
             </div>
           </div>
 
-          {/* Right column — highlight grid */}
-          <div className="flex-1">
-            <div className="grid gap-px overflow-hidden rounded-2xl border border-[#0a0d12]/8 bg-[#0a0d12]/8 sm:grid-cols-2">
-              {t.openSource.highlights.map((item) => (
-                <div key={item.title} className="bg-white p-8 lg:p-10">
-                  <h3 className="text-[17px] font-semibold leading-snug text-[#0a0d12] sm:text-[18px]">
+          {/* Right column — narrative highlight list */}
+          <ul className="flex-1 divide-y divide-[#0a0d12]/8">
+            {t.openSource.highlights.map((item, i) => (
+              <li
+                key={item.title}
+                className={
+                  i === 0
+                    ? "pb-8 sm:pb-10"
+                    : i === t.openSource.highlights.length - 1
+                      ? "pt-8 sm:pt-10"
+                      : "py-8 sm:py-10"
+                }
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:gap-10">
+                  <h3
+                    className={
+                      i === 0
+                        ? "text-[22px] font-semibold leading-tight tracking-[-0.01em] text-[#0a0d12] sm:text-[24px] sm:w-[260px] sm:shrink-0"
+                        : "text-[17px] font-semibold leading-snug text-[#0a0d12] sm:text-[18px] sm:w-[260px] sm:shrink-0"
+                    }
+                  >
                     {item.title}
                   </h3>
-                  <p className="mt-3 text-[14px] leading-[1.7] text-[#0a0d12]/56 sm:text-[15px]">
+                  <p className="text-[14px] leading-[1.7] text-[#0a0d12]/60 sm:text-[15px]">
                     {item.description}
                   </p>
                 </div>
-              ))}
-            </div>
-          </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </section>
