@@ -11,6 +11,10 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
+import {
+  LocalStackStatusScreen,
+  useLocalStackStatus,
+} from "./components/local-stack-status";
 import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
@@ -24,6 +28,10 @@ function AppContent() {
   const qc = useQueryClient();
   const capabilities = useProductCapabilities();
   const localOnly = isLocalOnlyProduct(capabilities);
+  // Local stack supervisor status — only meaningful in local mode. Called
+  // unconditionally (hook order rule); the gate below is what scopes the
+  // boot-status UI to the local product.
+  const stackStatus = useLocalStackStatus();
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
   // setQueryData sequentially. loginWithToken sets user+isLoading=false
   // as soon as getMe resolves, which would cause DesktopShell to mount
@@ -209,6 +217,15 @@ function AppContent() {
       sessionStartedEmptyRef.current = false;
     }
   }, [user, workspaceListFetched, wsCount]);
+
+  // In local mode, the supervisor brings up DB/migrations/API/daemon before
+  // the renderer is usable. Block the UI on that until everything is ready.
+  // `stackStatus === null` means the first IPC round-trip hasn't landed yet
+  // — fall through to the regular loader instead of flashing an empty
+  // status screen. The cloud build (`!localOnly`) is unaffected.
+  if (localOnly && stackStatus !== null && stackStatus.overall !== "ready") {
+    return <LocalStackStatusScreen status={stackStatus} />;
+  }
 
   if (isLoading || bootstrapping) {
     return (
