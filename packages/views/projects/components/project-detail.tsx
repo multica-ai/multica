@@ -175,6 +175,14 @@ function ProjectIssuesContent({
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
+          // Drag-to-move parity with BoardView. Without this, the ListView
+          // renders rows in read-only mode (the prop being undefined is the
+          // signal to ListView to disable its sortable wiring), so users on
+          // the project detail's list tab couldn't drag issues between
+          // statuses even though the same UX works on /<slug>/issues. The
+          // handler itself is the same one BoardView uses two lines up —
+          // updateIssueMutation with status (and optional position).
+          onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
