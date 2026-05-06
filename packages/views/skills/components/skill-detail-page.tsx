@@ -113,8 +113,12 @@ function AddFileInline({
           setError("");
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Escape") {
+            onCancel();
+            return;
+          }
+          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+          submit();
         }}
         placeholder="templates/review.md"
         className="h-7 font-mono text-xs"

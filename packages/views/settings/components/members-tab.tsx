@@ -327,7 +327,8 @@ export function MembersTab() {
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="user@company.com"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                    if (inviteEmail.trim()) handleInviteMember();
                   }}
                 />
                 <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>

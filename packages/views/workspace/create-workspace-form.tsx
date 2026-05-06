@@ -79,7 +79,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
             value={name}
             onChange={(e) => handleNameChange(e.target.value)}
             placeholder="My Workspace"
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              handleCreate();
+            }}
           />
         </div>
         <div className="space-y-1.5">
@@ -95,7 +98,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
               onChange={(e) => handleSlugChange(e.target.value)}
               placeholder="my-workspace"
               className="border-0 shadow-none focus-visible:ring-0"
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              handleCreate();
+            }}
             />
           </div>
           {slugError && (
