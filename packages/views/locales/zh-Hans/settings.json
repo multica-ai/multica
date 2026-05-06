@@ -25,7 +25,10 @@
       "general": "通用",
       "repositories": "代码仓库",
       "labs": "实验室",
-      "members": "成员"
+      "members": "成员",
+      "user_integrations": "集成",
+      "work_calendars": "工作日历",
+      "integrations": "集成"
     }
   },
   "account": {
@@ -63,6 +66,10 @@
       "agent_activity": {
         "label": "智能体活动",
         "description": "智能体 task 完成或失败时"
+      },
+      "time_tracking": {
+        "label": "工时提醒",
+        "description": "当你未按工作日历记录所需工时时，每日发送提醒"
       }
     }
   },
