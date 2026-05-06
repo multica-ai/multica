@@ -23,6 +23,13 @@
 //
 // The `normalizeGitVersion` helper is exported so tests can cover the
 // version-derivation logic without shelling out.
+//
+// TODO Task 11: Bundle Postgres binaries (initdb / pg_ctl / postgres / psql)
+// per platform/arch into resources/postgres/<arch>/. The runtime path
+// resolver in managed-postgres.ts:getPostgresBinaryPath() will look up the
+// binaries from app.getPath("userData") in dev / from process.resourcesPath
+// in production. Real binary download + staging is deferred to a separate
+// hardening pass.
 
 import { execFileSync, spawnSync, execSync } from "node:child_process";
 import { delimiter, dirname, resolve } from "node:path";

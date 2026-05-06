@@ -8,6 +8,7 @@ import {
   type LocalStackOverallState,
   type LocalStackStatus,
 } from "../shared/local-stack-types";
+import type { ManagedPostgres } from "./managed-postgres";
 
 /**
  * Per-component runner. Returning the promise represents a single attempt;
@@ -166,4 +167,20 @@ export class LocalStackSupervisor extends EventEmitter {
     if (components.every((c) => c.state === "ready")) return "ready";
     return "starting";
   }
+}
+
+/**
+ * Adapter: wrap a `ManagedPostgres` instance in the runner shape the
+ * supervisor expects. Kept as a free function (not a method on
+ * LocalStackSupervisor) so the supervisor stays decoupled from the
+ * concrete database implementation.
+ */
+export function createManagedPostgresRunner(
+  pg: ManagedPostgres,
+): LocalStackComponentRunner {
+  return {
+    name: "database",
+    start: () => pg.start(),
+    stop: () => pg.stop(),
+  };
 }

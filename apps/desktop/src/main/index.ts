@@ -8,7 +8,12 @@ import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
-import { LocalStackSupervisor } from "./local-stack-supervisor";
+import {
+  LocalStackSupervisor,
+  createManagedPostgresRunner,
+} from "./local-stack-supervisor";
+import type { LocalStackComponentRunner } from "./local-stack-supervisor";
+import { ManagedPostgres } from "./managed-postgres";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -41,25 +46,46 @@ let mainWindow: BrowserWindow | null = null;
 
 // Local-stack supervisor: orchestrates the per-component start order
 // (database → migrations → api → bootstrap → daemon → runtimeRegistration)
-// for the local-only desktop product. Task 9 ships only the shell — the
-// runners below are no-op placeholders that resolve immediately. Task 11
-// will plug in real Postgres / migrations / API runners. The renderer
-// observes status via `localStackAPI` exposed from the preload bridge.
-const localStackSupervisor = new LocalStackSupervisor({
-  runners: [
-    { name: "database", start: async () => {} },
-    { name: "migrations", start: async () => {} },
-    { name: "api", start: async () => {} },
-    { name: "bootstrap", start: async () => {} },
-    { name: "daemon", start: async () => {} },
-    { name: "runtimeRegistration", start: async () => {} },
-  ],
-  onStatusChange: (status) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("localStack:status", status);
-    }
-  },
-});
+// for the local-only desktop product. Task 9 shipped the shell; Task 11
+// plugs in the real `database` runner backed by `ManagedPostgres`. The
+// remaining runners are still placeholders pending later tasks.
+//
+// Set MULTICA_USE_EXTERNAL_DB=1 to keep using the dev shared container;
+// the default uses the bundled Postgres binaries (resolved by
+// managed-postgres at runtime via app.getPath("userData")/postgres/bin).
+//
+// Construction is deferred to a factory invoked from `whenReady` so the
+// dev userData override (set further below before the lock is requested)
+// is in effect before we resolve the Postgres data directory.
+let localStackSupervisor: LocalStackSupervisor | null = null;
+
+function buildLocalStackSupervisor(): LocalStackSupervisor {
+  const managedPostgres = new ManagedPostgres({
+    dataDir: join(app.getPath("userData"), "postgres", "data"),
+    port: Number(process.env.MULTICA_LOCAL_DB_PORT) || 55432,
+  });
+
+  const databaseRunner: LocalStackComponentRunner =
+    process.env.MULTICA_USE_EXTERNAL_DB === "1"
+      ? { name: "database", start: async () => {} }
+      : createManagedPostgresRunner(managedPostgres);
+
+  return new LocalStackSupervisor({
+    runners: [
+      databaseRunner,
+      { name: "migrations", start: async () => {} },
+      { name: "api", start: async () => {} },
+      { name: "bootstrap", start: async () => {} },
+      { name: "daemon", start: async () => {} },
+      { name: "runtimeRegistration", start: async () => {} },
+    ],
+    onStatusChange: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("localStack:status", status);
+      }
+    },
+  });
+}
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -312,13 +338,21 @@ if (!gotTheLock) {
       }
     });
 
+    // Build the local-stack supervisor now — we need the dev `userData`
+    // override (set above) to be in effect before ManagedPostgres resolves
+    // its data directory. The supervisor is a singleton, so guard against
+    // multiple `whenReady` resolutions (defensive — the lock guarantees one).
+    if (!localStackSupervisor) {
+      localStackSupervisor = buildLocalStackSupervisor();
+    }
+
     // IPC: local-stack supervisor — status read, retry trigger, log opener
     // (the log opener is a Task 12 placeholder that lets the renderer wire
     // the action button without a no-op error).
     ipcMain.handle("localStack:get-status", () =>
-      localStackSupervisor.getStatus(),
+      localStackSupervisor!.getStatus(),
     );
-    ipcMain.handle("localStack:retry", () => localStackSupervisor.retry());
+    ipcMain.handle("localStack:retry", () => localStackSupervisor!.retry());
     ipcMain.handle("localStack:open-logs", () => {
       // TODO Task 12: surface aggregated local-stack logs.
       return { ok: false };
