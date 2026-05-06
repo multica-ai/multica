@@ -10,6 +10,7 @@ import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import { ProductCapabilitiesProvider } from "./product-capabilities";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 
@@ -65,6 +66,7 @@ export function CoreProvider({
   onLogin,
   onLogout,
   identity,
+  productCapabilities,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
@@ -72,24 +74,26 @@ export function CoreProvider({
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
   return (
-    <QueryProvider>
-      <AuthInitializer
-        onLogin={onLogin}
-        onLogout={onLogout}
-        storage={storage}
-        cookieAuth={cookieAuth}
-        identity={identity}
-      >
-        <WSProvider
-          wsUrl={wsUrl}
-          authStore={authStore}
+    <ProductCapabilitiesProvider capabilities={productCapabilities}>
+      <QueryProvider>
+        <AuthInitializer
+          onLogin={onLogin}
+          onLogout={onLogout}
           storage={storage}
           cookieAuth={cookieAuth}
           identity={identity}
         >
-          {children}
-        </WSProvider>
-      </AuthInitializer>
-    </QueryProvider>
+          <WSProvider
+            wsUrl={wsUrl}
+            authStore={authStore}
+            storage={storage}
+            cookieAuth={cookieAuth}
+            identity={identity}
+          >
+            {children}
+          </WSProvider>
+        </AuthInitializer>
+      </QueryProvider>
+    </ProductCapabilitiesProvider>
   );
 }

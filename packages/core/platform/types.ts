@@ -1,4 +1,5 @@
 import type { StorageAdapter } from "../types/storage";
+import type { ProductCapabilities } from "../config/local-product";
 
 /** Identifies the calling client to the server. Threaded through to
  *  ApiClient and WSClient so all HTTP requests and WS connections from
@@ -28,4 +29,6 @@ export interface CoreProviderProps {
   onLogout?: () => void;
   /** Identifies the calling client (web/desktop + version + os) to the server. */
   identity?: ClientIdentity;
+  /** Product capability flags. Default: local-only desktop product capabilities. */
+  productCapabilities?: ProductCapabilities;
 }
