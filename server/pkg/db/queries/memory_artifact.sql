@@ -72,13 +72,15 @@ INSERT INTO memory_artifact (
     title, content, slug,
     anchor_type, anchor_id,
     author_type, author_id,
-    tags, metadata
+    tags, metadata,
+    always_inject_at_runtime
 ) VALUES (
     $1, $2, sqlc.narg('parent_id'),
     $3, $4, sqlc.narg('slug'),
     sqlc.narg('anchor_type'), sqlc.narg('anchor_id'),
     $5, $6,
-    $7, $8
+    $7, $8,
+    COALESCE(sqlc.narg('always_inject_at_runtime')::bool, false)
 ) RETURNING *;
 
 -- name: UpdateMemoryArtifact :one
@@ -86,17 +88,31 @@ INSERT INTO memory_artifact (
 -- updated. Tags and metadata pass through directly because they're
 -- already nullable JSONB / array — narg semantics handled by sqlc.
 UPDATE memory_artifact SET
-    title       = COALESCE(sqlc.narg('title'), title),
-    content     = COALESCE(sqlc.narg('content'), content),
-    slug        = sqlc.narg('slug'),
-    parent_id   = sqlc.narg('parent_id'),
-    anchor_type = sqlc.narg('anchor_type'),
-    anchor_id   = sqlc.narg('anchor_id'),
-    tags        = COALESCE(sqlc.narg('tags')::text[], tags),
-    metadata    = COALESCE(sqlc.narg('metadata')::jsonb, metadata),
-    updated_at  = now()
+    title                    = COALESCE(sqlc.narg('title'), title),
+    content                  = COALESCE(sqlc.narg('content'), content),
+    slug                     = sqlc.narg('slug'),
+    parent_id                = sqlc.narg('parent_id'),
+    anchor_type              = sqlc.narg('anchor_type'),
+    anchor_id                = sqlc.narg('anchor_id'),
+    tags                     = COALESCE(sqlc.narg('tags')::text[], tags),
+    metadata                 = COALESCE(sqlc.narg('metadata')::jsonb, metadata),
+    always_inject_at_runtime = COALESCE(sqlc.narg('always_inject_at_runtime')::bool, always_inject_at_runtime),
+    updated_at               = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: ListAlwaysInjectArtifacts :many
+-- Workspace-wide artifacts the user has flagged for injection into every
+-- agent task. Used by the runtime context path alongside the per-anchor
+-- lookups. Active (non-archived) only; ordered most-recently-updated
+-- first so a recently-edited "How we deploy" beats a stale entry of the
+-- same kind.
+SELECT * FROM memory_artifact
+WHERE workspace_id              = $1
+  AND always_inject_at_runtime  = true
+  AND archived_at              IS NULL
+ORDER BY updated_at DESC
+LIMIT $2;
 
 -- name: ArchiveMemoryArtifact :one
 -- Soft-delete: stamps archived_at + archived_by. Idempotent — re-archive

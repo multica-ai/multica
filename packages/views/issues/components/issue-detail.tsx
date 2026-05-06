@@ -113,10 +113,14 @@ function formatActivity(
       return `renamed this issue from "${details.from ?? "?"}" to "${details.to ?? "?"}"`;
     case "description_updated":
       return "updated the description";
-    case "task_completed":
-      return "completed the task";
-    case "task_failed":
-      return "task failed";
+    case "task_completed": {
+      const n = entry.coalesced_count ?? 1;
+      return n > 1 ? `completed the task (${n} times)` : "completed the task";
+    }
+    case "task_failed": {
+      const n = entry.coalesced_count ?? 1;
+      return n > 1 ? `task failed (${n} times)` : "task failed";
+    }
     default:
       return entry.action ?? "";
   }
@@ -259,8 +263,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    // Coalesce: same actor + same action within 2 min → keep last only
+    // Coalesce consecutive activities from the same actor + action.
+    // - task_completed / task_failed: no time limit (these repeat across runs)
+    // - all other actions: within a 2-minute window
     const COALESCE_MS = 2 * 60 * 1000;
+    const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
@@ -270,9 +277,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
           prev.actor_id === entry.actor_id &&
-          Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS
+          (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
+            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
         ) {
-          coalesced[coalesced.length - 1] = entry;
+          coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
           continue;
         }
       }

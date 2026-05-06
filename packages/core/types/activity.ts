@@ -23,4 +23,6 @@ export interface TimelineEntry {
   comment_type?: string;
   reactions?: Reaction[];
   attachments?: Attachment[];
+  /** Set by frontend coalescing when consecutive identical activities are merged. */
+  coalesced_count?: number;
 }

@@ -1347,6 +1347,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:            task.ProjectTitle,
 		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
 		PeerAgents:              convertPeerAgentsForEnv(task.PeerAgents),
+		MemoryArtifacts:         convertMemoryArtifactsForEnv(task.MemoryArtifacts),
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -1966,6 +1967,26 @@ func convertPeerAgentsForEnv(peers []PeerAgentData) []execenv.PeerAgentForEnv {
 			ID:           p.ID,
 			Name:         p.Name,
 			Instructions: p.Instructions,
+		}
+	}
+	return result
+}
+
+func convertMemoryArtifactsForEnv(artifacts []MemoryArtifactData) []execenv.MemoryArtifactForEnv {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	result := make([]execenv.MemoryArtifactForEnv, len(artifacts))
+	for i, a := range artifacts {
+		result[i] = execenv.MemoryArtifactForEnv{
+			ID:         a.ID,
+			Kind:       a.Kind,
+			Title:      a.Title,
+			Content:    a.Content,
+			Tags:       a.Tags,
+			AnchorType: a.AnchorType,
+			AnchorID:   a.AnchorID,
+			UpdatedAt:  a.UpdatedAt,
 		}
 	}
 	return result

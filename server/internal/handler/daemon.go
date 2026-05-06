@@ -1070,6 +1070,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Memory artifact injection — pull anything anchored to this
+			// issue, then to the issue's project (when present), then to
+			// the claiming agent (long-lived agent persona/preferences).
+			// Order is most-specific-first because the prompt builder
+			// renders them in this order and the agent reads top-down.
+			//
+			// Best-effort: a failed lookup logs and continues with no
+			// artifacts rather than failing the claim. Per-anchor limit caps
+			// the total payload — the agent can fetch more via the API if it
+			// needs to. Default 10 per anchor = at most 30 artifacts × the
+			// per-artifact content cap (100KB) = ~3MB worst case, but
+			// typical workspaces will have <5 anchored at any one time.
+			// Dedup in fetchMemoryArtifactsForTask handles artifacts pinned
+			// to multiple anchors.
+			const maxArtifactsPerAnchor = 10
+			resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+				r.Context(),
+				issue.WorkspaceID,
+				[]taskAnchor{
+					{Type: "issue", ID: issue.ID},
+					{Type: "project", ID: issue.ProjectID},
+					{Type: "agent", ID: task.AgentID},
+				},
+				maxArtifactsPerAnchor,
+			)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1280,6 +1306,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				// has conversational context without needing a tool call.
 				// Window size is configurable via CHANNEL_AGENT_CONTEXT_MESSAGES.
 				resp.ChannelHistory = h.loadChannelHistoryForTask(r.Context(), cm)
+
+				// Memory artifact injection for channel-mention tasks.
+				// Anchor order: channel (most specific to this conversation),
+				// then agent (for long-lived agent persona/preferences).
+				// No issue or project anchor here — channel-mention tasks
+				// don't have an issue context.
+				const maxArtifactsPerAnchor = 10
+				resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+					r.Context(),
+					parseUUID(cm.WorkspaceID),
+					[]taskAnchor{
+						{Type: "channel", ID: parseUUID(cm.ChannelID)},
+						{Type: "agent", ID: task.AgentID},
+					},
+					maxArtifactsPerAnchor,
+				)
 			}
 		}
 	}

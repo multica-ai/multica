@@ -368,3 +368,148 @@ func TestMemoryArtifactRejectsMismatchedAnchor(t *testing.T) {
 		t.Fatalf("expected 400 on half anchor, got %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestMemoryArtifactRevisionHistory exercises the versioning path:
+// create → update twice (each captures the prior state) → list history
+// → fetch a specific revision → restore (which itself snapshots the
+// current state, producing a third revision row).
+func TestMemoryArtifactRevisionHistory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// 1. Create.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/memory?workspace_id="+testWorkspaceID, map[string]any{
+		"kind":    "wiki_page",
+		"title":   "Revision Test v1",
+		"content": "Original content.",
+	})
+	testHandler.CreateMemoryArtifact(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateMemoryArtifact: %d %s", w.Code, w.Body.String())
+	}
+	var created MemoryArtifactResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		req := newRequest("DELETE", "/api/memory/"+created.ID, nil)
+		req = withURLParam(req, "id", created.ID)
+		testHandler.DeleteMemoryArtifact(httptest.NewRecorder(), req)
+	}()
+
+	// 2. First edit — should snapshot v1's state into revision 1.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/memory/"+created.ID, map[string]any{
+		"title":   "Revision Test v2",
+		"content": "Second draft content.",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateMemoryArtifact(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first UpdateMemoryArtifact: %d %s", w.Code, w.Body.String())
+	}
+
+	// 3. Second edit — should snapshot v2's state into revision 2.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/memory/"+created.ID, map[string]any{
+		"content": "Third draft content.",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateMemoryArtifact(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second UpdateMemoryArtifact: %d %s", w.Code, w.Body.String())
+	}
+
+	// 4. List history — expect two revisions, newest-first.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/memory/"+created.ID+"/history", nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.ListMemoryArtifactRevisions(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListMemoryArtifactRevisions: %d %s", w.Code, w.Body.String())
+	}
+	var histResp struct {
+		Revisions []MemoryArtifactRevisionSummary `json:"revisions"`
+	}
+	json.NewDecoder(w.Body).Decode(&histResp)
+	if got := len(histResp.Revisions); got != 2 {
+		t.Fatalf("expected 2 revisions, got %d: %+v", got, histResp.Revisions)
+	}
+	// Newest-first ordering: revision_number 2 first, then 1.
+	if histResp.Revisions[0].RevisionNumber != 2 {
+		t.Errorf("expected first listed revision_number=2, got %d", histResp.Revisions[0].RevisionNumber)
+	}
+	if histResp.Revisions[1].RevisionNumber != 1 {
+		t.Errorf("expected second listed revision_number=1, got %d", histResp.Revisions[1].RevisionNumber)
+	}
+	// Revision 1 captures the v1 (original) state because the first
+	// update happened on top of v1; revision 2 captures v2.
+	if histResp.Revisions[1].Title != "Revision Test v1" {
+		t.Errorf("rev1 title: got %q want 'Revision Test v1'", histResp.Revisions[1].Title)
+	}
+	if histResp.Revisions[0].Title != "Revision Test v2" {
+		t.Errorf("rev2 title: got %q want 'Revision Test v2'", histResp.Revisions[0].Title)
+	}
+
+	// 5. Get full content of revision 1 — should be the original content.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/memory/"+created.ID+"/history/1", nil)
+	req = withURLParam(req, "id", created.ID)
+	req = withURLParam(req, "revision", "1")
+	testHandler.GetMemoryArtifactRevision(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetMemoryArtifactRevision: %d %s", w.Code, w.Body.String())
+	}
+	var revDetail MemoryArtifactRevisionDetail
+	json.NewDecoder(w.Body).Decode(&revDetail)
+	if revDetail.Content != "Original content." {
+		t.Errorf("rev1 content: got %q want 'Original content.'", revDetail.Content)
+	}
+
+	// 6. Restore to revision 1 — should snapshot the current (v3) state
+	// as revision 3, then apply v1's content onto the live row.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/memory/"+created.ID+"/restore-revision/1", map[string]any{})
+	req = withURLParam(req, "id", created.ID)
+	req = withURLParam(req, "revision", "1")
+	testHandler.RestoreMemoryArtifactRevision(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RestoreMemoryArtifactRevision: %d %s", w.Code, w.Body.String())
+	}
+	var restored MemoryArtifactResponse
+	json.NewDecoder(w.Body).Decode(&restored)
+	if restored.Content != "Original content." {
+		t.Errorf("after restore live content: got %q want 'Original content.'", restored.Content)
+	}
+	if restored.Title != "Revision Test v1" {
+		t.Errorf("after restore live title: got %q want 'Revision Test v1'", restored.Title)
+	}
+
+	// 7. List history again — should now have 3 revisions; the newest
+	// captures the v3-pre-restore state ("Third draft content.").
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/memory/"+created.ID+"/history", nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.ListMemoryArtifactRevisions(w, req)
+	json.NewDecoder(w.Body).Decode(&histResp)
+	if got := len(histResp.Revisions); got != 3 {
+		t.Fatalf("expected 3 revisions after restore, got %d", got)
+	}
+	if histResp.Revisions[0].RevisionNumber != 3 {
+		t.Errorf("newest revision after restore: got %d want 3", histResp.Revisions[0].RevisionNumber)
+	}
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/memory/"+created.ID+"/history/3", nil)
+	req = withURLParam(req, "id", created.ID)
+	req = withURLParam(req, "revision", "3")
+	testHandler.GetMemoryArtifactRevision(w, req)
+	json.NewDecoder(w.Body).Decode(&revDetail)
+	if revDetail.Content != "Third draft content." {
+		t.Errorf("rev3 content (pre-restore snapshot): got %q want 'Third draft content.'", revDetail.Content)
+	}
+}
+
+// silence unused-import warnings if `chi` is otherwise unreferenced when
+// the new tests are skipped on a no-DB run. (`chi` is used for URL param
+// helpers in the existing tests; this is purely belt-and-suspenders.)
+var _ = chi.URLParam

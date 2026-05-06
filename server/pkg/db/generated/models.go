@@ -379,24 +379,44 @@ type Member struct {
 }
 
 type MemoryArtifact struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Kind        string             `json:"kind"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	Title       string             `json:"title"`
-	Content     string             `json:"content"`
-	Slug        pgtype.Text        `json:"slug"`
-	AnchorType  pgtype.Text        `json:"anchor_type"`
-	AnchorID    pgtype.UUID        `json:"anchor_id"`
-	AuthorType  string             `json:"author_type"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-	Tags        []string           `json:"tags"`
-	Metadata    []byte             `json:"metadata"`
-	ContentTsv  interface{}        `json:"content_tsv"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	ArchivedBy  pgtype.UUID        `json:"archived_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	Kind                  string             `json:"kind"`
+	ParentID              pgtype.UUID        `json:"parent_id"`
+	Title                 string             `json:"title"`
+	Content               string             `json:"content"`
+	Slug                  pgtype.Text        `json:"slug"`
+	AnchorType            pgtype.Text        `json:"anchor_type"`
+	AnchorID              pgtype.UUID        `json:"anchor_id"`
+	AuthorType            string             `json:"author_type"`
+	AuthorID              pgtype.UUID        `json:"author_id"`
+	Tags                  []string           `json:"tags"`
+	Metadata              []byte             `json:"metadata"`
+	ContentTsv            interface{}        `json:"content_tsv"`
+	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy            pgtype.UUID        `json:"archived_by"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
+}
+
+type MemoryArtifactRevision struct {
+	ID                    pgtype.UUID        `json:"id"`
+	MemoryArtifactID      pgtype.UUID        `json:"memory_artifact_id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	RevisionNumber        int32              `json:"revision_number"`
+	Title                 string             `json:"title"`
+	Content               string             `json:"content"`
+	Slug                  pgtype.Text        `json:"slug"`
+	ParentID              pgtype.UUID        `json:"parent_id"`
+	AnchorType            pgtype.Text        `json:"anchor_type"`
+	AnchorID              pgtype.UUID        `json:"anchor_id"`
+	Tags                  []string           `json:"tags"`
+	Metadata              []byte             `json:"metadata"`
+	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
+	EditorType            pgtype.Text        `json:"editor_type"`
+	EditorID              pgtype.UUID        `json:"editor_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
 type NotificationPreference struct {

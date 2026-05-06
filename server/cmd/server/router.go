@@ -310,7 +310,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
+					// NOTE: UpdateIssue is a partial-update handler — every field
+					// is a *T pointer and only fields present in the body are
+					// applied. PUT predates PATCH here for historical reasons
+					// (the CLI uses PutJSON); we register PATCH on the same
+					// handler so the MCP client (which only has a `patch()`
+					// method, no `put()`) can call it without hitting 405.
 					r.Put("/", h.UpdateIssue)
+					r.Patch("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
@@ -414,6 +421,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteMemoryArtifact)
 					r.Post("/archive", h.ArchiveMemoryArtifact)
 					r.Post("/restore", h.RestoreMemoryArtifact)
+					// History endpoints — list revisions, get a specific
+					// revision in full, restore (which is itself a new
+					// edit, snapshotting the current state first).
+					r.Get("/history", h.ListMemoryArtifactRevisions)
+					r.Get("/history/{revision}", h.GetMemoryArtifactRevision)
+					r.Post("/restore-revision/{revision}", h.RestoreMemoryArtifactRevision)
 				})
 			})
 

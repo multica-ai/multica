@@ -21,6 +21,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@multica/ui/components/ui/tooltip";
 
 // Project Resources sidebar section.
 //
@@ -126,19 +131,31 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 <div className="space-y-1">
                   {workspace.repos.map((repo) => {
                     const isAttached = attachedUrls.has(repo.url);
+                    const isDisabled = isAttached || createResource.isPending;
                     return (
+                      // Use aria-disabled instead of the native `disabled` attribute so
+                      // hover events still reach the tooltip trigger on attached rows
+                      // (browsers suppress pointer events on disabled form controls).
                       <button
                         key={repo.url}
                         type="button"
-                        disabled={isAttached || createResource.isPending}
+                        aria-disabled={isDisabled}
                         onClick={async () => {
+                          if (isDisabled) return;
                           await handleAttach(repo.url);
                           setAddOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                       >
                         <FolderGit className="size-3.5" />
-                        <span className="truncate flex-1">{repo.url}</span>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="truncate flex-1">{repo.url}</span>
+                            }
+                          />
+                          <TooltipContent side="top">{repo.url}</TooltipContent>
+                        </Tooltip>
                         {isAttached && (
                           <span className="text-[10px] text-muted-foreground">
                             attached
@@ -177,14 +194,21 @@ function ResourceRow({
     return (
       <div className="flex items-center gap-2 text-xs group">
         <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
-        <a
-          href={ref.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="truncate flex-1 hover:underline"
-        >
-          {resource.label || ref.url}
-        </a>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={ref.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="truncate flex-1 hover:underline"
+              >
+                {resource.label || ref.url}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{ref.url}</TooltipContent>
+        </Tooltip>
         {isPrimary && (
           <span
             className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -93,23 +94,24 @@ func validateMemorySlug(raw string) (string, error) {
 // ---------------------------------------------------------------------------
 
 type MemoryArtifactResponse struct {
-	ID          string          `json:"id"`
-	WorkspaceID string          `json:"workspace_id"`
-	Kind        string          `json:"kind"`
-	ParentID    *string         `json:"parent_id"`
-	Title       string          `json:"title"`
-	Content     string          `json:"content"`
-	Slug        *string         `json:"slug"`
-	AnchorType  *string         `json:"anchor_type"`
-	AnchorID    *string         `json:"anchor_id"`
-	AuthorType  string          `json:"author_type"`
-	AuthorID    string          `json:"author_id"`
-	Tags        []string        `json:"tags"`
-	Metadata    json.RawMessage `json:"metadata"`
-	ArchivedAt  *string         `json:"archived_at"`
-	ArchivedBy  *string         `json:"archived_by"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID                    string          `json:"id"`
+	WorkspaceID           string          `json:"workspace_id"`
+	Kind                  string          `json:"kind"`
+	ParentID              *string         `json:"parent_id"`
+	Title                 string          `json:"title"`
+	Content               string          `json:"content"`
+	Slug                  *string         `json:"slug"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	AuthorType            string          `json:"author_type"`
+	AuthorID              string          `json:"author_id"`
+	Tags                  []string        `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime bool            `json:"always_inject_at_runtime"`
+	ArchivedAt            *string         `json:"archived_at"`
+	ArchivedBy            *string         `json:"archived_by"`
+	CreatedAt             string          `json:"created_at"`
+	UpdatedAt             string          `json:"updated_at"`
 }
 
 func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
@@ -122,49 +124,182 @@ func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
 		metadata = json.RawMessage("{}")
 	}
 	return MemoryArtifactResponse{
-		ID:          uuidToString(a.ID),
-		WorkspaceID: uuidToString(a.WorkspaceID),
-		Kind:        a.Kind,
-		ParentID:    uuidToPtr(a.ParentID),
-		Title:       a.Title,
-		Content:     a.Content,
-		Slug:        textToPtr(a.Slug),
-		AnchorType:  textToPtr(a.AnchorType),
-		AnchorID:    uuidToPtr(a.AnchorID),
-		AuthorType:  a.AuthorType,
-		AuthorID:    uuidToString(a.AuthorID),
-		Tags:        tags,
-		Metadata:    metadata,
-		ArchivedAt:  timestampToPtr(a.ArchivedAt),
-		ArchivedBy:  uuidToPtr(a.ArchivedBy),
-		CreatedAt:   timestampToString(a.CreatedAt),
-		UpdatedAt:   timestampToString(a.UpdatedAt),
+		ID:                    uuidToString(a.ID),
+		WorkspaceID:           uuidToString(a.WorkspaceID),
+		Kind:                  a.Kind,
+		ParentID:              uuidToPtr(a.ParentID),
+		Title:                 a.Title,
+		Content:               a.Content,
+		Slug:                  textToPtr(a.Slug),
+		AnchorType:            textToPtr(a.AnchorType),
+		AnchorID:              uuidToPtr(a.AnchorID),
+		AuthorType:            a.AuthorType,
+		AuthorID:              uuidToString(a.AuthorID),
+		Tags:                  tags,
+		Metadata:              metadata,
+		AlwaysInjectAtRuntime: a.AlwaysInjectAtRuntime,
+		ArchivedAt:            timestampToPtr(a.ArchivedAt),
+		ArchivedBy:            uuidToPtr(a.ArchivedBy),
+		CreatedAt:             timestampToString(a.CreatedAt),
+		UpdatedAt:             timestampToString(a.UpdatedAt),
 	}
 }
 
 type CreateMemoryArtifactRequest struct {
-	Kind       string          `json:"kind"`
-	ParentID   *string         `json:"parent_id"`
-	Title      string          `json:"title"`
-	Content    string          `json:"content"`
-	Slug       *string         `json:"slug"`
-	AnchorType *string         `json:"anchor_type"`
-	AnchorID   *string         `json:"anchor_id"`
-	Tags       []string        `json:"tags"`
-	Metadata   json.RawMessage `json:"metadata"`
+	Kind                  string          `json:"kind"`
+	ParentID              *string         `json:"parent_id"`
+	Title                 string          `json:"title"`
+	Content               string          `json:"content"`
+	Slug                  *string         `json:"slug"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	Tags                  []string        `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime *bool           `json:"always_inject_at_runtime"`
 }
 
 type UpdateMemoryArtifactRequest struct {
 	// All fields nullable so PATCH-style partial updates work without
 	// callers re-sending the full document.
-	Title      *string         `json:"title"`
-	Content    *string         `json:"content"`
-	Slug       *string         `json:"slug"`
-	ParentID   *string         `json:"parent_id"`
-	AnchorType *string         `json:"anchor_type"`
-	AnchorID   *string         `json:"anchor_id"`
-	Tags       *[]string       `json:"tags"`
-	Metadata   json.RawMessage `json:"metadata"`
+	Title                 *string         `json:"title"`
+	Content               *string         `json:"content"`
+	Slug                  *string         `json:"slug"`
+	ParentID              *string         `json:"parent_id"`
+	AnchorType            *string         `json:"anchor_type"`
+	AnchorID              *string         `json:"anchor_id"`
+	Tags                  *[]string       `json:"tags"`
+	Metadata              json.RawMessage `json:"metadata"`
+	AlwaysInjectAtRuntime *bool           `json:"always_inject_at_runtime"`
+}
+
+// taskAnchor identifies one (anchor_type, anchor_id) pair to consult when
+// hydrating memory artifacts for a claimed task. The slice form lets the
+// claim path mix anchor sources (issue + project + agent for issue claims;
+// channel + agent for channel-mention claims) without an ever-growing
+// argument list. Order matters: artifacts come back in the order their
+// anchors are listed, with deduplication by id so an artifact anchored
+// to multiple things doesn't appear twice.
+type taskAnchor struct {
+	Type string
+	ID   pgtype.UUID
+}
+
+// alwaysInjectArtifactsCap caps the per-claim count of artifacts pulled
+// from the always_inject_at_runtime flag. Workspace-wide notes flagged
+// for always-inject can accumulate (a year of "we deploy by..." entries),
+// and the agent's context budget isn't unlimited — this is the sane upper
+// bound. The expectation is that workspaces use the flag for a small set
+// of evergreen rules (≤5), not a parking lot for old wiki pages.
+const alwaysInjectArtifactsCap = 5
+
+// fetchMemoryArtifactsForTask pulls memory artifacts anchored to any of the
+// given (type, id) pairs PLUS any artifacts flagged
+// `always_inject_at_runtime = true` in the workspace, returning a flattened
+// slice for injection into the daemon claim response. Caller-side concerns:
+//
+//   - Order is preserved by anchor: callers should pass the *most specific*
+//     anchor first (issue before project, channel before agent). The agent
+//     prompt uses this ordering when rendering the ## Memory section.
+//   - Always-inject artifacts come AFTER all anchored artifacts. They're
+//     workspace-wide context (deploy guides, brand rules) — useful but
+//     less specific than what's tied to the work at hand.
+//   - Errors are logged and swallowed — a failed memory lookup must not
+//     fail the task claim. The agent can still work without memory.
+//   - The limit applies *per anchor*, not globally. N anchors = up to
+//     N × limit artifacts in the worst case, plus alwaysInjectArtifactsCap.
+//   - Artifacts matched by both an anchor and the always-inject flag
+//     appear only once, under their first-matched anchor (the more-
+//     specific surface wins).
+//
+// Lives in the memory_artifact handler file (rather than daemon.go) so the
+// pgtype + db.ListMemoryArtifactsByAnchorParams plumbing stays colocated
+// with the rest of the memory handlers.
+func (h *Handler) fetchMemoryArtifactsForTask(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	anchors []taskAnchor,
+	limitPerAnchor int32,
+) []MemoryArtifactData {
+	var out []MemoryArtifactData
+	seen := make(map[string]bool)
+
+	appendRow := func(row db.MemoryArtifact, anchorOverride string) {
+		id := uuidToString(row.ID)
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		tags := row.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		anchorIDStr := ""
+		if row.AnchorID.Valid {
+			anchorIDStr = uuidToString(row.AnchorID)
+		}
+		anchorTypeStr := ""
+		if row.AnchorType.Valid {
+			anchorTypeStr = row.AnchorType.String
+		}
+		if anchorOverride != "" {
+			// Always-inject path: rendered under the "Always-on" heading,
+			// regardless of whether the underlying row also has an anchor
+			// (rare — but possible if a flagged artifact later got pinned
+			// to an issue). The override only kicks in when the artifact
+			// reaches the runtime via the always-inject query.
+			anchorTypeStr = anchorOverride
+			anchorIDStr = ""
+		}
+		out = append(out, MemoryArtifactData{
+			ID:         id,
+			Kind:       row.Kind,
+			Title:      row.Title,
+			Content:    row.Content,
+			Tags:       tags,
+			AnchorType: anchorTypeStr,
+			AnchorID:   anchorIDStr,
+			UpdatedAt:  timestampToString(row.UpdatedAt),
+		})
+	}
+
+	for _, anchor := range anchors {
+		if !anchor.ID.Valid || anchor.Type == "" {
+			continue
+		}
+		rows, err := h.Queries.ListMemoryArtifactsByAnchor(ctx, db.ListMemoryArtifactsByAnchorParams{
+			WorkspaceID: workspaceID,
+			AnchorType:  pgtype.Text{String: anchor.Type, Valid: true},
+			AnchorID:    anchor.ID,
+			Limit:       limitPerAnchor,
+		})
+		if err != nil {
+			slog.Warn("fetchMemoryArtifactsForTask: list by anchor failed",
+				"anchor_type", anchor.Type, "error", err)
+			continue
+		}
+		for _, row := range rows {
+			appendRow(row, "")
+		}
+	}
+
+	// Always-inject artifacts ride along on every claim. The renderer
+	// surfaces them under a "Workspace knowledge (always-on)" heading.
+	alwaysRows, err := h.Queries.ListAlwaysInjectArtifacts(ctx, db.ListAlwaysInjectArtifactsParams{
+		WorkspaceID: workspaceID,
+		Limit:       alwaysInjectArtifactsCap,
+	})
+	if err != nil {
+		slog.Warn("fetchMemoryArtifactsForTask: list always-inject failed", "error", err)
+	} else {
+		for _, row := range alwaysRows {
+			// "always" is a synthetic anchor_type used only on the wire to
+			// the daemon; nothing else in the system writes/reads it. The
+			// renderer keys off this string for its dedicated heading.
+			appendRow(row, "always")
+		}
+	}
+
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -493,19 +628,25 @@ func (h *Handler) CreateMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 		metadata = json.RawMessage("{}")
 	}
 
+	var alwaysInjectParam pgtype.Bool
+	if req.AlwaysInjectAtRuntime != nil {
+		alwaysInjectParam = pgtype.Bool{Bool: *req.AlwaysInjectAtRuntime, Valid: true}
+	}
+
 	created, err := h.Queries.CreateMemoryArtifact(r.Context(), db.CreateMemoryArtifactParams{
-		WorkspaceID: wsUUID,
-		Kind:        req.Kind,
-		ParentID:    parentParam,
-		Title:       req.Title,
-		Content:     req.Content,
-		Slug:        slugParam,
-		AnchorType:  anchorTypeParam,
-		AnchorID:    anchorIDParam,
-		AuthorType:  authorType,
-		AuthorID:    authorUUID,
-		Tags:        tags,
-		Metadata:    metadata,
+		WorkspaceID:           wsUUID,
+		Kind:                  req.Kind,
+		ParentID:              parentParam,
+		Title:                 req.Title,
+		Content:               req.Content,
+		Slug:                  slugParam,
+		AnchorType:            anchorTypeParam,
+		AnchorID:              anchorIDParam,
+		AuthorType:            authorType,
+		AuthorID:              authorUUID,
+		Tags:                  tags,
+		Metadata:              metadata,
+		AlwaysInjectAtRuntime: alwaysInjectParam,
 	})
 	if err != nil {
 		// Slug uniqueness collision.
@@ -619,8 +760,56 @@ func (h *Handler) UpdateMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 	if len(req.Metadata) > 0 {
 		params.Metadata = req.Metadata
 	}
+	if req.AlwaysInjectAtRuntime != nil {
+		params.AlwaysInjectAtRuntime = pgtype.Bool{Bool: *req.AlwaysInjectAtRuntime, Valid: true}
+	}
 
-	updated, err := h.Queries.UpdateMemoryArtifact(r.Context(), params)
+	// Resolve the editor identity once so the snapshot, the update, and
+	// the publish event all attribute to the same actor in lock-step.
+	editorType, editorID := h.resolveActor(r, userID, workspaceID)
+
+	// Transactional path: snapshot the prior state into the revision log,
+	// then apply the update. Both succeed or neither does — partial
+	// history would be misleading.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Snapshot the existing row. Editor fields capture who *caused* this
+	// row to become history (i.e. the actor doing the edit on top of it).
+	snapshotTags := existing.Tags
+	if snapshotTags == nil {
+		snapshotTags = []string{}
+	}
+	snapshotMetadata := existing.Metadata
+	if len(snapshotMetadata) == 0 {
+		snapshotMetadata = []byte("{}")
+	}
+	if _, err := qtx.CreateMemoryArtifactRevision(r.Context(), db.CreateMemoryArtifactRevisionParams{
+		MemoryArtifactID:      existing.ID,
+		WorkspaceID:           wsUUID,
+		Title:                 existing.Title,
+		Content:               existing.Content,
+		Slug:                  existing.Slug,
+		ParentID:              existing.ParentID,
+		AnchorType:            existing.AnchorType,
+		AnchorID:              existing.AnchorID,
+		Tags:                  snapshotTags,
+		Metadata:              snapshotMetadata,
+		AlwaysInjectAtRuntime: existing.AlwaysInjectAtRuntime,
+		EditorType:            pgtype.Text{String: editorType, Valid: editorType != ""},
+		EditorID:              parseUUID(editorID),
+	}); err != nil {
+		slog.Warn("UpdateMemoryArtifact: snapshot failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to snapshot prior state")
+		return
+	}
+
+	updated, err := qtx.UpdateMemoryArtifact(r.Context(), params)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -632,9 +821,14 @@ func (h *Handler) UpdateMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("UpdateMemoryArtifact commit failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to commit update")
+		return
+	}
+
 	resp := memoryArtifactToResponse(updated)
-	authorType, authorID := h.resolveActor(r, userID, workspaceID)
-	h.publish(protocol.EventMemoryArtifactUpdated, workspaceID, authorType, authorID, map[string]any{
+	h.publish(protocol.EventMemoryArtifactUpdated, workspaceID, editorType, editorID, map[string]any{
 		"memory_artifact": resp,
 	})
 	writeJSON(w, http.StatusOK, resp)
@@ -760,4 +954,286 @@ func (h *Handler) DeleteMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 		"memory_artifact_id": id,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Revision history
+// ---------------------------------------------------------------------------
+
+// MemoryArtifactRevisionSummary is the metadata-only shape returned by
+// the history list endpoint. Content is omitted to keep the payload
+// small; clients fetch a specific revision's content via the get-by-
+// revision endpoint when they need it (typical UX: render a list, only
+// load full content when the user clicks "view this revision").
+type MemoryArtifactRevisionSummary struct {
+	ID                    string   `json:"id"`
+	MemoryArtifactID      string   `json:"memory_artifact_id"`
+	WorkspaceID           string   `json:"workspace_id"`
+	RevisionNumber        int32    `json:"revision_number"`
+	Title                 string   `json:"title"`
+	Slug                  *string  `json:"slug"`
+	AnchorType            *string  `json:"anchor_type"`
+	AnchorID              *string  `json:"anchor_id"`
+	Tags                  []string `json:"tags"`
+	AlwaysInjectAtRuntime bool     `json:"always_inject_at_runtime"`
+	EditorType            *string  `json:"editor_type"`
+	EditorID              *string  `json:"editor_id"`
+	CreatedAt             string   `json:"created_at"`
+}
+
+// MemoryArtifactRevisionDetail is the full-content shape returned by
+// the single-revision endpoint.
+type MemoryArtifactRevisionDetail struct {
+	MemoryArtifactRevisionSummary
+	Content  string          `json:"content"`
+	ParentID *string         `json:"parent_id"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+func revisionSummaryFromRow(r db.ListMemoryArtifactRevisionsRow) MemoryArtifactRevisionSummary {
+	tags := r.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return MemoryArtifactRevisionSummary{
+		ID:                    uuidToString(r.ID),
+		MemoryArtifactID:      uuidToString(r.MemoryArtifactID),
+		WorkspaceID:           uuidToString(r.WorkspaceID),
+		RevisionNumber:        r.RevisionNumber,
+		Title:                 r.Title,
+		Slug:                  textToPtr(r.Slug),
+		AnchorType:            textToPtr(r.AnchorType),
+		AnchorID:              uuidToPtr(r.AnchorID),
+		Tags:                  tags,
+		AlwaysInjectAtRuntime: r.AlwaysInjectAtRuntime,
+		EditorType:            textToPtr(r.EditorType),
+		EditorID:              uuidToPtr(r.EditorID),
+		CreatedAt:             timestampToString(r.CreatedAt),
+	}
+}
+
+func revisionDetailFromRow(r db.MemoryArtifactRevision) MemoryArtifactRevisionDetail {
+	tags := r.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	metadata := json.RawMessage(r.Metadata)
+	if len(metadata) == 0 {
+		metadata = json.RawMessage("{}")
+	}
+	return MemoryArtifactRevisionDetail{
+		MemoryArtifactRevisionSummary: MemoryArtifactRevisionSummary{
+			ID:                    uuidToString(r.ID),
+			MemoryArtifactID:      uuidToString(r.MemoryArtifactID),
+			WorkspaceID:           uuidToString(r.WorkspaceID),
+			RevisionNumber:        r.RevisionNumber,
+			Title:                 r.Title,
+			Slug:                  textToPtr(r.Slug),
+			AnchorType:            textToPtr(r.AnchorType),
+			AnchorID:              uuidToPtr(r.AnchorID),
+			Tags:                  tags,
+			AlwaysInjectAtRuntime: r.AlwaysInjectAtRuntime,
+			EditorType:            textToPtr(r.EditorType),
+			EditorID:              uuidToPtr(r.EditorID),
+			CreatedAt:             timestampToString(r.CreatedAt),
+		},
+		Content:  r.Content,
+		ParentID: uuidToPtr(r.ParentID),
+		Metadata: metadata,
+	}
+}
+
+// ListMemoryArtifactRevisions — GET /api/memory/{id}/history
+func (h *Handler) ListMemoryArtifactRevisions(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "memory artifact id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	// Existence check via the live artifact — guards against history-
+	// leak for a row in another workspace.
+	if _, err := h.Queries.GetMemoryArtifact(r.Context(), db.GetMemoryArtifactParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "memory artifact not found")
+		return
+	}
+	limit, offset := parseListPagination(r)
+	rows, err := h.Queries.ListMemoryArtifactRevisions(r.Context(), db.ListMemoryArtifactRevisionsParams{
+		MemoryArtifactID: idUUID,
+		WorkspaceID:      wsUUID,
+		Limit:            limit,
+		Offset:           offset,
+	})
+	if err != nil {
+		slog.Warn("ListMemoryArtifactRevisions failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list revisions")
+		return
+	}
+	out := make([]MemoryArtifactRevisionSummary, len(rows))
+	for i, row := range rows {
+		out[i] = revisionSummaryFromRow(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"revisions": out,
+		"total":     len(out),
+	})
+}
+
+// GetMemoryArtifactRevision — GET /api/memory/{id}/history/{revision}
+func (h *Handler) GetMemoryArtifactRevision(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	revStr := chi.URLParam(r, "revision")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "memory artifact id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	revNum, err := strconv.Atoi(revStr)
+	if err != nil || revNum < 1 {
+		writeError(w, http.StatusBadRequest, "revision must be a positive integer")
+		return
+	}
+	row, err := h.Queries.GetMemoryArtifactRevision(r.Context(), db.GetMemoryArtifactRevisionParams{
+		MemoryArtifactID: idUUID,
+		WorkspaceID:      wsUUID,
+		RevisionNumber:   int32(revNum),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "revision not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, revisionDetailFromRow(row))
+}
+
+// RestoreMemoryArtifactRevision — POST /api/memory/{id}/restore-revision/{revision}
+//
+// Restoring revision N copies its content/title/etc. onto the live
+// artifact. The restore is itself an edit: the *current* state gets
+// snapshotted into a new revision row before the rollback applies, so
+// history stays linear and "I rolled back" looks like any other edit.
+// This is intentional — destructive rollback that erased intervening
+// edits would be a footgun.
+func (h *Handler) RestoreMemoryArtifactRevision(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	revStr := chi.URLParam(r, "revision")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "memory artifact id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	revNum, err := strconv.Atoi(revStr)
+	if err != nil || revNum < 1 {
+		writeError(w, http.StatusBadRequest, "revision must be a positive integer")
+		return
+	}
+
+	// Fetch both the live artifact (for the snapshot we're about to
+	// create) and the target revision (the state we're restoring to)
+	// before opening a transaction — both lookups can 404 cleanly.
+	existing, err := h.Queries.GetMemoryArtifact(r.Context(), db.GetMemoryArtifactParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "memory artifact not found")
+		return
+	}
+	target, err := h.Queries.GetMemoryArtifactRevision(r.Context(), db.GetMemoryArtifactRevisionParams{
+		MemoryArtifactID: idUUID,
+		WorkspaceID:      wsUUID,
+		RevisionNumber:   int32(revNum),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "revision not found")
+		return
+	}
+
+	editorType, editorID := h.resolveActor(r, userID, workspaceID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// 1. Snapshot the *current* live state — so the user can undo the
+	//    rollback if they change their mind.
+	snapshotTags := existing.Tags
+	if snapshotTags == nil {
+		snapshotTags = []string{}
+	}
+	snapshotMetadata := existing.Metadata
+	if len(snapshotMetadata) == 0 {
+		snapshotMetadata = []byte("{}")
+	}
+	if _, err := qtx.CreateMemoryArtifactRevision(r.Context(), db.CreateMemoryArtifactRevisionParams{
+		MemoryArtifactID:      existing.ID,
+		WorkspaceID:           wsUUID,
+		Title:                 existing.Title,
+		Content:               existing.Content,
+		Slug:                  existing.Slug,
+		ParentID:              existing.ParentID,
+		AnchorType:            existing.AnchorType,
+		AnchorID:              existing.AnchorID,
+		Tags:                  snapshotTags,
+		Metadata:              snapshotMetadata,
+		AlwaysInjectAtRuntime: existing.AlwaysInjectAtRuntime,
+		EditorType:            pgtype.Text{String: editorType, Valid: editorType != ""},
+		EditorID:              parseUUID(editorID),
+	}); err != nil {
+		slog.Warn("RestoreMemoryArtifactRevision: snapshot failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to snapshot prior state")
+		return
+	}
+
+	// 2. Apply the target revision's content onto the live row.
+	updated, err := qtx.UpdateMemoryArtifact(r.Context(), db.UpdateMemoryArtifactParams{
+		ID:                    idUUID,
+		WorkspaceID:           wsUUID,
+		Title:                 pgtype.Text{String: target.Title, Valid: true},
+		Content:               pgtype.Text{String: target.Content, Valid: true},
+		Slug:                  target.Slug,
+		ParentID:              target.ParentID,
+		AnchorType:            target.AnchorType,
+		AnchorID:              target.AnchorID,
+		Tags:                  target.Tags,
+		Metadata:              target.Metadata,
+		AlwaysInjectAtRuntime: pgtype.Bool{Bool: target.AlwaysInjectAtRuntime, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("RestoreMemoryArtifactRevision update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to apply revision")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit restore")
+		return
+	}
+
+	resp := memoryArtifactToResponse(updated)
+	h.publish(protocol.EventMemoryArtifactUpdated, workspaceID, editorType, editorID, map[string]any{
+		"memory_artifact":     resp,
+		"restored_from_revision": revNum,
+	})
+	writeJSON(w, http.StatusOK, resp)
 }

@@ -116,7 +116,10 @@ export function AgentCreatePanel({
   // daemons handle attachments and partial-failure retries incorrectly
   // (see PR #1851 / MUL-1496). Pre-check on the picker so the user gets
   // immediate feedback instead of waiting for the inbox failure; the
-  // server re-validates as the trust boundary.
+  // server re-validates as the trust boundary. Dev-built daemons
+  // (git-describe shape) are exempted inside checkQuickCreateCliVersion
+  // — frontend and server share the same signal there, so they agree by
+  // construction across web/desktop/staging without comparing env flags.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>

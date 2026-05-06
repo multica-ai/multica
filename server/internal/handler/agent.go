@@ -133,6 +133,23 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// MemoryArtifactData is the wire shape for a memory_artifact (wiki page,
+// agent note, runbook, decision) injected into the agent's runtime context
+// at task claim. Only fields the meta-skill renderer needs travel across
+// the wire — content is the substantive payload, the rest is presentation
+// metadata. Anchor fields are emitted so the renderer can group artifacts
+// by "this issue" vs "the parent project".
+type MemoryArtifactData struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	Tags       []string `json:"tags,omitempty"`
+	AnchorType string   `json:"anchor_type,omitempty"`
+	AnchorID   string   `json:"anchor_id,omitempty"`
+	UpdatedAt  string   `json:"updated_at"`
+}
+
 type AgentTaskResponse struct {
 	ID                      string          `json:"id"`
 	AgentID                 string          `json:"agent_id"`
@@ -157,6 +174,7 @@ type AgentTaskResponse struct {
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`  // resources attached to the project
 	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`        // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
 	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // true when the claiming agent is the workspace's configured orchestrator AND the trigger was an agent-authored comment. Tells the prompt builder to render the orchestrator review-and-act block instead of the generic "decide whether to reply" block.
+	MemoryArtifacts         []MemoryArtifactData  `json:"memory_artifacts,omitempty"`   // wiki/note/runbook/decision artifacts anchored to this issue or its project
 	CreatedAt               string          `json:"created_at"`
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue

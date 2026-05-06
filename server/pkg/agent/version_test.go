@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -47,6 +48,32 @@ func TestSemverLessThan(t *testing.T) {
 		got := tt.a.lessThan(tt.b)
 		if got != tt.want {
 			t.Errorf("%v.lessThan(%v) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestCheckMinCLIVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"tagged release at minimum", "v0.2.20", nil},
+		{"tagged release above minimum", "0.3.1", nil},
+		{"tagged release below minimum", "v0.2.15", ErrCLIVersionTooOld},
+		{"empty string", "", ErrCLIVersionMissing},
+		{"unparsable", "not-a-version", ErrCLIVersionMissing},
+		{"git-describe dev build past old tag", "v0.2.15-235-gdaf0e935", nil},
+		{"git-describe dirty dev build", "v0.2.15-235-gdaf0e935-dirty", nil},
+		{"git-describe dev build past current tag", "v0.2.20-3-gabc1234", nil},
+	}
+	for _, tt := range tests {
+		err := CheckMinCLIVersion(tt.input)
+		if tt.wantErr == nil && err != nil {
+			t.Errorf("%s: CheckMinCLIVersion(%q) = %v, want nil", tt.name, tt.input, err)
+		}
+		if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+			t.Errorf("%s: CheckMinCLIVersion(%q) = %v, want %v", tt.name, tt.input, err, tt.wantErr)
 		}
 	}
 }
