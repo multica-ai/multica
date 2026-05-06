@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Trash2, Clock, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Trash2, Clock, Link2, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,14 +12,21 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { TimeEntry } from "@/shared/types";
+import {
+  PropertyPicker,
+  PickerEmpty,
+  PickerItem,
+} from "@/features/issues/components/pickers/property-picker";
+import { useIssueStore } from "@/features/issues";
+import { useIssuesListQuery } from "@/features/issues/queries";
+import type { TimeEntry, IssueReference } from "@/shared/types";
 import { useUpdateTimeEntryMutation, useDeleteTimeEntryMutation } from "../hooks/use-time-tracking";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Converts an ISO 8601 timestamp to a value compatible with <input type="datetime-local">.
- * e.g. "2024-06-10T14:30:00Z" → "2024-06-10T14:30"
+ * Converts an ISO 8601 timestamp to a value for <input type="datetime-local">.
+ * e.g. "2024-06-10T14:30:00Z" → "2024-06-10T14:30" (local time)
  */
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso);
@@ -27,10 +34,7 @@ function toDatetimeLocal(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/**
- * Converts a datetime-local input value back to an ISO 8601 string.
- * The browser gives us local time; we treat it as local and convert to UTC.
- */
+/** Converts a datetime-local input value back to an ISO 8601 UTC string. */
 function fromDatetimeLocal(value: string): string {
   return new Date(value).toISOString();
 }
@@ -44,7 +48,116 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+// ── Issue picker ───────────────────────────────────────────────────────────────
+
+/**
+ * Inline issue picker used inside the time entry edit sheet.
+ * Shows a popover with a searchable list of workspace issues.
+ */
+function IssuePicker({
+  selectedIssueId,
+  onChange,
+}: {
+  selectedIssueId: string | null;
+  onChange: (issueId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  // Load issues from store (already fetched by the issue list page) or fallback to API.
+  const storeIssues = useIssueStore((s) => s.issues) as IssueReference[];
+  const { data } = useIssuesListQuery();
+  const allIssues: IssueReference[] = data?.issues ?? storeIssues;
+
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allIssues;
+    return allIssues.filter(
+      (i) =>
+        i.title.toLowerCase().includes(q) ||
+        i.identifier.toLowerCase().includes(q),
+    );
+  }, [allIssues, filter]);
+
+  const selected = allIssues.find((i) => i.id === selectedIssueId) ?? null;
+
+  return (
+    <PropertyPicker
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setFilter("");
+      }}
+      width="w-80"
+      align="start"
+      searchable
+      searchPlaceholder="Search issues..."
+      onSearchChange={setFilter}
+      trigger={
+        selected ? (
+          <>
+            <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm">
+              {selected.identifier} · {selected.title}
+            </span>
+            <button
+              type="button"
+              className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(null);
+              }}
+              aria-label="Remove issue link"
+            >
+              <X className="size-3" />
+            </button>
+          </>
+        ) : (
+          <span className="text-muted-foreground text-sm">Link to an issue…</span>
+        )
+      }
+    >
+      {/* Clear option */}
+      {selectedIssueId && (
+        <PickerItem
+          selected={false}
+          onClick={() => {
+            onChange(null);
+            setOpen(false);
+          }}
+        >
+          <X className="size-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">No issue</span>
+        </PickerItem>
+      )}
+
+      {filtered.map((issue) => (
+        <PickerItem
+          key={issue.id}
+          selected={issue.id === selectedIssueId}
+          onClick={() => {
+            onChange(issue.id);
+            setOpen(false);
+          }}
+        >
+          {issue.id === selectedIssueId ? (
+            <Check className="size-3.5 shrink-0 text-primary" />
+          ) : (
+            <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex min-w-0 flex-1 flex-col items-start">
+            <span className="truncate text-sm">{issue.title}</span>
+            <span className="text-[11px] text-muted-foreground">{issue.identifier}</span>
+          </span>
+        </PickerItem>
+      ))}
+
+      {filtered.length === 0 && <PickerEmpty />}
+    </PropertyPicker>
+  );
+}
+
+// ── Main sheet ─────────────────────────────────────────────────────────────────
 
 interface TimeEntryEditSheetProps {
   entry: TimeEntry | null;
@@ -52,10 +165,11 @@ interface TimeEntryEditSheetProps {
 }
 
 /**
- * Slide-over sheet for editing a completed time entry.
+ * Slide-over sheet for editing a time entry.
  *
  * Editable fields:
  * - Description (free text)
+ * - Linked issue (searchable picker)
  * - Start time (datetime-local)
  * - Stop time (datetime-local, hidden for running entries)
  *
@@ -65,22 +179,23 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
   const updateMutation = useUpdateTimeEntryMutation();
   const deleteMutation = useDeleteTimeEntryMutation();
 
-  // Local form state — populated when entry changes.
+  // Local form state — reset whenever a different entry is opened.
   const [description, setDescription] = useState("");
+  const [issueId, setIssueId] = useState<string | null>(null);
   const [startValue, setStartValue] = useState("");
   const [stopValue, setStopValue] = useState("");
 
-  // Sync state when entry changes (sheet opened with a new entry).
   useEffect(() => {
     if (!entry) return;
     setDescription(entry.description ?? "");
+    setIssueId(entry.issue_id ?? null);
     setStartValue(toDatetimeLocal(entry.start_time));
     setStopValue(entry.stop_time ? toDatetimeLocal(entry.stop_time) : "");
   }, [entry?.id]);
 
   const isRunning = entry ? entry.stop_time === null : false;
 
-  // Compute preview duration from local form values (only for stopped entries).
+  // Duration preview computed from local form values for stopped entries.
   const previewDuration = (() => {
     if (!entry || isRunning) return null;
     const start = new Date(startValue).getTime();
@@ -92,16 +207,12 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
   const handleSave = () => {
     if (!entry) return;
 
-    // Build only the fields that changed to keep the payload minimal.
     const startIso = fromDatetimeLocal(startValue);
     const stopIso = stopValue ? fromDatetimeLocal(stopValue) : undefined;
 
-    // Validate that stop is after start for completed entries.
-    if (!isRunning && stopIso) {
-      if (new Date(stopIso) <= new Date(startIso)) {
-        toast.error("Stop time must be after start time");
-        return;
-      }
+    if (!isRunning && stopIso && new Date(stopIso) <= new Date(startIso)) {
+      toast.error("Stop time must be after start time");
+      return;
     }
 
     updateMutation.mutate(
@@ -109,6 +220,8 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
         id: entry.id,
         data: {
           description: description || undefined,
+          // Pass null explicitly to clear the link; undefined = no change (but we always send it).
+          issue_id: issueId,
           start_time: startIso,
           stop_time: stopIso,
         },
@@ -118,9 +231,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
           toast.success("Time entry updated");
           onClose();
         },
-        onError: () => {
-          toast.error("Failed to update time entry");
-        },
+        onError: () => toast.error("Failed to update time entry"),
       },
     );
   };
@@ -152,7 +263,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
         </SheetHeader>
 
         {entry && (
-          <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 py-6">
+          <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-6">
             {/* Description */}
             <div className="space-y-2">
               <Label htmlFor="entry-description">Description</Label>
@@ -163,6 +274,14 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
                 onChange={(e) => setDescription(e.target.value)}
                 autoFocus
               />
+            </div>
+
+            {/* Issue link */}
+            <div className="space-y-2">
+              <Label>Issue</Label>
+              <div className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 min-h-9">
+                <IssuePicker selectedIssueId={issueId} onChange={setIssueId} />
+              </div>
             </div>
 
             {/* Start time */}
@@ -190,19 +309,11 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
               </div>
             )}
 
-            {/* Duration preview (computed from local form values) */}
+            {/* Duration preview */}
             {previewDuration !== null && (
               <div className="rounded-md bg-muted px-4 py-3 text-sm">
                 <span className="text-muted-foreground">Duration: </span>
                 <span className="font-mono font-semibold">{formatDuration(previewDuration)}</span>
-              </div>
-            )}
-
-            {/* Issue link (read-only for now, just shows if linked) */}
-            {entry.issue_id && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ExternalLink className="size-3.5 shrink-0" />
-                <span>Linked to issue</span>
               </div>
             )}
           </div>
@@ -237,3 +348,5 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
     </Sheet>
   );
 }
+
+
