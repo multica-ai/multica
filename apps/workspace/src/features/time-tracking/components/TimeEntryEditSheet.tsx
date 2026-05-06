@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import {
   Sheet,
   SheetContent,
@@ -23,22 +24,6 @@ import type { TimeEntry, IssueReference } from "@/shared/types";
 import { useUpdateTimeEntryMutation, useDeleteTimeEntryMutation } from "../hooks/use-time-tracking";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/**
- * Converts an ISO 8601 timestamp to a value for <input type="datetime-local">.
- * Includes seconds (step="1") so sub-minute entries are preserved accurately.
- * e.g. "2024-06-10T14:30:45Z" → "2024-06-10T14:30:45" (local time)
- */
-function toDatetimeLocal(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-/** Converts a datetime-local input value back to an ISO 8601 UTC string. */
-function fromDatetimeLocal(value: string): string {
-  return new Date(value).toISOString();
-}
 
 /** Formats elapsed seconds as H:MM:SS or M:SS. */
 function formatDuration(seconds: number): string {
@@ -171,8 +156,8 @@ interface TimeEntryEditSheetProps {
  * Editable fields:
  * - Description (free text)
  * - Linked issue (searchable picker)
- * - Start time (datetime-local)
- * - Stop time (datetime-local, hidden for running entries)
+ * - Start time (custom DateTimePicker)
+ * - Stop time (custom DateTimePicker, hidden for running entries)
  *
  * Duration is auto-calculated from start/stop and shown read-only.
  */
@@ -180,36 +165,32 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
   const updateMutation = useUpdateTimeEntryMutation();
   const deleteMutation = useDeleteTimeEntryMutation();
 
-  // Local form state — reset whenever a different entry is opened.
+  // Local form state — ISO strings, reset whenever a different entry is opened.
   const [description, setDescription] = useState("");
   const [issueId, setIssueId] = useState<string | null>(null);
-  const [startValue, setStartValue] = useState("");
-  const [stopValue, setStopValue] = useState("");
+  const [startIso, setStartIso] = useState<string | null>(null);
+  const [stopIso, setStopIso] = useState<string | null>(null);
 
   useEffect(() => {
     if (!entry) return;
     setDescription(entry.description ?? "");
     setIssueId(entry.issue_id ?? null);
-    setStartValue(toDatetimeLocal(entry.start_time));
-    setStopValue(entry.stop_time ? toDatetimeLocal(entry.stop_time) : "");
+    setStartIso(entry.start_time);
+    setStopIso(entry.stop_time ?? null);
   }, [entry?.id]);
 
   const isRunning = entry ? entry.stop_time === null : false;
 
-  // Duration preview computed from local form values for stopped entries.
+  // Duration preview computed from current ISO values for stopped entries.
   const previewDuration = (() => {
-    if (!entry || isRunning) return null;
-    const start = new Date(startValue).getTime();
-    const stop = new Date(stopValue).getTime();
-    if (isNaN(start) || isNaN(stop) || stop <= start) return null;
-    return Math.round((stop - start) / 1000);
+    if (!entry || isRunning || !startIso || !stopIso) return null;
+    const diff = new Date(stopIso).getTime() - new Date(startIso).getTime();
+    if (diff <= 0) return null;
+    return Math.round(diff / 1000);
   })();
 
   const handleSave = () => {
-    if (!entry) return;
-
-    const startIso = fromDatetimeLocal(startValue);
-    const stopIso = stopValue ? fromDatetimeLocal(stopValue) : undefined;
+    if (!entry || !startIso) return;
 
     if (!isRunning && stopIso && new Date(stopIso) < new Date(startIso)) {
       toast.error("Stop time must be after start time");
@@ -221,10 +202,9 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
         id: entry.id,
         data: {
           description: description || undefined,
-          // Pass null explicitly to clear the link; undefined = no change (but we always send it).
           issue_id: issueId,
           start_time: startIso,
-          stop_time: stopIso,
+          stop_time: stopIso ?? undefined,
         },
       },
       {
@@ -287,28 +267,32 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
 
             {/* Start time */}
             <div className="space-y-2">
-              <Label htmlFor="entry-start">Start time</Label>
-              <Input
-                id="entry-start"
-                type="datetime-local"
-                step="1"
-                value={startValue}
-                onChange={(e) => setStartValue(e.target.value)}
-                disabled={isRunning}
-              />
+              <Label>Start time</Label>
+              <div className="flex items-center rounded-md border px-3 py-1.5 min-h-9">
+                <DateTimePicker
+                  value={startIso}
+                  onChange={(v) => setStartIso(v)}
+                  placeholder="Pick start time"
+                  required
+                  disabled={isRunning}
+                  align="start"
+                />
+              </div>
             </div>
 
             {/* Stop time — hidden for running timers */}
             {!isRunning && (
               <div className="space-y-2">
-                <Label htmlFor="entry-stop">Stop time</Label>
-                <Input
-                  id="entry-stop"
-                  type="datetime-local"
-                  step="1"
-                  value={stopValue}
-                  onChange={(e) => setStopValue(e.target.value)}
-                />
+                <Label>Stop time</Label>
+                <div className="flex items-center rounded-md border px-3 py-1.5 min-h-9">
+                  <DateTimePicker
+                    value={stopIso}
+                    onChange={(v) => setStopIso(v)}
+                    placeholder="Pick stop time"
+                    required
+                    align="start"
+                  />
+                </div>
               </div>
             )}
 
@@ -351,5 +335,3 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
     </Sheet>
   );
 }
-
-
