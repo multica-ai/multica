@@ -57,6 +57,10 @@ function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const oidcClientID = useConfigStore((state) => state.oidcClientID);
+  const oidcAuthorizationEndpoint = useConfigStore(
+    (state) => state.oidcAuthorizationEndpoint,
+  );
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -122,14 +126,16 @@ function LoginPageContent() {
     router.push(dest);
   };
 
-  // Build Google OAuth state: encode platform + next URL so the callback
-  // can redirect to the right place after login.
-  const googleState = [
+  // Build OAuth/OIDC state: encode platform + next URL so the callback
+  // can redirect to the right place after login. Shared between Google
+  // and OIDC because the callback parsing logic is identical.
+  const authState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
   ]
     .filter(Boolean)
     .join(",") || undefined;
+  const googleState = authState;
 
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
@@ -186,6 +192,16 @@ function LoginPageContent() {
               clientId: googleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
               state: googleState,
+            }
+          : undefined
+      }
+      oidc={
+        oidcClientID && oidcAuthorizationEndpoint
+          ? {
+              authorizationEndpoint: oidcAuthorizationEndpoint,
+              clientID: oidcClientID,
+              redirectUri: `${window.location.origin}/auth/oidc/callback`,
+              state: authState,
             }
           : undefined
       }

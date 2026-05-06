@@ -239,7 +239,29 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
+// emailLoginEnabled reports whether the email verify-code path is allowed
+// at the HTTP layer. Default-allow (unset / contains "email") preserves
+// the upstream UX; SSO-only deployments set LOGIN_METHODS=oidc to disable
+// email at the backend, eliminating a backdoor that frontend UI hiding
+// alone leaves open. Comma-separated; case-insensitive.
+func emailLoginEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("LOGIN_METHODS")))
+	if v == "" {
+		return true
+	}
+	for _, m := range strings.Split(v, ",") {
+		if strings.TrimSpace(m) == "email" {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
+	if !emailLoginEnabled() {
+		writeError(w, http.StatusForbidden, "email login disabled")
+		return
+	}
 	var req SendCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -322,6 +344,10 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
+	if !emailLoginEnabled() {
+		writeError(w, http.StatusForbidden, "email login disabled")
+		return
+	}
 	var req VerifyCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

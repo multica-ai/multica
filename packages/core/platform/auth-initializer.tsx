@@ -53,6 +53,9 @@ export function AuthInitializer({
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          oidcIssuerURL: cfg.oidc_issuer_url,
+          oidcClientID: cfg.oidc_client_id,
+          oidcAuthorizationEndpoint: cfg.oidc_authorization_endpoint,
         });
         if (cfg.posthog_key) {
           initAnalytics({
