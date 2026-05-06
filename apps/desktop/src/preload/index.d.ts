@@ -1,6 +1,8 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 
 import type { LocalStackStatus } from "../shared/local-stack-types";
+import type { LocalDataPaths } from "../main/local-data-paths";
+import type { LocalDiagnostics } from "../main/local-diagnostics";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -80,6 +82,14 @@ interface LocalStackAPI {
   onStatusChange: (callback: (status: LocalStackStatus) => void) => () => void;
 }
 
+interface LocalDiagnosticsAPI {
+  get: () => Promise<LocalDiagnostics>;
+  formatAsText: () => Promise<string>;
+  openPath: (
+    key: keyof LocalDataPaths,
+  ) => Promise<{ ok: boolean; error?: string }>;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -98,6 +108,7 @@ declare global {
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
     localStackAPI: LocalStackAPI;
+    localDiagnosticsAPI: LocalDiagnosticsAPI;
     updater: UpdaterAPI;
   }
 }

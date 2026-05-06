@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 
 import type { LocalStackStatus } from "../shared/local-stack-types";
+import type { LocalDataPaths } from "../main/local-data-paths";
+import type { LocalDiagnostics } from "../main/local-diagnostics";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -164,6 +166,20 @@ const localStackAPI = {
   },
 };
 
+const localDiagnosticsAPI = {
+  /** Live diagnostics snapshot — re-collected on each call. */
+  get: (): Promise<LocalDiagnostics> =>
+    ipcRenderer.invoke("diagnostics:get"),
+  /** Pre-formatted plain-text version, ready for the clipboard. */
+  formatAsText: (): Promise<string> =>
+    ipcRenderer.invoke("diagnostics:formatText"),
+  /** Open one of the well-known local data folders in the OS file manager. */
+  openPath: (
+    key: keyof LocalDataPaths,
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("diagnostics:openPath", key),
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -193,6 +209,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("localStackAPI", localStackAPI);
+  contextBridge.exposeInMainWorld("localDiagnosticsAPI", localDiagnosticsAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
@@ -203,6 +220,8 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.localStackAPI = localStackAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.localDiagnosticsAPI = localDiagnosticsAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }

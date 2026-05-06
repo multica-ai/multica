@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, Notification, shell } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -14,6 +14,11 @@ import {
 } from "./local-stack-supervisor";
 import type { LocalStackComponentRunner } from "./local-stack-supervisor";
 import { ManagedPostgres } from "./managed-postgres";
+import {
+  resolveLocalDataPaths,
+  type LocalDataPaths,
+} from "./local-data-paths";
+import { createDiagnosticsCollector } from "./local-diagnostics";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -357,6 +362,47 @@ if (!gotTheLock) {
       // TODO Task 12: surface aggregated local-stack logs.
       return { ok: false };
     });
+
+    // --- Local diagnostics ---------------------------------------------
+    // Build the diagnostics collector once at startup. The supervisor and
+    // path resolver are wired here so the collector stays decoupled from
+    // module-level singletons (easier to test in isolation).
+    const diagnosticsPaths: LocalDataPaths = resolveLocalDataPaths();
+    const platformOs: "macos" | "windows" | "linux" | "unknown" =
+      process.platform === "darwin"
+        ? "macos"
+        : process.platform === "win32"
+          ? "windows"
+          : process.platform === "linux"
+            ? "linux"
+            : "unknown";
+    const diagnosticsCollector = createDiagnosticsCollector({
+      appVersion: getAppVersion(),
+      apiUrl: process.env.MULTICA_LOCAL_API_URL || "http://localhost:8080",
+      os: platformOs,
+      paths: diagnosticsPaths,
+      getStackStatus: () => localStackSupervisor!.getStatus(),
+      // Daemon-manager doesn't expose its CLI version probe yet (private to
+      // the module). Until it does, return null so the diagnostics surface
+      // labels the field as "(not resolved)" instead of fabricating a value.
+      getDaemonVersion: () => null,
+    });
+
+    ipcMain.handle("diagnostics:get", () => diagnosticsCollector.snapshot());
+    ipcMain.handle("diagnostics:formatText", () =>
+      diagnosticsCollector.formatAsText(diagnosticsCollector.snapshot()),
+    );
+    // Accepts a key into the resolved paths map — never an arbitrary string —
+    // so the renderer can't ask the main process to open arbitrary directories.
+    ipcMain.handle(
+      "diagnostics:openPath",
+      async (_event, key: keyof LocalDataPaths) => {
+        const target = diagnosticsPaths[key];
+        if (!target) return { ok: false, error: "unknown path key" };
+        const result = await shell.openPath(target);
+        return result === "" ? { ok: true } : { ok: false, error: result };
+      },
+    );
 
     createWindow();
 
