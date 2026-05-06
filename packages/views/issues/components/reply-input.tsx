@@ -10,7 +10,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
-import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
+import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 
 // ---------------------------------------------------------------------------
 // Types

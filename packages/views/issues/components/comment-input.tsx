@@ -9,7 +9,7 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay 
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
+import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 
 interface CommentInputProps {
   issueId: string;

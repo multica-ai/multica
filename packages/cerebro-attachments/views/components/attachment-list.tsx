@@ -7,7 +7,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useNavigation } from "../../navigation";
+import { useNavigation } from "@multica/views/navigation";
 
 // Renders attachments that are NOT already referenced inline in the markdown
 // content. Used both for issue bodies and for individual comments.

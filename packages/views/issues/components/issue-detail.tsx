@@ -37,8 +37,8 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { useStickyBottom } from "@multica/ui/hooks/use-sticky-bottom";
-import { JumpToLatestButton } from "@multica/ui/components/common/jump-to-latest-button";
+import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -53,7 +53,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
-import { AttachmentList } from "./attachment-list";
+import { AttachmentList } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -70,7 +70,7 @@ import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, Iss
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { PrivacyToggle } from "./privacy-toggle";
+import { PrivacyToggle } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";

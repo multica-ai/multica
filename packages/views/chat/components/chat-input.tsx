@@ -18,7 +18,7 @@ import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
-import { useSubmitOnEnter } from "../../preferences/use-submit-on-enter";
+import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 
 const logger = createLogger("chat.ui");
 

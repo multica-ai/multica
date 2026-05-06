@@ -39,7 +39,7 @@ vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("../../preferences/use-submit-on-enter", () => ({
+vi.mock("@multica/cerebro-preferences/views", () => ({
   useSubmitOnEnter: () => false,
 }));
 

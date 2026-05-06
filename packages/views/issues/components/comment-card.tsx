@@ -37,7 +37,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
-import { AttachmentList } from "./attachment-list";
+import { AttachmentList } from "@multica/cerebro-attachments/views";
 import type { TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 

@@ -10,7 +10,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
-import { SUBMIT_ON_ENTER_KEY } from "../../preferences/use-submit-on-enter";
+import { SUBMIT_ON_ENTER_KEY } from "./use-submit-on-enter";
 
 /**
  * Fork-specific: lets the user choose between Enter-to-send and

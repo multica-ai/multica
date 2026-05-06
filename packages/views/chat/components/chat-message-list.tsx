@@ -13,8 +13,8 @@ import {
 } from "@multica/ui/components/ui/collapsible";
 import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useStickyBottom } from "@multica/ui/hooks/use-sticky-bottom";
-import { JumpToLatestButton } from "@multica/ui/components/common/jump-to-latest-button";
+import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";

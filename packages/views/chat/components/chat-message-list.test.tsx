@@ -14,7 +14,7 @@ vi.mock("@multica/ui/hooks/use-scroll-fade", () => ({
   useScrollFade: () => ({}),
 }));
 
-vi.mock("@multica/ui/hooks/use-sticky-bottom", () => ({
+vi.mock("@multica/cerebro-ui/hooks/use-sticky-bottom", () => ({
   useStickyBottom: () => ({ hasNewBelow: false, scrollToBottom: () => {} }),
 }));
 

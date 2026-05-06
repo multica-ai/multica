@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { EnterPreferenceSection } from "./enter-preference-section";
+import { EnterPreferenceSection } from "@multica/cerebro-preferences/views";
 
 export function AccountTab() {
   const user = useAuthStore((s) => s.user);
