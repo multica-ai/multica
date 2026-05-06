@@ -815,6 +815,7 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    repo_approval_required: boolean;
     posthog_key?: string;
     posthog_host?: string;
   }> {
@@ -837,10 +838,17 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: Array<{ url: string; status?: WorkspaceRepo["status"] }> }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async approveWorkspaceRepo(id: string, url: string): Promise<Workspace> {
+    return this.fetch(`/api/workspaces/${id}/repos/approve`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
     });
   }
 

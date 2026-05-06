@@ -54,6 +54,7 @@ export function AuthInitializer({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
         });
+        configStore.getState().setRepoApprovalRequired(cfg.repo_approval_required);
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

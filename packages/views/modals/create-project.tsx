@@ -31,6 +31,7 @@ import {
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
@@ -136,7 +137,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
   const [customRepoUrl, setCustomRepoUrl] = useState("");
-  const workspaceRepos = workspace?.repos ?? [];
+  const repoApprovalRequired = useConfigStore((s) => s.repoApprovalRequired);
+  // When approval is required, workspace settings is the single source of
+  // truth — only approved repos are pickable and ad-hoc paste is hidden.
+  // When off, status is irrelevant and the user can also paste arbitrary URLs.
+  const allWorkspaceRepos = workspace?.repos ?? [];
+  const pickableWorkspaceRepos = repoApprovalRequired
+    ? allWorkspaceRepos.filter((r) => r.status === "approved")
+    : allWorkspaceRepos;
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -463,9 +471,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <div className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.create_project.repos_heading)}
               </div>
-              {workspaceRepos.length > 0 ? (
+              {pickableWorkspaceRepos.length > 0 ? (
                 <div className="space-y-1">
-                  {workspaceRepos.map((repo) => {
+                  {pickableWorkspaceRepos.map((repo) => {
                     const checked = selectedRepos.includes(repo.url);
                     return (
                       <button
@@ -491,33 +499,37 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {t(($) => $.create_project.repos_empty)}
+                  {repoApprovalRequired
+                    ? t(($) => $.create_project.repos_empty_approval)
+                    : t(($) => $.create_project.repos_empty)}
                 </p>
               )}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addCustomRepo();
-                }}
-                className="flex items-center gap-1.5 pt-1 border-t"
-              >
-                <input
-                  type="url"
-                  value={customRepoUrl}
-                  onChange={(e) => setCustomRepoUrl(e.target.value)}
-                  placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                  className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  disabled={!customRepoUrl.trim()}
+              {!repoApprovalRequired && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    addCustomRepo();
+                  }}
+                  className="flex items-center gap-1.5 pt-1 border-t"
                 >
-                  {t(($) => $.create_project.repos_add)}
-                </Button>
-              </form>
+                  <input
+                    type="url"
+                    value={customRepoUrl}
+                    onChange={(e) => setCustomRepoUrl(e.target.value)}
+                    placeholder={t(($) => $.create_project.repos_url_placeholder)}
+                    className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    disabled={!customRepoUrl.trim()}
+                  >
+                    {t(($) => $.create_project.repos_add)}
+                  </Button>
+                </form>
+              )}
               {selectedRepos.length > 0 && (
                 <div className="space-y-1 pt-1 border-t">
                   <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">

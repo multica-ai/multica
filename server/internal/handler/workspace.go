@@ -225,12 +225,12 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
+	Name        *string               `json:"name"`
+	Description *string               `json:"description"`
+	Context     *string               `json:"context"`
+	Settings    any                   `json:"settings"`
+	Repos       *[]WorkspaceRepoEntry `json:"repos"`
+	IssuePrefix *string               `json:"issue_prefix"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -267,8 +267,32 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
+	var addedRepoURLs []string
 	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
+		// Fetch the current repos so client-submitted entries can't tamper
+		// with server-managed status: existing entries keep their stored
+		// status; new entries are stamped per REPO_APPROVAL_REQUIRED.
+		current, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		existing := parseRepoEntries(current.Repos)
+		normalized, err := h.normalizeIncomingRepos(*req.Repos, existing)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		existingSet := make(map[string]struct{}, len(existing))
+		for _, e := range existing {
+			existingSet[normalizeRepoURL(e.URL)] = struct{}{}
+		}
+		for _, e := range normalized {
+			if _, found := existingSet[normalizeRepoURL(e.URL)]; !found {
+				addedRepoURLs = append(addedRepoURLs, e.URL)
+			}
+		}
+		reposJSON, _ := json.Marshal(normalized)
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
@@ -286,6 +310,76 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
+	userID := requestUserID(r)
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+
+	if len(addedRepoURLs) > 0 {
+		repos := make([]map[string]any, 0, len(addedRepoURLs))
+		for _, url := range addedRepoURLs {
+			repos = append(repos, map[string]any{"url": url})
+		}
+		h.publish(protocol.EventWorkspaceReposCreated, uuidToString(ws.ID), "member", userID, map[string]any{"repos": repos})
+	}
+
+	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+}
+
+// ApproveWorkspaceRepoRequest carries the URL of the repo to approve.
+type ApproveWorkspaceRepoRequest struct {
+	URL string `json:"url"`
+}
+
+// ApproveWorkspaceRepo flips a workspace repo's status to "approved". This is
+// the only path that can promote a repo out of "pending" — UpdateWorkspace
+// preserves whatever the server stored.
+func (h *Handler) ApproveWorkspaceRepo(w http.ResponseWriter, r *http.Request) {
+	id := workspaceIDFromURL(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
+	if !ok {
+		return
+	}
+
+	var req ApproveWorkspaceRepoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	target := normalizeRepoURL(req.URL)
+	if target == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+
+	current, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	entries := parseRepoEntries(current.Repos)
+	idx := findRepoIndex(entries, target)
+	if idx < 0 {
+		writeError(w, http.StatusNotFound, "repo not found in workspace")
+		return
+	}
+	if entries[idx].Status == repoStatusApproved {
+		// Idempotent: return the workspace as-is.
+		writeJSON(w, http.StatusOK, workspaceToResponse(current))
+		return
+	}
+	entries[idx].Status = repoStatusApproved
+
+	reposJSON, _ := json.Marshal(entries)
+	ws, err := h.Queries.UpdateWorkspace(r.Context(), db.UpdateWorkspaceParams{
+		ID:    idUUID,
+		Repos: reposJSON,
+	})
+	if err != nil {
+		slog.Warn("approve workspace repo failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to approve repo")
+		return
+	}
+
+	slog.Info("workspace repo approved", append(logger.RequestAttrs(r), "workspace_id", id, "repo_url", target)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
 

@@ -97,9 +97,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		AllowSignup:          os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:        splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:  splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		RepoApprovalRequired: os.Getenv("REPO_APPROVAL_REQUIRED") == "true",
+		AllowedRepoDomains:   splitAndTrim(os.Getenv("ALLOWED_REPO_DOMAINS")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -270,6 +272,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
+					r.Post("/repos/approve", h.ApproveWorkspaceRepo)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)

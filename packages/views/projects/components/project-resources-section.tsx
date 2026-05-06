@@ -11,6 +11,7 @@ import {
 } from "@multica/core/projects";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
 import type {
   GithubRepoResourceRef,
   ProjectResource,
@@ -37,6 +38,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
+  const repoApprovalRequired = useConfigStore((s) => s.repoApprovalRequired);
   const [open, setOpen] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -51,6 +53,15 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       .filter((r) => r.resource_type === "github_repo")
       .map((r) => (r.resource_ref as GithubRepoResourceRef).url),
   );
+
+  // When approval is required, workspace settings is the single source of
+  // truth: only approved repos are pickable and the ad-hoc paste form is
+  // hidden. When approval is off, status is irrelevant — show everything
+  // and let the user paste arbitrary URLs.
+  const allRepos = workspace?.repos ?? [];
+  const pickableRepos = repoApprovalRequired
+    ? allRepos.filter((r) => r.status === "approved")
+    : allRepos;
 
   const handleAttach = async (url: string) => {
     try {
@@ -116,9 +127,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               <div className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.resources.popover_title)}
               </div>
-              {workspace?.repos && workspace.repos.length > 0 && (
+              {pickableRepos.length > 0 ? (
                 <div className="space-y-1">
-                  {workspace.repos.map((repo) => {
+                  {pickableRepos.map((repo) => {
                     const isAttached = attachedUrls.has(repo.url);
                     const isDisabled = isAttached || createResource.isPending;
                     return (
@@ -154,19 +165,33 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                     );
                   })}
                 </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {repoApprovalRequired
+                    ? t(($) => $.resources.popover_empty_approval)
+                    : t(($) => $.resources.popover_empty)}
+                </p>
               )}
-              <CustomRepoForm
-                onSubmit={async (url) => {
-                  await handleAttach(url);
-                  setAddOpen(false);
-                }}
-              />
+              {!repoApprovalRequired && (
+                <CustomRepoForm
+                  onSubmit={async (url) => {
+                    await handleAttach(url);
+                    setAddOpen(false);
+                  }}
+                />
+              )}
             </PopoverContent>
           </Popover>
         </div>
       )}
     </div>
   );
+}
+
+// Convert SSH-style git URL (git@host:owner/repo.git) to https for browser navigation.
+function toHttpUrl(url: string): string {
+  const match = /^git@([^:]+):(.+)$/.exec(url);
+  return match ? `https://${match[1]}/${match[2]}` : url;
 }
 
 function ResourceRow({
@@ -186,7 +211,7 @@ function ResourceRow({
           <TooltipTrigger
             render={
               <a
-                href={ref.url}
+                href={toHttpUrl(ref.url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="truncate flex-1 hover:underline"

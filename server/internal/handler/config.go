@@ -13,6 +13,12 @@ type AppConfig struct {
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
 
+	// When true, newly added workspace repos start as "pending" and require
+	// admin approval; the settings UI surfaces a status badge per repo.
+	// When false (default), repos are auto-approved and the UI hides the
+	// badge entirely.
+	RepoApprovalRequired bool `json:"repo_approval_required"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -28,8 +34,9 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		AllowSignup:          os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:       os.Getenv("GOOGLE_CLIENT_ID"),
+		RepoApprovalRequired: os.Getenv("REPO_APPROVAL_REQUIRED") == "true",
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

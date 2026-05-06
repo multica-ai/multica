@@ -1,7 +1,10 @@
 export type MemberRole = "owner" | "admin" | "member";
 
+export type WorkspaceRepoStatus = "pending" | "approved";
+
 export interface WorkspaceRepo {
   url: string;
+  status: WorkspaceRepoStatus;
 }
 
 export interface Workspace {

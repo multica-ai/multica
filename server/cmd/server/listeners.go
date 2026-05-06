@@ -31,6 +31,9 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
+		// Internal-only event — consumed by the optional repo approval
+		// webhook listener, never delivered to WS clients.
+		protocol.EventWorkspaceReposCreated: true,
 	}
 
 	// Helper: marshal event and send to a specific user.

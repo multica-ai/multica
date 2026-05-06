@@ -46,6 +46,11 @@ const (
 	EventWorkspaceUpdated = "workspace:updated"
 	EventWorkspaceDeleted = "workspace:deleted"
 
+	// Fired when new repo URLs are saved into a workspace (UpdateWorkspace).
+	// Consumed by the optional approval webhook listener which forwards the
+	// list to an external service for evaluation.
+	EventWorkspaceReposCreated = "workspace_repos:created"
+
 	// Member events
 	EventMemberAdded   = "member:added"
 	EventMemberUpdated = "member:updated"

@@ -94,10 +94,15 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 
 	var workspaceID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO workspace (name, slug, description, issue_prefix, repos)
+		VALUES ($1, $2, $3, $4, $5::jsonb)
 		RETURNING id
-	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN").Scan(&workspaceID); err != nil {
+	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN",
+		// Pre-approve the canonical test repo so project_resource tests can
+		// attach github_repo refs without going through the workspace settings
+		// approval flow first.
+		`[{"url":"https://github.com/multica-ai/multica","status":"approved"}]`,
+	).Scan(&workspaceID); err != nil {
 		return "", "", err
 	}
 
