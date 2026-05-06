@@ -10,6 +10,7 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorAvatar } from "../common/actor-avatar";
 import { AppLink } from "../navigation";
+import { useT } from "../i18n";
 
 interface MemberProfileCardProps {
   // The User UUID — matches member.user_id and agent.owner_id. We accept user_id
@@ -18,18 +19,13 @@ interface MemberProfileCardProps {
   userId: string;
 }
 
-const ROLE_LABEL: Record<MemberRole, string> = {
-  owner: "Owner",
-  admin: "Admin",
-  member: "Member",
-};
-
 // Mirrors AgentProfileCard's structure so the two hover surfaces feel like
 // twins ("agent and human are both first-class team members"). Content is
 // asymmetric on purpose: humans get identity + the AI agents they own; they
 // don't get a status dot because there's no member-presence backbone today
 // and we don't want to fabricate one.
 export function MemberProfileCard({ userId }: MemberProfileCardProps) {
+  const { t } = useT("members");
   const wsId = useWorkspaceId();
   const { data: members = [], isLoading: membersLoading } = useQuery(
     memberListOptions(wsId),
@@ -53,7 +49,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 
   if (!member) {
     return (
-      <div className="text-xs text-muted-foreground">Member unavailable</div>
+      <div className="text-xs text-muted-foreground">{t(($) => $.card.unavailable)}</div>
     );
   }
 
@@ -106,14 +102,20 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 }
 
 function RoleBadge({ role }: { role: MemberRole }) {
+  const { t } = useT("members");
   return (
     <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      {ROLE_LABEL[role]}
+      {role === "owner"
+        ? t(($) => $.role.owner)
+        : role === "admin"
+          ? t(($) => $.role.admin)
+          : t(($) => $.role.member)}
     </span>
   );
 }
 
 function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
+  const { t } = useT("members");
   // Top-2 by frequency (parent already sorted), each row links to the agent
   // detail page. The presence dot is overlaid on the avatar via ActorAvatar's
   // showStatusDot — `enableHoverCard` deliberately omitted to avoid
@@ -126,7 +128,7 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
 
   return (
     <div className="flex flex-col gap-1.5 text-xs">
-      <span className="text-muted-foreground">Agents ({agents.length})</span>
+      <span className="text-muted-foreground">{t(($) => $.card.agents_section, { count: agents.length })}</span>
       <div className="flex flex-col gap-0.5">
         {visible.map((a) => (
           <AppLink
@@ -153,13 +155,13 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
               aria-hidden
               className="mt-0.5 shrink-0 font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
             >
-              Detail →
+              {t(($) => $.card.detail_link)}
             </span>
           </AppLink>
         ))}
         {overflow > 0 && (
           <span className="text-muted-foreground">
-            and {overflow} other agent{overflow === 1 ? "" : "s"}
+            {t(($) => $.card.more_agents, { count: overflow })}
           </span>
         )}
       </div>

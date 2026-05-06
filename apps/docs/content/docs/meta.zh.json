@@ -9,6 +9,7 @@
     "workspaces",
     "members-roles",
     "issues",
+    "projects",
     "comments",
     "---智能体---",
     "agents",
@@ -32,6 +33,8 @@
     "---参考---",
     "cli",
     "auth-tokens",
-    "desktop-app"
+    "desktop-app",
+    "---开发者---",
+    "developers"
   ]
 }

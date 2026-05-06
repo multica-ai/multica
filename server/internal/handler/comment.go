@@ -96,8 +96,19 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	var comments []db.Comment
 	var err error
 
+	// When neither limit nor offset is specified, default to the most recent
+	// 50 comments. The previous behavior returned every comment unbounded,
+	// which let an agent or browser call accidentally pull thousands of rows
+	// (see issue #1968). Callers that want everything must opt in with a
+	// large explicit --limit; a 100-cap on the server side stays in place via
+	// the timeline endpoint, but this endpoint is used by humans + the CLI
+	// where the cap is the documented 50 default.
+	if !hasPagination {
+		limit = 50
+		hasPagination = true
+	}
 	switch {
-	case sinceTime.Valid && hasPagination:
+	case sinceTime.Valid:
 		if limit == 0 {
 			limit = 50
 		}
@@ -108,18 +119,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			Limit:       limit,
 			Offset:      offset,
 		})
-	case sinceTime.Valid:
-		// Apply a server-side cap to prevent unbounded result sets when
-		// --since is used without --limit.
-		comments, err = h.Queries.ListCommentsSincePaginated(r.Context(), db.ListCommentsSincePaginatedParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			CreatedAt:   sinceTime,
-			Limit:       500,
-			Offset:      0,
-		})
-		hasPagination = true
-	case hasPagination:
+	default:
 		if limit == 0 {
 			limit = 50
 		}
@@ -128,11 +128,6 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: issue.WorkspaceID,
 			Limit:       limit,
 			Offset:      offset,
-		})
-	default:
-		comments, err = h.Queries.ListComments(r.Context(), db.ListCommentsParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
 		})
 	}
 	if err != nil {

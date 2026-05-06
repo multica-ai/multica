@@ -6,19 +6,24 @@ import { Archive } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
+import { useT } from "../../i18n";
 
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
+// Hook returning a localized relative-time formatter — the i18n equivalent
+// of the previous static `timeAgo` function. Returning a function (rather
+// than a string) keeps call-site usage identical: `timeAgo(dateStr)`.
+export function useTimeAgo() {
+  const { t } = useT("inbox");
+  return (dateStr: string): string => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return t(($) => $.list.time.just_now);
+    if (minutes < 60) return t(($) => $.list.time.minutes, { count: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t(($) => $.list.time.hours, { count: hours });
+    const days = Math.floor(hours / 24);
+    return t(($) => $.list.time.days, { count: days });
+  };
 }
-
-export { timeAgo };
 
 export function InboxListItem({
   item,
@@ -31,6 +36,8 @@ export function InboxListItem({
   onClick: () => void;
   onArchive: () => void;
 }) {
+  const { t } = useT("inbox");
+  const timeAgo = useTimeAgo();
   const displayTitle = getInboxDisplayTitle(item);
 
   return (
@@ -62,7 +69,7 @@ export function InboxListItem({
             <span
               role="button"
               tabIndex={-1}
-              title="Archive"
+              title={t(($) => $.list.archive_tooltip)}
               onClick={(e) => {
                 e.stopPropagation();
                 onArchive();

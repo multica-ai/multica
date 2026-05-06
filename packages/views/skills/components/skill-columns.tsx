@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { readOrigin, totalFileCount } from "../lib/origin";
+import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
 // `row.original` and never pull their own queries.
@@ -36,45 +37,36 @@ export interface SkillRow {
   canEdit: boolean;
 }
 
-// Column widths in px. Both Name and Source carry `meta.grow: true`,
-// so DataTable skips their inline widths and fixed table-layout splits
-// the leftover space between them equally — a single grow column would
-// dump all the slack into the Name column, leaving Source perpetually
-// truncated while Name accumulates wasteful right-side whitespace.
-//
-// Each column's `size` is its floor: the values still flow into
-// table.getTotalSize() and become the table's min-width, so when the
-// viewport drops below the sum, the container scrolls horizontally
-// instead of letting either column shrink past its floor.
 const COL_WIDTHS = {
   name: 240,
   usedBy: 140,
   source: 220,
   updated: 100,
-  // 48 = 16 left padding + 16 chevron icon + 16 right padding. Keeps
-  // the chevron's right edge 16px from the card so it lines up with
-  // the toolbar's px-4 right inset.
   chevron: 48,
 } as const;
 
-export function createSkillColumns(): ColumnDef<SkillRow>[] {
+// Hook returns column defs that close over a translation function. Defining
+// columns inside a hook (rather than as a module-level static) is the i18n
+// price for header strings — same pattern used by inbox `useTypeLabels`.
+export function useSkillColumns(): ColumnDef<SkillRow>[] {
+  const { t } = useT("skills");
   return [
     {
       id: "name",
-      header: "Name",
+      header: t(($) => $.table.name),
       size: COL_WIDTHS.name,
       meta: { grow: true },
       cell: ({ row }) => <SkillNameCell row={row.original} />,
     },
     {
       id: "usedBy",
-      header: "Used by",
+      header: t(($) => $.table.used_by),
       size: COL_WIDTHS.usedBy,
       cell: ({ row }) => <AgentAssignees agents={row.original.agents} />,
     },
     {
       id: "source",
-      header: "Source · Added by",
+      header: t(($) => $.table.source),
       size: COL_WIDTHS.source,
       meta: { grow: true },
       cell: ({ row }) => (
@@ -87,7 +79,7 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
     },
     {
       id: "updated",
-      header: "Updated",
+      header: t(($) => $.table.updated),
       size: COL_WIDTHS.updated,
       cell: ({ row }) => (
         <span className="whitespace-nowrap text-xs text-muted-foreground">
@@ -96,9 +88,6 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
       ),
     },
     {
-      // Trailing chevron — purely a "this row is clickable" affordance,
-      // matches the convention from the pre-data-table SkillRow. The
-      // colour deepens on row hover via the row's `group` class.
       id: "_chevron",
       header: () => null,
       size: COL_WIDTHS.chevron,
@@ -115,6 +104,7 @@ export function createSkillColumns(): ColumnDef<SkillRow>[] {
 // ---------------------------------------------------------------------------
 
 function SkillNameCell({ row }: { row: SkillRow }) {
+  const { t } = useT("skills");
   const { skill, canEdit } = row;
   return (
     <div className="min-w-0">
@@ -128,7 +118,7 @@ function SkillNameCell({ row }: { row: SkillRow }) {
               }
             />
             <TooltipContent>
-              Read-only — only creator or admin can edit
+              {t(($) => $.table.lock_tooltip)}
             </TooltipContent>
           </Tooltip>
         )}
@@ -137,11 +127,6 @@ function SkillNameCell({ row }: { row: SkillRow }) {
           {totalFileCount(skill)}
         </span>
       </div>
-      {/* `max-w-xl` (36rem) caps how wide the description gets on
-          large viewports. The Name column is `meta.grow`, so on a
-          24" desktop it can balloon past 800px — without this cap,
-          a long single-line description would stretch all the way
-          across, reading more like a paragraph than a table cell. */}
       <div
         className={`mt-0.5 max-w-xl truncate text-xs ${
           skill.description
@@ -149,15 +134,16 @@ function SkillNameCell({ row }: { row: SkillRow }) {
             : "italic text-muted-foreground/50"
         }`}
       >
-        {skill.description || "No description"}
+        {skill.description || t(($) => $.table.no_description)}
       </div>
     </div>
   );
 }
 
 function AgentAssignees({ agents }: { agents: Agent[] }) {
+  const { t } = useT("skills");
   if (agents.length === 0) {
-    return <span className="text-xs text-muted-foreground/70">— unused</span>;
+    return <span className="text-xs text-muted-foreground/70">{t(($) => $.table.unused)}</span>;
   }
   const visible = agents.slice(0, 3);
   const extra = agents.length - visible.length;
@@ -199,23 +185,24 @@ function SourceCell({
   creator: MemberWithUser | null;
   runtime: AgentRuntime | null;
 }) {
+  const { t } = useT("skills");
   const origin = readOrigin(skill);
 
   let icon = <Pencil className="h-3 w-3 shrink-0" />;
-  let label = "Created manually";
+  let label: string = t(($) => $.table.source_manual);
   if (origin.type === "runtime_local") {
     icon = <HardDrive className="h-3 w-3 shrink-0" />;
     label = runtime
-      ? `From ${runtime.name}`
+      ? t(($) => $.table.source_runtime_named, { name: runtime.name })
       : origin.provider
-        ? `From ${origin.provider} runtime`
-        : "From a runtime";
+        ? t(($) => $.table.source_runtime_provider, { provider: origin.provider })
+        : t(($) => $.table.source_runtime_unknown);
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From ClawHub";
+    label = t(($) => $.table.source_clawhub);
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
-    label = "From Skills.sh";
+    label = t(($) => $.table.source_skills_sh);
   }
 
   return (
@@ -232,7 +219,7 @@ function SourceCell({
             avatarUrl={creator.avatar_url}
             size={14}
           />
-          <span className="truncate">by {creator.name}</span>
+          <span className="truncate">{t(($) => $.table.by_creator, { name: creator.name })}</span>
         </div>
       )}
     </div>

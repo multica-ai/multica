@@ -34,6 +34,7 @@ import { api } from "@multica/core/api";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
+import { useT } from "../../i18n";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -162,6 +163,7 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
 }: AgentTranscriptDialogProps) {
+  const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
@@ -282,17 +284,17 @@ export function AgentTranscriptDialog({
   const statusBadge = isLive ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
       <Loader2 className="h-3 w-3 animate-spin" />
-      Running
+      {t(($) => $.transcript.status_running)}
     </span>
   ) : task.status === "completed" ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
       <CheckCircle2 className="h-3 w-3" />
-      Completed
+      {t(($) => $.transcript.status_completed)}
     </span>
   ) : task.status === "failed" ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
       <XCircle className="h-3 w-3" />
-      Failed
+      {t(($) => $.transcript.status_failed)}
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
@@ -306,7 +308,7 @@ export function AgentTranscriptDialog({
         className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">Agent Execution Transcript</DialogTitle>
+        <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
@@ -337,7 +339,7 @@ export function AgentTranscriptDialog({
                     )}
                   >
                     <Filter className="h-3 w-3" />
-                    Filter
+                    {t(($) => $.transcript.filter)}
                     {selectedTools.size > 0 && (
                       <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
                         {selectedTools.size}
@@ -358,7 +360,7 @@ export function AgentTranscriptDialog({
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                          Clear filters
+                          {t(($) => $.transcript.clear_filters)}
                         </DropdownMenuItem>
                       </>
                     )}
@@ -370,7 +372,7 @@ export function AgentTranscriptDialog({
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? "Copied" : selectedTools.size > 0 ? "Copy filtered" : "Copy all"}
+                {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
                 onClick={() => onOpenChange(false)}
@@ -416,10 +418,12 @@ export function AgentTranscriptDialog({
 
             {/* Event counts */}
             {toolCount > 0 && (
-              <MetadataChip>{toolCount} tool calls</MetadataChip>
+              <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
             )}
             <MetadataChip>
-              {selectedTools.size > 0 ? `${filteredItems.length} of ${items.length}` : items.length} events
+              {selectedTools.size > 0
+                ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
+                : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
 
             {/* Created time */}
@@ -457,10 +461,10 @@ export function AgentTranscriptDialog({
               {isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for events...
+                  {t(($) => $.transcript.waiting_events)}
                 </div>
               ) : (
-                "No execution data recorded."
+                t(($) => $.transcript.no_data)
               )}
             </div>
           ) : (

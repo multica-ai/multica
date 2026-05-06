@@ -364,6 +364,17 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 	return nil
 }
 
+// BroadcastCancelledTasks reconciles each affected agent's status and emits
+// task:cancelled for every row. Callers must invoke this AFTER committing the
+// cancellation so subscribers don't observe a "cancelled" event for a row
+// that the tx might still roll back.
+func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
+	for _, t := range cancelled {
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {

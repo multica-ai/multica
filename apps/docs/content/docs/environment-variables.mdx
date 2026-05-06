@@ -66,12 +66,18 @@ Multica stores user-uploaded attachments (images and files in comments). **S3 is
 
 | Variable | Default | Description |
 |---|---|---|
-| `S3_BUCKET` | empty | Setting this enables S3 storage |
-| `S3_REGION` | `us-west-2` | AWS region |
+| `S3_BUCKET` | empty | **Bucket name only** (for example `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public host from `S3_BUCKET` + `S3_REGION`. Setting this enables S3 storage |
+| `S3_REGION` | `us-west-2` | AWS region. Must match the bucket's actual region — it is used both for SDK signing and for building the public URL |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
 | `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
 
 **When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
+
+**Public URLs** are constructed in this order of priority:
+
+1. `https://<CLOUDFRONT_DOMAIN>/<key>` if `CLOUDFRONT_DOMAIN` is set.
+2. `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style) if `AWS_ENDPOINT_URL` is set.
+3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). When `S3_BUCKET` contains dots, the server falls back to `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) because the AWS-issued wildcard TLS certificate does not validate dotted bucket hosts.
 
 ### Local disk (when S3 is not configured)
 

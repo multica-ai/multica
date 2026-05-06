@@ -28,8 +28,10 @@ import {
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
+import { notificationPreferenceOptions } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
+import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
@@ -206,7 +208,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:session_read",
+      "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -267,7 +269,7 @@ export function useRealtimeSync(
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
     });
 
-    const unsubInboxNew = ws.on("inbox:new", (p) => {
+    const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
       const wsId = getCurrentWsId();
@@ -277,6 +279,22 @@ export function useRealtimeSync(
       // styling is enough — no need to interrupt with a banner. `desktopAPI`
       // is injected by the preload script; its absence (web app) skips silently.
       if (typeof document !== "undefined" && document.hasFocus()) return;
+      // Respect the user's system-notification preference. The Settings page
+      // owns the only `useQuery` for this resource, so on a fresh app start
+      // (or any session that hasn't visited Settings) the React Query cache
+      // is empty — using `getQueryData` would silently default to "all" and
+      // ignore the user's saved choice. `ensureQueryData` resolves to the
+      // cached value if present and otherwise fetches once, populating the
+      // cache for subsequent events. On network failure we fall through to
+      // the default ("all") rather than swallow the banner entirely.
+      if (wsId) {
+        try {
+          const prefData = await qc.ensureQueryData(notificationPreferenceOptions(wsId));
+          if (prefData?.preferences?.system_notifications === "muted") return;
+        } catch {
+          // Fall through with default behavior.
+        }
+      }
       // Capture the source workspace slug at emit time. The user may switch
       // workspaces before clicking the banner (macOS Notification Center
       // holds banners), so routing must not read "current slug" at click
@@ -625,6 +643,31 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // chat:session_deleted fires after a hard delete. The originating tab has
+    // already optimistically dropped the row via useDeleteChatSession; this
+    // handler keeps OTHER tabs/devices in sync and also clears the active
+    // session pointer so a deleted session doesn't keep the chat window
+    // pointed at vanished messages.
+    const unsubChatSessionDeleted = ws.on("chat:session_deleted", (p) => {
+      const payload = p as { chat_session_id: string };
+      chatWsLogger.info("chat:session_deleted (global)", payload);
+      const id = getCurrentWsId();
+      if (id) {
+        const drop = (old?: { id: string }[]) =>
+          old?.filter((s) => s.id !== payload.chat_session_id);
+        qc.setQueryData(chatKeys.sessions(id), drop);
+        qc.setQueryData(chatKeys.allSessions(id), drop);
+      }
+      qc.removeQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      qc.removeQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      invalidatePendingAggregate();
+
+      const chatState = useChatStore.getState?.();
+      if (chatState && chatState.activeSessionId === payload.chat_session_id) {
+        chatState.setActiveSession(null);
+      }
+    });
+
     return () => {
       unsubAny();
       unsubIssueUpdated();
@@ -658,6 +701,7 @@ export function useRealtimeSync(
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
+      unsubChatSessionDeleted();
       timers.forEach(clearTimeout);
       timers.clear();
     };

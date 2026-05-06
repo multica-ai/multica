@@ -4,6 +4,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../../locales/en/common.json";
+import enAgents from "../../../locales/en/agents.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 const mockListSkills = vi.hoisted(() => vi.fn());
 
@@ -62,9 +67,11 @@ function renderSkillsTab() {
   });
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <SkillsTab agent={agent} />
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <SkillsTab agent={agent} />
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 

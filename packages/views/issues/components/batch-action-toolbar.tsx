@@ -18,8 +18,10 @@ import type { UpdateIssueRequest } from "@multica/core/types";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
+import { useT } from "../../i18n";
 
 export function BatchActionToolbar() {
+  const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
   const count = selectedIds.size;
@@ -39,9 +41,9 @@ export function BatchActionToolbar() {
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
       await batchUpdate.mutateAsync({ ids, updates });
-      toast.success(`Updated ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t(($) => $.batch.update_success, { count }));
     } catch {
-      toast.error("Failed to update issues");
+      toast.error(t(($) => $.batch.update_failed));
     }
   };
 
@@ -49,9 +51,9 @@ export function BatchActionToolbar() {
     try {
       await batchDelete.mutateAsync(ids);
       clear();
-      toast.success(`Deleted ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(t(($) => $.batch.delete_success, { count }));
     } catch {
-      toast.error("Failed to delete issues");
+      toast.error(t(($) => $.batch.delete_failed));
     } finally {
       setDeleteOpen(false);
     }
@@ -61,7 +63,7 @@ export function BatchActionToolbar() {
     <>
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
-          <span className="text-sm font-medium">{count} selected</span>
+          <span className="text-sm font-medium">{t(($) => $.batch.selected, { count })}</span>
           <button
             type="button"
             onClick={clear}
@@ -78,7 +80,7 @@ export function BatchActionToolbar() {
           open={statusOpen}
           onOpenChange={setStatusOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Status"
+          trigger={t(($) => $.batch.status)}
           align="center"
         />
 
@@ -89,7 +91,7 @@ export function BatchActionToolbar() {
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Priority"
+          trigger={t(($) => $.batch.priority)}
           align="center"
         />
 
@@ -101,7 +103,7 @@ export function BatchActionToolbar() {
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={<Button variant="ghost" size="sm" disabled={loading} />}
-          trigger="Assignee"
+          trigger={t(($) => $.batch.assignee)}
           align="center"
         />
 
@@ -114,7 +116,7 @@ export function BatchActionToolbar() {
           className="text-destructive hover:text-destructive"
         >
           <Trash2 className="size-3.5 mr-1" />
-          Delete
+          {t(($) => $.batch.delete)}
         </Button>
       </div>
 
@@ -122,23 +124,22 @@ export function BatchActionToolbar() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {count} issue{count > 1 ? "s" : ""}?
+              {t(($) => $.batch.delete_dialog_title, { count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the
-              selected issue{count > 1 ? "s" : ""} and all associated data.
+              {t(($) => $.batch.delete_dialog_desc, { count })}
               <span className="mt-2 block text-xs text-muted-foreground/80">
-                Any workspace member can delete issues.
+                {t(($) => $.batch.delete_dialog_warning)}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t(($) => $.batch.cancel)}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleBatchDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {t(($) => $.batch.delete)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
