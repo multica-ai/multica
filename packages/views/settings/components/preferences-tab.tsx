@@ -88,7 +88,7 @@ function WindowMockup({
   );
 }
 
-export function AppearanceTab() {
+export function PreferencesTab() {
   const { theme, setTheme } = useTheme();
   const { t, i18n } = useT("settings");
   const localeAdapter = useLocaleAdapter();
@@ -104,14 +104,14 @@ export function AppearanceTab() {
     : DEFAULT_LOCALE;
 
   const themeOptions = [
-    { value: "light" as const, label: t(($) => $.appearance.theme.light) },
-    { value: "dark" as const, label: t(($) => $.appearance.theme.dark) },
-    { value: "system" as const, label: t(($) => $.appearance.theme.system) },
+    { value: "light" as const, label: t(($) => $.preferences.theme.light) },
+    { value: "dark" as const, label: t(($) => $.preferences.theme.dark) },
+    { value: "system" as const, label: t(($) => $.preferences.theme.system) },
   ];
 
   const languageOptions: { value: SupportedLocale; label: string }[] = [
-    { value: "en", label: t(($) => $.appearance.language.english) },
-    { value: "zh-Hans", label: t(($) => $.appearance.language.chinese) },
+    { value: "en", label: t(($) => $.preferences.language.english) },
+    { value: "zh-Hans", label: t(($) => $.preferences.language.chinese) },
   ];
 
   // Persist locally → sync to user.language → reload. Reload (vs in-place
@@ -137,7 +137,7 @@ export function AppearanceTab() {
     }
 
     if (syncFailed) {
-      toast.warning(t(($) => $.appearance.language.sync_failed));
+      toast.warning(t(($) => $.preferences.language.sync_failed));
       // Give the toast 2.5s of visible time before navigating away.
       setTimeout(() => window.location.reload(), 2500);
       return;
@@ -149,7 +149,7 @@ export function AppearanceTab() {
     <div className="space-y-8">
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">
-          {t(($) => $.appearance.theme.title)}
+          {t(($) => $.preferences.theme.title)}
         </h2>
         <div className="flex gap-6" role="radiogroup">
           {themeOptions.map((opt) => {
@@ -203,7 +203,7 @@ export function AppearanceTab() {
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">
-          {t(($) => $.appearance.language.title)}
+          {t(($) => $.preferences.language.title)}
         </h2>
         <div className="flex gap-3" role="radiogroup">
           {languageOptions.map((opt) => {

@@ -1,5 +1,5 @@
 {
-  "appearance": {
+  "preferences": {
     "theme": {
       "title": "Theme",
       "light": "Light",
@@ -19,7 +19,7 @@
     "workspace_fallback": "Workspace",
     "tabs": {
       "profile": "Profile",
-      "appearance": "Appearance",
+      "preferences": "Preferences",
       "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",
