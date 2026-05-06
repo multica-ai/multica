@@ -30,7 +30,7 @@ import {
   type Persona,
   type Profile,
   type Language,
-} from "@multica/core/profile";
+} from "@multica/cerebro-profile/core";
 import type { UserProfileResponse } from "@multica/core/types";
 
 function profileFromResponse(row: UserProfileResponse): Profile {

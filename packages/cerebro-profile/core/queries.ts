@@ -1,6 +1,6 @@
 // CEREBRO-PATCH(core-profile-queries): cerebro modification of upstream file
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "../api";
+import { api } from "@multica/core/api";
 
 export const profileKeys = {
   me: () => ["profile", "me"] as const,

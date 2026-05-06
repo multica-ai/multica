@@ -13,7 +13,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
-import { AgentProfileTab } from "./agent-profile-tab";
+import { AgentProfileTab } from "@multica/cerebro-profile/views";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },

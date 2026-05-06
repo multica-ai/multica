@@ -1,7 +1,7 @@
 // CEREBRO-PATCH(core-profile-mutations): cerebro modification of upstream file
 import type { QueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import type { UserProfileRequest, UserProfileResponse } from "../types";
+import { api } from "@multica/core/api";
+import type { UserProfileRequest, UserProfileResponse } from "@multica/core/types";
 import { profileKeys } from "./queries";
 
 export function upsertMyProfileMutation(qc: QueryClient) {
