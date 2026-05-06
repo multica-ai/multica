@@ -827,7 +827,15 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      aria-label={viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
+                    >
+                      <span className="sr-only">
+                        {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
+                      </span>
                       {viewMode === "board" ? (
                         <Columns3 className="size-4" />
                       ) : (

@@ -116,6 +116,19 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
+
+	// Backwards-compat: pre-#2128 clients (Multica.app ≤ v0.2.25 and any cached
+	// web build older than the matching server) call /timeline with no query
+	// string and consume the response body as TimelineEntry[] directly. The
+	// new client always sends ?limit=..., so absence of every pagination param
+	// uniquely identifies a legacy caller. Drop this branch once the desktop
+	// auto-update has rolled the user base past v0.2.26.
+	if q.Get("limit") == "" && q.Get("before") == "" &&
+		q.Get("after") == "" && q.Get("around") == "" {
+		h.listTimelineLegacy(w, r, issue)
+		return
+	}
+
 	limit := timelineDefaultLimit
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -152,6 +165,42 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.listTimelineLatest(w, r, issue, limit)
 	}
+}
+
+// listTimelineLegacy serves clients that predate cursor pagination (#2128) —
+// notably Multica.app ≤ v0.2.25, where the renderer reads the response body
+// as TimelineEntry[] directly and would crash with "timeline.filter is not a
+// function" against the new wrapped shape (#2143, #2147). Returned bounded
+// at legacyTimelineCap to honour the spirit of #1968 — old clients couldn't
+// render thousands of entries without freezing the tab anyway.
+func (h *Handler) listTimelineLegacy(w http.ResponseWriter, r *http.Request, issue db.Issue) {
+	const legacyTimelineCap = 200
+	ctx := r.Context()
+	comments, err := h.Queries.ListCommentsLatest(ctx, db.ListCommentsLatestParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: legacyTimelineCap,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list comments")
+		return
+	}
+	activities, err := h.Queries.ListActivitiesLatest(ctx, db.ListActivitiesLatestParams{
+		IssueID: issue.ID, Limit: legacyTimelineCap,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list activities")
+		return
+	}
+	entries := h.mergeTimelineDesc(r, comments, activities, legacyTimelineCap)
+	// Old contract: ASC (oldest → newest).
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	// Old client does `data: timeline = []` which defaults undefined, not
+	// null — render an empty issue as "[]" not "null".
+	if entries == nil {
+		entries = []TimelineEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // listTimelineLatest fetches the most recent <limit> entries (no cursor).

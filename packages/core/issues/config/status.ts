@@ -30,6 +30,14 @@ export const BOARD_STATUSES: IssueStatus[] = [
   "blocked",
 ];
 
+/** Default board slice for active/current work. Backlog/done stay available through the column menu. */
+export const ACTIVE_BOARD_STATUSES: IssueStatus[] = [
+  "todo",
+  "in_progress",
+  "in_review",
+  "blocked",
+];
+
 export const STATUS_CONFIG: Record<
   IssueStatus,
   {

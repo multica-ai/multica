@@ -10,7 +10,7 @@ import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/co
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../utils/filter";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { ACTIVE_BOARD_STATUSES, BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -69,7 +69,7 @@ export function IssuesPage() {
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
       return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    return BOARD_STATUSES;
+    return ACTIVE_BOARD_STATUSES;
   }, [statusFilters]);
 
   const hiddenStatuses = useMemo(() => {

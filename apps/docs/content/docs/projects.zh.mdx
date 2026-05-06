@@ -1,0 +1,49 @@
+---
+title: 项目
+description: 把相关的 issue 归为一组当成一个单元来跟进 —— 有优先级、状态、进度和负责人。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 里的**项目**（project）是相关 [issue](/issues) 的容器。当一摊工作比单个 issue 大、又比整个工作区小的时候用它 —— 一次发布、一次迁移、一个分多块做的功能、一个会拆出多个线索的调研。
+
+每个项目有名字、图标、描述、**负责人**（lead，可以是成员，也可以是 [智能体](/agents)）、**状态**（`planned` / `in_progress` / `paused` / `completed` / `cancelled`）、**优先级**（`urgent` / `high` / `medium` / `low` / `none`），以及一个根据关联 issue 状态自动算出来的**进度**百分比。
+
+## 项目和 issue 的关系
+
+项目和 issue 是独立对象，多对一关系：一个 issue **最多属于一个**项目；一个项目可以容纳**任意多个** issue。关联和解除关联随时可逆 —— 在看板视图里拖动，或者在 issue 右侧 properties 面板用项目选择器。
+
+项目的进度条是按关联 issue 状态自动算出来的 —— 越多 issue 到 `done`，进度条越满。`cancelled` 的 issue 不计入分母；`backlog` 的 issue 计入分母但不计入分子。
+
+## pin 到侧边栏
+
+点项目右上角的 pin 图标，可以把这个项目加到侧边栏的固定区。pin 过的项目无论你在工作区哪里都一键可达；每个人独立 pin —— pin 是个人偏好。
+
+侧边栏 **Workspace → Projects** 链接始终展示工作区里所有项目；pin 只是在这之上的个人快捷方式。
+
+## 关联 resources
+
+每个项目有一个 **Resources** 区，可以挂 GitHub 仓库。挂上之后，被分配到这个项目里 issue 的 [智能体](/agents) 在执行 task 时可以读写这些仓库 —— Multica 会把仓库 URL 作为上下文传给 [守护进程](/daemon-runtimes)。
+
+Resources 是项目级别的；多个项目要共享同一个仓库，要分别挂上。
+
+## 删除项目
+
+删除项目**不会**删除它的 issue。关联的 issue 只是解除关联，回到工作区的扁平 issue 列表。这是刻意的 —— 即使项目本身的框架变了，里面的工作通常也不会是一次性的。
+
+<Callout type="info">
+如果你确实想把工作也删掉，先归档或删除 issue，再删除项目。
+</Callout>
+
+## 项目负责人
+
+负责人是为这个项目负总责的人 —— 或者智能体。这是一个软信号，不是权限控制：工作区任何成员都可以编辑项目，不管谁是负责人。项目负责人可以是：
+
+- 工作区里的成员（人）
+- [智能体](/agents) —— 当项目里的工作大部分要交给智能体时合适（例如"每周 bug 巡检"由一个巡检智能体担任 lead）
+
+## 下一步
+
+- [Issues](/issues) —— 项目里装的工作单元
+- [智能体担任项目负责人](/agents) —— 什么时候由智能体当 lead 合适
+- [Multica 怎么运转](/how-multica-works) —— 整体视图

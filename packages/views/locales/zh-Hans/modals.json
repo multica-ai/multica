@@ -118,18 +118,18 @@
       "select_agent_aria": "选择智能体",
       "pick_an_agent": "选一个智能体...",
       "no_agents": "暂无可用智能体。",
-      "version_missing": "该智能体的 daemon 没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级 daemon 并重连，或切换到手动创建。",
-      "version_below": "该智能体的 daemon CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级 daemon，或切换到手动创建。",
+      "version_missing": "该智能体的守护进程没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级守护进程并重连，或切换到手动创建。",
+      "version_below": "该智能体的守护进程 CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级守护进程，或切换到手动创建。",
       "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
       "submit": "创建",
       "sending": "发送中...",
       "uploading": "上传中...",
       "sent_label": "已发送",
       "sent_count": "已发送 {{count}}",
-      "version_blocked_tooltip": "daemon CLI 必须 ≥ {{min}}",
+      "version_blocked_tooltip": "守护进程 CLI 必须 ≥ {{min}}",
       "toast_sent": "已交给智能体——完成后会在收件箱通知你",
       "error_agent_unavailable_fallback": "智能体不可用，请换一个。",
-      "error_daemon_version": "该智能体的 daemon CLI（{{current}}）低于要求的 {{min}}。请升级 daemon 后再使用通过智能体创建。",
+      "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",
       "error_unknown": "提交失败，请重试。"
     }
   }
