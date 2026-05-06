@@ -262,6 +262,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/task-runs", h.ListWorkspaceTaskRuns)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

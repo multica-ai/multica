@@ -644,6 +644,35 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+// TestListWorkspaceTaskRuns_CrossWorkspace_Returns404 verifies that workspace-
+// scoped task history is not readable when the caller targets a workspace they
+// do not belong to.
+func TestListWorkspaceTaskRuns_CrossWorkspace_Returns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	_, _ = setupForeignWorkspaceFixture(t)
+
+	// Determine the foreign workspace ID by re-querying the fixture's issue.
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM workspace WHERE slug = $1`, "foreign-idor-tests",
+	).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("lookup foreign workspace: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/workspaces/"+foreignWorkspaceID+"/task-runs", nil)
+	req.Header.Set("X-Workspace-ID", foreignWorkspaceID)
+	req = withURLParam(req, "id", foreignWorkspaceID)
+
+	testHandler.ListWorkspaceTaskRuns(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ListWorkspaceTaskRuns with cross-workspace wsId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
 // usage is not readable across workspaces via a bare issue UUID.
 func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {

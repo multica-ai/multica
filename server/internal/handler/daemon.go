@@ -1594,6 +1594,97 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// WorkspaceTaskRunResponse is the row shape returned by the workspace-scoped
+// task-runs list endpoint backing the Runs page. Mirrors only the columns the
+// list view renders (status / issue link / agent / timing / error) — the full
+// task detail is fetched on a per-row drill-in (out of scope for v1).
+type WorkspaceTaskRunResponse struct {
+	ID              string  `json:"id"`
+	AgentID         string  `json:"agent_id"`
+	AgentName       string  `json:"agent_name"`
+	IssueID         string  `json:"issue_id,omitempty"`
+	IssueIdentifier string  `json:"issue_identifier,omitempty"`
+	IssueTitle      string  `json:"issue_title,omitempty"`
+	Status          string  `json:"status"`
+	Error           *string `json:"error"`
+	CreatedAt       string  `json:"created_at"`
+	StartedAt       *string `json:"started_at"`
+	CompletedAt     *string `json:"completed_at"`
+}
+
+// ListWorkspaceTaskRuns returns paginated task-run history scoped to the
+// caller's workspace. Workspace scoping is enforced via JOIN on agent (the
+// agent_task_queue table itself has no workspace_id column). Mirrors the
+// pagination shape used elsewhere — { items, total, has_more, limit, offset }.
+func (h *Handler) ListWorkspaceTaskRuns(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	limit := int32(50)
+	offset := int32(0)
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = int32(v)
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = int32(v)
+		}
+	}
+
+	wsUUID := parseUUID(workspaceID)
+	rows, err := h.Queries.ListTasksByWorkspace(r.Context(), db.ListTasksByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Limit:       limit,
+		Offset:      offset,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list task runs")
+		return
+	}
+	total, err := h.Queries.CountTasksByWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count task runs")
+		return
+	}
+
+	items := make([]WorkspaceTaskRunResponse, len(rows))
+	for i, row := range rows {
+		identifier := ""
+		if row.IssuePrefix.Valid && row.IssueNumber.Valid {
+			identifier = fmt.Sprintf("%s-%d", row.IssuePrefix.String, row.IssueNumber.Int32)
+		}
+		items[i] = WorkspaceTaskRunResponse{
+			ID:              uuidToString(row.ID),
+			AgentID:         uuidToString(row.AgentID),
+			AgentName:       row.AgentName,
+			IssueID:         uuidToString(row.IssueID),
+			IssueIdentifier: identifier,
+			IssueTitle:      row.IssueTitle.String,
+			Status:          row.Status,
+			Error:           textToPtr(row.Error),
+			CreatedAt:       timestampToString(row.CreatedAt),
+			StartedAt:       timestampToPtr(row.StartedAt),
+			CompletedAt:     timestampToPtr(row.CompletedAt),
+		}
+	}
+
+	hasMore := int64(offset)+int64(len(items)) < total
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":    items,
+		"total":    total,
+		"has_more": hasMore,
+		"limit":    limit,
+		"offset":   offset,
+	})
+}
+
 // ListTaskMessagesByUser returns task messages for a task.
 // Used by the frontend under regular user auth (not daemon auth).
 // Verifies the task belongs to the caller's workspace.

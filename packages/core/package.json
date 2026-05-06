@@ -61,6 +61,8 @@
     "./autopilots": "./autopilots/index.ts",
     "./autopilots/queries": "./autopilots/queries.ts",
     "./autopilots/mutations": "./autopilots/mutations.ts",
+    "./runs": "./runs/index.ts",
+    "./runs/queries": "./runs/queries.ts",
     "./pins": "./pins/index.ts",
     "./pins/queries": "./pins/queries.ts",
     "./pins/mutations": "./pins/mutations.ts",

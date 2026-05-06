@@ -66,6 +66,7 @@ export const RESERVED_SLUGS = new Set([
   "issues",
   "projects",
   "autopilots",
+  "runs",
   "agents",
   "inbox",
   "my-issues",

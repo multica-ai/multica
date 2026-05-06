@@ -20,6 +20,7 @@
     "./common/task-transcript": "./common/task-transcript/index.ts",
     "./projects/components": "./projects/components/index.ts",
     "./autopilots/components": "./autopilots/components/index.ts",
+    "./runs/components": "./runs/components/index.ts",
     "./modals/registry": "./modals/registry.tsx",
     "./modals/create-issue": "./modals/create-issue.tsx",
     "./my-issues": "./my-issues/index.ts",

@@ -78,6 +78,7 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  ListWorkspaceTaskRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
 } from "../types";
@@ -1226,5 +1227,16 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  async listWorkspaceTaskRuns(
+    workspaceId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<ListWorkspaceTaskRunsResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", params.limit.toString());
+    if (params?.offset !== undefined) search.set("offset", params.offset.toString());
+    const qs = search.toString();
+    return this.fetch(`/api/workspaces/${workspaceId}/task-runs${qs ? `?${qs}` : ""}`);
   }
 }

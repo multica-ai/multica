@@ -421,6 +421,38 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListTasksByWorkspace :many
+-- Workspace-scoped task history for the Runs page. Joins agent (the only
+-- workspace anchor — agent_task_queue has no workspace_id column) and
+-- LEFT JOINs issue + workspace to surface the issue identifier prefix.number
+-- on the row without a follow-up round-trip per task.
+SELECT
+    t.id,
+    t.agent_id,
+    a.name              AS agent_name,
+    t.issue_id,
+    i.number            AS issue_number,
+    w.issue_prefix      AS issue_prefix,
+    i.title             AS issue_title,
+    t.status,
+    t.error,
+    t.created_at,
+    t.started_at,
+    t.completed_at
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+LEFT JOIN issue i ON i.id = t.issue_id
+LEFT JOIN workspace w ON w.id = a.workspace_id
+WHERE a.workspace_id = $1
+ORDER BY t.created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CountTasksByWorkspace :one
+SELECT COUNT(*)::bigint AS total
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = $1;
+
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1

@@ -498,6 +498,20 @@ func (q *Queries) CountRunningTasks(ctx context.Context, agentID pgtype.UUID) (i
 	return count, err
 }
 
+const countTasksByWorkspace = `-- name: CountTasksByWorkspace :one
+SELECT COUNT(*)::bigint AS total
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = $1
+`
+
+func (q *Queries) CountTasksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTasksByWorkspace, workspaceID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -1450,7 +1464,7 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, trigger_summary FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, trigger_summary, force_fresh_session FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
 `
@@ -1497,6 +1511,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 			&i.FailureReason,
 			&i.LastHeartbeatAt,
 			&i.TriggerSummary,
+			&i.ForceFreshSession,
 		); err != nil {
 			return nil, err
 		}
@@ -1549,6 +1564,87 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 			&i.LastHeartbeatAt,
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTasksByWorkspace = `-- name: ListTasksByWorkspace :many
+SELECT
+    t.id,
+    t.agent_id,
+    a.name              AS agent_name,
+    t.issue_id,
+    i.number            AS issue_number,
+    w.issue_prefix      AS issue_prefix,
+    i.title             AS issue_title,
+    t.status,
+    t.error,
+    t.created_at,
+    t.started_at,
+    t.completed_at
+FROM agent_task_queue t
+JOIN agent a ON a.id = t.agent_id
+LEFT JOIN issue i ON i.id = t.issue_id
+LEFT JOIN workspace w ON w.id = a.workspace_id
+WHERE a.workspace_id = $1
+ORDER BY t.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListTasksByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+}
+
+type ListTasksByWorkspaceRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	AgentName   string             `json:"agent_name"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssueNumber pgtype.Int4        `json:"issue_number"`
+	IssuePrefix pgtype.Text        `json:"issue_prefix"`
+	IssueTitle  pgtype.Text        `json:"issue_title"`
+	Status      string             `json:"status"`
+	Error       pgtype.Text        `json:"error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Workspace-scoped task history for the Runs page. Joins agent (the only
+// workspace anchor — agent_task_queue has no workspace_id column) and
+// LEFT JOINs issue + workspace to surface the issue identifier prefix.number
+// on the row without a follow-up round-trip per task.
+func (q *Queries) ListTasksByWorkspace(ctx context.Context, arg ListTasksByWorkspaceParams) ([]ListTasksByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listTasksByWorkspace, arg.WorkspaceID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTasksByWorkspaceRow{}
+	for rows.Next() {
+		var i ListTasksByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.AgentName,
+			&i.IssueID,
+			&i.IssueNumber,
+			&i.IssuePrefix,
+			&i.IssueTitle,
+			&i.Status,
+			&i.Error,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
