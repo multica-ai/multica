@@ -23,6 +23,57 @@ func TestNewReturnsOpenclawBackend(t *testing.T) {
 	}
 }
 
+func TestOpenclawExecuteParsesStdoutWrappedResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then echo 'openclaw 2026.5.4'; exit 0; fi\n" +
+		"echo '[info] diagnostic on stderr' >&2\n" +
+		"printf '%s\\n' '{\"runId\":\"run_stdout\",\"status\":\"ok\",\"result\":{\"payloads\":[{\"type\":\"text\",\"text\":\"stdout wrapped\"}],\"meta\":{\"agentMeta\":{\"sessionId\":\"ses_stdout\",\"model\":\"deepseek-chat\",\"usage\":{\"input\":12,\"output\":3}}}}}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("status: got %q, want completed (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "stdout wrapped" {
+			t.Errorf("output: got %q, want %q", result.Output, "stdout wrapped")
+		}
+		if result.SessionID != "ses_stdout" {
+			t.Errorf("sessionID: got %q, want %q", result.SessionID, "ses_stdout")
+		}
+		if got := result.Usage["deepseek-chat"].InputTokens; got != 12 {
+			t.Errorf("input tokens: got %d, want 12", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // ── Legacy result format tests (processOutput with final JSON blob) ──
 
 func TestOpenclawProcessOutputHappyPath(t *testing.T) {
@@ -77,6 +128,52 @@ func TestOpenclawProcessOutputHappyPath(t *testing.T) {
 	if msgs[0].Content != "Hello from openclaw" {
 		t.Errorf("message content: got %q", msgs[0].Content)
 	}
+}
+
+func TestOpenclawProcessOutputWrappedResult(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawWrappedResult{
+		RunID:  "run_123",
+		Status: "ok",
+		Result: &openclawResult{
+			Payloads: []openclawPayload{{Text: "Hello from wrapped openclaw"}},
+			Meta: openclawMeta{
+				AgentMeta: map[string]any{
+					"sessionId": "ses_wrapped",
+					"model":     "deepseek-chat",
+					"usage": map[string]any{
+						"input":  float64(42),
+						"output": float64(7),
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(result)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Hello from wrapped openclaw" {
+		t.Errorf("output: got %q, want wrapped payload text", res.output)
+	}
+	if res.sessionID != "ses_wrapped" {
+		t.Errorf("sessionID: got %q, want %q", res.sessionID, "ses_wrapped")
+	}
+	if res.model != "deepseek-chat" {
+		t.Errorf("model: got %q, want %q", res.model, "deepseek-chat")
+	}
+	if res.usage.InputTokens != 42 || res.usage.OutputTokens != 7 {
+		t.Errorf("usage: got %+v", res.usage)
+	}
+
+	close(ch)
 }
 
 func TestOpenclawProcessOutputMultiplePayloads(t *testing.T) {
@@ -167,6 +264,35 @@ func TestOpenclawProcessOutputWithLeadingLogLines(t *testing.T) {
 	close(ch)
 }
 
+func TestOpenclawProcessOutputWithNoiseAndWrappedResult(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawWrappedResult{
+		RunID:  "run_noise",
+		Status: "ok",
+		Result: &openclawResult{
+			Payloads: []openclawPayload{{Text: "Done after noise"}},
+			Meta:     openclawMeta{DurationMs: 100},
+		},
+	}
+	data, _ := json.Marshal(result)
+	input := "[info] starting\n" + string(data) + "\n[debug] finished"
+
+	res := b.processOutput(strings.NewReader(input), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Done after noise" {
+		t.Errorf("output: got %q, want %q", res.output, "Done after noise")
+	}
+
+	close(ch)
+}
+
 func TestOpenclawProcessOutputIgnoresTrailingLogLinesAfterJSON(t *testing.T) {
 	t.Parallel()
 
@@ -204,6 +330,24 @@ func TestOpenclawProcessOutputNoJSON(t *testing.T) {
 	}
 	if res.output != "not json at all" {
 		t.Errorf("output: got %q", res.output)
+	}
+
+	close(ch)
+}
+
+func TestOpenclawProcessOutputMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	res := b.processOutput(strings.NewReader(`{"payloads":[`), ch)
+
+	if res.status != "failed" {
+		t.Errorf("status: got %q, want %q", res.status, "failed")
+	}
+	if res.errMsg != "openclaw returned no parseable output" {
+		t.Errorf("errMsg: got %q", res.errMsg)
 	}
 
 	close(ch)
@@ -1409,12 +1553,12 @@ func TestCompareOpenclawVersion(t *testing.T) {
 		a, b string
 		want int
 	}{
-		{"2026.5.5", "2026.5.5", 0},
-		{"2026.5.4", "2026.5.5", -1},
-		{"2026.5.6", "2026.5.5", 1},
+		{"2026.5.4", "2026.5.4", 0},
+		{"2026.5.3", "2026.5.4", -1},
+		{"2026.5.5", "2026.5.4", 1},
 		{"2026.4.99", "2026.5.0", -1},
 		{"2027.0.0", "2026.99.99", 1},
-		{"0.0.0", "2026.5.5", -1},
+		{"0.0.0", "2026.5.4", -1},
 	}
 
 	for _, c := range cases {
@@ -1459,7 +1603,7 @@ func TestOpenclawExecuteRejectsOldVersion(t *testing.T) {
 		t.Fatal("expected Execute to return a version error, got nil")
 	}
 	msg := err.Error()
-	for _, want := range []string{"2026.4.9", "2026.5.5", "openclaw update"} {
+	for _, want := range []string{"2026.4.9", "2026.5.4", "openclaw update"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q: %s", want, msg)
 		}
@@ -1480,7 +1624,7 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "openclaw")
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"--version\" ]; then\n" +
-		"  echo 'openclaw 2026.5.5 c37871e'\n" +
+		"  echo 'openclaw 2026.5.4 c37871e'\n" +
 		"  exit 0\n" +
 		"fi\n" +
 		"exit 0\n"
