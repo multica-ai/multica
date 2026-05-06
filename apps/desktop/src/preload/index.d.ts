@@ -4,6 +4,11 @@ import type { LocalStackStatus } from "../shared/local-stack-types";
 import type { ResetResult } from "../shared/local-reset-types";
 import type { LocalDataPaths } from "../main/local-data-paths";
 import type { LocalDiagnostics } from "../main/local-diagnostics";
+import type {
+  TaskChangeApplyResult,
+  TaskChangeInput,
+  TaskChangePreview,
+} from "../shared/task-change-types";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -98,6 +103,21 @@ interface LocalResetAPI {
   reset: () => Promise<ResetResult>;
 }
 
+interface TaskChangeAPI {
+  /** Show an OS folder picker; returns `{ ok: true, path }` on selection,
+   *  `{ ok: false }` when the dialog is cancelled. */
+  pickCheckoutDirectory: () => Promise<{ ok: boolean; path?: string }>;
+  /** Compute the diff between the task branch and base ref, plus the
+   *  target-checkout cleanliness/repo-match status. Read-only. */
+  previewApplyTaskDiff: (input: TaskChangeInput) => Promise<TaskChangePreview>;
+  /** Apply the task diff onto the target checkout. Refuses on dirty target,
+   *  repo mismatch, no changes, or 3-way conflict. Never commits, never pushes. */
+  applyTaskDiff: (input: TaskChangeInput) => Promise<TaskChangeApplyResult>;
+  /** Reveal an absolute path in the OS file manager. Main-process validates
+   *  that the input is a non-empty absolute path before calling shell.openPath. */
+  openPath: (target: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -118,6 +138,7 @@ declare global {
     localStackAPI: LocalStackAPI;
     localDiagnosticsAPI: LocalDiagnosticsAPI;
     localResetAPI: LocalResetAPI;
+    taskChangeAPI: TaskChangeAPI;
     updater: UpdaterAPI;
   }
 }

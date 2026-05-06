@@ -28,43 +28,19 @@ import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
 
-export type TaskChangeInput = {
-  taskWorktreePath: string;
-  taskBranchName: string;
-  /** Branch from the worktree to diff against — usually the resolved base ref. */
-  baseRef: string;
-  taskRepoURL: string;
-  /** User-side directory we apply into. */
-  targetCheckout: string;
-  /** Branch name to create on target if not present. */
-  newBranchName: string;
-};
+// Data-shape types live in shared/ so the preload bridge can import them
+// without dragging child_process/fs into the renderer.
+export type {
+  TaskChangeInput,
+  TaskChangePreview,
+  TaskChangeApplyResult,
+} from "../shared/task-change-types";
 
-export type TaskChangePreview = {
-  changedFiles: string[];
-  deletedFiles: string[];
-  /** Full unified diff body — for the review dialog. */
-  diff: string;
-  /** True when no uncommitted changes exist on target. */
-  targetClean: boolean;
-  /** Repo URL on target (from `git remote get-url origin`). */
-  targetRepoURL: string;
-  /** Repo URL match status. */
-  repoMatches: boolean;
-};
-
-export type TaskChangeApplyResult =
-  | { ok: true; createdBranch: boolean; branchName: string }
-  | {
-      ok: false;
-      reason:
-        | "target_dirty"
-        | "repo_mismatch"
-        | "conflict"
-        | "no_changes"
-        | "git_failure";
-      detail: string;
-    };
+import type {
+  TaskChangeInput,
+  TaskChangePreview,
+  TaskChangeApplyResult,
+} from "../shared/task-change-types";
 
 export interface GitRunner {
   /** Run a git command. Returns stdout on success; throws on non-zero exit with stderr in the error. */

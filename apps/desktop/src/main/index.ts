@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, nativeImage, Notification, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from "electron";
 import { homedir } from "os";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import { rm } from "fs/promises";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
@@ -21,6 +21,8 @@ import {
 } from "./local-data-paths";
 import { createDiagnosticsCollector } from "./local-diagnostics";
 import { performLocalReset } from "./local-reset";
+import { applyTaskDiff, previewTaskDiff } from "./task-change-service";
+import type { TaskChangeInput } from "../shared/task-change-types";
 
 // Bundled icon used for dev-mode dock/taskbar branding. In production the
 // app bundle icon (from electron-builder) wins; this path is only consumed
@@ -124,6 +126,44 @@ function handleDeepLink(url: string): void {
   } catch {
     // Ignore malformed URLs
   }
+}
+
+// --- Task change input validation ---------------------------------------
+// Renderer-supplied task-change payloads cross the IPC boundary as `unknown`.
+// We require every string field to be a non-empty string and reject anything
+// else with a clear error — invoke() surfaces this to the renderer as a
+// rejected promise.
+
+const TASK_CHANGE_INPUT_FIELDS = [
+  "taskWorktreePath",
+  "taskBranchName",
+  "baseRef",
+  "taskRepoURL",
+  "targetCheckout",
+  "newBranchName",
+] as const;
+
+function assertTaskChangeInput(input: unknown): TaskChangeInput {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid task change input: expected object");
+  }
+  const record = input as Record<string, unknown>;
+  for (const field of TASK_CHANGE_INPUT_FIELDS) {
+    const value = record[field];
+    if (typeof value !== "string" || value === "") {
+      throw new Error(
+        `invalid task change input: field "${field}" must be a non-empty string`,
+      );
+    }
+  }
+  return {
+    taskWorktreePath: record.taskWorktreePath as string,
+    taskBranchName: record.taskBranchName as string,
+    baseRef: record.baseRef as string,
+    taskRepoURL: record.taskRepoURL as string,
+    targetCheckout: record.targetCheckout as string,
+    newBranchName: record.newBranchName as string,
+  };
 }
 
 // --- Window creation -----------------------------------------------------
@@ -429,6 +469,48 @@ if (!gotTheLock) {
         },
       }),
     );
+
+    // --- Task change preview / apply -------------------------------------
+    // Narrow IPC surface for the "apply task diff to my checkout" flow
+    // (Phase 8). Only four channels are exposed — no arbitrary FS/git access
+    // from the renderer. Inputs are validated here so the service layer can
+    // assume well-formed strings.
+    ipcMain.handle("taskChange:pickCheckoutDirectory", async () => {
+      const result = await dialog.showOpenDialog({
+        properties: ["openDirectory"],
+        title: "Select target checkout",
+        message:
+          "Pick the local clone of the repo to apply the task diff into.",
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false };
+      }
+      return { ok: true, path: result.filePaths[0] };
+    });
+
+    ipcMain.handle(
+      "taskChange:previewApplyTaskDiff",
+      (_event, input: unknown) => {
+        const validated = assertTaskChangeInput(input);
+        return previewTaskDiff(validated);
+      },
+    );
+
+    ipcMain.handle("taskChange:applyTaskDiff", (_event, input: unknown) => {
+      const validated = assertTaskChangeInput(input);
+      return applyTaskDiff(validated);
+    });
+
+    // `openPath` only ever sees absolute paths the user chose themselves
+    // (via `pickCheckoutDirectory`) or paths the daemon supplied as task
+    // metadata. We still validate the shape — any other input is rejected.
+    ipcMain.handle("taskChange:openPath", async (_event, target: unknown) => {
+      if (typeof target !== "string" || target === "" || !isAbsolute(target)) {
+        return { ok: false, error: "invalid path" };
+      }
+      const result = await shell.openPath(target);
+      return result === "" ? { ok: true } : { ok: false, error: result };
+    });
 
     createWindow();
 

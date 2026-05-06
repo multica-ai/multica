@@ -5,6 +5,11 @@ import type { LocalStackStatus } from "../shared/local-stack-types";
 import type { ResetResult } from "../shared/local-reset-types";
 import type { LocalDataPaths } from "../main/local-data-paths";
 import type { LocalDiagnostics } from "../main/local-diagnostics";
+import type {
+  TaskChangeApplyResult,
+  TaskChangeInput,
+  TaskChangePreview,
+} from "../shared/task-change-types";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -189,6 +194,22 @@ const localDiagnosticsAPI = {
     ipcRenderer.invoke("diagnostics:openPath", key),
 };
 
+// Narrow surface for the "apply task diff to my checkout" flow (Phase 8).
+// Only these four methods exist — the renderer cannot ask main to read or
+// write arbitrary files. `openPath` is bounded to paths the user chose via
+// `pickCheckoutDirectory` or paths surfaced by the daemon as task metadata;
+// the main process additionally enforces that the argument is absolute.
+const taskChangeAPI = {
+  pickCheckoutDirectory: (): Promise<{ ok: boolean; path?: string }> =>
+    ipcRenderer.invoke("taskChange:pickCheckoutDirectory"),
+  previewApplyTaskDiff: (input: TaskChangeInput): Promise<TaskChangePreview> =>
+    ipcRenderer.invoke("taskChange:previewApplyTaskDiff", input),
+  applyTaskDiff: (input: TaskChangeInput): Promise<TaskChangeApplyResult> =>
+    ipcRenderer.invoke("taskChange:applyTaskDiff", input),
+  openPath: (target: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("taskChange:openPath", target),
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -220,6 +241,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("localStackAPI", localStackAPI);
   contextBridge.exposeInMainWorld("localDiagnosticsAPI", localDiagnosticsAPI);
   contextBridge.exposeInMainWorld("localResetAPI", localResetAPI);
+  contextBridge.exposeInMainWorld("taskChangeAPI", taskChangeAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
@@ -234,6 +256,8 @@ if (process.contextIsolated) {
   window.localDiagnosticsAPI = localDiagnosticsAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.localResetAPI = localResetAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.taskChangeAPI = taskChangeAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
 }
