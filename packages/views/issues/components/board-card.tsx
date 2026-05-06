@@ -11,6 +11,7 @@ import { CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { issueWorkspaceControlWritable } from "@multica/core/issues/workspace-control";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -64,6 +65,8 @@ export const BoardCardContent = memo(function BoardCardContent({
   });
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
+  const workspaceControl = issue.workspace_control;
+  const canEditWorkspaceSource = issueWorkspaceControlWritable(issue);
 
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
@@ -83,11 +86,28 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const showWorkspaceControl = workspaceControl?.status || workspaceControl?.source_id;
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
       {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        {showWorkspaceControl && (
+          <span
+            className={`inline-flex min-h-5 items-center rounded border px-1.5 text-[10px] font-medium ${
+              workspaceControl?.status === "apply-failed"
+                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                : workspaceControl?.status === "pending"
+                  ? "border-primary/25 bg-primary/10 text-primary"
+                  : "border-border bg-muted text-muted-foreground"
+            }`}
+            title={workspaceControl?.error ?? workspaceControl?.source_id}
+          >
+            {workspaceControl?.status ?? (workspaceControl?.writable ? "workspace" : "read-only")}
+          </span>
+        )}
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
@@ -128,7 +148,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       {(showAssignee || showPriority || showDueDate) && (
         <div className="mt-3 flex items-center gap-2">
           {showAssignee &&
-            (editable ? (
+            (editable && canEditWorkspaceSource ? (
               <PickerWrapper>
                 <AssigneePicker
                   assigneeType={issue.assignee_type}
@@ -153,7 +173,7 @@ export const BoardCardContent = memo(function BoardCardContent({
               />
             ))}
           {showPriority &&
-            (editable ? (
+            (editable && canEditWorkspaceSource ? (
               <PickerWrapper>
                 <PriorityPicker
                   priority={issue.priority}
@@ -174,7 +194,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             ))}
           {showDueDate && (
             <div className="ml-auto">
-              {editable ? (
+              {editable && canEditWorkspaceSource ? (
                 <PickerWrapper>
                   <DueDatePicker
                     dueDate={issue.due_date}
@@ -221,6 +241,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
 
 export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
   const p = useWorkspacePaths();
+  const disabled = !issueWorkspaceControlWritable(issue);
   const {
     attributes,
     listeners,
@@ -232,6 +253,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
     id: issue.id,
     data: { status: issue.status },
     animateLayoutChanges,
+    disabled,
   });
 
   const style = {
@@ -245,8 +267,8 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
         ref={setNodeRef}
         style={style}
         {...attributes}
-        {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        {...(!disabled ? listeners : {})}
+        className={`group/card ${isDragging ? "opacity-30" : ""} ${disabled ? "cursor-default" : ""}`}
       >
         <AppLink
           href={p.issueDetail(issue.id)}

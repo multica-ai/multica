@@ -9,6 +9,7 @@
     "workspaces",
     "members-roles",
     "issues",
+    "projects",
     "comments",
     "project-resources",
     "---Agents---",

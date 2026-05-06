@@ -33,6 +33,17 @@ export const BOARD_STATUSES: IssueStatus[] = [
   "blocked",
 ];
 
+/** Default board slice: show every business stage in the workspace control board. */
+export const ACTIVE_BOARD_STATUSES: IssueStatus[] = [
+  "backlog",
+  "todo",
+  "in_progress",
+  "in_review",
+  "review",
+  "done",
+  "blocked",
+];
+
 export const STATUS_CONFIG: Record<
   IssueStatus,
   {

@@ -14,6 +14,17 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent";
 
+export interface WorkspaceControlState {
+  source_type: string;
+  source_id: string;
+  writable: boolean;
+  status?: "pending" | "applied" | "apply-failed";
+  action?: "update" | "delete";
+  fields?: string[];
+  error?: string;
+  updated_at?: string;
+}
+
 export interface IssueReaction {
   id: string;
   issue_id: string;
@@ -42,6 +53,7 @@ export interface Issue {
   due_date: string | null;
   reactions?: IssueReaction[];
   labels?: Label[];
+  workspace_control?: WorkspaceControlState;
   created_at: string;
   updated_at: string;
 }

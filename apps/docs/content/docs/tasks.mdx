@@ -63,6 +63,8 @@ Automatic retry also has two extra conditions:
 
 <Callout type="warning">
 **Autopilot tasks don't retry automatically** by design. An Autopilot has its own firing cadence (e.g. daily); automatic retries on failure would overlap with the next scheduled run. If you need an immediate re-run after failure, use a manual rerun (next section).
+
+**How you'll know an Autopilot task failed**: a notification lands in your [Inbox](/inbox), and the associated issue's status reverts from `in_progress` back to `todo`. The [Autopilots](/autopilots) page also shows the latest run result per autopilot.
 </Callout>
 
 ## Manual rerun vs. automatic retry

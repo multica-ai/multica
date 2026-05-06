@@ -94,7 +94,9 @@ func TestListTimeline_DefaultLatestPage(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Latest page test")
 	seedTimelineEntries(t, issueID, 60, 60) // 120 total; default limit is 50
 
-	resp, code := fetchTimeline(t, issueID, "")
+	// Empty query string is now reserved for the legacy compat path; new
+	// client always sends ?limit=... so emulate that here.
+	resp, code := fetchTimeline(t, issueID, "limit=50")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
@@ -265,7 +267,7 @@ func TestListTimeline_MergedCommentAndActivity(t *testing.T) {
 		t.Fatalf("seed comment: %v", err)
 	}
 
-	resp, code := fetchTimeline(t, issueID, "")
+	resp, code := fetchTimeline(t, issueID, "limit=50")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
@@ -279,5 +281,52 @@ func TestListTimeline_MergedCommentAndActivity(t *testing.T) {
 	}
 	if !strings.Contains(*resp.Entries[0].Content, "merge test") {
 		t.Fatalf("comment content lost in merge: %v", resp.Entries[0].Content)
+	}
+}
+
+// TestListTimeline_LegacyShapeForPreCursorClients pins the backwards-compat
+// contract for clients that predate cursor pagination (#2128). They call
+// /timeline with no query string and read the body as TimelineEntry[]
+// directly — returning the new wrapped shape there is what caused #2143 /
+// #2147. Asserts: array shape, ASC order, "[]" (not "null") on empty issue.
+func TestListTimeline_LegacyShapeForPreCursorClients(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Legacy compat test")
+	seedTimelineEntries(t, issueID, 3, 2) // 5 total
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/timeline", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ListTimeline(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Must decode as a bare array, not the wrapped TimelineResponse.
+	var entries []TimelineEntry
+	if err := json.NewDecoder(w.Body).Decode(&entries); err != nil {
+		t.Fatalf("legacy response must be a JSON array: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries (3 comments + 2 activities), got %d", len(entries))
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i-1].CreatedAt > entries[i].CreatedAt {
+			t.Fatalf("legacy contract requires ASC order, got %s before %s",
+				entries[i-1].CreatedAt, entries[i].CreatedAt)
+		}
+	}
+
+	// Empty issue must render as "[]" (not "null") — old client does
+	// `data: timeline = []` which defaults undefined but not null.
+	emptyID := createIssueForTimeline(t, "Empty legacy test")
+	w2 := httptest.NewRecorder()
+	req2 := newRequest("GET", "/api/issues/"+emptyID+"/timeline", nil)
+	req2 = withURLParam(req2, "id", emptyID)
+	testHandler.ListTimeline(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("empty issue: expected 200, got %d", w2.Code)
+	}
+	if got := strings.TrimSpace(w2.Body.String()); got != "[]" {
+		t.Fatalf("empty issue must render as [], got %q", got)
 	}
 }

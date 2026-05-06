@@ -28,6 +28,7 @@ export function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
+  projectId,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -35,6 +36,8 @@ export function BoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
+  /** When set, the per-column "+" pre-fills the project on the create form. */
+  projectId?: string;
 }) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -80,7 +83,11 @@ export function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
-                  onClick={() => useModalStore.getState().open("create-issue", { status })}
+                  onClick={() =>
+                    useModalStore
+                      .getState()
+                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
+                  }
                 >
                   <Plus className="size-3.5" />
                 </Button>

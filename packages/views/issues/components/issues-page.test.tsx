@@ -81,6 +81,7 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked", "cancelled"],
   BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked"],
+  ACTIVE_BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -400,6 +401,10 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("Design");
     expect(screen.getAllByText("Not started").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Developing").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Testing").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Review").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Done").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Pending").length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows workspace breadcrumb with 'Issues' label", async () => {

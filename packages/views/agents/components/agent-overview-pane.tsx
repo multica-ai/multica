@@ -117,6 +117,10 @@ export function AgentOverviewPane({
   };
 
   return (
+    // On mobile the parent stacks the inspector and overview and scrolls the
+    // page itself, so this pane has no inherited height. `min-h-[60vh]` keeps
+    // the tab content area usably tall when content is short; `md:` restores
+    // the grid-driven full-height behavior on tablet and up.
     <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
       <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b px-2 md:px-4">
         {detailTabs.map((tab) => (

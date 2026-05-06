@@ -95,20 +95,29 @@ Multica 的产品名词分两类：
 
 这套规则与 `apps/docs/content/docs/*.zh.mdx` 完全对齐 —— docs 是已经实战 20+ 篇的 CN voice 标准。
 
-### 不翻 —— 实体（小写英文）
+### 实体词的混合规则（`issue` / `skill` / `task`）
 
-| 词 | 中文中的写法 | 例 |
+`issue` / `skill` / `task` 是 Multica 的核心实体。schema 字段、API 字段、产品 UI 标签都用英文。中文里采用**混合规则** —— 词出现在哪里决定怎么写：
+
+| 场景 | 写法 | 例 |
 | --- | --- | --- |
-| Issue | `issue`（小写） | "把 issue 分配给智能体"、"创建子 issue" |
-| Skill | `skill`（小写） | "为智能体注入 skill" |
-| Task | `task`（小写） | "排队中的 task" |
+| **UI 短句 / 状态名 / 代码上下文** | 小写英文 | "排队中的 task"、"创建子 issue"、"为智能体注入 skill" |
+| **doc 标题 / 章节标题** | 首字母大写英文，**或**对应中文术语 | "Issue 与 project"、"Skills"、"执行任务" |
+| **doc 正文长篇讨论中作为主语** | 中文术语，首次出现配括号英文 | "**执行任务**（task）是智能体每一次工作的单位" |
+| **API / DB 字段** | 永远 `task` / `issue` / `skill` | `task_id`、`issue_status`、`skill_uuid` |
 
-**为什么 `issue` / `skill` / `task` 不翻而 `project` / `autopilot` 翻**：
+中文术语对照：
 
-- **`issue` / `task`**：dev 团队习惯说英文，"任务"在中文里和"工作"几乎同义太空泛，"工单"是 IT 工单语义，"议题"是 GitHub 风格但用户场景不匹配。三个候选都不如 `issue` 准确。
+- `task` ↔ `执行任务`（上下文清楚后可简写为「任务」）
+- `issue` 没有公认中文译法 —— 保留英文；标题可大写为 `Issue`
+- `skill` 没有公认中文译法 —— 保留英文；标题可大写为 `Skills`
+
+**为什么 `issue` / `skill` / `task` 不强制译，而 `project` / `autopilot` 必译**：
+
+- **`issue` / `task`**：dev 团队习惯说英文，"任务"在中文里和"工作"几乎同义太空泛，"工单"是 IT 工单语义，"议题"是 GitHub 风格但用户场景不匹配 —— 三个候选都不如 `issue` 准确。**但**在长篇 doc 正文里，重复 50 次 `task` 节奏不顺，所以正文允许用 `执行任务`，UI 短句、状态名仍保持小写英文。
 - **`skill`**：Multica 特有概念，没有公认中文译法。
-- **`project` 翻成"项目"**：这是中文里早就稳定的日常词。飞书 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻译成"项目"，没有产品保留 `project`。
-- **`autopilot` 翻成"自动化"**：autopilot 在中文里联想到特斯拉的"自动驾驶"，跟产品功能（按周期跑 task）对应不上。Notion / 飞书都用"自动化"，是行业共识。
+- **`project` 翻成「项目」**：中文里早就稳定的日常词。飞书 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻译成「项目」，没有产品保留 `project`。
+- **`autopilot` 翻成「自动化」**：autopilot 在中文里联想到特斯拉的「自动驾驶」，跟产品功能（按周期跑 task）对应不上。Notion / 飞书都用「自动化」，是行业共识。
 
 ### 完整翻译 —— 概念词
 
