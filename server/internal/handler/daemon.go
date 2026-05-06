@@ -182,16 +182,16 @@ func workspaceReposVersion(repos []RepoData) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func parseWorkspaceRepos(raw []byte) []RepoData {
-	repos := approvedWorkspaceRepoData(raw)
+func (h *Handler) parseWorkspaceRepos(raw []byte) []RepoData {
+	repos := h.approvedWorkspaceRepoData(raw)
 	if repos == nil {
 		return []RepoData{}
 	}
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
-	repos := parseWorkspaceRepos(raw)
+func (h *Handler) workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+	repos := h.parseWorkspaceRepos(raw)
 	return daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
@@ -342,7 +342,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
+	repoResp := h.workspaceReposResponse(req.WorkspaceID, ws.Repos)
 
 	// Include workspace settings so the daemon can honour feature toggles
 	// (e.g. co_authored_by_enabled for the prepare-commit-msg hook).
@@ -453,7 +453,7 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	writeJSON(w, http.StatusOK, h.workspaceReposResponse(workspaceID, ws.Repos))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -1057,7 +1057,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
 			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
+				if repos := h.approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}
@@ -1120,7 +1120,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
+				if repos := h.approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}
@@ -1179,7 +1179,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(resp.Repos) == 0 {
 					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
+						if repos := h.approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 							resp.Repos = repos
 						}
 					}
@@ -1199,7 +1199,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				if repos := approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
+				if repos := h.approvedWorkspaceRepoData(ws.Repos); len(repos) > 0 {
 					resp.Repos = repos
 				}
 			}

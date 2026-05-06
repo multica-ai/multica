@@ -137,7 +137,9 @@ func (h *Handler) normalizeIncomingRepos(incoming []WorkspaceRepoEntry, existing
 }
 
 // loadApprovedWorkspaceRepoURLs fetches the workspace and returns the set of
-// approved repo URLs. Used to gate project resource creation.
+// attachable repo URLs. When RepoApprovalRequired is on, only "approved"
+// entries qualify. When off, status is meaningless so every entry is
+// attachable — including legacy "pending" rows from a prior config flip.
 func (h *Handler) loadApprovedWorkspaceRepoURLs(ctx context.Context, wsID string) (map[string]struct{}, error) {
 	wsUUID, err := parseUUIDLoose(wsID)
 	if err != nil {
@@ -150,25 +152,28 @@ func (h *Handler) loadApprovedWorkspaceRepoURLs(ctx context.Context, wsID string
 	entries := parseRepoEntries(ws.Repos)
 	set := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
-		if isApprovedStatus(e.Status) {
-			set[normalizeRepoURL(e.URL)] = struct{}{}
+		if h.cfg.RepoApprovalRequired && !isApprovedStatus(e.Status) {
+			continue
 		}
+		set[normalizeRepoURL(e.URL)] = struct{}{}
 	}
 	return set, nil
 }
 
 // approvedWorkspaceRepoData converts the JSONB blob to the daemon-facing
-// RepoData slice, dropping anything still in pending status.
-func approvedWorkspaceRepoData(reposJSON []byte) []RepoData {
+// RepoData slice. When RepoApprovalRequired is on, only "approved" entries
+// are returned. When off, every entry is returned — status is irrelevant.
+func (h *Handler) approvedWorkspaceRepoData(reposJSON []byte) []RepoData {
 	entries := parseRepoEntries(reposJSON)
 	if len(entries) == 0 {
 		return nil
 	}
 	out := make([]RepoData, 0, len(entries))
 	for _, e := range entries {
-		if isApprovedStatus(e.Status) {
-			out = append(out, RepoData{URL: normalizeRepoURL(e.URL)})
+		if h.cfg.RepoApprovalRequired && !isApprovedStatus(e.Status) {
+			continue
 		}
+		out = append(out, RepoData{URL: normalizeRepoURL(e.URL)})
 	}
 	return out
 }
