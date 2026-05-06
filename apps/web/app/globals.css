@@ -7,6 +7,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+:root {
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-serif: "Source Serif 4", "Instrument Serif", ui-serif,
+    "Iowan Old Style", "Apple Garamond", Baskerville, "Times New Roman", serif;
+  --font-serif-zh: "Noto Serif SC", "Songti SC", "SimSun", serif;
+}
+
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
