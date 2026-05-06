@@ -31,7 +31,6 @@
     "./inbox/components/inbox-detail-label": "./inbox/components/inbox-detail-label.tsx",
     "./layout/page-header": "./layout/page-header.tsx",
     "./runtimes": "./runtimes/index.ts",
-    "./docs": "./docs/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",
     "./workspace/create-workspace-form": "./workspace/create-workspace-form.tsx",
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",

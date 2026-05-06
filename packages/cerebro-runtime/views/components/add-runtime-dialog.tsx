@@ -18,7 +18,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { api } from "@multica/core/api";
 import type { CreateRuntimeSetupTokenResponse } from "@multica/core/types";
-import { useNavigation } from "../../navigation";
+import { useNavigation } from "@multica/views/navigation";
 import { toast } from "sonner";
 
 const TICK_MS = 1000;

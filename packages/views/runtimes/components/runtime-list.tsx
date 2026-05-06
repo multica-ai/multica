@@ -14,7 +14,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { ProviderLogo } from "./provider-logo";
-import { AddRuntimeDialog } from "./add-runtime-dialog";
+import { AddRuntimeDialog } from "@multica/cerebro-runtime/views";
 
 type RuntimeFilter = "mine" | "all";
 

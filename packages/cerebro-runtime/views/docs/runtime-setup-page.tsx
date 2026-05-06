@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(runtime-setup-page): cerebro modification of upstream file
 
 import { ArrowLeft, Server, Terminal, Apple } from "lucide-react";
-import { useNavigation } from "../navigation";
+import { useNavigation } from "@multica/views/navigation";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
