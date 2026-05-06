@@ -243,7 +243,7 @@ importers:
         version: 15.8.5(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
       fumadocs-mdx:
         specifier: ^12.0.3
-        version: 12.0.3(fumadocs-core@15.8.5(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
+        version: 12.0.3(fumadocs-core@15.8.5(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
       fumadocs-ui:
         specifier: ^15.5.2
         version: 15.8.5(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(tailwindcss@4.2.2)
@@ -281,6 +281,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
 
   apps/web:
     dependencies:
@@ -11700,7 +11703,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  fumadocs-mdx@12.0.3(fumadocs-core@15.8.5(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3):
+  fumadocs-mdx@12.0.3(fumadocs-core@15.8.5(@types/react@19.2.14)(lucide-react@1.0.1(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react-router@7.14.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3))(next@15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1)):
     dependencies:
       '@mdx-js/mdx': 3.1.1
       '@standard-schema/spec': 1.1.0
@@ -11722,6 +11725,7 @@ snapshots:
     optionalDependencies:
       next: 15.5.15(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react: 19.2.3
+      vite: 8.0.1(@types/node@25.5.0)(jiti@2.6.1)
     transitivePeerDependencies:
       - supports-color
 
