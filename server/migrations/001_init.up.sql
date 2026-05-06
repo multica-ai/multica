@@ -55,7 +55,7 @@ CREATE TABLE issue (
     title TEXT NOT NULL,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'backlog'
-        CHECK (status IN ('backlog', 'todo', 'in_progress', 'in_review', 'review', 'done', 'blocked', 'cancelled')),
+        CHECK (status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled')),
     priority TEXT NOT NULL DEFAULT 'none'
         CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
     assignee_type TEXT CHECK (assignee_type IN ('member', 'agent')),

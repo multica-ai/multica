@@ -7,13 +7,12 @@
     "move_failed": "Failed to move issue"
   },
   "status": {
-    "backlog": "Design",
-    "todo": "Not started",
-    "in_progress": "Developing",
-    "in_review": "Testing",
-    "review": "Review",
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
     "done": "Done",
-    "blocked": "Pending",
+    "blocked": "Blocked",
     "cancelled": "Cancelled"
   },
   "priority": {
