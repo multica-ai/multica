@@ -25,6 +25,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  projectId,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -32,6 +33,8 @@ export function ListView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** When set, the per-section "+" pre-fills the project on the create form. */
+  projectId?: string;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -86,6 +89,7 @@ export function ListView({
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
+            projectId={projectId}
           />
         ))}
       </Accordion.Root>
@@ -98,11 +102,13 @@ function StatusAccordionItem({
   issues,
   childProgressMap,
   myIssuesOpts,
+  projectId,
 }: {
   status: IssueStatus;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  projectId?: string;
 }) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -153,7 +159,7 @@ function StatusAccordionItem({
                   onClick={() =>
                     useModalStore
                       .getState()
-                      .open("create-issue", { status })
+                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
                   }
                 />
               }
