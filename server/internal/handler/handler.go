@@ -320,8 +320,10 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		issue = got
 	}
 
-	// Enforce project access / standalone privacy. 404 (not 403) so the
-	// existence of the issue isn't leaked to non-members.
+	// Enforce access. For tasks this is project access / standalone
+	// privacy; for channels/DMs it's participant membership. canAccessIssue
+	// dispatches on issue.Kind. Returning 404 (not 403) hides existence
+	// from non-members.
 	if member, ok := h.resolveMemberFromRequest(r); ok {
 		if !h.canAccessIssue(r.Context(), member, issue) {
 			writeError(w, http.StatusNotFound, "issue not found")

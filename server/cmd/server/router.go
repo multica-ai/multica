@@ -471,6 +471,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 
+			// Channels (multi-party chat — issues with kind in channel,dm).
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Get("/{id}", h.GetChannel)
+			})
+
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)

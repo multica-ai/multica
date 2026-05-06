@@ -75,6 +75,22 @@ func (h *Handler) canAccessProjectByID(ctx context.Context, member db.Member, pr
 //   * standalone non-private issue → nil
 //   * standalone private issue → creator ∪ workspace owners/admins
 func (h *Handler) audienceForIssue(ctx context.Context, issue db.Issue) []string {
+	// Channels and DMs broadcast only to their participants. This isolates
+	// chat traffic from the workspace event stream — non-members never see
+	// a comment in a private DM, even via WS fan-out.
+	if issue.Kind == "channel" || issue.Kind == "dm" {
+		subs, err := h.Queries.ListIssueSubscribers(ctx, issue.ID)
+		if err != nil {
+			return []string{}
+		}
+		out := make([]string, 0, len(subs))
+		for _, s := range subs {
+			if s.UserType == "member" {
+				out = append(out, uuidToString(s.UserID))
+			}
+		}
+		return out
+	}
 	if issue.ProjectID.Valid {
 		project, err := h.Queries.GetProject(ctx, issue.ProjectID)
 		if err != nil {
@@ -160,6 +176,17 @@ func (h *Handler) resolveMemberFromRequest(r *http.Request) (db.Member, bool) {
 //   * standalone issue with is_private = true → creator + admins only
 //   * standalone issue with is_private = false → workspace members
 func (h *Handler) canAccessIssue(ctx context.Context, member db.Member, issue db.Issue) bool {
+	// Channels and DMs are subscriber-gated, not project/privacy-gated.
+	// Admins do NOT get implicit read access — a private DM stays private
+	// even from workspace owners. This matches the chat_session model.
+	if issue.Kind == "channel" || issue.Kind == "dm" {
+		ok, err := h.Queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: "member",
+			UserID:   member.UserID,
+		})
+		return err == nil && ok
+	}
 	if isWorkspaceAdmin(member) {
 		return true
 	}
