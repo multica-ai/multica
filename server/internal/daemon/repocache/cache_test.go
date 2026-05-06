@@ -1406,3 +1406,155 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
 	}
 }
+
+// TestCreateWorktree_ReportsMetadata verifies that CreateWorktree populates the
+// new metadata fields (RepoURL, RequestedRef, BaseRef) on the success path
+// where params.Ref is unset and the resolved base is the remote default branch.
+// This metadata is what enables daemon.TaskWorktreeMetadata to be constructed
+// without re-deriving values that CreateWorktree already computed.
+func TestCreateWorktree_ReportsMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Code Reviewer",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if result.Path == "" {
+		t.Error("expected non-empty Path")
+	}
+	if !strings.HasPrefix(result.BranchName, "agent/") {
+		t.Errorf("expected BranchName to start with 'agent/', got %q", result.BranchName)
+	}
+	if result.RepoURL != sourceRepo {
+		t.Errorf("expected RepoURL %q, got %q", sourceRepo, result.RepoURL)
+	}
+	if result.RequestedRef != "" {
+		t.Errorf("expected empty RequestedRef when params.Ref unset, got %q", result.RequestedRef)
+	}
+	if result.BaseRef == "" {
+		t.Error("expected non-empty BaseRef (resolved default branch)")
+	}
+	// BaseRef must be the resolved base, not the new agent branch.
+	if result.BaseRef == "refs/heads/"+result.BranchName {
+		t.Errorf("BaseRef must be the parent ref, not the new agent branch (%q)", result.BaseRef)
+	}
+}
+
+// TestCreateWorktree_ReportsRequestedRef verifies that when the caller passes
+// params.Ref, RequestedRef preserves the user-supplied value verbatim and
+// BaseRef is non-empty (the resolved candidate, e.g. "refs/remotes/origin/main").
+func TestCreateWorktree_ReportsRequestedRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Determine the local default branch name so we can request it explicitly.
+	headRef, err := exec.Command("git", "-C", sourceRepo, "symbolic-ref", "--short", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("read HEAD branch name: %v", err)
+	}
+	requested := strings.TrimSpace(string(headRef))
+	if requested == "" {
+		t.Fatal("could not determine source repo default branch")
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         requested,
+		AgentName:   "Reviewer",
+		TaskID:      "metadata-requested-ref-task",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if result.RequestedRef != requested {
+		t.Errorf("expected RequestedRef %q, got %q", requested, result.RequestedRef)
+	}
+	if result.BaseRef == "" {
+		t.Error("expected non-empty BaseRef when params.Ref is set")
+	}
+	if result.RepoURL != sourceRepo {
+		t.Errorf("expected RepoURL %q, got %q", sourceRepo, result.RepoURL)
+	}
+}
+
+// TestCreateWorktree_ReportsRepoURLOnReuse exercises the existing-worktree
+// branch (when CreateWorktree is invoked against a workdir that already
+// contains a git worktree from a prior task). The reused-path success return
+// must populate the same metadata as the fresh-create path.
+func TestCreateWorktree_ReportsRepoURLOnReuse(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	first, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Reviewer",
+		TaskID:      "reuse-first-task-id",
+	})
+	if err != nil {
+		t.Fatalf("first CreateWorktree failed: %v", err)
+	}
+	if !isGitWorktree(first.Path) {
+		t.Fatalf("expected first call to leave a git worktree at %s", first.Path)
+	}
+
+	// Second call with the same WorkDir hits the reuse branch (line ~432).
+	second, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Reviewer",
+		TaskID:      "reuse-second-task-id",
+	})
+	if err != nil {
+		t.Fatalf("second CreateWorktree failed: %v", err)
+	}
+
+	if second.Path != first.Path {
+		t.Errorf("expected reuse to land at same path %q, got %q", first.Path, second.Path)
+	}
+	if second.RepoURL != sourceRepo {
+		t.Errorf("expected RepoURL %q, got %q", sourceRepo, second.RepoURL)
+	}
+	if second.RequestedRef != "" {
+		t.Errorf("expected empty RequestedRef, got %q", second.RequestedRef)
+	}
+	if second.BaseRef == "" {
+		t.Error("expected non-empty BaseRef on reuse")
+	}
+	if !strings.HasPrefix(second.BranchName, "agent/") {
+		t.Errorf("expected BranchName to start with 'agent/', got %q", second.BranchName)
+	}
+}

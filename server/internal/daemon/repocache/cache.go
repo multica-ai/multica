@@ -361,10 +361,16 @@ type WorktreeParams struct {
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
-// WorktreeResult describes a successfully created worktree.
+// WorktreeResult describes a successfully created worktree. The metadata
+// fields (RepoURL, RequestedRef, BaseRef) carry everything daemon callers need
+// to construct daemon.TaskWorktreeMetadata without re-deriving values that
+// CreateWorktree already computed internally.
 type WorktreeResult struct {
-	Path       string `json:"path"`        // absolute path to the worktree
-	BranchName string `json:"branch_name"` // git branch created for this worktree
+	Path         string `json:"path"`          // absolute path to the worktree
+	BranchName   string `json:"branch_name"`   // git branch created for this worktree
+	RepoURL      string `json:"repo_url"`      // remote URL the worktree was created from (mirrors WorktreeParams.RepoURL)
+	RequestedRef string `json:"requested_ref"` // user-supplied ref verbatim (trimmed); empty when the caller did not specify one
+	BaseRef      string `json:"base_ref"`      // resolved base ref the worktree was forked from (e.g. "refs/remotes/origin/main"). Distinct from BranchName, which is the new agent branch.
 }
 
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
@@ -420,6 +426,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
 
+	// Preserve the caller-supplied ref (trimmed) for metadata reporting.
+	// "" here means the caller did not request a specific ref — the worktree
+	// was based on the resolved default branch (already captured in baseRef).
+	requestedRef := strings.TrimSpace(params.Ref)
+
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
 
@@ -462,8 +473,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		)
 
 		return &WorktreeResult{
-			Path:       worktreePath,
-			BranchName: actualBranch,
+			Path:         worktreePath,
+			BranchName:   actualBranch,
+			RepoURL:      params.RepoURL,
+			RequestedRef: requestedRef,
+			BaseRef:      baseRef,
 		}, nil
 	}
 
@@ -500,8 +514,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	)
 
 	return &WorktreeResult{
-		Path:       worktreePath,
-		BranchName: actualBranch,
+		Path:         worktreePath,
+		BranchName:   actualBranch,
+		RepoURL:      params.RepoURL,
+		RequestedRef: requestedRef,
+		BaseRef:      baseRef,
 	}, nil
 }
 
