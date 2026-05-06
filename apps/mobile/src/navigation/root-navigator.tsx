@@ -13,7 +13,7 @@ import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
 import type { Workspace } from "@multica/core/types";
 import { CircleUserRound, ListTodo } from "lucide-react-native";
-import { EmptyState, LoadingState, Screen } from "../components/ui/primitives";
+import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
@@ -23,6 +23,7 @@ import { InboxDetailScreen } from "../screens/mine/inbox-detail-screen";
 import { InboxScreen } from "../screens/mine/inbox-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
+import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import { colors, spacing } from "../theme/tokens";
 import { linking } from "./linking";
 import { WorkspaceContext } from "./workspace-context";
@@ -50,7 +51,6 @@ const Tabs = createBottomTabNavigator<TabParamList>();
 export function RootNavigator() {
   const user = useAuthStore((state) => state.user);
   const isLoading = useAuthStore((state) => state.isLoading);
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   if (isLoading) {
     return (
@@ -62,10 +62,21 @@ export function RootNavigator() {
 
   if (!user) return <LoginScreen />;
 
+  return <AuthenticatedNavigator />;
+}
+
+function AuthenticatedNavigator() {
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const { data: workspaces = [], isError, isLoading } = useWorkspaceList();
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <SignedInErrorScreen />;
+  if (workspaces.length === 0) return <WorkspaceSetupScreen />;
+
   return (
     <NavigationIndependentTree>
       <NavigationContainer linking={linking} ref={navigationRef}>
-        <WorkspaceGate>
+        <WorkspaceGate workspaces={workspaces}>
           <Stack.Navigator
             screenOptions={{
               contentStyle: { backgroundColor: colors.background },
@@ -88,20 +99,23 @@ export function RootNavigator() {
   );
 }
 
-function WorkspaceGate({ children }: { children: React.ReactNode }) {
-  const { data: workspaces = [], isError, isLoading } = useWorkspaceList();
+function WorkspaceGate({
+  children,
+  workspaces,
+}: {
+  children: React.ReactNode;
+  workspaces: Workspace[];
+}) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
 
   useEffect(() => {
-    if (workspace || workspaces.length === 0) return;
+    if (workspace && workspaces.some((item) => item.id === workspace.id)) return;
     const first = workspaces[0];
     if (!first) return;
     setCurrentWorkspace(first.slug, first.id);
     setWorkspace(first);
   }, [workspace, workspaces]);
 
-  if (isLoading) return <LoadingState />;
-  if (isError) return <EmptyState title="Unable to load workspaces" />;
   if (!workspace) return <EmptyState title="No workspaces available" />;
 
   return (
@@ -110,6 +124,24 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
         {children}
       </WorkspaceContext.Provider>
     </WorkspaceSlugProvider>
+  );
+}
+
+function SignedInErrorScreen() {
+  const logout = useAuthStore((state) => state.logout);
+
+  return (
+    <Screen>
+      <View style={styles.errorState}>
+        <EmptyState
+          detail="Check your connection and try again."
+          title="Unable to load workspaces"
+        />
+        <Button onPress={logout} style={styles.errorLogoutButton} variant="secondary">
+          Log out
+        </Button>
+      </View>
+    </Screen>
   );
 }
 
@@ -190,5 +222,15 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 14,
     lineHeight: 20,
+  },
+  errorState: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  errorLogoutButton: {
+    alignSelf: "center",
+    bottom: spacing.xl,
+    position: "absolute",
+    width: "60%",
   },
 });
