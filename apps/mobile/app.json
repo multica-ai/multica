@@ -2,7 +2,7 @@
   "expo": {
     "name": "Multicam",
     "slug": "multicam",
-    "scheme": "wujieai_multicam",
+    "scheme": "wujieai-multicam",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -26,7 +26,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.wujieai.multica",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "supportsTablet": false,
       "icon": "./assets/icon.png",
       "infoPlist": {

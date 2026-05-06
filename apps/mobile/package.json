@@ -45,6 +45,7 @@
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
     "@types/react": "catalog:",
+    "eas-cli": "^18.11.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
