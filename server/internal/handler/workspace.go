@@ -418,10 +418,13 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err != nil {
 		if isNotFound(err) {
-			// Auto-create user with email so they can be invited before signing up
+			// Auto-create user with email so they can be invited before signing up.
+			// EmailVerified stays false — they haven't completed any auth flow yet;
+			// it flips to true on first magic-link or Google sign-in.
 			user, err = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
-				Name:  email,
-				Email: email,
+				Name:          email,
+				Email:         email,
+				EmailVerified: false,
 			})
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to create user")

@@ -436,6 +436,8 @@ type User struct {
 	CloudWaitlistEmail      pgtype.Text        `json:"cloud_waitlist_email"`
 	CloudWaitlistReason     pgtype.Text        `json:"cloud_waitlist_reason"`
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
+	GoogleID                pgtype.Text        `json:"google_id"`
+	EmailVerified           bool               `json:"email_verified"`
 }
 
 type VerificationCode struct {

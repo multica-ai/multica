@@ -158,8 +158,9 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		name = email[:at]
 	}
 	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
-		Name:  name,
-		Email: email,
+		Name:          name,
+		Email:         email,
+		EmailVerified: true, // magic-link flow proves the email
 	})
 	if err != nil {
 		return db.User{}, false, err
