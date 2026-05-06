@@ -61,5 +61,12 @@
   "legend_missing": "Missing",
   "tooltip_logged": "Logged:",
   "tooltip_entry_one": "{{count}} entry",
-  "tooltip_entry_other": "{{count}} entries"
+  "tooltip_entry_other": "{{count}} entries",
+  "timer_discard": "Discard",
+  "timer_stop_log": "Stop & Log",
+  "idle_title": "You seem to be away",
+  "idle_body": "No activity detected for {{duration}}. Timer is still running on {{issue}}.",
+  "idle_keep_running": "Keep running",
+  "idle_subtract_idle": "Stop & subtract idle time ({{duration}})",
+  "idle_stop_all": "Stop & log everything"
 }

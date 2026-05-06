@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { toast } from "sonner";
+import { useT } from "../i18n";
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -34,6 +35,7 @@ function formatDurationShort(minutes: number): string {
 }
 
 export function SidebarTimerIndicator() {
+  const { t } = useT("time-tracking");
   const timer = useTimerStore((s) => s.activeTimer);
   const stopTimer = useTimerStore((s) => s.stopTimer);
   const discardTimer = useTimerStore((s) => s.discardTimer);
@@ -192,7 +194,7 @@ export function SidebarTimerIndicator() {
             onClick={handleDiscard}
           >
             <X className="mr-1 size-3" />
-            Discard
+            {t($ => $.timer_discard)}
           </Button>
           <Button
             size="xs"
@@ -201,7 +203,7 @@ export function SidebarTimerIndicator() {
             disabled={createEntry.isPending}
           >
             <Square className="mr-1 size-3" />
-            Stop & Log
+            {t($ => $.timer_stop_log)}
           </Button>
         </div>
       </PopoverContent>

@@ -12,6 +12,7 @@ import { useNavigation } from "../navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../i18n";
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -23,6 +24,7 @@ function formatElapsed(ms: number): string {
 }
 
 export function FloatingTimer() {
+  const { t } = useT("time-tracking");
   const timer = useTimerStore((s) => s.activeTimer);
   const stopTimer = useTimerStore((s) => s.stopTimer);
   const discardTimer = useTimerStore((s) => s.discardTimer);
@@ -174,7 +176,7 @@ export function FloatingTimer() {
               onClick={handleDiscard}
             >
               <X className="size-3 mr-1" />
-              Discard
+              {t($ => $.timer_discard)}
             </Button>
             <Button
               size="xs"
@@ -183,7 +185,7 @@ export function FloatingTimer() {
               disabled={createEntry.isPending}
             >
               <Square className="size-3 mr-1" />
-              Stop & Log
+              {t($ => $.timer_stop_log)}
             </Button>
           </div>
         </div>

@@ -9,6 +9,7 @@ import {
 import { useCreateTimeEntry } from "@multica/core/time-entries/mutations";
 import { Button } from "@multica/ui/components/ui/button";
 import { toast } from "sonner";
+import { useT } from "../i18n";
 
 function formatDuration(ms: number): string {
   const mins = Math.round(ms / 60000);
@@ -23,6 +24,7 @@ function formatDuration(ms: number): string {
  * is running. Offers to: keep running, adjust (subtract idle time), or stop & log.
  */
 export function IdleDetector() {
+  const { t } = useT("time-tracking");
   const timer = useTimerStore((s) => s.activeTimer);
   const stopTimer = useTimerStore((s) => s.stopTimer);
   const isIdle = useIdleStore((s) => s.isIdle);
@@ -123,24 +125,19 @@ export function IdleDetector() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-in fade-in-0 duration-200">
       <div className="mx-4 w-full max-w-sm rounded-xl border bg-popover p-5 shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-2 duration-200">
-        <div className="mb-1 text-sm font-medium">You seem to be away</div>
+        <div className="mb-1 text-sm font-medium">{t($ => $.idle_title)}</div>
         <p className="mb-4 text-xs text-muted-foreground">
-          No activity detected for{" "}
-          <span className="font-mono font-medium text-foreground">
-            {formatDuration(idleDuration)}
-          </span>
-          . Timer is still running on{" "}
-          <span className="font-medium text-foreground">
-            {timer.issueIdentifier}
-          </span>
-          .
+          {t($ => $.idle_body, {
+            duration: formatDuration(idleDuration),
+            issue: timer.issueIdentifier,
+          })}
         </p>
         <div className="flex flex-col gap-2">
           <Button size="sm" variant="default" onClick={handleKeepRunning}>
-            Keep running
+            {t($ => $.idle_keep_running)}
           </Button>
           <Button size="sm" variant="outline" onClick={handleAdjust}>
-            Stop & subtract idle time ({formatDuration(idleDuration)})
+            {t($ => $.idle_subtract_idle, { duration: formatDuration(idleDuration) })}
           </Button>
           <Button
             size="sm"
@@ -148,7 +145,7 @@ export function IdleDetector() {
             className="text-muted-foreground"
             onClick={handleStopAndLog}
           >
-            Stop & log everything
+            {t($ => $.idle_stop_all)}
           </Button>
         </div>
       </div>

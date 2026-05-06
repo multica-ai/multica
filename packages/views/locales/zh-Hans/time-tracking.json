@@ -57,5 +57,12 @@
   "legend_partial": "部分",
   "legend_missing": "缺失",
   "tooltip_logged": "已记录：",
-  "tooltip_entry_other": "{{count}} 条"
+  "tooltip_entry_other": "{{count}} 条",
+  "timer_discard": "丢弃",
+  "timer_stop_log": "停止并记录",
+  "idle_title": "您似乎已离开",
+  "idle_body": "检测到 {{duration}} 无活动，计时器仍在 {{issue}} 上运行。",
+  "idle_keep_running": "继续运行",
+  "idle_subtract_idle": "停止并扣除空闲时间（{{duration}}）",
+  "idle_stop_all": "停止并记录所有时间"
 }

@@ -236,7 +236,7 @@ function EditableMonthGrid({
                 <span className="text-xs font-semibold">{monthNames[month - 1]}</span>
                 {monthlyHours && (
                     <span className="text-[10px] tabular-nums text-muted-foreground font-medium">
-                        {monthlyHours.total_hours}h
+                        {`${monthlyHours.total_hours}h`}
                     </span>
                 )}
             </div>
@@ -411,7 +411,7 @@ function MonthlyHoursChart({ monthlyHours }: { monthlyHours: MonthlyHours[] }) {
                                 style={{ height: `${Math.max(height, 4)}%` }}
                             >
                                 <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] tabular-nums text-muted-foreground opacity-0 group-hover/bar:opacity-100 transition-opacity whitespace-nowrap">
-                                    {m.total_hours}h
+                                    {`${m.total_hours}h`}
                                 </div>
                             </div>
                         </div>
