@@ -434,6 +434,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				r.Get("/change-requests", h.ListPendingChangeRequests)
+				r.Post("/change-requests/{crId}/review", h.ReviewSkillChangeRequest)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)
 					r.Put("/", h.UpdateSkill)
@@ -441,6 +443,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+					r.Put("/ownership", h.UpdateSkillOwnership)
+					r.Get("/versions", h.ListSkillVersions)
+					r.Get("/change-requests", h.ListSkillChangeRequests)
+					r.Post("/change-requests", h.CreateSkillChangeRequest)
+					r.Get("/forks", h.ListSkillForks)
+					r.Post("/forks", h.CreateSkillFork)
 				})
 			})
 

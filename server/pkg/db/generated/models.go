@@ -462,15 +462,36 @@ type RuntimeSetupToken struct {
 }
 
 type Skill struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Content     string             `json:"content"`
-	Config      []byte             `json:"config"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Content        string             `json:"content"`
+	Config         []byte             `json:"config"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	ApproverIds    []pgtype.UUID      `json:"approver_ids"`
+	CurrentVersion string             `json:"current_version"`
+}
+
+type SkillChangeRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	SkillID         pgtype.UUID        `json:"skill_id"`
+	Title           string             `json:"title"`
+	Description     string             `json:"description"`
+	BaseVersion     string             `json:"base_version"`
+	ProposedVersion string             `json:"proposed_version"`
+	ProposedContent string             `json:"proposed_content"`
+	ProposedFiles   []byte             `json:"proposed_files"`
+	Status          string             `json:"status"`
+	ProposedBy      pgtype.UUID        `json:"proposed_by"`
+	ReviewedBy      pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt      pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewComment   string             `json:"review_comment"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SkillFile struct {
@@ -480,6 +501,25 @@ type SkillFile struct {
 	Content   string             `json:"content"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SkillFork struct {
+	ID            pgtype.UUID        `json:"id"`
+	ParentSkillID pgtype.UUID        `json:"parent_skill_id"`
+	ForkedSkillID pgtype.UUID        `json:"forked_skill_id"`
+	ForkedBy      pgtype.UUID        `json:"forked_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	Version     string             `json:"version"`
+	Content     string             `json:"content"`
+	Files       []byte             `json:"files"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type TaskMessage struct {

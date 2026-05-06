@@ -31,6 +31,13 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SkillVersion,
+  SkillChangeRequest,
+  SkillFork,
+  UpdateSkillOwnershipRequest,
+  CreateSkillChangeRequestRequest,
+  ReviewSkillChangeRequestRequest,
+  ForkSkillRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -894,6 +901,57 @@ export class ApiClient {
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Skill ownership / versioning / change requests / forks (JEH-216)
+  async updateSkillOwnership(id: string, data: UpdateSkillOwnershipRequest): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/ownership`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSkillVersions(id: string): Promise<SkillVersion[]> {
+    return this.fetch(`/api/skills/${id}/versions`);
+  }
+
+  async listSkillChangeRequests(id: string): Promise<SkillChangeRequest[]> {
+    return this.fetch(`/api/skills/${id}/change-requests`);
+  }
+
+  async listPendingSkillChangeRequests(): Promise<SkillChangeRequest[]> {
+    return this.fetch("/api/skills/change-requests");
+  }
+
+  async createSkillChangeRequest(
+    id: string,
+    data: CreateSkillChangeRequestRequest,
+  ): Promise<SkillChangeRequest> {
+    return this.fetch(`/api/skills/${id}/change-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reviewSkillChangeRequest(
+    crId: string,
+    data: ReviewSkillChangeRequestRequest,
+  ): Promise<SkillChangeRequest> {
+    return this.fetch(`/api/skills/change-requests/${crId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSkillForks(id: string): Promise<SkillFork[]> {
+    return this.fetch(`/api/skills/${id}/forks`);
+  }
+
+  async createSkillFork(id: string, data: ForkSkillRequest): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/forks`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

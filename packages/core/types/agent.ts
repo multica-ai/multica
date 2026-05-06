@@ -121,6 +121,9 @@ export interface Skill {
   config: Record<string, unknown>;
   files: SkillFile[];
   created_by: string | null;
+  owner_id: string | null;
+  approver_ids: string[];
+  current_version: string;
   created_at: string;
   updated_at: string;
 }
@@ -132,6 +135,78 @@ export interface SkillFile {
   content: string;
   created_at: string;
   updated_at: string;
+}
+
+export type SkillChangeRequestStatus = "pending" | "approved" | "rejected" | "merged";
+
+export interface SkillVersionFileSnapshot {
+  path: string;
+  content: string;
+}
+
+export interface SkillVersion {
+  id: string;
+  skill_id: string;
+  version: string;
+  content: string;
+  files: SkillVersionFileSnapshot[];
+  description: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface SkillChangeRequest {
+  id: string;
+  skill_id: string;
+  title: string;
+  description: string;
+  base_version: string;
+  proposed_version: string;
+  proposed_content: string;
+  proposed_files: SkillVersionFileSnapshot[];
+  status: SkillChangeRequestStatus;
+  proposed_by: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_comment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SkillFork {
+  id: string;
+  parent_skill_id: string;
+  forked_skill_id: string;
+  forked_by: string | null;
+  created_at: string;
+  /** Joined fields from skill table — only present in list-by-parent response. */
+  forked_name?: string;
+  forked_description?: string;
+  current_version?: string;
+}
+
+export interface UpdateSkillOwnershipRequest {
+  owner_id?: string | null;
+  approver_ids?: string[];
+}
+
+export interface CreateSkillChangeRequestRequest {
+  title: string;
+  description?: string;
+  proposed_version: string;
+  proposed_content: string;
+  proposed_files?: { path: string; content: string }[];
+}
+
+export interface ReviewSkillChangeRequestRequest {
+  action: "approve" | "reject";
+  comment?: string;
+}
+
+export interface ForkSkillRequest {
+  name: string;
+  description?: string;
+  owner_id?: string | null;
 }
 
 export interface CreateSkillRequest {

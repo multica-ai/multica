@@ -28,9 +28,9 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 }
 
 const createSkill = `-- name: CreateSkill :one
-INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, owner_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version
 `
 
 type CreateSkillParams struct {
@@ -40,6 +40,7 @@ type CreateSkillParams struct {
 	Content     string      `json:"content"`
 	Config      []byte      `json:"config"`
 	CreatedBy   pgtype.UUID `json:"created_by"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
 }
 
 func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error) {
@@ -50,6 +51,7 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		arg.Content,
 		arg.Config,
 		arg.CreatedBy,
+		arg.OwnerID,
 	)
 	var i Skill
 	err := row.Scan(
@@ -62,6 +64,9 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
 	)
 	return i, err
 }
@@ -94,7 +99,7 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 }
 
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version FROM skill
 WHERE id = $1
 `
 
@@ -111,6 +116,9 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
 	)
 	return i, err
 }
@@ -135,7 +143,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version FROM skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -157,13 +165,16 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
 	)
 	return i, err
 }
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.owner_id, s.approver_ids, s.current_version FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
@@ -189,6 +200,9 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.ApproverIds,
+			&i.CurrentVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -277,7 +291,7 @@ func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]Sk
 
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -302,6 +316,9 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.ApproverIds,
+			&i.CurrentVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -345,7 +362,7 @@ UPDATE skill SET
     config = COALESCE($5, config),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version
 `
 
 type UpdateSkillParams struct {
@@ -375,6 +392,79 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
+	)
+	return i, err
+}
+
+const updateSkillCurrentVersion = `-- name: UpdateSkillCurrentVersion :one
+UPDATE skill SET
+    current_version = $2,
+    content = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version
+`
+
+type UpdateSkillCurrentVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	CurrentVersion string      `json:"current_version"`
+	Content        string      `json:"content"`
+}
+
+func (q *Queries) UpdateSkillCurrentVersion(ctx context.Context, arg UpdateSkillCurrentVersionParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, updateSkillCurrentVersion, arg.ID, arg.CurrentVersion, arg.Content)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
+	)
+	return i, err
+}
+
+const updateSkillOwnership = `-- name: UpdateSkillOwnership :one
+UPDATE skill SET
+    owner_id = COALESCE($2, owner_id),
+    approver_ids = COALESCE($3, approver_ids),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version
+`
+
+type UpdateSkillOwnershipParams struct {
+	ID          pgtype.UUID   `json:"id"`
+	OwnerID     pgtype.UUID   `json:"owner_id"`
+	ApproverIds []pgtype.UUID `json:"approver_ids"`
+}
+
+func (q *Queries) UpdateSkillOwnership(ctx context.Context, arg UpdateSkillOwnershipParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, updateSkillOwnership, arg.ID, arg.OwnerID, arg.ApproverIds)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.ApproverIds,
+		&i.CurrentVersion,
 	)
 	return i, err
 }
