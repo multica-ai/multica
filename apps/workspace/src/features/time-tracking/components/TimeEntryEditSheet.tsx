@@ -26,12 +26,13 @@ import { useUpdateTimeEntryMutation, useDeleteTimeEntryMutation } from "../hooks
 
 /**
  * Converts an ISO 8601 timestamp to a value for <input type="datetime-local">.
- * e.g. "2024-06-10T14:30:00Z" → "2024-06-10T14:30" (local time)
+ * Includes seconds (step="1") so sub-minute entries are preserved accurately.
+ * e.g. "2024-06-10T14:30:45Z" → "2024-06-10T14:30:45" (local time)
  */
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** Converts a datetime-local input value back to an ISO 8601 UTC string. */
@@ -210,7 +211,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
     const startIso = fromDatetimeLocal(startValue);
     const stopIso = stopValue ? fromDatetimeLocal(stopValue) : undefined;
 
-    if (!isRunning && stopIso && new Date(stopIso) <= new Date(startIso)) {
+    if (!isRunning && stopIso && new Date(stopIso) < new Date(startIso)) {
       toast.error("Stop time must be after start time");
       return;
     }
@@ -290,6 +291,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
               <Input
                 id="entry-start"
                 type="datetime-local"
+                step="1"
                 value={startValue}
                 onChange={(e) => setStartValue(e.target.value)}
                 disabled={isRunning}
@@ -303,6 +305,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
                 <Input
                   id="entry-stop"
                   type="datetime-local"
+                  step="1"
                   value={stopValue}
                   onChange={(e) => setStopValue(e.target.value)}
                 />
