@@ -989,63 +989,6 @@ export class ApiClient {
     return this.fetch("/api/inbox/notifications/archive-all", { method: "POST" });
   }
 
-  // CEREBRO-PATCH(inbox-folders-api): kept from cerebro fork — main removed
-  // the inbox-folders feature in JEH-650, but cerebro-inbox still uses it.
-  async listInboxFolders(): Promise<InboxFolder[]> {
-    return this.fetch("/api/inbox/folders");
-  }
-
-  async createInboxFolder(name: string, parentId?: string | null): Promise<InboxFolder> {
-    return this.fetch("/api/inbox/folders", {
-      method: "POST",
-      body: JSON.stringify({ name, parent_id: parentId ?? null }),
-    });
-  }
-
-  async renameInboxFolder(id: string, name: string): Promise<InboxFolder> {
-    return this.fetch(`/api/inbox/folders/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ name }),
-    });
-  }
-
-  async setInboxFolderParent(id: string, parentId: string | null): Promise<InboxFolder> {
-    return this.fetch(`/api/inbox/folders/${id}/parent`, {
-      method: "PUT",
-      body: JSON.stringify({ parent_id: parentId ?? "" }),
-    });
-  }
-
-  async deleteInboxFolder(id: string): Promise<void> {
-    return this.fetch(`/api/inbox/folders/${id}`, { method: "DELETE" });
-  }
-
-  async listInboxFolderMemberships(): Promise<InboxFolderMembership[]> {
-    return this.fetch("/api/inbox/folder-memberships");
-  }
-
-  async addInboxFolderItem(
-    folderId: string,
-    itemType: InboxFolderItemType,
-    itemId: string,
-  ): Promise<void> {
-    return this.fetch(`/api/inbox/folders/${folderId}/items`, {
-      method: "POST",
-      body: JSON.stringify({ item_type: itemType, item_id: itemId }),
-    });
-  }
-
-  async removeInboxFolderItem(
-    folderId: string,
-    itemType: InboxFolderItemType,
-    itemId: string,
-  ): Promise<void> {
-    return this.fetch(
-      `/api/inbox/folders/${folderId}/items/${itemType}/${itemId}`,
-      { method: "DELETE" },
-    );
-  }
-
   // CEREBRO-PATCH(notification-preferences-api): cerebro feature, not in upstream.
   async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
     return this.fetch("/api/notification-preferences");

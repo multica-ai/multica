@@ -128,8 +128,8 @@ describe("MessageBubble user → waiting indicator (JEH-654)", () => {
     withQuery(
       <ChatMessageList
         messages={[userMessage({ id: "u-pending", content: "still in queue", respondedAt: null })]}
-        pendingTaskId={null}
-        isWaiting={false}
+        pendingTask={null}
+        availability={undefined}
       />,
       qc,
     );
@@ -147,8 +147,8 @@ describe("MessageBubble user → waiting indicator (JEH-654)", () => {
             respondedAt: "2026-05-07T10:00:30Z",
           }),
         ]}
-        pendingTaskId={null}
-        isWaiting={false}
+        pendingTask={null}
+        availability={undefined}
       />,
       qc,
     );

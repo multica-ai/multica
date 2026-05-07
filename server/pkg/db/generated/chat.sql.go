@@ -271,7 +271,13 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 const getPendingChatTask = `-- name: GetPendingChatTask :one
 SELECT id, status, created_at FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
-ORDER BY created_at DESC
+ORDER BY
+  CASE status
+    WHEN 'running' THEN 0
+    WHEN 'dispatched' THEN 1
+    WHEN 'queued' THEN 2
+  END,
+  created_at ASC
 LIMIT 1
 `
 
@@ -281,9 +287,15 @@ type GetPendingChatTaskRow struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-// Returns the most recent in-flight task for a chat session, if any.
-// Used by the frontend to recover pending state after refresh / reopen.
-// created_at is the anchor for the chat StatusPill timer (it computes
+// Returns the in-flight task the UI should follow for this chat session.
+// Prefer the task that is actually mid-stream over a freshly-queued
+// successor: when the user sends msg2 while msg1's task is still 'running',
+// we want the frontend to keep watching task1's stream. Ordering by
+// created_at alone (newest first) made the queued successor win the moment
+// it was created — which flipped pendingTaskId mid-stream and hid the live
+// timeline. Within a single status bucket we still pick the oldest so
+// coalesced queued tasks return deterministically.
+// created_at is also the anchor for the chat StatusPill timer (it computes
 // elapsed = now - task.created_at), so the pill survives refresh / reopen
 // without "resetting to 0s".
 func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.UUID) (GetPendingChatTaskRow, error) {
@@ -331,6 +343,71 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 	items := []ListAllChatSessionsByCreatorRow{}
 	for rows.Next() {
 		var i ListAllChatSessionsByCreatorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.RuntimeID,
+			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArchivedChatSessionsByCreator = `-- name: ListArchivedChatSessionsByCreator :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
+ORDER BY cs.updated_at DESC
+`
+
+type ListArchivedChatSessionsByCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+type ListArchivedChatSessionsByCreatorRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	HasUnread   bool               `json:"has_unread"`
+}
+
+// Returns archived sessions with the unread flag, mirroring the active
+// variant. Backs the "show archived" view alongside the archived inbox feed.
+func (q *Queries) ListArchivedChatSessionsByCreator(ctx context.Context, arg ListArchivedChatSessionsByCreatorParams) ([]ListArchivedChatSessionsByCreatorRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedChatSessionsByCreatorRow{}
+	for rows.Next() {
+		var i ListArchivedChatSessionsByCreatorRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

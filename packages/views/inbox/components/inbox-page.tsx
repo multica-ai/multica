@@ -22,16 +22,6 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
-// CEREBRO-PATCH(inbox-page-folders): inbox folders moved to @multica/cerebro-inbox in Phase 6
-import {
-  inboxFolderListOptions,
-  inboxFolderMembershipsOptions,
-  useCreateInboxFolder,
-  useRenameInboxFolder,
-  useDeleteInboxFolder,
-  useAddInboxFolderItem,
-  useSetInboxFolderParent,
-} from "@multica/cerebro-inbox/core/folders";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
@@ -212,7 +202,7 @@ export function InboxPage() {
   const channelsEnabledForFetch = useFeatureFlag("cerebro_channels");
   const { data: channels = [] } = useQuery({
     ...channelListOptions(wsId),
-    enabled: channelsEnabledForFetch && !isArchivedView && !isFolderView,
+    enabled: channelsEnabledForFetch && !isArchivedView,
   });
   const channelMap = useMemo(
     () => new Map(channels.map((c) => [c.id, c])),
@@ -253,12 +243,6 @@ export function InboxPage() {
       setView("all");
     }
   }, [channelsEnabled, view, setView]);
-
-  const createFolder = useCreateInboxFolder();
-  const renameFolder = useRenameInboxFolder();
-  const deleteFolder = useDeleteInboxFolder();
-  const addItemToFolder = useAddInboxFolderItem();
-  const setFolderParent = useSetInboxFolderParent();
 
   const selectedChatSession =
     chatSessions.find((s) => s.id === selectedKey) ??
@@ -917,36 +901,6 @@ export function InboxPage() {
         filteredEntries.map(renderEntry)
       )}
     </div>
-  );
-
-  // CEREBRO-PATCH(inbox-folders): folder section drives the left rail
-  const folderSection = (
-    <FolderSection
-      folders={folders}
-      selectedFolderId={isFolderView ? folderId : null}
-      onSelect={(id) => {
-        setSelectedKey(null, "");
-        setViewMode(id ? { kind: "folder", id } : { kind: "inbox" });
-      }}
-      onCreate={(name, parentId) =>
-        createFolder.mutate(
-          { name, parentId },
-          { onError: () => toast.error("Failed to create folder") },
-        )
-      }
-      onRename={(id, name) =>
-        renameFolder.mutate(
-          { id, name },
-          { onError: () => toast.error("Failed to rename") },
-        )
-      }
-      onDelete={(id) => {
-        if (isFolderView && folderId === id) setViewMode({ kind: "inbox" });
-        deleteFolder.mutate(id, {
-          onError: () => toast.error("Failed to delete folder"),
-        });
-      }}
-    />
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;

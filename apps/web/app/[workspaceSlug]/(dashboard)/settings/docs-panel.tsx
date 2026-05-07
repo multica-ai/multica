@@ -17,7 +17,9 @@ function Callout({ children }: { children: ReactNode }) {
   );
 }
 
-const mdxComponents = { Callout, ...cerebroMdxComponents };
+// Local Callout takes precedence over the shim's; spread cerebro shims
+// first so the local override wins.
+const mdxComponents = { ...cerebroMdxComponents, Callout };
 
 export function DocsPanel() {
   // source.getPages() returns all docs collected by fumadocs-mdx. We
