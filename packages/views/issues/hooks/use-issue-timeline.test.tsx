@@ -41,16 +41,24 @@ vi.mock("@multica/core/issues/mutations", () => ({
   }),
 }));
 
+// Spy on issueTimelineInfiniteOptions so tests can assert which `around` value
+// the hook actually fed to useInfiniteQuery on each render.
+const queriesMock = vi.hoisted(() => ({
+  issueTimelineInfiniteOptions: vi.fn(
+    (id: string, around?: string | null) => ({
+      queryKey: around
+        ? ["issues", "timeline", id, "around", around]
+        : ["issues", "timeline", id],
+      queryFn: () => Promise.resolve({}),
+      initialPageParam: { mode: "latest" as const },
+      getNextPageParam: () => undefined,
+      getPreviousPageParam: () => undefined,
+    }),
+  ),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
-  issueTimelineInfiniteOptions: (id: string, around?: string | null) => ({
-    queryKey: around
-      ? ["issues", "timeline", id, "around", around]
-      : ["issues", "timeline", id],
-    queryFn: () => Promise.resolve(emptyPage()),
-    initialPageParam: { mode: "latest" as const },
-    getNextPageParam: () => undefined,
-    getPreviousPageParam: () => undefined,
-  }),
+  issueTimelineInfiniteOptions: queriesMock.issueTimelineInfiniteOptions,
   issueKeys: {
     timeline: (id: string, around?: string | null) =>
       around
@@ -121,6 +129,7 @@ import { useIssueTimeline } from "./use-issue-timeline";
 describe("useIssueTimeline", () => {
   beforeEach(() => {
     wsHandlers.clear();
+    queriesMock.issueTimelineInfiniteOptions.mockClear();
     queryState.data = {
       pages: [{ ...emptyPage(), has_more_after: false }],
       pageParams: [{ mode: "latest" }],
@@ -281,6 +290,32 @@ describe("useIssueTimeline", () => {
       });
     });
     expect(result.current.newEntriesBelowCount).toBe(0);
+  });
+
+  // Regression: when the inbox split-pane is open and the user clicks a
+  // comment-notification (around=<id>) and then a notification for the SAME
+  // issue without a comment_id (around=undefined), <IssueDetail> stays
+  // mounted (keyed on issueId, see inbox-page.tsx). The hook therefore has
+  // to react to the around prop transitioning back to falsy — otherwise the
+  // around-mode cache is re-served on every subsequent click and entries
+  // outside the original window appear "lost" until a hard refresh.
+  it("syncs around state when the prop transitions back to undefined", () => {
+    const { rerender } = renderHook(
+      ({ around }: { around?: string | null }) =>
+        useIssueTimeline("issue-1", "user-1", { around }),
+      { initialProps: { around: "comment-X" as string | null | undefined } },
+    );
+
+    // First render is anchored on comment-X.
+    const firstAround = queriesMock.issueTimelineInfiniteOptions.mock.calls.at(-1)?.[1];
+    expect(firstAround).toBe("comment-X");
+
+    rerender({ around: undefined });
+
+    // After transitioning to undefined, the next call MUST use the latest
+    // (around=null) cache, not keep re-using the comment-X anchor.
+    const lastAround = queriesMock.issueTimelineInfiniteOptions.mock.calls.at(-1)?.[1];
+    expect(lastAround).toBeNull();
   });
 
   it("jumpToLatest clears newEntriesBelowCount", () => {
