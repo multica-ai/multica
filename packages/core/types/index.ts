@@ -28,7 +28,7 @@ export type {
   RuntimeModelsResult,
   IssueUsageSummary,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, InviteLink, CreateInviteLinkRequest } from "./workspace";
 export type {
   NotificationChannel,
   NotificationEventType,

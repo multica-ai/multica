@@ -3,12 +3,13 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -101,6 +102,11 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 		"iat":   time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
+}
+
+func fixedVerificationCodeHash(code string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
+	return hex.EncodeToString(sum[:])
 }
 
 // findOrCreateUser returns the existing user for an email, or creates one if
@@ -255,6 +261,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if _, err := h.Queries.GetFixedVerificationCodeByEmail(r.Context(), email); err == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
+		return
+	} else if !isNotFound(err) {
+		writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+		return
+	}
+
 	// Rate limit: max 1 code per 60 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
 	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
@@ -305,6 +319,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if handled := h.verifyFixedCode(w, r, email, code); handled {
+		return
+	}
+
 	dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
@@ -323,6 +341,30 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.completeEmailLogin(w, r, email)
+}
+
+func (h *Handler) verifyFixedCode(w http.ResponseWriter, r *http.Request, email, code string) bool {
+	fixedCode, err := h.Queries.GetFixedVerificationCodeByEmail(r.Context(), email)
+	if err != nil {
+		if isNotFound(err) {
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+		return true
+	}
+
+	expectedHash := fixedVerificationCodeHash(code)
+	if subtle.ConstantTimeCompare([]byte(expectedHash), []byte(fixedCode.CodeHash)) != 1 {
+		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		return true
+	}
+
+	h.completeEmailLogin(w, r, email)
+	return true
+}
+
+func (h *Handler) completeEmailLogin(w http.ResponseWriter, r *http.Request, email string) {
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
 		var signupErr SignupError
@@ -352,7 +394,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", req.Email)...)
+		slog.Warn("login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
@@ -401,6 +443,11 @@ type GoogleLoginRequest struct {
 	RedirectURI string `json:"redirect_uri"`
 }
 
+type GoogleMobileLoginRequest struct {
+	IDToken  string `json:"id_token"`
+	Platform string `json:"platform"`
+}
+
 type googleTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	IDToken     string `json:"id_token"`
@@ -414,86 +461,7 @@ type googleUserInfo struct {
 	Picture string `json:"picture"`
 }
 
-func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	var req GoogleLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, "code is required")
-		return
-	}
-
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
-		return
-	}
-
-	redirectURI := req.RedirectURI
-	if redirectURI == "" {
-		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
-	}
-
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"code":          {req.Code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	})
-	if err != nil {
-		slog.Error("google oauth token exchange failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
-		return
-	}
-	defer tokenResp.Body.Close()
-
-	tokenBody, err := io.ReadAll(tokenResp.Body)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to read Google token response")
-		return
-	}
-
-	if tokenResp.StatusCode != http.StatusOK {
-		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
-		return
-	}
-
-	var gToken googleTokenResponse
-	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
-
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
-		slog.Error("google userinfo fetch failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
-		return
-	}
-
+func (h *Handler) loginWithGoogleUser(w http.ResponseWriter, r *http.Request, gUser googleUserInfo) {
 	if gUser.Email == "" {
 		writeError(w, http.StatusBadRequest, "Google account has no email")
 		return
@@ -583,6 +551,59 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	var req GoogleLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+		return
+	}
+
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
+	}
+
+	gToken, err := exchangeGoogleCode(r.Context(), req.Code, clientID, clientSecret, redirectURI)
+	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google oauth token exchange returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+			return
+		}
+		slog.Error("google oauth token exchange failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
+		return
+	}
+
+	gUser, err := fetchGoogleUserInfo(r.Context(), gToken.AccessToken)
+	if err != nil {
+		var statusErr *googleOAuthStatusError
+		if errors.As(err, &statusErr) {
+			slog.Error("google userinfo returned error", "status", statusErr.Status, "body", statusErr.Body)
+			writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+			return
+		}
+		slog.Error("google userinfo fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+		return
+	}
+
+	h.loginWithGoogleUser(w, r, gUser)
 }
 
 // IssueCliToken returns a fresh JWT for the authenticated user.

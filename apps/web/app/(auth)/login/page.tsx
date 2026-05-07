@@ -31,6 +31,7 @@ import {
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 const buildTimeDingTalkClientId = process.env.NEXT_PUBLIC_DINGTALK_CLIENT_ID;
 const buildTimeHideEmailLogin = process.env.NEXT_PUBLIC_HIDE_EMAIL_LOGIN === "true";
+const mobileAuthCallback = "wujieai-multicam://auth/callback";
 
 interface RuntimeAuthConfig {
   googleClientId?: string;
@@ -64,6 +65,8 @@ function LoginPageContent() {
   );
   const platform = searchParams.get("platform");
   const isDesktopHandoff = platform === "desktop" && !cliCallbackRaw;
+  const isMobileHandoff = platform === "mobile" && !cliCallbackRaw;
+  const requestedProvider = searchParams.get("provider");
   // `next` carries a protected URL the user was originally headed to
   // (e.g. /invite/{id}). With URL-driven workspaces there is no legacy
   // "/issues" default — if `next` is absent we decide after login based on
@@ -105,19 +108,22 @@ function LoginPageContent() {
   // the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading || !user || hasValidCliCallback) return;
-    if (isDesktopHandoff) {
-      // Desktop opened the browser for login but the web session is already
-      // authenticated — mint a bearer token from the cookie session and hand
-      // it off via deep link instead of silently redirecting to the workspace.
+    if (isDesktopHandoff || isMobileHandoff) {
+      // Native clients opened the browser for login but the web session is
+      // already authenticated — mint a bearer token from the cookie session
+      // and hand it off via deep link instead of redirecting to a workspace.
       api
         .issueCliToken()
         .then(({ token }) => {
           setDesktopToken(token);
-          window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          const callbackUrl = isMobileHandoff
+            ? mobileAuthCallback
+            : "multica://auth/callback";
+          window.location.href = `${callbackUrl}?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
           setDesktopError(
-            err instanceof Error ? err.message : "Failed to prepare Desktop sign-in",
+            err instanceof Error ? err.message : "Failed to prepare sign-in",
           );
         });
       return;
@@ -132,7 +138,7 @@ function LoginPageContent() {
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     router.replace(resolvePostAuthDestination(list, hasOnboarded));
-  }, [isLoading, user, router, nextUrl, hasValidCliCallback, isDesktopHandoff, hasOnboarded, qc]);
+  }, [isLoading, user, router, nextUrl, hasValidCliCallback, isDesktopHandoff, isMobileHandoff, hasOnboarded, qc]);
 
   const handleSuccess = () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
@@ -155,6 +161,7 @@ function LoginPageContent() {
   // can redirect to the right place after login.
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
+    platform === "mobile" ? "platform:mobile" : "",
     nextUrl ? `next:${nextUrl}` : "",
     cliOAuthStatePart,
   ]
@@ -163,16 +170,66 @@ function LoginPageContent() {
 
   const dingtalkState = [
     platform === "desktop" ? "platform:desktop" : "",
+    platform === "mobile" ? "platform:mobile" : "",
     nextUrl ? `next:${nextUrl}` : "",
     cliOAuthStatePart,
   ]
     .filter(Boolean)
     .join(",") || undefined;
 
+  useEffect(() => {
+    if (user || hasValidCliCallback || !isMobileHandoff) return;
+    if (requestedProvider !== "google" && requestedProvider !== "dingtalk") {
+      return;
+    }
+
+    if (requestedProvider === "google" && resolvedGoogleClientId) {
+      const params = new URLSearchParams({
+        client_id: resolvedGoogleClientId,
+        redirect_uri: `${window.location.origin}/auth/callback`,
+        response_type: "code",
+        scope: "openid email profile",
+        access_type: "offline",
+        prompt: "select_account",
+      });
+      if (googleState) params.set("state", googleState);
+      window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+      return;
+    }
+
+    if (requestedProvider === "dingtalk" && dingtalkClientId) {
+      const params = new URLSearchParams({
+        client_id: dingtalkClientId,
+        redirect_uri: `${window.location.origin}/auth/callback`,
+        response_type: "code",
+        scope: runtimeAuthConfig.dingtalkOAuthScope || "openid corpid Contact.User.Read",
+        prompt: "consent",
+      });
+      const stateParts = ["provider:dingtalk"];
+      if (dingtalkState) stateParts.push(dingtalkState);
+      params.set("state", stateParts.join(","));
+      window.location.href = `https://login.dingtalk.com/oauth2/auth?${params}`;
+    }
+  }, [
+    dingtalkClientId,
+    dingtalkState,
+    googleState,
+    hasValidCliCallback,
+    isMobileHandoff,
+    requestedProvider,
+    resolvedGoogleClientId,
+    runtimeAuthConfig.dingtalkOAuthScope,
+    user,
+  ]);
+
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
   // away to a workspace page.
-  if (isDesktopHandoff && user) {
+  if ((isDesktopHandoff || isMobileHandoff) && user) {
+    const appName = isMobileHandoff ? "Multica mobile app" : "Multica desktop app";
+    const openLabel = isMobileHandoff ? "Open Multica Mobile" : "Open Multica Desktop";
+    const callbackUrl = isMobileHandoff ? mobileAuthCallback : "multica://auth/callback";
+
     if (desktopError) {
       return (
         <div className="flex min-h-screen items-center justify-center">
@@ -192,8 +249,8 @@ function LoginPageContent() {
             <CardTitle className="text-2xl">Opening Multica</CardTitle>
             <CardDescription>
               {desktopToken
-                ? "You should see a prompt to open the Multica desktop app. If nothing happens, click the button below."
-                : "Preparing Desktop sign-in..."}
+                ? `You should see a prompt to open the ${appName}. If nothing happens, click the button below.`
+                : "Preparing sign-in..."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
@@ -201,10 +258,10 @@ function LoginPageContent() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                  window.location.href = `${callbackUrl}?token=${encodeURIComponent(desktopToken)}`;
                 }}
               >
-                Open Multica Desktop
+                {openLabel}
               </Button>
             ) : (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

@@ -21,6 +21,7 @@ export interface AuthState {
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
+  loginWithGoogleMobile: (idToken: string, platform: string) => Promise<User>;
   loginWithDingTalk: (code: string, redirectUri: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
@@ -94,6 +95,18 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     loginWithGoogle: async (code: string, redirectUri: string) => {
       const { token, user } = await api.googleLogin(code, redirectUri);
+      api.setToken(token);
+      if (!cookieAuth) {
+        storage.setItem("multica_token", token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user });
+      return user;
+    },
+
+    loginWithGoogleMobile: async (idToken: string, platform: string) => {
+      const { token, user } = await api.googleMobileLogin(idToken, platform);
       api.setToken(token);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);

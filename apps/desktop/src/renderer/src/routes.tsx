@@ -15,6 +15,7 @@ import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
+import { WikiPage } from "@multica/views/wiki";
 import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
@@ -118,6 +119,7 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Runtimes" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
+          { path: "wiki", element: <WikiPage />, handle: { title: "Wiki" } },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {

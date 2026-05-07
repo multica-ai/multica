@@ -79,8 +79,11 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    trigger_source, trigger_actor_type, trigger_actor_id
+)
+VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), $5, $6, $7)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
@@ -212,6 +215,9 @@ ORDER BY created_at DESC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: DeleteTasksByIssue :execrows
+DELETE FROM agent_task_queue WHERE issue_id = $1;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()

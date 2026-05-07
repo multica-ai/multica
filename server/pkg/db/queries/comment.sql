@@ -62,3 +62,6 @@ WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id
 
 -- name: DeleteComment :exec
 DELETE FROM comment WHERE id = $1;
+
+-- name: DeleteCommentsByIssue :execrows
+DELETE FROM comment WHERE issue_id = $1 AND workspace_id = $2;

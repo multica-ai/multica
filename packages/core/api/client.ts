@@ -56,6 +56,8 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  InviteLink,
+  CreateInviteLinkRequest,
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
@@ -276,6 +278,13 @@ export class ApiClient {
     return this.fetch("/auth/google", {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
+  async googleMobileLogin(idToken: string, platform: string): Promise<LoginResponse> {
+    return this.fetch("/auth/google/mobile", {
+      method: "POST",
+      body: JSON.stringify({ id_token: idToken, platform }),
     });
   }
 
@@ -543,6 +552,16 @@ export class ApiClient {
     });
   }
 
+  async clearIssueHistory(
+    issueId: string,
+    options: { clear_comments: boolean; clear_tasks: boolean },
+  ): Promise<{ comments_deleted: number; tasks_deleted: number }> {
+    return this.fetch(`/api/issues/${issueId}/clear-history`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
     return this.fetch(`/api/issues/${issueId}/comments`);
@@ -807,6 +826,7 @@ export class ApiClient {
   async getConfig(): Promise<{
     cdn_domain: string;
     google_client_id?: string;
+    google_ios_client_id?: string;
     dingtalk_client_id?: string;
     dingtalk_oauth_scope?: string;
     hide_email_login?: boolean;
@@ -832,7 +852,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -878,6 +898,33 @@ export class ApiClient {
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/invitations/${invitationId}`, {
       method: "DELETE",
+    });
+  }
+
+  async createInviteLink(workspaceId: string, data: CreateInviteLinkRequest): Promise<InviteLink> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listInviteLinks(workspaceId: string): Promise<InviteLink[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`);
+  }
+
+  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async validateInviteLink(token: string): Promise<InviteLink> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}`);
+  }
+
+  async acceptInviteLink(token: string): Promise<MemberWithUser> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
     });
   }
 

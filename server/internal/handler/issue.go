@@ -925,7 +925,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_create", "member", creatorID))
 		}
 	}
 
@@ -1123,7 +1123,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_update", actorType, actorID))
 		}
 	}
 
@@ -1133,7 +1133,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged && !assigneeChanged && actorType == "member" &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_update", actorType, actorID))
 		}
 	}
 
@@ -1432,7 +1432,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_batch_update", actorType, actorID))
 			}
 		}
 
@@ -1440,7 +1440,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if statusChanged && !assigneeChanged && actorType == "member" &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("issue_batch_update", actorType, actorID))
 			}
 		}
 
@@ -1508,4 +1508,95 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// ---------------------------------------------------------------------------
+// Clear issue history (comments + execution runs)
+// ---------------------------------------------------------------------------
+
+type ClearIssueHistoryRequest struct {
+	ClearComments bool `json:"clear_comments"`
+	ClearTasks    bool `json:"clear_tasks"`
+}
+
+type ClearIssueHistoryResponse struct {
+	CommentsDeleted int64 `json:"comments_deleted"`
+	TasksDeleted    int64 `json:"tasks_deleted"`
+}
+
+func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owner or admin can clear issue history")
+		return
+	}
+
+	var req ClearIssueHistoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if !req.ClearComments && !req.ClearTasks {
+		writeError(w, http.StatusBadRequest, "at least one of clear_comments or clear_tasks must be true")
+		return
+	}
+
+	var resp ClearIssueHistoryResponse
+
+	if req.ClearTasks {
+		// Cancel any running/queued tasks first.
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+
+		deleted, err := h.Queries.DeleteTasksByIssue(r.Context(), issue.ID)
+		if err != nil {
+			slog.Warn("clear task history failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear task history")
+			return
+		}
+		resp.TasksDeleted = deleted
+	}
+
+	if req.ClearComments {
+		// Collect attachment URLs before cascade delete to clean up S3 objects.
+		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+
+		deleted, err := h.Queries.DeleteCommentsByIssue(r.Context(), db.DeleteCommentsByIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("clear comment history failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear comment history")
+			return
+		}
+		resp.CommentsDeleted = deleted
+		h.deleteS3Objects(r.Context(), attachmentURLs)
+	}
+
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	slog.Info("issue history cleared",
+		append(logger.RequestAttrs(r),
+			"issue_id", id,
+			"comments_deleted", resp.CommentsDeleted,
+			"tasks_deleted", resp.TasksDeleted,
+		)...)
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		"issue_id":         id,
+		"action":           "clear_history",
+		"comments_deleted": resp.CommentsDeleted,
+		"tasks_deleted":    resp.TasksDeleted,
+	})
+	writeJSON(w, http.StatusOK, resp)
 }

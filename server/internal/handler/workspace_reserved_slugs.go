@@ -56,6 +56,7 @@ var reservedSlugs = map[string]bool{
 	"agents":     true,
 	"inbox":      true,
 	"my-issues":  true,
+	"wiki":       true,
 	"runtimes":   true,
 	"skills":     true,
 	"settings":   true,

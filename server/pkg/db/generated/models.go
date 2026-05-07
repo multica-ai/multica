@@ -87,6 +87,9 @@ type AgentTaskQueue struct {
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
 	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
+	TriggerSource    pgtype.Text        `json:"trigger_source"`
+	TriggerActorType pgtype.Text        `json:"trigger_actor_type"`
+	TriggerActorID   pgtype.UUID        `json:"trigger_actor_id"`
 }
 
 type Attachment struct {
@@ -231,6 +234,12 @@ type ExternalAccountBinding struct {
 	Metadata              []byte             `json:"metadata"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FixedVerificationCode struct {
+	Email     string             `json:"email"`
+	CodeHash  string             `json:"code_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type InboxItem struct {
@@ -504,17 +513,26 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	WikiContent  pgtype.Text        `json:"wiki_content"`
 }
 
 type WorkspaceInvitation struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	InviterID     pgtype.UUID        `json:"inviter_id"`
-	InviteeEmail  string             `json:"invitee_email"`
-	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
-	Role          string             `json:"role"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
 }

@@ -240,7 +240,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue a chat task after the message exists.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, buildTriggerActor("chat_send", "member", userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
@@ -656,7 +656,7 @@ func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue a new task.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, buildTriggerActor("chat_retry", "member", userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return

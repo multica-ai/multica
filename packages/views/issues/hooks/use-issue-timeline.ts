@@ -38,10 +38,10 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
   };
 }
 
-export function useIssueTimeline(issueId: string, userId?: string) {
+export function useIssueTimeline(wsId: string, issueId: string, userId?: string) {
   const qc = useQueryClient();
   const { data: timeline = [], isLoading: loading } = useQuery(
-    issueTimelineOptions(issueId),
+    issueTimelineOptions(wsId, issueId),
   );
   const [submitting, setSubmitting] = useState(false);
 
@@ -53,8 +53,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    }, [qc, issueId]),
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+    }, [qc, wsId, issueId]),
   );
 
   // --- WS event handlers ---
@@ -66,7 +66,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
         qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
+          issueKeys.timeline(wsId, issueId),
           (old) => {
             if (!old) return old;
             if (old.some((e) => e.id === comment.id)) return old;
@@ -76,7 +76,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           },
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -87,7 +87,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id === issueId) {
           qc.setQueryData<TimelineEntry[]>(
-            issueKeys.timeline(issueId),
+            issueKeys.timeline(wsId, issueId),
             (old) =>
               old?.map((e) =>
                 e.id === comment.id ? commentToTimelineEntry(comment) : e,
@@ -95,7 +95,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           );
         }
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -106,7 +106,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id === issueId) {
           qc.setQueryData<TimelineEntry[]>(
-            issueKeys.timeline(issueId),
+            issueKeys.timeline(wsId, issueId),
             (old) => {
               if (!old) return old;
               const idsToRemove = new Set<string>([comment_id]);
@@ -129,7 +129,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           );
         }
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -142,7 +142,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const entry = p.entry;
         if (!entry || !entry.id) return;
         qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
+          issueKeys.timeline(wsId, issueId),
           (old) => {
             if (!old) return old;
             if (old.some((e) => e.id === entry.id)) return old;
@@ -152,7 +152,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           },
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -163,7 +163,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
         qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
+          issueKeys.timeline(wsId, issueId),
           (old) =>
             old?.map((e) => {
               if (e.id !== reaction.comment_id) return e;
@@ -173,7 +173,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             }),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -184,7 +184,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<TimelineEntry[]>(
-          issueKeys.timeline(issueId),
+          issueKeys.timeline(wsId, issueId),
           (old) =>
             old?.map((e) => {
               if (e.id !== p.comment_id) return e;
@@ -202,7 +202,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             }),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -271,7 +271,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   const pendingReactionVars = useMutationState({
     filters: {
-      mutationKey: ["toggleCommentReaction", issueId],
+      mutationKey: ["toggleCommentReaction", wsId, issueId],
       status: "pending",
     },
     select: (m) =>

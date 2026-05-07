@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Eraser,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -77,7 +78,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions, mentionFrequencyOptions } from "@multica/core/workspace/queries";
-import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
+import { useUpdateIssue, useDeleteIssue, useClearIssueHistory } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
@@ -368,6 +369,7 @@ export function IssueDetail({
   }, [isMobile]);
   const [deleting, setDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const [backlogHintOpen, setBacklogHintOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
@@ -424,7 +426,7 @@ export function IssueDetail({
   const {
     timeline, submitComment, submitReply,
     editComment, deleteComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(issueResourceId, user?.id);
+  } = useIssueTimeline(wsId, issueResourceId, user?.id);
 
   const commentById = useMemo(() => {
     const m = new Map<string, TimelineEntry>();
@@ -439,14 +441,14 @@ export function IssueDetail({
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(issueResourceId, user?.id);
+  } = useIssueReactions(wsId, issueResourceId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(issueResourceId, user?.id);
+  } = useIssueSubscribers(wsId, issueResourceId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(issueResourceId));
+  const { data: usage } = useQuery(issueUsageOptions(wsId, issueResourceId));
 
   // Pinned state
   const { data: pinnedItems = [] } = useQuery({
@@ -539,6 +541,23 @@ export function IssueDetail({
     } catch {
       toast.error("Failed to delete issue");
       setDeleting(false);
+    }
+  };
+
+  const clearHistoryMutation = useClearIssueHistory();
+  const handleClearHistory = async () => {
+    try {
+      const result = await clearHistoryMutation.mutateAsync({
+        issueId: issue!.id,
+        clearComments: true,
+        clearTasks: true,
+      });
+      toast.success(
+        `Cleared ${result.comments_deleted} comments, ${result.tasks_deleted} task runs`,
+      );
+      setClearHistoryDialogOpen(false);
+    } catch {
+      toast.error("Failed to clear history");
     }
   };
 
@@ -944,6 +963,14 @@ export function IssueDetail({
 
                   <DropdownMenuSeparator />
 
+                  {/* Clear history */}
+                  <DropdownMenuItem
+                    onClick={() => setClearHistoryDialogOpen(true)}
+                  >
+                    <Eraser className="h-3.5 w-3.5" />
+                    Clear history
+                  </DropdownMenuItem>
+
                   {/* Delete */}
                   <DropdownMenuItem
                     variant="destructive"
@@ -998,6 +1025,27 @@ export function IssueDetail({
                   className="bg-destructive text-white hover:bg-destructive/90"
                 >
                   {deleting ? "Deleting..." : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog open={clearHistoryDialogOpen} onOpenChange={setClearHistoryDialogOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear history</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete all comments and execution runs for this issue. The issue itself will be kept. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleClearHistory}
+                  disabled={clearHistoryMutation.isPending}
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                >
+                  {clearHistoryMutation.isPending ? "Clearing..." : "Clear"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1379,31 +1427,32 @@ export function IssueDetail({
                       }
                     }
 
-                    return groups.map((group) => {
-                      if (group.type === "comment") {
-                        const entry = group.entries[0]!;
-                        return (
-                          <div key={entry.id} id={`comment-${entry.id}`}>
-                            <CommentCard
-                              issueId={issue.id}
-                              entry={entry}
-                              allReplies={repliesByParent}
-                              commentById={commentById}
-                              agents={agents}
-                              isWorkspaceAdmin={isWorkspaceAdmin}
-                              issueOpen={
-                                !!issue && issue.status !== "done" && issue.status !== "cancelled"
-                              }
-                              currentUserId={user?.id}
-                              onReply={submitReply}
-                              onEdit={editComment}
-                              onDelete={deleteComment}
-                              onToggleReaction={handleToggleReaction}
-                              highlightedCommentId={highlightedId}
-                            />
-                          </div>
-                        );
-                      }
+                return groups.map((group) => {
+                  if (group.type === "comment") {
+                    const entry = group.entries[0]!;
+                    return (
+                      <div key={entry.id} id={`comment-${entry.id}`}>
+                        <CommentCard
+                          wsId={wsId}
+                          issueId={issue.id}
+                          entry={entry}
+                          allReplies={repliesByParent}
+                          commentById={commentById}
+                          agents={agents}
+                          isWorkspaceAdmin={isWorkspaceAdmin}
+                          issueOpen={
+                            !!issue && issue.status !== "done" && issue.status !== "cancelled"
+                          }
+                          currentUserId={user?.id}
+                          onReply={submitReply}
+                          onEdit={editComment}
+                          onDelete={deleteComment}
+                          onToggleReaction={handleToggleReaction}
+                          highlightedCommentId={highlightedId}
+                        />
+                      </div>
+                    );
+                  }
 
                       return (
                         <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">

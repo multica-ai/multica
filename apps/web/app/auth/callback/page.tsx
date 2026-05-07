@@ -22,6 +22,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 
+const mobileAuthCallback = "wujieai-multicam://auth/callback";
+
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -82,16 +84,20 @@ function CallbackContent() {
     // DingTalk login flow
     if (stateParts.includes("provider:dingtalk")) {
       const isDesktop = stateParts.includes("platform:desktop");
+      const isMobile = stateParts.includes("platform:mobile");
       const nextPart = stateParts.find((p) => p.startsWith("next:"));
       const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
       const redirectUri = `${window.location.origin}/auth/callback`;
 
-      if (isDesktop) {
+      if (isDesktop || isMobile) {
+        const callbackUrl = isMobile
+          ? mobileAuthCallback
+          : "multica://auth/callback";
         api
           .dingtalkLogin(code, redirectUri)
           .then(({ token }) => {
             setDesktopToken(token);
-            window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+            window.location.href = `${callbackUrl}?token=${encodeURIComponent(token)}`;
           })
           .catch((err) => {
             setError(err instanceof Error ? err.message : "Login failed");
@@ -129,18 +135,20 @@ function CallbackContent() {
 
     // Google login flow
     const isDesktop = stateParts.includes("platform:desktop");
+    const isMobile = stateParts.includes("platform:mobile");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
     const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
-    if (isDesktop) {
-      // Desktop flow: exchange code for token, then redirect via deep link
+    if (isDesktop || isMobile) {
+      // Native flow: exchange code for token, then redirect via deep link.
+      const callbackUrl = isMobile ? mobileAuthCallback : "multica://auth/callback";
       api
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
           setDesktopToken(token);
-          window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          window.location.href = `${callbackUrl}?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
@@ -177,13 +185,19 @@ function CallbackContent() {
   }, [searchParams, loginWithGoogle, loginWithDingTalk, router, qc]);
 
   if (desktopToken) {
+    const state = searchParams.get("state") || "";
+    const isMobile = state.split(",").includes("platform:mobile");
+    const callbackUrl = isMobile ? mobileAuthCallback : "multica://auth/callback";
+    const appName = isMobile ? "Multica mobile app" : "Multica desktop app";
+    const openLabel = isMobile ? "Open Multica Mobile" : "Open Multica Desktop";
+
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Opening Multica</CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
+              You should see a prompt to open the {appName}. If
               nothing happens, click the button below.
             </CardDescription>
           </CardHeader>
@@ -191,10 +205,10 @@ function CallbackContent() {
             <Button
               variant="outline"
               onClick={() => {
-                window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                window.location.href = `${callbackUrl}?token=${encodeURIComponent(desktopToken)}`;
               }}
             >
-              Open Multica Desktop
+              {openLabel}
             </Button>
           </CardContent>
         </Card>
