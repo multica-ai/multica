@@ -39,6 +39,7 @@ export interface CreateTimeEntryRequest {
 export interface ListTimeEntriesResponse {
   time_entries: TimeEntry[];
   total_minutes: number;
+  redmine_task_total_minutes?: number;
 }
 
 export interface UpdateTimeEntryRequest {

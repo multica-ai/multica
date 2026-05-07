@@ -88,6 +88,15 @@ WHERE te.workspace_id = $1 AND te.user_id = $2
 GROUP BY te.issue_id, i.number, i.title
 ORDER BY total_minutes DESC;
 
+-- name: GetTotalTimeByRedmineExternalIssue :one
+SELECT COALESCE(SUM(te.duration_minutes), 0)::int AS total_minutes
+FROM time_entry te
+JOIN issue_integration_link l ON l.issue_id = te.issue_id
+WHERE te.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.provider = 'redmine'
+  AND l.external_issue_id = $2;
+
 -- name: GetUserTimeOnDate :one
 SELECT COALESCE(SUM(duration_minutes), 0)::int AS total_minutes
 FROM time_entry

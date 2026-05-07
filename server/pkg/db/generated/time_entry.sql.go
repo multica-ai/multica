@@ -283,6 +283,28 @@ func (q *Queries) GetTotalTimeByIssue(ctx context.Context, arg GetTotalTimeByIss
 	return total_minutes, err
 }
 
+const getTotalTimeByRedmineExternalIssue = `-- name: GetTotalTimeByRedmineExternalIssue :one
+SELECT COALESCE(SUM(te.duration_minutes), 0)::int AS total_minutes
+FROM time_entry te
+JOIN issue_integration_link l ON l.issue_id = te.issue_id
+WHERE te.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.provider = 'redmine'
+  AND l.external_issue_id = $2
+`
+
+type GetTotalTimeByRedmineExternalIssueParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ExternalIssueID string      `json:"external_issue_id"`
+}
+
+func (q *Queries) GetTotalTimeByRedmineExternalIssue(ctx context.Context, arg GetTotalTimeByRedmineExternalIssueParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getTotalTimeByRedmineExternalIssue, arg.WorkspaceID, arg.ExternalIssueID)
+	var total_minutes int32
+	err := row.Scan(&total_minutes)
+	return total_minutes, err
+}
+
 const getUserTimeOnDate = `-- name: GetUserTimeOnDate :one
 SELECT COALESCE(SUM(duration_minutes), 0)::int AS total_minutes
 FROM time_entry

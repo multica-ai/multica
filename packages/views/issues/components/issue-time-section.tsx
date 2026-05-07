@@ -126,6 +126,8 @@ export function IssueTimeSection({
   const { data } = useQuery(issueTimeEntriesOptions(wsId, issueId));
   const entries = data?.time_entries ?? [];
   const totalMinutes = data?.total_minutes ?? 0;
+  // Use aggregated total across all Multica issues linked to the same Redmine task (when available).
+  const redmineTaskTotalMinutes = data?.redmine_task_total_minutes ?? totalMinutes;
 
   const { data: activitiesData } = useQuery({
     ...redmineActivitiesOptions(wsId),
@@ -346,37 +348,37 @@ export function IssueTimeSection({
             </Button>
           </div>
 
-          {/* Budget bar: estimated vs actual */}
+          {/* Budget bar: estimated vs actual (aggregates hours across all Multica issues linked to the same Redmine task) */}
           {estimatedMinutes != null && estimatedMinutes > 0 && (
             <div className="space-y-1">
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>
-                  {formatMinutes(totalMinutes)} /{" "}
+                  {formatMinutes(redmineTaskTotalMinutes)} /{" "}
                   {formatMinutes(estimatedMinutes)}
                 </span>
                 <span>
-                  {Math.round((totalMinutes / estimatedMinutes) * 100)}%
+                  {Math.round((redmineTaskTotalMinutes / estimatedMinutes) * 100)}%
                 </span>
               </div>
               <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
                   className={cn(
                     "h-full rounded-full transition-all duration-300",
-                    totalMinutes / estimatedMinutes > 1
+                    redmineTaskTotalMinutes / estimatedMinutes > 1
                       ? "bg-destructive"
-                      : totalMinutes / estimatedMinutes > 0.8
+                      : redmineTaskTotalMinutes / estimatedMinutes > 0.8
                         ? "bg-yellow-500"
                         : "bg-emerald-500",
                   )}
                   style={{
-                    width: `${Math.min((totalMinutes / estimatedMinutes) * 100, 100)}%`,
+                    width: `${Math.min((redmineTaskTotalMinutes / estimatedMinutes) * 100, 100)}%`,
                   }}
                 />
               </div>
-              {totalMinutes > estimatedMinutes && (
+              {redmineTaskTotalMinutes > estimatedMinutes && (
                 <p className="text-[10px] text-destructive">
                   {t(($) => $.ts_over_budget, {
-                    amount: formatMinutes(totalMinutes - estimatedMinutes),
+                    amount: formatMinutes(redmineTaskTotalMinutes - estimatedMinutes),
                   })}
                 </p>
               )}

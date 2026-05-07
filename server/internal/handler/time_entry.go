@@ -302,14 +302,35 @@ func (h *Handler) ListTimeEntries(w http.ResponseWriter, r *http.Request) {
 		total = 0
 	}
 
+	// Aggregate total minutes across all Multica issues linked to the same Redmine task.
+	var redmineTaskTotalMinutes *int32
+	redmineLink, linkErr := h.Queries.GetIssueIntegrationLink(r.Context(), db.GetIssueIntegrationLinkParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+		Provider:    "redmine",
+	})
+	if linkErr == nil {
+		taskTotal, qtErr := h.Queries.GetTotalTimeByRedmineExternalIssue(r.Context(), db.GetTotalTimeByRedmineExternalIssueParams{
+			WorkspaceID:     parseUUID(workspaceID),
+			ExternalIssueID: redmineLink.ExternalIssueID,
+		})
+		if qtErr == nil {
+			redmineTaskTotalMinutes = &taskTotal
+		}
+	}
+
 	resp := make([]TimeEntryResponse, len(entries))
 	for i, e := range entries {
 		resp[i] = timeEntryToResponse(e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"time_entries":  resp,
 		"total_minutes": total,
-	})
+	}
+	if redmineTaskTotalMinutes != nil {
+		body["redmine_task_total_minutes"] = *redmineTaskTotalMinutes
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // DeleteTimeEntry deletes a time entry (own entries only) and removes it from Redmine if synced.
