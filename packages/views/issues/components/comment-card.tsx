@@ -1,8 +1,9 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, FileText, Link2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -34,6 +35,7 @@ import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, us
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useNavigation } from "../../navigation";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -155,6 +157,28 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   );
 }
 
+function useCopyCommentLink(issueId: string) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+
+  return useCallback(async (commentId: string) => {
+    const path = paths.issueDetail(issueId, { commentId });
+    const url = navigation.getShareableUrl
+      ? navigation.getShareableUrl(path)
+      : typeof window !== "undefined"
+        ? window.location.origin + path
+        : path;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(t(($) => $.detail.link_copied));
+    } catch {
+      toast.error(t(($) => $.detail.link_copy_failed));
+    }
+  }, [issueId, navigation, paths, t]);
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -178,6 +202,7 @@ function CommentRow({
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  const copyCommentLink = useCopyCommentLink(issueId);
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
@@ -266,6 +291,10 @@ function CommentRow({
               }}>
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
+                <Link2 className="h-3.5 w-3.5" />
+                {t(($) => $.actions.copy_link)}
               </DropdownMenuItem>
               {(canEditEntry || canDeleteEntry) && (
                 <>
@@ -365,6 +394,7 @@ function CommentCardImpl({
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  const copyCommentLink = useCopyCommentLink(issueId);
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -493,6 +523,10 @@ function CommentCardImpl({
                   }}>
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
+                    <Link2 className="h-3.5 w-3.5" />
+                    {t(($) => $.actions.copy_link)}
                   </DropdownMenuItem>
                   {(canEditEntry || canDeleteEntry) && (
                     <>

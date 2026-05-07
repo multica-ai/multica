@@ -192,6 +192,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
+  const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
+  const requestedCommentId = highlightCommentId ?? linkedCommentId;
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
@@ -284,7 +286,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     isFetchingOlder, isFetchingNewer,
     fetchOlder, fetchNewer, jumpToLatest,
     isAtLatest, newEntriesBelowCount,
-  } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
+  } = useIssueTimeline(id, user?.id, { around: requestedCommentId });
 
   // Memoized timeline grouping. The same Map / groups references are reused
   // across re-renders that don't change `timeline`, so React.memo on
@@ -378,19 +380,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0) return;
-    if (didHighlightRef.current === highlightCommentId) return;
-    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (!requestedCommentId || timeline.length === 0) return;
+    if (didHighlightRef.current === requestedCommentId) return;
+    const el = document.getElementById(`comment-${requestedCommentId}`);
     if (el) {
-      didHighlightRef.current = highlightCommentId;
+      didHighlightRef.current = requestedCommentId;
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: "instant", block: "center" });
-        setHighlightedId(highlightCommentId);
+        setHighlightedId(requestedCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
       });
     }
-  }, [highlightCommentId, timeline.length]);
+  }, [requestedCommentId, timeline.length]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
