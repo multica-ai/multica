@@ -93,4 +93,9 @@ const (
 	// Daemon events
 	EventDaemonHeartbeat = "daemon:heartbeat"
 	EventDaemonRegister  = "daemon:register"
+
+	// Connection liveness — emitted on every active WS connection so clients
+	// can detect a half-open or system-suspended (iOS PWA background) socket
+	// by observing the absence of recent messages, then force-reconnect.
+	EventServerPing = "server:ping"
 )

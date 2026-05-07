@@ -60,7 +60,10 @@ export type WSEventType =
   | "invitation:revoked"
   | "artifact:created"
   | "artifact:updated"
-  | "artifact:deleted";
+  | "artifact:deleted"
+  // Connection liveness — emitted periodically by the server so the client can
+  // detect a half-open or system-suspended (iOS PWA background) socket.
+  | "server:ping";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
