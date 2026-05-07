@@ -50,7 +50,7 @@ RETURNING *;
 
 -- name: ListFailedTimeEntries :many
 SELECT * FROM time_entry
-WHERE workspace_id = $1 AND sync_status = 'failed'
+WHERE workspace_id = $1 AND sync_status IN ('failed', 'not_linked')
 ORDER BY created_at DESC;
 
 -- name: ListTimeEntriesByUserDateRange :many

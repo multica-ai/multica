@@ -484,13 +484,21 @@ func (h *Handler) UpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If synced to Redmine, update there too
+	issueID := uuidToString(updated.IssueID)
+
+	// If synced to Redmine, update there too.
+	// If previously not_linked, re-attempt sync in case the issue has been linked to Redmine since creation.
 	if updated.SyncStatus == "synced" && updated.ExternalTimeEntryID.Valid {
 		h.tryUpdateRedmineTimeEntry(r, workspaceID, userID, updated)
+	} else if updated.SyncStatus == "not_linked" {
+		h.syncTimeEntryToRedmine(r, workspaceID, userID, issueID, updated)
+		updated, _ = h.Queries.GetTimeEntry(r.Context(), db.GetTimeEntryParams{
+			ID:          updated.ID,
+			WorkspaceID: updated.WorkspaceID,
+		})
 	}
 
 	resp := timeEntryToResponse(updated)
-	issueID := uuidToString(updated.IssueID)
 
 	h.publish(protocol.EventTimeEntryCreated, workspaceID, "member", userID, map[string]any{
 		"issue_id":   issueID,

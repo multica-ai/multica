@@ -304,7 +304,7 @@ func (q *Queries) GetUserTimeOnDate(ctx context.Context, arg GetUserTimeOnDatePa
 
 const listFailedTimeEntries = `-- name: ListFailedTimeEntries :many
 SELECT id, workspace_id, issue_id, user_id, duration_minutes, activity_name, redmine_activity_id, comment, spent_on, external_time_entry_id, sync_status, timer_started_at, timer_stopped_at, created_at, updated_at FROM time_entry
-WHERE workspace_id = $1 AND sync_status = 'failed'
+WHERE workspace_id = $1 AND sync_status IN ('failed', 'not_linked')
 ORDER BY created_at DESC
 `
 
