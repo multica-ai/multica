@@ -73,6 +73,8 @@ import {
 } from "@multica/ui/components/ui/popover";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm pins when cerebro_channels is OFF
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(dashboard-nav): JEH-684 sidebar entry for cerebro dashboard
+import { DashboardNavItem } from "@multica/cerebro-dashboard/views/dashboard-nav-item";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -702,6 +704,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
+                {/* CEREBRO-PATCH(dashboard-nav): JEH-684 cerebro dashboard entry */}
+                <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {personalNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);

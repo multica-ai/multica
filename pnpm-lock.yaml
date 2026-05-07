@@ -310,6 +310,9 @@ importers:
       '@multica/cerebro-chat':
         specifier: workspace:*
         version: link:../../packages/cerebro-chat
+      '@multica/cerebro-dashboard':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-dashboard
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../../packages/cerebro-feature-flags
@@ -775,6 +778,46 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
+
+  packages/cerebro-dashboard:
+    dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.96.2(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.0.1(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@types/node@25.5.0)(jiti@2.6.1))
 
   packages/cerebro-feature-flags:
     dependencies:

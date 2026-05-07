@@ -12,7 +12,8 @@ export type CerebroFlagKey =
   | "cerebro_sandbox_ui"
   | "cerebro_mcp_guide"
   | "cerebro_channels"
-  | "cerebro_web_push";
+  | "cerebro_web_push"
+  | "cerebro_dashboard";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -25,6 +26,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_mcp_guide: true,
   cerebro_channels: true,
   cerebro_web_push: true,
+  cerebro_dashboard: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -73,5 +75,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Web Push notifications",
     description:
       "Enable browser/PWA push notifications for new inbox items, comments, and mentions.",
+  },
+  {
+    key: "cerebro_dashboard",
+    label: "Cerebro dashboard",
+    description:
+      "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
   },
 ];

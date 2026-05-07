@@ -94,6 +94,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `comment-handler` | server/internal/handler/comment.go | 7 | Comment cerebro additions (replies, attachments, reactions) |
 | `comment-input-cerebro` | packages/views/issues/components/comment-input.tsx | 3 | Comment cerebro additions (replies, attachments, reactions) |
 | `core-chat-queries` | packages/core/chat/queries.ts | 19 | Cerebro chat-archive/coalesce additions |
+| `dashboard-nav` | packages/views/layout/app-sidebar.tsx | 4 | JEH-684 — sidebar entry for the cerebro dashboard at /:workspace/dashboard. Imports `<DashboardNavItem />` from `@multica/cerebro-dashboard` and renders it above personal nav. Gated on `cerebro_dashboard` feature flag. |
 | `core-chat-store` | packages/core/chat/store.ts | 5 | Cerebro chat-archive/coalesce additions |
 | `core-inbox-folders` | packages/core/inbox/folders.ts | 194 | Cerebro inbox-folder/archive additions |
 | `core-inbox-index` | packages/core/inbox/index.ts | 1 | Cerebro inbox-folder/archive additions |

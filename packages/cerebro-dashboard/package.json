@@ -1,0 +1,37 @@
+{
+  "name": "@multica/cerebro-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./core/queries": "./core/queries.ts",
+    "./core/store": "./core/store.ts",
+    "./views": "./views/index.ts",
+    "./views/dashboard-page": "./views/dashboard-page.tsx",
+    "./views/dashboard-nav-item": "./views/components/dashboard-nav-item.tsx"
+  },
+  "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
