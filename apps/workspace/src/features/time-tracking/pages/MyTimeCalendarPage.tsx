@@ -152,7 +152,6 @@ function CalendarContextMenu({ state, onClose, onEdit, onContinue, onDelete }: C
  * /my-time/calendar — full-featured time entry calendar with DnD, zoom, and custom components.
  */
 export function MyTimeCalendarPage() {
-  const { data: entries = [] } = useTimeEntriesQuery();
   const { data: running } = useCurrentTimerQuery();
   const updateEntry = useUpdateTimeEntryMutation();
   const startTimer = useStartTimerMutation();
@@ -163,6 +162,38 @@ export function MyTimeCalendarPage() {
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [zoom, setZoom] = useState<-1 | 0 | 1>(0);
+
+  // Tracks the current time so the running timer event block updates periodically.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, [!!running]);
+
+  // Compute the visible date window based on the current view and date so the
+  // query only fetches what's needed (and never gets capped by a fixed limit).
+  const { since, until } = useMemo(() => {
+    const d = new Date(date);
+    if (view === Views.DAY) {
+      const s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const u = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+      return { since: s.toISOString(), until: u.toISOString() };
+    }
+    if (view === Views.WEEK) {
+      // Monday-anchored week window (±1 day buffer for cross-midnight entries).
+      const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dayOfWeek);
+      const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 7);
+      return { since: mon.toISOString(), until: sun.toISOString() };
+    }
+    // Month view fallback.
+    const s = new Date(d.getFullYear(), d.getMonth(), 1);
+    const u = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    return { since: s.toISOString(), until: u.toISOString() };
+  }, [view, date]);
+
+  const { data: entries = [] } = useTimeEntriesQuery({ since, until });
 
   const calendarRef = useRef<HTMLDivElement>(null);
 
@@ -178,7 +209,8 @@ export function MyTimeCalendarPage() {
     const result: CalendarEvent[] = [];
     for (const entry of allEntries) {
       const start = new Date(entry.start_time);
-      const end = entry.stop_time ? new Date(entry.stop_time) : new Date();
+      // Use the reactive `now` for running entries so the block extends as time passes.
+      const end = entry.stop_time ? new Date(entry.stop_time) : now;
       const displayEnd = displayEndForCalendar(start, end);
       const segments = splitAtMidnight(start, displayEnd);
       for (const seg of segments) {
@@ -192,7 +224,7 @@ export function MyTimeCalendarPage() {
       }
     }
     return result;
-  }, [allEntries]);
+  }, [allEntries, now]);
 
   // Compute daily totals keyed by "YYYY-MM-DD" for the day header component.
   const dailyTotals = useMemo(() => {
