@@ -49,6 +49,12 @@ async function readAllFiles(files: FileList): Promise<ParsedFile[]> {
 
   const promises: Promise<void>[] = [];
 
+  // Determine the top-level directory name from the first file's webkitRelativePath.
+  // If it starts with '.' (e.g. .claude, .codex), preserve it in paths so format parsers
+  // can identify the skill format by the directory name (e.g. .claude/commands/*.md).
+  const topDir = files.length > 0 ? getFirstSegment(files[0]!.webkitRelativePath) : "";
+  const preserveTopDir = topDir.startsWith(".");
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
     const ext = getExtension(file.name);
@@ -59,8 +65,9 @@ async function readAllFiles(files: FileList): Promise<ParsedFile[]> {
       file.text().then((content) => {
         // webkitRelativePath is like "dirname/subdir/file.md"
         const relativePath = file.webkitRelativePath;
-        // Strip the top-level directory name
-        const stripped = stripFirstSegment(relativePath);
+        // Strip the top-level directory name, except for dot directories whose
+        // name is meaningful to format detection (e.g. .claude/commands/).
+        const stripped = preserveTopDir ? relativePath : stripFirstSegment(relativePath);
         if (stripped) {
           results.push({ relativePath: stripped, content });
         }
@@ -93,21 +100,36 @@ function parseClaudeCodeFormat(files: ParsedFile[]): CreateSkillRequest[] {
 }
 
 function parseCodexFormat(files: ParsedFile[]): CreateSkillRequest | null {
+  // Match AGENTS.md/codex.md at root, or directly inside a dot directory (e.g. .codex/AGENTS.md).
   const codexFile = files.find(
-    (f) => f.relativePath === "AGENTS.md" || f.relativePath === "codex.md",
+    (f) =>
+      f.relativePath === "AGENTS.md" ||
+      f.relativePath === "codex.md" ||
+      /^\.[^/]+\/AGENTS\.md$/.test(f.relativePath) ||
+      /^\.[^/]+\/codex\.md$/.test(f.relativePath),
   );
   if (!codexFile) return null;
 
   const { name, description } = parseFrontmatter(codexFile.content);
+
+  // If AGENTS.md is inside a dot directory, only include sibling files under the same prefix.
+  const filePrefix = codexFile.relativePath.includes("/")
+    ? codexFile.relativePath.slice(0, codexFile.relativePath.lastIndexOf("/") + 1)
+    : "";
   const supportingFiles = files.filter(
-    (f) => f !== codexFile && f.relativePath !== "AGENTS.md" && f.relativePath !== "codex.md",
+    (f) =>
+      f !== codexFile &&
+      (filePrefix === "" || f.relativePath.startsWith(filePrefix)),
   );
 
   return {
     name: name || "AGENTS",
     description: description || "Imported from Codex format",
     content: codexFile.content,
-    files: supportingFiles.map((f) => ({ path: f.relativePath, content: f.content })),
+    files: supportingFiles.map((f) => ({
+      path: filePrefix ? f.relativePath.slice(filePrefix.length) : f.relativePath,
+      content: f.content,
+    })),
   };
 }
 
@@ -160,7 +182,11 @@ function parseSkillMdFormat(files: ParsedFile[]): CreateSkillRequest[] {
 }
 
 function parseFallbackFormat(files: ParsedFile[]): CreateSkillRequest[] {
-  const rootMdFiles = files.filter(
+  // If all files share a single dot-directory prefix (e.g. user uploaded .claude or .mytools),
+  // work within that prefix so root .md files are detected correctly.
+  const normalized = normalizeDotDirFiles(files);
+
+  const rootMdFiles = normalized.filter(
     (f) => !f.relativePath.includes("/") && f.relativePath.endsWith(".md"),
   );
 
@@ -169,8 +195,8 @@ function parseFallbackFormat(files: ParsedFile[]): CreateSkillRequest[] {
     return [{
       name: "Imported Skills",
       description: "",
-      content: files.find((f) => f.relativePath.endsWith(".md"))?.content || "",
-      files: files
+      content: normalized.find((f) => f.relativePath.endsWith(".md"))?.content || "",
+      files: normalized
         .filter((f) => !f.relativePath.endsWith(".md"))
         .map((f) => ({ path: f.relativePath, content: f.content })),
     }];
@@ -184,6 +210,22 @@ function parseFallbackFormat(files: ParsedFile[]): CreateSkillRequest[] {
       content: f.content,
     };
   });
+}
+
+/** Strip a shared dot-directory prefix when all files live under a single dot directory. */
+function normalizeDotDirFiles(files: ParsedFile[]): ParsedFile[] {
+  if (files.length === 0) return files;
+  const topDirs = new Set(files.map((f) => getFirstSegment(f.relativePath)));
+  if (topDirs.size !== 1) return files;
+  const [topDir] = topDirs;
+  if (!topDir || !topDir.startsWith(".")) return files;
+  const prefix = topDir + "/";
+  return files.map((f) => ({
+    ...f,
+    relativePath: f.relativePath.startsWith(prefix)
+      ? f.relativePath.slice(prefix.length)
+      : f.relativePath,
+  }));
 }
 
 // --- Helpers ---
@@ -228,4 +270,9 @@ function stripFirstSegment(path: string): string {
 function getDirectory(path: string): string {
   const slash = path.lastIndexOf("/");
   return slash >= 0 ? path.slice(0, slash) : "";
+}
+
+function getFirstSegment(path: string): string {
+  const slash = path.indexOf("/");
+  return slash >= 0 ? path.slice(0, slash) : path;
 }
