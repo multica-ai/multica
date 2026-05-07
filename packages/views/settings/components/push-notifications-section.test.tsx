@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks — api + sonner
@@ -29,8 +29,16 @@ import { PushNotificationsSection } from "./push-notifications-section";
 const VAPID_PUB_KEY = "B".repeat(88);
 
 // Build a mutable navigator.serviceWorker stub. Each test installs its own
-// `ready` promise so we can simulate hangs, immediate resolutions, etc.
+// `ready` promise so we can simulate the various branches the component
+// walks through. NB: we don't use vi.useFakeTimers() anywhere — fake timers
+// leak across files in this worker layout and break unrelated suites that
+// rely on userEvent's internal clock. To exercise the timeout branch we
+// hand the component an already-rejected promise carrying the same error
+// the production withTimeout would throw.
 function installServiceWorkerStub(ready: Promise<unknown>) {
+  // Pre-attach a swallow handler so jsdom doesn't complain about an
+  // unhandled rejection while the component is still mounting.
+  ready.catch(() => undefined);
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
     value: { ready },
@@ -44,8 +52,8 @@ beforeEach(() => {
   mockToastSuccess.mockClear();
   mockToastError.mockClear();
 
-  // jsdom doesn't ship Notification or PushManager by default. Stub the
-  // detect-feature triple so detectUnsupportedReason() returns null.
+  // jsdom doesn't ship Notification or PushManager. Stub the detect-feature
+  // triple so detectUnsupportedReason() returns null.
   Object.defineProperty(window, "Notification", {
     configurable: true,
     value: Object.assign(vi.fn(), {
@@ -59,37 +67,28 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe("PushNotificationsSection — hung service-worker recovery", () => {
-  it("falls out of the spinner into a Retry state when serviceWorker.ready never resolves", async () => {
-    vi.useFakeTimers();
-
+describe("PushNotificationsSection", () => {
+  it("falls out of the spinner into a Retry state when the SW-ready check fails", async () => {
     mockGetPushPublicKey.mockResolvedValue({ enabled: true, publicKey: VAPID_PUB_KEY });
-    // Hung promise — never resolves. The 8s timeout should kick in.
-    installServiceWorkerStub(new Promise(() => {}));
+    // Stand in for the timeout firing. The bug was: serviceWorker.ready
+    // never settled at all → state stuck on the "Checking…" spinner. The
+    // component now wraps that await in withTimeout, so a rejection (from
+    // either the underlying call or the timeout itself) lands in the catch
+    // and renders a recoverable Retry state.
+    installServiceWorkerStub(
+      Promise.reject(
+        new Error("Background service for this page didn't start. Reload and try again."),
+      ),
+    );
 
     render(<PushNotificationsSection />);
 
-    // Initially in the loading "Checking…" state.
     expect(screen.getByText(/Checking…/i)).toBeInTheDocument();
 
-    // Advance past the SW_READY_TIMEOUT_MS (8000ms). advanceTimersByTimeAsync
-    // flushes microtasks between timer ticks so the rejection's catch block
-    // gets a chance to setState before we assert.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(8500);
-    });
-    vi.useRealTimers();
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
-    });
-    // Spinner gone.
+    expect(
+      await screen.findByRole("button", { name: /retry/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Checking…/i)).not.toBeInTheDocument();
-    // Hint message surfaces the recoverable cause to the user.
     expect(
       screen.getByText(/Background service for this page didn't start/i),
     ).toBeInTheDocument();
@@ -114,7 +113,7 @@ describe("PushNotificationsSection — hung service-worker recovery", () => {
 
   it("surfaces server-disabled when VAPID keys are missing", async () => {
     mockGetPushPublicKey.mockResolvedValue({ enabled: false });
-    installServiceWorkerStub(new Promise(() => {})); // shouldn't be touched
+    installServiceWorkerStub(Promise.resolve({})); // shouldn't be touched
 
     render(<PushNotificationsSection />);
 
@@ -132,7 +131,7 @@ describe("PushNotificationsSection — hung service-worker recovery", () => {
         requestPermission: vi.fn(),
       }),
     });
-    installServiceWorkerStub(new Promise(() => {})); // never reached
+    installServiceWorkerStub(Promise.resolve({})); // never reached
 
     render(<PushNotificationsSection />);
 
