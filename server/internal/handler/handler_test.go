@@ -1581,6 +1581,11 @@ func TestVerifyCodeRejectsDevCodeUnlessExplicitlyConfigured(t *testing.T) {
 }
 
 func TestVerifyCodeAcceptsConfiguredDevCodeOutsideProduction(t *testing.T) {
+	// CEREBRO-PATCH(skip-dev-master-code): cerebro removed the dev-master-code
+	// escape hatch as a security patch (see auth_master_code_test.go which
+	// enforces rejection). This upstream test asserts the opposite behavior
+	// and is incompatible with the cerebro security posture.
+	t.Skip("cerebro security patch: dev master code (888888) is rejected, see TestVerifyCodeRejectsMasterCode")
 	t.Setenv(devVerificationCodeEnv, "888888")
 	t.Setenv("APP_ENV", "development")
 
