@@ -6,11 +6,16 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  AgentActivityBucket,
+  AgentRunCount,
+  TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
   CreateAgentRequest,
   UpdateAgentRequest,
   Skill,
+  SkillSummary,
+  AgentSkillSummary,
   SkillFile,
   CreateSkillRequest,
   UpdateSkillRequest,
@@ -26,10 +31,21 @@ export type {
   ForkSkillRequest,
   RuntimeUsage,
   RuntimeHourlyActivity,
-  RuntimePing,
-  RuntimePingStatus,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
   RuntimeUpdateStatus,
+  RuntimeModel,
+  RuntimeModelListRequest,
+  RuntimeModelListStatus,
+  RuntimeModelsResult,
+  RuntimeLocalSkillStatus,
+  RuntimeLocalSkillSummary,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillsResult,
+  RuntimeLocalSkillImportResult,
   IssueUsageSummary,
   WorkSession,
 } from "./agent";
@@ -42,8 +58,15 @@ export type {
   InboxFolderMembership,
   InboxFolderItemType,
 } from "./inbox";
+export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
-export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
+export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
+export type {
+  TimelineEntry,
+  TimelinePage,
+  TimelinePageParam,
+  AssigneeFrequencyEntry,
+} from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
@@ -67,7 +90,21 @@ export type {
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { Channel, ChannelKind, ChannelMember, CreateChannelRequest } from "./channel";
 export type { StorageAdapter } from "./storage";
-export type { Project, ProjectStatus, ProjectPriority, ProjectAccess, ProjectMember, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
+export type {
+  Project,
+  ProjectStatus,
+  ProjectPriority,
+  ProjectAccess,
+  ProjectMember,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  ListProjectsResponse,
+  ProjectResource,
+  ProjectResourceType,
+  GithubRepoResourceRef,
+  CreateProjectResourceRequest,
+  ListProjectResourcesResponse,
+} from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   Autopilot,

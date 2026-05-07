@@ -1,0 +1,232 @@
+{
+  "page": {
+    "title": "Autopilot",
+    "new_autopilot": "New autopilot",
+    "start_blank": "Start from scratch",
+    "table": {
+      "name": "Name",
+      "agent": "Agent",
+      "mode": "Mode",
+      "status": "Status",
+      "last_run": "Last run"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "No autopilots yet",
+      "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
+    }
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused",
+    "archived": "Archived"
+  },
+  "execution_mode": {
+    "create_issue": "Create Issue",
+    "run_only": "Run Only"
+  },
+  "relative_date": {
+    "today": "Today",
+    "one_day_ago": "1d ago",
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Daily news digest",
+      "summary": "Search and summarize today's news for the team"
+    },
+    "pr_review": {
+      "title": "PR review reminder",
+      "summary": "Flag stale pull requests that need review"
+    },
+    "bug_triage": {
+      "title": "Bug triage",
+      "summary": "Assess and prioritize new bug reports"
+    },
+    "weekly_progress": {
+      "title": "Weekly progress report",
+      "summary": "Compile a weekly summary of team progress"
+    },
+    "dependency_audit": {
+      "title": "Dependency audit",
+      "summary": "Scan for security vulnerabilities and outdated packages"
+    },
+    "documentation_check": {
+      "title": "Documentation check",
+      "summary": "Review recent changes for documentation gaps"
+    }
+  },
+  "detail": {
+    "not_found": "Autopilot not found",
+    "pause_aria": "Pause autopilot",
+    "activate_aria": "Activate autopilot",
+    "edit": "Edit",
+    "run_now": "Run now",
+    "running": "Running...",
+    "toast_triggered": "Autopilot triggered",
+    "toast_trigger_failed": "Failed to trigger autopilot",
+    "section_properties": "Properties",
+    "section_triggers": "Triggers",
+    "section_run_history": "Run History",
+    "section_danger": "Danger Zone",
+    "field_agent": "Agent",
+    "field_output_mode": "Output Mode",
+    "field_prompt": "Prompt",
+    "add_trigger": "Add trigger",
+    "no_triggers": "No triggers configured. Add a schedule to run automatically.",
+    "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
+    "delete_button": "Delete autopilot",
+    "toast_deleted": "Autopilot deleted",
+    "toast_delete_failed": "Failed to delete autopilot",
+    "delete_dialog": {
+      "title": "Delete autopilot",
+      "description": "This will permanently delete \"{{title}}\", along with its triggers and run history. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    }
+  },
+  "run_status": {
+    "issue_created": "Issue Created",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "run": {
+    "issue_linked": "Issue linked",
+    "view_log": "View execution log"
+  },
+  "trigger_row": {
+    "disabled_badge": "Disabled",
+    "next_label": "Next: {{date}}",
+    "toast_deleted": "Trigger deleted",
+    "toast_delete_failed": "Failed to delete trigger",
+    "delete_dialog": {
+      "title": "Delete trigger",
+      "description": "This trigger will be removed and the autopilot will stop firing on this schedule. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Add Trigger",
+    "label_field": "Label (optional)",
+    "label_placeholder": "e.g. Weekday morning",
+    "submit": "Add trigger",
+    "submitting": "Adding...",
+    "toast_added": "Trigger added",
+    "toast_add_failed": "Failed to add trigger"
+  },
+  "dialog": {
+    "sr_create": "New Autopilot",
+    "sr_edit": "Edit Autopilot",
+    "header_create": "New autopilot",
+    "header_edit": "Edit autopilot",
+    "subtitle": "A recurring AI task",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "close": "Close",
+    "title_placeholder": "Autopilot name",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Read by the agent on every run",
+    "description_placeholder": "# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. …\n2. …",
+    "auto_run_hint": "Once saved, runs automatically until paused.",
+    "cancel": "Cancel",
+    "create": "Create autopilot",
+    "save": "Save",
+    "creating": "Creating...",
+    "saving": "Saving...",
+    "toast_created": "Autopilot created",
+    "toast_create_partial": "Autopilot created, but schedule failed to save",
+    "toast_create_failed": "Failed to create autopilot",
+    "toast_updated": "Autopilot updated",
+    "toast_update_partial": "Autopilot updated, but schedule failed to save",
+    "toast_update_failed": "Failed to update autopilot",
+    "section_agent": "Agent",
+    "select_agent": "Select agent",
+    "section_output_mode": "Output mode",
+    "section_schedule": "Schedule",
+    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
+    "next_run_label": "Next run:",
+    "output_modes": {
+      "create_issue": {
+        "label": "Create issue",
+        "description": "Each run creates a tracked issue"
+      },
+      "run_only": {
+        "label": "Run only",
+        "description": "Silent run, no issue created"
+      }
+    },
+    "frequency_long": {
+      "hourly": "Every hour",
+      "daily": "Every day",
+      "weekdays": "Every weekday",
+      "weekly": "Every week",
+      "custom": "Custom cron"
+    },
+    "days": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "weekdays": "Weekdays",
+      "weekly": "Days",
+      "custom": "Custom"
+    },
+    "days_short": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "cron_label": "Cron Expression",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "minute_label": "Minute",
+    "time_label": "Time",
+    "timezone_label": "Timezone",
+    "days_label": "Days",
+    "summary": {
+      "hourly": "Hourly · :{{min}}",
+      "daily": "Daily {{time}}",
+      "weekdays": "Weekdays {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Custom cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "Runs every hour at :{{min}}",
+      "daily": "Runs daily at {{time}} {{offset}}",
+      "weekdays": "Runs weekdays at {{time}} {{offset}}",
+      "weekly": "Runs every {{days}} at {{time}} {{offset}}",
+      "custom": "Custom schedule: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Filter agents...",
+    "select_agent": "Select agent"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Search timezone..."
+  }
+}

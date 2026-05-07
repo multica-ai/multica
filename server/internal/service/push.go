@@ -106,7 +106,12 @@ func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) 
 		return
 	}
 
-	subs, err := s.queries.ListPushSubscriptionsByUser(ctx, util.ParseUUID(userID))
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		slog.Warn("push: invalid user id", "user_id", userID, "error", err)
+		return
+	}
+	subs, err := s.queries.ListPushSubscriptionsByUser(ctx, userUUID)
 	if err != nil {
 		slog.Error("push: list subscriptions failed", "user_id", userID, "error", err)
 		return
@@ -124,7 +129,7 @@ func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) 
 	// the count at zero so the SW clears the icon. The next push after
 	// the user re-enables badge will reflect the true count.
 	if p.Badge {
-		count, err := s.queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(userID))
+		count, err := s.queries.CountUnreadInboxForUserAllWorkspaces(ctx, userUUID)
 		if err != nil {
 			slog.Warn("push: unread count failed", "user_id", userID, "error", err)
 		} else {

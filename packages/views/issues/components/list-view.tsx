@@ -8,12 +8,12 @@ import { Accordion } from "@base-ui/react/accordion";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
-import { useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
+import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { sortIssues } from "../utils/sort";
 import { StatusIcon } from "./status-icon";
 import { ListRow, type ChildProgress } from "./list-row";
@@ -39,10 +39,10 @@ export function ListView({
   childrenMap?: Map<string, Issue[]>;
   /** Override the done-group count (e.g. with a server-filtered total). */
   doneTotal?: number;
-  /** When set, use the My Issues load-more hook instead of the workspace one. */
+  /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
-  /** Extra data merged into the create-issue modal (e.g. project_id). */
+  /** CEREBRO-PATCH(list-view-cerebro): Extra data merged into the create-issue modal. */
   createIssueData?: Record<string, unknown>;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
@@ -56,10 +56,6 @@ export function ListView({
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
-  const myIssuesOpts = myIssuesScope ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} } : undefined;
-  const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } =
-    useLoadMoreDoneIssues(myIssuesOpts);
-  const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
 
   const issuesByStatus = useMemo(() => {
     const map = new Map<IssueStatus, Issue[]>();
@@ -77,6 +73,17 @@ export function ListView({
       ),
     [visibleStatuses, listCollapsedStatuses]
   );
+
+  const myIssuesOpts = myIssuesScope
+    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
+    : undefined;
+
+  // Done-column pagination (server-paginated for performance).
+  const { loadMore, hasMore, isLoading: loadingMore, total: doneTotalFromHook } = useLoadMoreByStatus(
+    "done",
+    myIssuesOpts,
+  );
+  const displayDoneTotal = doneTotalOverride ?? doneTotalFromHook;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-2">
@@ -124,7 +131,7 @@ export function ListView({
                 </div>
                 <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none">
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-                  <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
+                  <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.iconColor}`}>
                     <StatusIcon status={status} className="h-3 w-3" inheritColor />
                     {cfg.label}
                   </span>
@@ -182,3 +189,4 @@ export function ListView({
     </div>
   );
 }
+

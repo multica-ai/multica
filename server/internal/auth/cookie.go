@@ -5,25 +5,61 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	AuthCookieName = "multica_auth"
-	CSRFCookieName = "multica_csrf"
+	AuthCookieName   = "multica_auth"
+	CSRFCookieName   = "multica_csrf"
 	authCookieMaxAge = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
+var ipCookieDomainWarnOnce sync.Once
+
+// cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
+// like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
+// Domain attribute, so browsers silently drop Set-Cookie headers that carry
+// one. An IP value here is almost always a misconfiguration.
 func cookieDomain() string {
-	return strings.TrimSpace(os.Getenv("COOKIE_DOMAIN"))
+	raw := strings.TrimSpace(os.Getenv("COOKIE_DOMAIN"))
+	if raw == "" {
+		return ""
+	}
+	// A leading dot ("." for subdomain matching) is legal syntax but doesn't
+	// change whether the remainder is an IP literal.
+	if ip := net.ParseIP(strings.TrimPrefix(raw, ".")); ip != nil {
+		ipCookieDomainWarnOnce.Do(func() {
+			slog.Warn(
+				"COOKIE_DOMAIN looks like an IP address; ignoring. RFC 6265 forbids IP literals in the cookie Domain attribute, so browsers would drop the Set-Cookie. Leave COOKIE_DOMAIN empty for single-host deployments, or use a real domain.",
+				"value", raw,
+			)
+		})
+		return ""
+	}
+	return raw
 }
 
+// isSecureCookie reports whether session cookies should carry the Secure flag.
+// Derived from the scheme of FRONTEND_ORIGIN — browsers silently drop Secure
+// cookies received on a plain-HTTP page, so the flag has to track the actual
+// user-facing scheme rather than a coarser environment name.
 func isSecureCookie() bool {
-	env := os.Getenv("APP_ENV")
-	return env == "production" || env == "staging"
+	raw := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Scheme, "https")
 }
 
 // generateCSRFToken creates a CSRF token bound to the auth token via HMAC.

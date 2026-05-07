@@ -126,6 +126,7 @@ function makeProject(access: "workspace" | "restricted"): Project {
     updated_at: "",
     issue_count: 0,
     done_count: 0,
+    resource_count: 0,
   };
 }
 

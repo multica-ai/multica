@@ -1,0 +1,29 @@
+{
+  "create_form": {
+    "name_label": "Workspace Name",
+    "name_placeholder": "My Workspace",
+    "url_label": "Workspace URL",
+    "url_placeholder": "my-workspace",
+    "submit": "Create workspace",
+    "submitting": "Creating...",
+    "errors": {
+      "slug_format": "Only lowercase letters, numbers, and hyphens",
+      "slug_taken": "That workspace URL is already taken.",
+      "slug_conflict_toast": "Choose a different workspace URL",
+      "create_failed": "Failed to create workspace"
+    }
+  },
+  "new_page": {
+    "back": "Back",
+    "log_out": "Log out",
+    "title": "Welcome to Multica",
+    "description": "One workspace where you and your AI teammates work side by side — taking issues, leaving comments, sharing the same context.",
+    "invite_hint": "You can invite teammates once your workspace is ready."
+  },
+  "no_access": {
+    "title": "Workspace not available",
+    "description": "This workspace doesn't exist or you don't have access.",
+    "go_to_workspaces": "Go to my workspaces",
+    "sign_in_different": "Sign in as a different user"
+  }
+}

@@ -51,3 +51,35 @@ export function formatUptime(uptime?: string): string {
   const m = match[2] ? `${match[2]}m` : "";
   return `${h}${m}`.trim() || uptime;
 }
+
+/**
+ * User-facing description for the local daemon's current state. Replaces the
+ * raw state label ("Running" / "Stopped") with a sentence that answers
+ * "what does this mean for me?" — i.e. whether tasks can run on this device.
+ *
+ * `runtimeCount` is the number of runtimes the local daemon has registered
+ * (claude / codex / gemini / ... — one per detected CLI). It's only consulted
+ * when state === "running".
+ */
+export function daemonStateDescription(state: DaemonState, runtimeCount: number): string {
+  switch (state) {
+    case "running":
+      if (runtimeCount === 0) {
+        return "Running, but no runtimes have registered yet.";
+      }
+      if (runtimeCount === 1) {
+        return "Running here · 1 runtime available for tasks.";
+      }
+      return `Running here · ${runtimeCount} runtimes available for tasks.`;
+    case "stopped":
+      return "Not running · this device can't take new tasks.";
+    case "starting":
+      return "Starting up the local daemon…";
+    case "stopping":
+      return "Shutting down the local daemon…";
+    case "installing_cli":
+      return "Setting up the runtime for the first time. Only happens once.";
+    case "cli_not_found":
+      return "Setup failed · couldn't download the runtime. Check your network.";
+  }
+}

@@ -12,16 +12,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// listActivitiesForIssue is a test helper that fetches all activity_log records for an issue.
+// listActivitiesForIssue is a test helper that fetches up to 100 activity_log
+// records for an issue using the keyset query that backs the cursor-paginated
+// timeline endpoint. The unbounded ListActivities was removed when the
+// timeline switched to cursor pagination (#1968 root fix).
 func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
 	t.Helper()
-	activities, err := queries.ListActivities(context.Background(), db.ListActivitiesParams{
-		IssueID: util.ParseUUID(issueID),
+	activities, err := queries.ListActivitiesLatest(context.Background(), db.ListActivitiesLatestParams{
+		IssueID: util.MustParseUUID(issueID),
 		Limit:   100,
-		Offset:  0,
 	})
 	if err != nil {
-		t.Fatalf("ListActivities: %v", err)
+		t.Fatalf("ListActivitiesLatest: %v", err)
 	}
 	return activities
 }

@@ -1,5 +1,6 @@
 // CEREBRO-PATCH(core-types-issue): cerebro modification of upstream file
 import type { Attachment } from "./attachment";
+import type { Label } from "./label";
 
 export type IssueStatus =
   | "backlog"
@@ -46,6 +47,7 @@ export interface Issue {
   is_private?: boolean;
   reactions?: IssueReaction[];
   attachments?: Attachment[];
+  labels?: Label[];
   created_at: string;
   updated_at: string;
 }

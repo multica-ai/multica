@@ -10,19 +10,25 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
 import { useChannelDisplay } from "../../channels";
 import { InboxDetailLabel } from "./inbox-detail-label";
+import { getInboxDisplayTitle } from "./inbox-display";
+import { useT } from "../../i18n";
 
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
+// Hook returning a localized relative-time formatter — the i18n equivalent
+// of the previous static `timeAgo` function. Returning a function (rather
+// than a string) keeps call-site usage identical: `timeAgo(dateStr)`.
+export function useTimeAgo() {
+  const { t } = useT("inbox");
+  return (dateStr: string): string => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return t(($) => $.list.time.just_now);
+    if (minutes < 60) return t(($) => $.list.time.minutes, { count: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t(($) => $.list.time.hours, { count: hours });
+    const days = Math.floor(hours / 24);
+    return t(($) => $.list.time.days, { count: days });
+  };
 }
-
-export { timeAgo };
 
 interface InboxListItemBaseProps {
   isSelected: boolean;
@@ -34,7 +40,7 @@ interface InboxListItemBaseProps {
 }
 
 /**
- * Shared row chrome — handles the unread brand-blue stripe, hover-only
+ * CEREBRO-PATCH(inbox-list-item-cerebro): Shared row chrome — handles the unread brand-blue stripe, hover-only
  * archive button, selection background, and click target. Variant-specific
  * content is rendered via children so the channel/DM/issue rows stay
  * single-purpose and easy to test.
@@ -46,6 +52,7 @@ function InboxListItemShell({
   onArchive,
   children,
 }: InboxListItemBaseProps) {
+  const { t } = useT("inbox");
   return (
     <button
       onClick={onClick}
@@ -63,7 +70,7 @@ function InboxListItemShell({
       <span
         role="button"
         tabIndex={-1}
-        title="Archive"
+        title={t(($) => $.list.archive_tooltip)}
         onClick={(e) => {
           e.stopPropagation();
           onArchive();
@@ -97,6 +104,9 @@ export function InboxListItem({
 }) {
   const unread = !item.read;
   const mentioned = item.type === "mentioned" && unread;
+  const timeAgo = useTimeAgo();
+  const displayTitle = getInboxDisplayTitle(item);
+
   return (
     <InboxListItemShell
       isSelected={isSelected}
@@ -108,13 +118,14 @@ export function InboxListItem({
         actorType={item.actor_type ?? item.recipient_type}
         actorId={item.actor_id ?? item.recipient_id}
         size={28}
+        enableHoverCard
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span
             className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold" : "text-muted-foreground"}`}
           >
-            {item.title}
+            {displayTitle}
           </span>
           {mentioned && <MentionBadge />}
           {item.issue_status && (
@@ -166,6 +177,7 @@ export function ChannelListItem({
 }) {
   const display = useChannelDisplay(channel);
   const unread = channel.unread_count > 0;
+  const timeAgo = useTimeAgo();
   const showParticipants =
     display.isChannel && display.otherParticipants.length > 0;
 

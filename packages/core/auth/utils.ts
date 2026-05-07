@@ -15,6 +15,7 @@
 export function sanitizeNextUrl(raw: string | null): string | null {
   if (!raw) return null;
   if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  // eslint-disable-next-line no-control-regex -- intentional: rejecting control chars is the whole point
   if (/[\x00-\x1f\\]/.test(raw)) return null;
   return raw;
 }

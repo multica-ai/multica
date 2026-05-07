@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { paths } from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import {
   Card,
@@ -62,18 +62,46 @@ function CallbackContent() {
     } else {
       // Normal web flow
       loginWithGoogle(code, redirectUri)
-        .then(async () => {
+        .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
-          // URL is now the source of truth for the current workspace — the
-          // [workspaceSlug]/layout syncs stores + cookie once we navigate.
-          // Honor ?next= first (e.g. came from /invite/{id}), otherwise land
-          // in the first workspace's issues, or /workspaces/new for zero-workspace users.
-          const [first] = wsList;
-          const defaultDest = first
-            ? paths.workspace(first.slug).issues()
-            : paths.newWorkspace();
-          router.push(nextUrl || defaultDest);
+          const onboarded = loggedInUser.onboarded_at != null;
+
+          // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
+          //    round-trip — the user clicked a specific link and we should
+          //    honor exactly that destination.
+          if (nextUrl) {
+            router.push(nextUrl);
+            return;
+          }
+
+          // 2. Un-onboarded users may have pending invitations on their
+          //    email even when no `next=` was carried (came from a fresh
+          //    login on app.multica.ai instead of clicking the email link,
+          //    or `state` was lost across the round-trip). Look them up by
+          //    email and route to the batch /invitations page if any.
+          //    Already-onboarded users skip this lookup — their new invites
+          //    surface in the sidebar dropdown, not as a forced wall.
+          if (!onboarded) {
+            try {
+              const invites = await api.listMyInvitations();
+              if (invites.length > 0) {
+                qc.setQueryData(workspaceKeys.myInvitations(), invites);
+                router.push(paths.invitations());
+                return;
+              }
+            } catch {
+              // Network blip on the invite lookup is non-fatal — fall through
+              // to the normal post-auth destination so the user isn't stuck
+              // on a blank callback screen. Worst case they land on
+              // /onboarding and the sidebar will surface invites later.
+            }
+          }
+
+          // 3. Default: hand off to the resolver (onboarding for first-timers,
+          //    first workspace for returning users, /workspaces/new for
+          //    onboarded users with zero workspaces).
+          router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

@@ -3,30 +3,55 @@
 // CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
+import { Bot, ChevronRight, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
 import { api } from "@multica/core/api";
-import { useWSEvent } from "@multica/core/realtime";
+import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
 import type { AgentTask, WorkSession } from "@multica/core/types/agent";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@multica/ui/components/ui/collapsible";
 import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { redactSecrets } from "../utils/redact";
-import { AgentTranscriptDialog } from "./agent-transcript-dialog";
+import {
+  TranscriptButton,
+  buildTimeline,
+  type TimelineItem,
+} from "../../common/task-transcript";
+import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transcript-dialog";
+import { redactSecrets } from "../../common/task-transcript/redact";
+// CEREBRO-PATCH(agent-live-card-cerebro): import getToolSummary from cerebro-chat after Phase 6 relocation
+import { getToolSummary } from "@multica/cerebro-chat/views";
+import { useT } from "../../i18n";
 
-// ─── Shared types & helpers ─────────────────────────────────────────────────
-
-/** A unified timeline entry: tool calls, thinking, text, errors, and activity reports. */
-interface TimelineItem {
-  seq: number;
-  type: string;
-  tool?: string;
-  content?: string;
-  input?: Record<string, unknown>;
-  output?: string;
+// Local helper — formats a start/end timestamp pair as "Ns" / "Nm Ns".
+function formatDuration(start: string, end: string): string {
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}m ${secs}s`;
 }
+
+// AgentLiveCard renders a sticky banner at the top of the issue's main
+// column for every active task. Each banner shows "agent X is working",
+// elapsed time, tool count, and Cancel/Transcript actions.
+//
+// The full timeline (live execution log) used to live inside an
+// expandable area on this card. It now lives in the right panel via
+// ExecutionLogSection — this card is just a header-style anchor that
+// answers "is anyone working on this issue right now?" at a glance.
+//
+// We still maintain per-task TimelineItem[] state here so the live
+// TranscriptButton on the sticky banner can open the dialog with live
+// items already attached (the dialog stays in sync via WS as messages
+// arrive). The right-panel rows use the lazy mode of TranscriptButton
+// instead — a one-shot fetch when opened. Both modes coexist.
 
 function formatElapsed(startedAt: string): string {
   const elapsed = Date.now() - new Date(startedAt).getTime();
@@ -37,130 +62,112 @@ function formatElapsed(startedAt: string): string {
   return `${minutes}m ${secs}s`;
 }
 
-function formatDuration(start: string, end: string): string {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
-}
-
-function getToolSummary(item: TimelineItem): string {
-  if (!item.input) return "";
-  const inp = item.input as Record<string, string>;
-
-  // WebSearch / web search
-  if (inp.query) return inp.query;
-  // File operations
-  if (inp.file_path) return shortenPath(inp.file_path);
-  if (inp.path) return shortenPath(inp.path);
-  if (inp.pattern) return inp.pattern;
-  // Bash
-  if (inp.description) return String(inp.description);
-  if (inp.command) {
-    const cmd = String(inp.command);
-    return cmd.length > 100 ? cmd.slice(0, 100) + "..." : cmd;
-  }
-  // Agent
-  if (inp.prompt) {
-    const p = String(inp.prompt);
-    return p.length > 100 ? p.slice(0, 100) + "..." : p;
-  }
-  // Skill
-  if (inp.skill) return String(inp.skill);
-  // Fallback: show first string value
-  for (const v of Object.values(inp)) {
-    if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-  }
-  return "";
-}
-
-/** Build a chronologically ordered timeline from raw messages. */
-function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
-  const items: TimelineItem[] = [];
-  for (const msg of msgs) {
-    items.push({
-      seq: msg.seq,
-      type: msg.type,
-      tool: msg.tool,
-      content: msg.content ? redactSecrets(msg.content) : msg.content,
-      input: msg.input,
-      output: msg.output ? redactSecrets(msg.output) : msg.output,
-    });
-  }
-  return items.sort((a, b) => a.seq - b.seq);
-}
-
-// ─── Per-task state ─────────────────────────────────────────────────────────
-
 interface TaskState {
   task: AgentTask;
   items: TimelineItem[];
 }
-
-// ─── AgentLiveCard (real-time view for multiple agents) ───────────────────
 
 interface AgentLiveCardProps {
   issueId: string;
 }
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   const seenSeqs = useRef(new Set<string>());
-
-  // Fetch active tasks on mount
+  const hydratedTaskIds = useRef(new Set<string>());
+  const mountedRef = useRef(true);
+  // Monotonic counter — each reconcile() call captures its issued seq and
+  // only applies its response if it's still the latest issued. This stops
+  // a slow getActiveTasksForIssue response from clobbering newer truth
+  // (e.g. a stale "task is active" payload re-adding a banner that a
+  // newer "tasks: []" response just cleared).
+  const reconcileSeq = useRef(0);
   useEffect(() => {
-    let cancelled = false;
-    api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
-      if (cancelled || tasks.length === 0) return;
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-      // Show cards immediately with empty timeline
+  // Reconcile local state to server truth. Replaces taskStates with the
+  // server's active set: tasks no longer active are dropped (this is what
+  // self-heals a stale "is working" banner when a task:completed/failed/
+  // cancelled event was lost during a WS reconnect window), and tasks
+  // still active keep their accumulated TimelineItems so the live
+  // TranscriptButton doesn't lose history. New tasks get a one-shot
+  // listTaskMessages hydration to backfill any messages that landed
+  // before the WS subscription saw them.
+  const reconcile = useCallback(() => {
+    const mySeq = ++reconcileSeq.current;
+    api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
+      if (!mountedRef.current) return;
+      // A newer reconcile was issued after this one — drop this response
+      // unconditionally and let the latest request win, regardless of
+      // resolution order. Without this guard, a slow A then a fast B can
+      // resolve in B-then-A order and A re-adds tasks B already cleared.
+      if (mySeq !== reconcileSeq.current) return;
+      const activeIds = new Set(tasks.map((t) => t.id));
+
       setTaskStates((prev) => {
-        const next = new Map(prev);
+        const next = new Map<string, TaskState>();
         for (const task of tasks) {
-          if (!next.has(task.id)) {
-            next.set(task.id, { task, items: [] });
-          }
+          const existing = prev.get(task.id);
+          next.set(task.id, existing
+            ? { task, items: existing.items }
+            : { task, items: [] });
         }
         return next;
       });
 
-      // Load messages per task in the background
+      // Drop bookkeeping for tasks that vanished, so a future re-dispatch
+      // of the same id (very rare, but possible) re-hydrates cleanly.
+      for (const key of Array.from(seenSeqs.current)) {
+        const taskId = key.slice(0, key.indexOf(":"));
+        if (!activeIds.has(taskId)) seenSeqs.current.delete(key);
+      }
+      for (const id of Array.from(hydratedTaskIds.current)) {
+        if (!activeIds.has(id)) hydratedTaskIds.current.delete(id);
+      }
+
+      // Hydrate messages for tasks we haven't fetched yet. Per-task guard
+      // prevents duplicate fetches when reconcile fires repeatedly (mount
+      // + reconnect + queued/dispatch can stack within a single tick).
       for (const task of tasks) {
+        if (hydratedTaskIds.current.has(task.id)) continue;
+        hydratedTaskIds.current.add(task.id);
         api.listTaskMessages(task.id).then((msgs) => {
-          if (cancelled) return;
+          if (!mountedRef.current) return;
           const timeline = buildTimeline(msgs);
           for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
           setTaskStates((prev) => {
             const next = new Map(prev);
             const existing = next.get(task.id);
-            if (existing) {
-              // Merge: keep any WS-delivered items not in the loaded batch
-              const loadedSeqs = new Set(timeline.map((i) => i.seq));
-              const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
-              const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
-              next.set(task.id, { task: existing.task, items: merged });
-            } else {
-              next.set(task.id, { task, items: timeline });
-            }
+            if (!existing) return prev;
+            const loadedSeqs = new Set(timeline.map((i) => i.seq));
+            const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
+            const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
+            next.set(task.id, { task: existing.task, items: merged });
             return next;
           });
-        }).catch(console.error);
+        }).catch((e) => {
+          hydratedTaskIds.current.delete(task.id);
+          console.error(e);
+        });
       }
     }).catch(console.error);
-
-    return () => { cancelled = true; };
   }, [issueId]);
 
-  // Handle real-time task messages — route by task_id
+  // Initial fetch on mount / issueId change.
+  useEffect(() => {
+    reconcile();
+  }, [reconcile]);
+
+  // WS reconnect — anything that happened while we were offline (most
+  // notably task:completed / task:failed / task:cancelled) won't replay,
+  // so re-pull the truth and let reconcile drop any stale banners.
+  useWSReconnect(reconcile);
+
+  // Real-time messages — route by task_id and dedupe by seq.
   useWSEvent(
     "task:message",
     useCallback((payload: unknown) => {
@@ -186,46 +193,45 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           const items = [...existing.items, item].sort((a, b) => a.seq - b.seq);
           next.set(msg.task_id, { ...existing, items });
         }
-        // If we don't have this task yet, the dispatch handler will pick it up
         return next;
       });
     }, [issueId]),
   );
 
-  // Handle task end events — remove only the specific task
+  // Task end — optimistically drop the banner for snappy UX, then
+  // reconcile to also clean up sibling tasks whose own end events may
+  // have been missed (e.g. a sequence of tasks all ending during a WS
+  // reconnect window will only replay this one event when we resubscribe).
   const handleTaskEnd = useCallback((payload: unknown) => {
     const p = payload as { task_id: string; issue_id: string };
     if (p.issue_id !== issueId) return;
     setTaskStates((prev) => {
+      if (!prev.has(p.task_id)) return prev;
       const next = new Map(prev);
       next.delete(p.task_id);
       return next;
     });
-  }, [issueId]);
+    reconcile();
+  }, [issueId, reconcile]);
 
   useWSEvent("task:completed", handleTaskEnd);
   useWSEvent("task:failed", handleTaskEnd);
   useWSEvent("task:cancelled", handleTaskEnd);
 
-  // Pick up newly dispatched tasks
-  useWSEvent(
-    "task:dispatch",
-    useCallback((payload: unknown) => {
-      const p = payload as { issue_id?: string };
-      if (p.issue_id && p.issue_id !== issueId) return;
-      api.getActiveTasksForIssue(issueId).then(({ tasks }) => {
-        setTaskStates((prev) => {
-          const next = new Map(prev);
-          for (const task of tasks) {
-            if (!next.has(task.id)) {
-              next.set(task.id, { task, items: [] });
-            }
-          }
-          return next;
-        });
-      }).catch(console.error);
-    }, [issueId]),
-  );
+  // Newly active tasks — both queued and dispatched land here. Subscribing
+  // to both events matters because retry creates a queued child without
+  // emitting task:dispatch (only the daemon's claim does), so listening
+  // to dispatch alone leaves the banner stale during the queued window.
+  // reconcile is idempotent (per-task hydration guard) and also drops
+  // stale tasks, so it's safe to fire once per event.
+  const handleTaskActive = useCallback((payload: unknown) => {
+    const p = payload as { issue_id?: string };
+    if (p.issue_id && p.issue_id !== issueId) return;
+    reconcile();
+  }, [issueId, reconcile]);
+
+  useWSEvent("task:queued", handleTaskActive);
+  useWSEvent("task:dispatch", handleTaskActive);
 
   if (taskStates.size === 0) return null;
 
@@ -235,16 +241,16 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
 
   return (
     <>
-      {/* Primary agent — sticky at top of the Activity section */}
-      <div className="mt-4 sticky top-4 z-10">
+      {/* Primary agent — sticky at the top of the activity area */}
+      <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
         <SingleAgentLiveCard
           task={firstEntry.task}
           items={firstEntry.items}
           issueId={issueId}
-          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : "Agent"}
+          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
         />
       </div>
-      {/* Additional agents — scroll with the page */}
+      {/* Additional agents — non-sticky, scroll with the page */}
       {restEntries.length > 0 && (
         <div className="mt-1.5 space-y-1.5">
           {restEntries.map(({ task, items }) => (
@@ -253,7 +259,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               task={task}
               items={items}
               issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : "Agent"}
+              agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
             />
           ))}
         </div>
@@ -262,7 +268,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   );
 }
 
-// ─── SingleAgentLiveCard (one card per running task) ──────────────────────
+// ─── SingleAgentLiveCard (header-only banner per active task) ──────────────
 
 interface SingleAgentLiveCardProps {
   task: AgentTask;
@@ -272,14 +278,11 @@ interface SingleAgentLiveCardProps {
 }
 
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
+  const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
-  const [open, setOpen] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
   const [cancelling, setCancelling] = useState(false);
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Elapsed time
+  // Elapsed time — ticks every second so users see the agent is alive.
   useEffect(() => {
     if (!task.started_at && !task.dispatched_at) return;
     const startRef = task.started_at ?? task.dispatched_at!;
@@ -288,54 +291,24 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     return () => clearInterval(interval);
   }, [task.started_at, task.dispatched_at]);
 
-  // Auto-scroll timeline to bottom
-  useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [items, autoScroll]);
-
-  const handleScroll = useCallback(() => {
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 40);
-  }, []);
-
-  const toggleOpen = useCallback(() => {
-    setOpen(!open);
-  }, [open]);
-
   const handleCancel = useCallback(async () => {
     if (cancelling) return;
     setCancelling(true);
     try {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel task");
+      toast.error(e instanceof Error ? e.message : t(($) => $.agent_live.cancel_failed));
       setCancelling(false);
     }
-  }, [task.id, issueId, cancelling]);
+  }, [task.id, issueId, cancelling, t]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
   return (
-    <div className="rounded-lg border border-info/20 bg-info/5 backdrop-blur-sm">
-      {/* Header — click to toggle timeline */}
-      <div
-        className="group flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors"
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
-        onClick={toggleOpen}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleOpen();
-          }
-        }}
-      >
+    <div className="rounded-lg border border-info/20 bg-info/5">
+      <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} />
+          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
         ) : (
           <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
             <Bot className="h-3 w-3" />
@@ -343,86 +316,31 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          <span className="font-medium text-foreground truncate">{t(($) => $.agent_live.is_working, { name: agentName })}</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
+            <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          <TranscriptButton
+            task={task}
+            agentName={agentName}
+            items={items}
+            isLive
+            title={t(($) => $.agent_live.transcript_button)}
+          />
           <button
-            onClick={(e) => { e.stopPropagation(); setTranscriptOpen(true); }}
-            className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            title="Expand transcript"
-          >
-            <Maximize2 className="h-3 w-3" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleCancel(); }}
+            onClick={handleCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            title="Stop agent"
+            title={t(($) => $.agent_live.stop_tooltip)}
           >
             {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>Stop</span>
+            <span>{t(($) => $.agent_live.stop_button)}</span>
           </button>
-          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
         </div>
       </div>
-
-      {/* Timeline — grid-rows animation for smooth collapse/expand */}
-      <div
-        className={cn(
-          "grid transition-[grid-template-rows] duration-200 ease-out",
-          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-      >
-        <div className="overflow-hidden">
-          {items.length > 0 ? (
-            <div
-              ref={scrollRef}
-              onScroll={handleScroll}
-              className="relative max-h-80 overflow-y-auto overscroll-y-contain border-t border-info/10 px-3 py-2 space-y-0.5"
-            >
-              {items.map((item, idx) => (
-                <TimelineRow key={`${item.seq}-${idx}`} item={item} />
-              ))}
-
-              {!autoScroll && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (scrollRef.current) {
-                      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-                      setAutoScroll(true);
-                    }
-                  }}
-                  className="sticky bottom-0 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full bg-background border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground shadow-sm"
-                >
-                  <ArrowDown className="h-3 w-3" />
-                  Latest
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="border-t border-info/10 px-3 py-3">
-              <p className="text-xs text-muted-foreground">
-                Live log is not available for this agent provider. Results will appear when the task completes.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Fullscreen transcript dialog */}
-      <AgentTranscriptDialog
-        open={transcriptOpen}
-        onOpenChange={setTranscriptOpen}
-        task={task}
-        items={items}
-        agentName={agentName}
-        isLive
-      />
     </div>
   );
 }
@@ -652,7 +570,9 @@ function TimelineRow({ item }: { item: TimelineItem }) {
 
 function ToolCallRow({ item }: { item: TimelineItem }) {
   const [open, setOpen] = useState(false);
-  const summary = getToolSummary(item);
+  // Safe: ToolCallRow is only rendered for items with type === "tool_use",
+  // which is in ChatTimelineItem's narrower union.
+  const summary = getToolSummary(item as Parameters<typeof getToolSummary>[0]);
   const hasInput = item.input && Object.keys(item.input).length > 0;
 
   return (

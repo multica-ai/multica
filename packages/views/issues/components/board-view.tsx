@@ -20,7 +20,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { useLoadMoreDoneIssues } from "@multica/core/issues/mutations";
+import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
@@ -28,7 +28,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES } from "@multica/core/issues/config";
 import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { sortIssues } from "../utils/sort";
@@ -37,6 +37,7 @@ import { BoardColumn } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
+import { useT } from "../../i18n";
 
 const COLUMN_IDS = new Set<string>(ALL_STATUSES);
 
@@ -101,18 +102,15 @@ const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
 export function BoardView({
   issues,
-  allIssues,
   visibleStatuses,
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  doneTotal: doneTotalOverride,
   myIssuesScope,
   myIssuesFilter,
   createIssueData,
 }: {
   issues: Issue[];
-  allIssues: Issue[];
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
   onMoveIssue: (
@@ -121,20 +119,17 @@ export function BoardView({
     newPosition?: number
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
-  /** Override the done-column count (e.g. with a server-filtered total). */
-  doneTotal?: number;
-  /** When set, use the My Issues load-more hook instead of the workspace one. */
+  /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
-  /** Extra data merged into the create-issue modal (e.g. project_id). */
+  /** CEREBRO-PATCH(board-view-cerebro): Extra data merged into the create-issue modal (e.g. project_id, privacy). */
   createIssueData?: Record<string, unknown>;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
-  const myIssuesOpts = myIssuesScope ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} } : undefined;
-  const { loadMore, hasMore, isLoading: loadingMore, doneTotal: hookDoneTotal } =
-    useLoadMoreDoneIssues(myIssuesOpts);
-  const displayDoneTotal = doneTotalOverride ?? hookDoneTotal;
+  const myIssuesOpts = myIssuesScope
+    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
+    : undefined;
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -292,18 +287,13 @@ export function BoardView({
     >
       <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
         {visibleStatuses.map((status) => (
-          <BoardColumn
+          <PaginatedBoardColumn
             key={status}
             status={status}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
-            totalCount={status === "done" ? displayDoneTotal : undefined}
-            footer={
-              status === "done" && hasMore ? (
-                <InfiniteScrollSentinel onVisible={loadMore} loading={loadingMore} />
-              ) : undefined
-            }
+            myIssuesOpts={myIssuesOpts}
             createIssueData={createIssueData}
           />
         ))}
@@ -311,7 +301,7 @@ export function BoardView({
         {hiddenStatuses.length > 0 && (
           <HiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            issues={allIssues}
+            myIssuesOpts={myIssuesOpts}
           />
         )}
       </div>
@@ -327,63 +317,110 @@ export function BoardView({
   );
 }
 
+function PaginatedBoardColumn({
+  status,
+  issueIds,
+  issueMap,
+  childProgressMap,
+  myIssuesOpts,
+  createIssueData,
+}: {
+  status: IssueStatus;
+  issueIds: string[];
+  issueMap: Map<string, Issue>;
+  childProgressMap?: Map<string, ChildProgress>;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  /** CEREBRO-PATCH(board-view-cerebro): Extra data merged into the create-issue modal. */
+  createIssueData?: Record<string, unknown>;
+}) {
+  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
+    status,
+    myIssuesOpts,
+  );
+  return (
+    <BoardColumn
+      status={status}
+      issueIds={issueIds}
+      issueMap={issueMap}
+      childProgressMap={childProgressMap}
+      totalCount={total}
+      createIssueData={createIssueData}
+      footer={
+        hasMore ? (
+          <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
+        ) : undefined
+      }
+    />
+  );
+}
+
 function HiddenColumnsPanel({
   hiddenStatuses,
-  issues,
+  myIssuesOpts,
 }: {
   hiddenStatuses: IssueStatus[];
-  issues: Issue[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
-  const viewStoreApi = useViewStoreApi();
+  const { t } = useT("issues");
   return (
     <div className="flex w-[240px] shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="text-sm font-medium text-muted-foreground">
-          Hidden columns
+          {t(($) => $.board.hidden_columns_label)}
         </span>
       </div>
       <div className="flex-1 space-y-0.5">
-        {hiddenStatuses.map((status) => {
-          const cfg = STATUS_CONFIG[status];
-          const count = issues.filter((i) => i.status === status).length;
-          return (
-            <div
-              key={status}
-              className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50"
+        {hiddenStatuses.map((status) => (
+          <HiddenColumnRow
+            key={status}
+            status={status}
+            myIssuesOpts={myIssuesOpts}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HiddenColumnRow({
+  status,
+  myIssuesOpts,
+}: {
+  status: IssueStatus;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+}) {
+  const { t } = useT("issues");
+  const viewStoreApi = useViewStoreApi();
+  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  return (
+    <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
+      <div className="flex items-center gap-2">
+        <StatusIcon status={status} className="h-3.5 w-3.5" />
+        <span className="text-sm">{t(($) => $.status[status])}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">{total}</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="rounded-full text-muted-foreground"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => viewStoreApi.getState().showStatus(status)}
             >
-              <div className="flex items-center gap-2">
-                <StatusIcon status={status} className="h-3.5 w-3.5" />
-                <span className="text-sm">{cfg.label}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">{count}</span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="rounded-full text-muted-foreground"
-                      >
-                        <MoreHorizontal className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() =>
-                        viewStoreApi.getState().showStatus(status)
-                      }
-                    >
-                      <Eye className="size-3.5" />
-                      Show column
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          );
-        })}
+              <Eye className="size-3.5" />
+              {t(($) => $.board.show_column)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

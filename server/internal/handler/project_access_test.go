@@ -24,8 +24,8 @@ func TestUpdateProjectAccess_AdminCanFlip(t *testing.T) {
 	owner, err := testHandler.Queries.GetMemberByUserAndWorkspace(
 		newReqAs("GET", "/", testUserID, db.Member{}).Context(),
 		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      util.ParseUUID(testUserID),
-			WorkspaceID: util.ParseUUID(testWorkspaceID),
+			UserID:      util.MustParseUUID(testUserID),
+			WorkspaceID: util.MustParseUUID(testWorkspaceID),
 		})
 	if err != nil {
 		t.Fatalf("load owner: %v", err)
@@ -72,8 +72,8 @@ func TestAddProjectMember_AdminCanAdd(t *testing.T) {
 	owner, _ := testHandler.Queries.GetMemberByUserAndWorkspace(
 		newReqAs("GET", "/", testUserID, db.Member{}).Context(),
 		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      util.ParseUUID(testUserID),
-			WorkspaceID: util.ParseUUID(testWorkspaceID),
+			UserID:      util.MustParseUUID(testUserID),
+			WorkspaceID: util.MustParseUUID(testWorkspaceID),
 		})
 
 	body, _ := json.Marshal(map[string]string{"user_id": f.outsideUserID})
@@ -93,8 +93,8 @@ func TestAddProjectMember_AdminCanAdd(t *testing.T) {
 
 	// Verify the now-added user can see the project's restricted issue
 	got, err := testHandler.Queries.IsProjectMember(req.Context(), db.IsProjectMemberParams{
-		ProjectID: util.ParseUUID(f.restrictedID),
-		UserID:    util.ParseUUID(f.outsideUserID),
+		ProjectID: util.MustParseUUID(f.restrictedID),
+		UserID:    util.MustParseUUID(f.outsideUserID),
 	})
 	if err != nil || !got {
 		t.Fatalf("expected outside user to be project member after add (err=%v ok=%v)", err, got)
@@ -107,8 +107,8 @@ func TestRemoveProjectMember_AdminCanRemove(t *testing.T) {
 	owner, _ := testHandler.Queries.GetMemberByUserAndWorkspace(
 		newReqAs("GET", "/", testUserID, db.Member{}).Context(),
 		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      util.ParseUUID(testUserID),
-			WorkspaceID: util.ParseUUID(testWorkspaceID),
+			UserID:      util.MustParseUUID(testUserID),
+			WorkspaceID: util.MustParseUUID(testWorkspaceID),
 		})
 
 	req := httptest.NewRequest("DELETE", "/api/projects/"+f.restrictedID+"/members/"+f.memberUserID, nil)
@@ -125,8 +125,8 @@ func TestRemoveProjectMember_AdminCanRemove(t *testing.T) {
 	}
 
 	got, _ := testHandler.Queries.IsProjectMember(req.Context(), db.IsProjectMemberParams{
-		ProjectID: util.ParseUUID(f.restrictedID),
-		UserID:    util.ParseUUID(f.memberUserID),
+		ProjectID: util.MustParseUUID(f.restrictedID),
+		UserID:    util.MustParseUUID(f.memberUserID),
 	})
 	if got {
 		t.Fatalf("user should no longer be project member after remove")
@@ -141,14 +141,14 @@ func TestListMemberProjects_AdminSeesRestrictedOnly(t *testing.T) {
 	ctx := newReqAs("GET", "/", testUserID, db.Member{}).Context()
 
 	owner, _ := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(testUserID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 
 	// Look up the *member* row id (not user_id) for the "member" user.
 	targetMember, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(f.memberUserID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(f.memberUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 	if err != nil {
 		t.Fatalf("load member row: %v", err)
@@ -203,8 +203,8 @@ func TestProjectResponse_IncludesAccess(t *testing.T) {
 	owner, _ := testHandler.Queries.GetMemberByUserAndWorkspace(
 		newReqAs("GET", "/", testUserID, db.Member{}).Context(),
 		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      util.ParseUUID(testUserID),
-			WorkspaceID: util.ParseUUID(testWorkspaceID),
+			UserID:      util.MustParseUUID(testUserID),
+			WorkspaceID: util.MustParseUUID(testWorkspaceID),
 		})
 
 	req := newReqAs("GET", "/api/projects", testUserID, owner)

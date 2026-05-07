@@ -12,6 +12,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// CEREBRO-PATCH(pin-enriched-response): cerebro hydrates Title/Icon/Identifier/Status
+// for channel/dm/project pins (where the client doesn't otherwise have a cached
+// label source for the underlying issue kind). Issues still resolve from the
+// per-issue query cache when those fields are nil so `issue:updated` events
+// flow naturally into the sidebar.
 type PinnedItemResponse struct {
 	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
@@ -20,11 +25,10 @@ type PinnedItemResponse struct {
 	ItemID      string  `json:"item_id"`
 	Position    float64 `json:"position"`
 	CreatedAt   string  `json:"created_at"`
-	// Enriched fields (set by list endpoint)
-	Title      string  `json:"title"`
-	Identifier *string `json:"identifier,omitempty"`
-	Icon       *string `json:"icon,omitempty"`
-	Status     string  `json:"status,omitempty"`
+	Title       string  `json:"title,omitempty"`
+	Identifier  *string `json:"identifier,omitempty"`
+	Status      string  `json:"status,omitempty"`
+	Icon        *string `json:"icon,omitempty"`
 }
 
 func pinnedItemToResponse(p db.PinnedItem) PinnedItemResponse {
@@ -69,9 +73,11 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enrich with item details
 	resp := make([]PinnedItemResponse, 0, len(pins))
 	for _, p := range pins {
+		// CEREBRO-PATCH(pin-enriched-response): hydrate pinned items with
+		// title/identifier/status/icon and filter out deleted or kind-shifted
+		// rows (channels, DMs, projects).
 		pr := pinnedItemToResponse(p)
 		switch p.ItemType {
 		case "issue":
@@ -113,7 +119,6 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = append(resp, pr)
 	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -141,11 +146,22 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	itemUUID, ok := parseUUIDOrBadRequest(w, req.ItemID, "item_id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
 	// Verify the item exists in this workspace
 	switch req.ItemType {
 	case "issue":
+		// CEREBRO-PATCH(pin-issue-kind-filter): pinning an "issue" must reject
+		// channel/dm kinds — those have separate item_type values.
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
+			ID: itemUUID, WorkspaceID: wsUUID,
 		})
 		if err != nil || issue.Kind != "issue" {
 			writeError(w, http.StatusNotFound, "issue not found")
@@ -153,7 +169,7 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		}
 	case "project":
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
+			ID: itemUUID, WorkspaceID: wsUUID,
 		}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
@@ -186,7 +202,7 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 
 	// Get max position to append at end
 	maxPos, err := h.Queries.GetMaxPinnedItemPosition(r.Context(), db.GetMaxPinnedItemPositionParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 	})
 	if err != nil {
@@ -195,10 +211,10 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pin, err := h.Queries.CreatePinnedItem(r.Context(), db.CreatePinnedItemParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 		ItemType:    req.ItemType,
-		ItemID:      parseUUID(req.ItemID),
+		ItemID:      itemUUID,
 		Position:    maxPos + 1,
 	})
 	if err != nil {
@@ -224,11 +240,20 @@ func (h *Handler) DeletePin(w http.ResponseWriter, r *http.Request) {
 	itemType := chi.URLParam(r, "itemType")
 	itemID := chi.URLParam(r, "itemId")
 
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	itemUUID, ok := parseUUIDOrBadRequest(w, itemID, "item id")
+	if !ok {
+		return
+	}
+
 	err := h.Queries.DeletePinnedItem(r.Context(), db.DeletePinnedItemParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 		ItemType:    itemType,
-		ItemID:      parseUUID(itemID),
+		ItemID:      itemUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete pin")
@@ -255,11 +280,20 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
 	for _, item := range req.Items {
+		itemUUID, ok := parseUUIDOrBadRequest(w, item.ID, "items[].id")
+		if !ok {
+			return
+		}
 		if err := h.Queries.UpdatePinnedItemPosition(r.Context(), db.UpdatePinnedItemPositionParams{
 			Position:    item.Position,
-			ID:          parseUUID(item.ID),
-			WorkspaceID: parseUUID(workspaceID),
+			ID:          itemUUID,
+			WorkspaceID: wsUUID,
 			UserID:      parseUUID(userID),
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to reorder pins")
@@ -267,9 +301,16 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fan out so other sessions (web/desktop, or a second tab) refetch
+	// the pin list and pick up the new order. Without this, reorder is
+	// only consistent on the originating client until a hard refresh.
+	h.publish(protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{"items": req.Items})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// CEREBRO-PATCH(pin-helpers): formatIdentifier + dmPeerName power the enriched
+// pin list response above.
 func formatIdentifier(prefix string, number int32) string {
 	if prefix == "" {
 		prefix = "ISS"

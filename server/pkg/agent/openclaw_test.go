@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -234,8 +238,8 @@ func TestOpenclawProcessOutputReadError(t *testing.T) {
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
 	}
-	if !strings.Contains(res.errMsg, "read stderr") {
-		t.Errorf("errMsg: got %q, want it to contain 'read stderr'", res.errMsg)
+	if !strings.Contains(res.errMsg, "read stdout") {
+		t.Errorf("errMsg: got %q, want it to contain 'read stdout'", res.errMsg)
 	}
 
 	close(ch)
@@ -688,8 +692,8 @@ func TestOpenclawUsageAlternativeFieldNames(t *testing.T) {
 
 	// Test PaperClip-style field names (inputTokens, outputTokens, etc.)
 	data := map[string]any{
-		"inputTokens":      float64(500),
-		"outputTokens":     float64(200),
+		"inputTokens":       float64(500),
+		"outputTokens":      float64(200),
 		"cachedInputTokens": float64(100),
 	}
 	usage := parseOpenclawUsage(data)
@@ -711,8 +715,8 @@ func TestOpenclawUsageSnakeCaseFieldNames(t *testing.T) {
 	// Test snake_case field names (Anthropic API style)
 	data := map[string]any{
 		"input_tokens":                float64(300),
-		"output_tokens":              float64(150),
-		"cache_read_input_tokens":    float64(80),
+		"output_tokens":               float64(150),
+		"cache_read_input_tokens":     float64(80),
 		"cache_creation_input_tokens": float64(40),
 	}
 	usage := parseOpenclawUsage(data)
@@ -796,8 +800,8 @@ func TestOpenclawUsageFinalResultAlternativeFields(t *testing.T) {
 			DurationMs: 1000,
 			AgentMeta: map[string]any{
 				"usage": map[string]any{
-					"inputTokens":      float64(400),
-					"outputTokens":     float64(180),
+					"inputTokens":       float64(400),
+					"outputTokens":      float64(180),
 					"cachedInputTokens": float64(90),
 				},
 			},
@@ -943,13 +947,15 @@ func TestBuildOpenclawArgsMinimal(t *testing.T) {
 	}
 }
 
-func TestBuildOpenclawArgsDoesNotForwardModelOrSystemPrompt(t *testing.T) {
+func TestBuildOpenclawArgsMapsModelToAgent(t *testing.T) {
 	t.Parallel()
 
-	// openclaw agent rejects --model and --system-prompt; verify they are
-	// never emitted as flags even when Model and SystemPrompt are set.
+	// For openclaw, agent.model stores the pre-registered agent name;
+	// the daemon must translate that to `--agent <name>` because the
+	// CLI rejects `--model` entirely. `--system-prompt` is also
+	// rejected and must not be emitted as a flag.
 	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
-		Model:        "gpt-4o",
+		Model:        "deepseek-v4-agent",
 		SystemPrompt: "You are a helpful agent.",
 	}, slog.Default())
 
@@ -958,6 +964,40 @@ func TestBuildOpenclawArgsDoesNotForwardModelOrSystemPrompt(t *testing.T) {
 	}
 	if idx := indexOf(args, "--system-prompt"); idx != -1 {
 		t.Fatalf("unexpected --system-prompt flag at %d: %v", idx, args)
+	}
+
+	agentIdx := indexOf(args, "--agent")
+	if agentIdx == -1 || agentIdx+1 >= len(args) {
+		t.Fatalf("expected --agent <value> in args: %v", args)
+	}
+	if got := args[agentIdx+1]; got != "deepseek-v4-agent" {
+		t.Errorf("--agent value = %q, want %q", got, "deepseek-v4-agent")
+	}
+}
+
+func TestBuildOpenclawArgsCustomAgentWinsOverModel(t *testing.T) {
+	t.Parallel()
+
+	// If the user already configured --agent via custom_args, their
+	// value wins — we don't double-inject. This keeps existing configs
+	// working when they later set agent.model.
+	args := buildOpenclawArgs("task", "ses-2b", ExecOptions{
+		Model:      "from-dropdown",
+		CustomArgs: []string{"--agent", "from-custom-args"},
+	}, slog.Default())
+
+	count := 0
+	for _, a := range args {
+		if a == "--agent" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --agent flag, got %d: %v", count, args)
+	}
+	agentIdx := indexOf(args, "--agent")
+	if args[agentIdx+1] != "from-custom-args" {
+		t.Errorf("custom --agent should win, got %q", args[agentIdx+1])
 	}
 }
 
@@ -1043,6 +1083,81 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 }
 
+func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Mirrors a real openclaw `--json` blob captured locally: agentMeta
+	// carries the actual LLM identifier under `model`, alongside the
+	// session id, provider, and usage. The dashboard previously bucketed
+	// usage under `unknown` because this field wasn't read; we now want
+	// it surfaced as the runtime's reported model string.
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "ok"}},
+		Meta: openclawMeta{
+			DurationMs: 9501,
+			AgentMeta: map[string]any{
+				"sessionId": "multica-1776752018613706000",
+				"provider":  "deepseek",
+				"model":     "deepseek-chat",
+				"usage": map[string]any{
+					"input":      float64(414),
+					"output":     float64(163),
+					"cacheRead":  float64(33280),
+					"cacheWrite": float64(0),
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(result)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.model != "deepseek-chat" {
+		t.Errorf("model: got %q, want %q", res.model, "deepseek-chat")
+	}
+	if res.sessionID != "multica-1776752018613706000" {
+		t.Errorf("sessionID: got %q", res.sessionID)
+	}
+	if res.usage.InputTokens != 414 {
+		t.Errorf("input tokens: got %d, want 414", res.usage.InputTokens)
+	}
+}
+
+func TestOpenclawProcessOutputModelEmptyWhenAgentMetaOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	// Older openclaw versions / partial outputs may not include `model`
+	// in agentMeta. processOutput must surface "" so the Execute loop
+	// can fall back to opts.Model (the agent name) and ultimately the
+	// daemon's "unknown" placeholder, preserving prior behavior for
+	// runtimes that haven't been upgraded.
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	result := openclawResult{
+		Payloads: []openclawPayload{{Text: "ok"}},
+		Meta: openclawMeta{
+			AgentMeta: map[string]any{
+				"sessionId": "ses_xyz",
+				"usage": map[string]any{
+					"input":  float64(10),
+					"output": float64(5),
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(result)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.model != "" {
+		t.Errorf("model: got %q, want empty", res.model)
+	}
+}
+
 func countOccurrences(args []string, s string) int {
 	n := 0
 	for _, a := range args {
@@ -1051,4 +1166,211 @@ func countOccurrences(args []string, s string) int {
 		}
 	}
 	return n
+}
+
+// TestOpenclawProcessOutputStdoutFixture is the regression test for WOR-10.
+// It feeds a recorded `openclaw agent --local --json` blob (captured from
+// openclaw 2026.5.5 at the time of the fix) into processOutput exactly as
+// the swapped pipe would deliver it, and asserts the result + messages parse.
+//
+// Before the fix, the daemon read this same byte stream from stderr (where
+// nothing was written), produced "openclaw returned no parseable output",
+// and surfaced a system-typed comment to users. After the fix, processOutput
+// reads from stdout and this fixture parses cleanly.
+func TestOpenclawProcessOutputStdoutFixture(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/openclaw-2026.5.5-stdout.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if len(data) < 1000 {
+		t.Fatalf("fixture too small (%d bytes); did the file get truncated?", len(data))
+	}
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", res.errMsg)
+	}
+	if res.output != "hi" {
+		t.Errorf("output: got %q, want %q", res.output, "hi")
+	}
+	if res.sessionID == "" {
+		t.Errorf("sessionID: got empty, want non-empty")
+	}
+	if res.model != "anthropic/claude-opus-4.7" {
+		t.Errorf("model: got %q, want %q", res.model, "anthropic/claude-opus-4.7")
+	}
+	if res.usage.InputTokens != 34620 {
+		t.Errorf("usage.InputTokens: got %d, want %d", res.usage.InputTokens, 34620)
+	}
+	if res.usage.OutputTokens != 6 {
+		t.Errorf("usage.OutputTokens: got %d, want %d", res.usage.OutputTokens, 6)
+	}
+	if res.usage.CacheWriteTokens != 46482 {
+		t.Errorf("usage.CacheWriteTokens: got %d, want %d", res.usage.CacheWriteTokens, 46482)
+	}
+
+	close(ch)
+
+	// At least one MessageText event should have been emitted carrying "hi".
+	var gotText bool
+	for msg := range ch {
+		if msg.Type == MessageText && strings.Contains(msg.Content, "hi") {
+			gotText = true
+		}
+	}
+	if !gotText {
+		t.Errorf("expected a MessageText event containing %q", "hi")
+	}
+}
+
+// ── Version gate tests (MUL-1803) ──
+
+func TestParseOpenclawVersion(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+		ok   bool
+	}{
+		{"bare", "2026.5.5", "2026.5.5", true},
+		{"with prefix", "openclaw 2026.5.5", "2026.5.5", true},
+		{"with v prefix", "openclaw v2026.5.5", "2026.5.5", true},
+		{"with commit suffix", "openclaw 2026.5.5 c37871e", "2026.5.5", true},
+		{"trailing newline", "openclaw 2026.5.5\n", "2026.5.5", true},
+		{"two segments rejected", "openclaw 2026.5", "", false},
+		{"no version at all", "openclaw build info", "", false},
+		{"empty", "", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := parseOpenclawVersion(c.in)
+			if ok != c.ok {
+				t.Fatalf("ok = %v, want %v (input=%q)", ok, c.ok, c.in)
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q (input=%q)", got, c.want, c.in)
+			}
+		})
+	}
+}
+
+func TestCompareOpenclawVersion(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"2026.5.5", "2026.5.5", 0},
+		{"2026.5.4", "2026.5.5", -1},
+		{"2026.5.6", "2026.5.5", 1},
+		{"2026.4.99", "2026.5.0", -1},
+		{"2027.0.0", "2026.99.99", 1},
+		{"0.0.0", "2026.5.5", -1},
+	}
+
+	for _, c := range cases {
+		got := compareOpenclawVersion(c.a, c.b)
+		if got != c.want {
+			t.Errorf("compareOpenclawVersion(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// TestOpenclawExecuteRejectsOldVersion verifies that an openclaw build
+// older than minOpenclawVersion is blocked at task-start with a
+// user-facing error naming the detected version and the upgrade
+// command. Without this gate, the task would silently fail with
+// "openclaw returned no parseable output" because pre-2026.5 builds
+// emit JSON on stderr (see PR #2101).
+func TestOpenclawExecuteRejectsOldVersion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then\n" +
+		"  echo 'openclaw 2026.4.9 abc123'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"echo 'fake openclaw should not have been invoked' >&2\n" +
+		"exit 99\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected Execute to return a version error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"2026.4.9", "2026.5.5", "openclaw update"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %s", want, msg)
+		}
+	}
+}
+
+// TestOpenclawExecuteAllowsCurrentVersion verifies that an openclaw
+// build at or above minOpenclawVersion clears the version gate and
+// proceeds to the actual run. The fake exits without producing JSON,
+// so the eventual Result is a downstream failure — but the failure
+// must NOT be the version-gate error.
+func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then\n" +
+		"  echo 'openclaw 2026.5.5 c37871e'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute returned synchronous error past the version gate: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if strings.Contains(result.Error, "openclaw update") {
+			t.Errorf("version gate fired for a current version: %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
 }

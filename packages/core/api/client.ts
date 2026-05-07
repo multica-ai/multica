@@ -13,6 +13,8 @@ import type {
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
+  AgentActivityBucket,
+  AgentRunCount,
   AgentRuntime,
   InboxItem,
   InboxFolder,
@@ -28,6 +30,7 @@ import type {
   MemberUsage,
   User,
   Skill,
+  SkillSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -46,9 +49,15 @@ import type {
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
-  RuntimePing,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
-  TimelineEntry,
+  RuntimeModelListRequest,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
+  TimelinePage,
+  TimelinePageParam,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -74,6 +83,14 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectResource,
+  CreateProjectResourceRequest,
+  ListProjectResourcesResponse,
+  Label,
+  CreateLabelRequest,
+  UpdateLabelRequest,
+  ListLabelsResponse,
+  IssueLabelsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -93,14 +110,32 @@ import type {
   UserProfileResponse,
   UserProfileRequest,
   PushSubscriptionResponse,
+  NotificationPreferenceResponse,
+  NotificationPreferences,
 } from "../types";
+import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 
+/** Identifies the calling client to the server.
+ *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
+ *  X-Client-OS so the backend can log, gate, or split metrics by client.
+ *  See server/internal/middleware/client.go for the receiving end. */
+export interface ApiClientIdentity {
+  /** Logical client kind. Server expects: "web" | "desktop" | "cli" | "daemon". */
+  platform?: string;
+  /** Client/app version string (e.g. "0.1.0", git tag, commit). */
+  version?: string;
+  /** Operating system the client is running on: "macos" | "windows" | "linux". */
+  os?: string;
+}
+
 export interface ApiClientOptions {
   logger?: Logger;
   onUnauthorized?: () => void;
+  /** Identifies the client to the server. Sent as X-Client-* headers. */
+  identity?: ApiClientIdentity;
 }
 
 export interface LoginResponse {
@@ -108,15 +143,66 @@ export interface LoginResponse {
   user: User;
 }
 
+// --- Starter content (post-onboarding import) -----------------------------
+// Shape mirrors the Go request/response in handler/onboarding.go.
+//
+// The client sends both branches of sub-issues and an unbound welcome
+// issue template (title + description, no `agent_id`). The SERVER picks
+// the branch by inspecting the workspace's agent list inside the
+// import transaction. This removes the client as a trusted decider —
+// even if the client has a stale agent cache or lies, the server uses
+// the DB as source of truth.
+
+export interface ImportStarterIssuePayload {
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  /** Server uses `user_id` (per app-wide AssigneePicker convention)
+   *  as assignee when true. No member_id is threaded through. */
+  assign_to_self: boolean;
+}
+
+export interface ImportStarterWelcomeIssueTemplate {
+  title: string;
+  description: string;
+  /** Defaults to "high" on server when empty. */
+  priority: string;
+}
+
+export interface ImportStarterContentPayload {
+  workspace_id: string;
+  project: { title: string; description: string; icon: string };
+  /** Always sent. Server creates it only when an agent exists in the
+   *  workspace; ignored otherwise. Agent id is picked by the server. */
+  welcome_issue_template: ImportStarterWelcomeIssueTemplate;
+  /** Used when the workspace has at least one agent. */
+  agent_guided_sub_issues: ImportStarterIssuePayload[];
+  /** Used when the workspace has zero agents. */
+  self_serve_sub_issues: ImportStarterIssuePayload[];
+}
+
+export interface ImportStarterContentResponse {
+  user: User;
+  project_id: string;
+  /** Non-null when server took the agent-guided branch. */
+  welcome_issue_id: string | null;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
+  // Raw decoded JSON body (when the server returned one). Carries structured
+  // error fields like `code` so callers can branch on machine-readable
+  // identifiers instead of pattern-matching the human-readable message.
+  readonly body?: unknown;
 
-  constructor(message: string, status: number, statusText: string) {
+  constructor(message: string, status: number, statusText: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.statusText = statusText;
+    this.body = body;
   }
 }
 
@@ -155,6 +241,10 @@ export class ApiClient {
     if (slug) headers["X-Workspace-Slug"] = slug;
     const csrf = this.readCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
+    const id = this.options.identity;
+    if (id?.platform) headers["X-Client-Platform"] = id.platform;
+    if (id?.version) headers["X-Client-Version"] = id.version;
+    if (id?.os) headers["X-Client-OS"] = id.os;
     return headers;
   }
 
@@ -175,6 +265,19 @@ export class ApiClient {
       // Ignore non-JSON error bodies.
     }
     return fallback;
+  }
+
+  // Reads the response body once for both human-readable error message and
+  // structured fields. The Response stream can only be consumed once, so
+  // both pieces have to come from a single read.
+  private async parseErrorBody(res: Response, fallback: string): Promise<{ message: string; body: unknown }> {
+    try {
+      const data = await res.json() as { error?: string };
+      const message = typeof data.error === "string" && data.error ? data.error : fallback;
+      return { message, body: data };
+    } catch {
+      return { message: fallback, body: undefined };
+    }
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -199,10 +302,10 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new ApiError(message, res.status, res.statusText);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -247,6 +350,62 @@ export class ApiClient {
 
   async getMe(): Promise<User> {
     return this.fetch("/api/me");
+  }
+
+  async markOnboardingComplete(payload?: {
+    completion_path?: OnboardingCompletionPath;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/complete", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+  }
+
+  async joinCloudWaitlist(payload: {
+    email: string;
+    reason?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/cloud-waitlist", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async patchOnboarding(payload: {
+    questionnaire?: Record<string, unknown>;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * Imports the Getting Started project + optional welcome issue + sub-issues
+   * in a single server-side transaction. Gated by an atomic
+   * starter_content_state: NULL → 'imported' claim — a second call returns
+   * 409 (already decided) and creates nothing new.
+   *
+   * The content templates live in TypeScript (see
+   * @multica/views/onboarding/utils/starter-content-templates) and are
+   * rendered from the user's questionnaire answers before being sent.
+   */
+  async importStarterContent(
+    payload: ImportStarterContentPayload,
+  ): Promise<ImportStarterContentResponse> {
+    return this.fetch("/api/me/starter-content/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async dismissStarterContent(payload?: {
+    workspace_id?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/starter-content/dismiss", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
   }
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
@@ -341,6 +500,7 @@ export class ApiClient {
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.open_only) search.set("open_only", "true");
     return this.fetch(`/api/issues?${search}`);
   }
@@ -367,6 +527,24 @@ export class ApiClient {
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
+    return this.fetch("/api/issues/quick-create", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createFeedback(data: {
+    message: string;
+    url?: string;
+    workspace_id?: string;
+  }): Promise<{ id: string; created_at: string }> {
+    return this.fetch("/api/feedback", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -422,8 +600,17 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    return this.fetch(`/api/issues/${issueId}/timeline`);
+  async listTimeline(
+    issueId: string,
+    pageParam: TimelinePageParam = { mode: "latest" },
+    limit = 50,
+  ): Promise<TimelinePage> {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (pageParam.mode === "before") params.set("before", pageParam.cursor);
+    else if (pageParam.mode === "after") params.set("after", pageParam.cursor);
+    else if (pageParam.mode === "around") params.set("around", pageParam.id);
+    return this.fetch(`/api/issues/${issueId}/timeline?${params.toString()}`);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
@@ -528,6 +715,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  // Bulk-cancel every active task (queued/dispatched/running) for the agent.
+  // Permission: agent owner or workspace admin/owner. Server returns the
+  // count of cancelled rows; broadcasts task:cancelled for each so other
+  // surfaces can clear their live cards.
+  async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
+    return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -559,12 +754,22 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/activity`);
   }
 
-  async pingRuntime(runtimeId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
+  async getRuntimeUsageByAgent(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByAgent[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
   }
 
-  async getPingResult(runtimeId: string, pingId: string): Promise<RuntimePing> {
-    return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
+  async getRuntimeUsageByHour(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByHour[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
   }
 
   async initiateUpdate(
@@ -584,8 +789,73 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
   }
 
+  async initiateListModels(runtimeId: string): Promise<RuntimeModelListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/models`, { method: "POST" });
+  }
+
+  async getListModelsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeModelListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/models/${requestId}`);
+  }
+
+  async initiateListLocalSkills(
+    runtimeId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
+      method: "POST",
+    });
+  }
+
+  async getListLocalSkillsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+  }
+
+  async initiateImportLocalSkill(
+    runtimeId: string,
+    data: CreateRuntimeLocalSkillImportRequest,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getImportLocalSkillResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
+  }
+
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
+  }
+
+  // Workspace-scoped agent task snapshot: every active task
+  // (queued/dispatched/running) plus each agent's most recent terminal task.
+  // Powers the front-end's "active wins, else latest terminal" presence
+  // derivation; one fetch backs every per-agent presence read in the app.
+  // Workspace is resolved server-side from the X-Workspace-Slug header.
+  async getAgentTaskSnapshot(): Promise<AgentTask[]> {
+    return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Per-agent daily activity for the last 30 days, anchored on
+  // completed_at. One workspace-wide fetch backs both the Agents-list
+  // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
+  // days" panel (uses all 30).
+  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
+    return this.fetch(`/api/agent-activity-30d`);
+  }
+
+  // Per-agent 30-day total run count for the Agents-list RUNS column.
+  async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
+    return this.fetch(`/api/agent-run-counts`);
   }
 
   async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
@@ -771,8 +1041,27 @@ export class ApiClient {
     );
   }
 
+  // Notification preferences
+  async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences");
+  }
+
+  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences", {
+      method: "PUT",
+      body: JSON.stringify({ preferences }),
+    });
+  }
+
+
   // App Config
-  async getConfig(): Promise<{ cdn_domain: string }> {
+  async getConfig(): Promise<{
+    cdn_domain: string;
+    allow_signup: boolean;
+    google_client_id?: string;
+    posthog_key?: string;
+    posthog_host?: string;
+  }> {
     return this.fetch("/api/config");
   }
 
@@ -893,7 +1182,7 @@ export class ApiClient {
   }
 
   // Skills
-  async listSkills(): Promise<Skill[]> {
+  async listSkills(): Promise<SkillSummary[]> {
     return this.fetch("/api/skills");
   }
 
@@ -926,7 +1215,7 @@ export class ApiClient {
     });
   }
 
-  async listAgentSkills(agentId: string): Promise<Skill[]> {
+  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
 
@@ -1063,7 +1352,7 @@ export class ApiClient {
     });
   }
 
-  async archiveChatSession(id: string): Promise<void> {
+  async deleteChatSession(id: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
@@ -1167,6 +1456,32 @@ export class ApiClient {
     });
   }
 
+  // Project resources
+  async listProjectResources(
+    projectId: string,
+  ): Promise<ListProjectResourcesResponse> {
+    return this.fetch(`/api/projects/${projectId}/resources`);
+  }
+
+  async createProjectResource(
+    projectId: string,
+    data: CreateProjectResourceRequest,
+  ): Promise<ProjectResource> {
+    return this.fetch(`/api/projects/${projectId}/resources`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectResource(
+    projectId: string,
+    resourceId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
   async listMemberProjects(
     workspaceId: string,
     memberId: string,
@@ -1182,6 +1497,50 @@ export class ApiClient {
     return this.fetch(
       `/api/workspaces/${workspaceId}/members/${memberId}/projects`,
     );
+  }
+
+  // Labels
+  async listLabels(): Promise<ListLabelsResponse> {
+    return this.fetch(`/api/labels`);
+  }
+
+  async getLabel(id: string): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`);
+  }
+
+  async createLabel(data: CreateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLabel(id: string, data: UpdateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabel(id: string): Promise<void> {
+    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`);
+  }
+
+  async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ label_id: labelId }),
+    });
+  }
+
+  async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+      method: "DELETE",
+    });
   }
 
   // Pins

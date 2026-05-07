@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -12,15 +13,28 @@ import { ReactRenderer } from "@tiptap/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
-import { issueKeys } from "@multica/core/issues/queries";
+import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
-import type { Issue, ListIssuesResponse, MemberWithUser, Agent } from "@multica/core/types";
+import type {
+  Issue,
+  ListIssuesCache,
+  MemberWithUser,
+  Agent,
+} from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { IssueStatus } from "@multica/core/types";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import {
+  getRecencyMap,
+  recordMentionUsage,
+  sortUserItemsByRecency,
+} from "./mention-recency";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,6 +52,7 @@ export interface MentionItem {
 
 interface MentionListProps {
   items: MentionItem[];
+  query: string;
   command: (item: MentionItem) => void;
 }
 
@@ -76,14 +91,101 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
 // MentionList — the popup rendered inside the editor
 // ---------------------------------------------------------------------------
 
-const MentionList = forwardRef<MentionListRef, MentionListProps>(
-  function MentionList({ items, command }, ref) {
+const MAX_ITEMS = 20;
+const SERVER_ISSUE_SEARCH_LIMIT = 20;
+const SERVER_SEARCH_DEBOUNCE_MS = 150;
+
+function mentionItemKey(item: MentionItem): string {
+  return `${item.type}:${item.id}`;
+}
+
+function mergeMentionItems(
+  syncItems: MentionItem[],
+  serverIssueItems: MentionItem[],
+): MentionItem[] {
+  const seen = new Set<string>();
+  const merged: MentionItem[] = [];
+
+  for (const item of [...syncItems, ...serverIssueItems]) {
+    const key = mentionItemKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+
+  return merged;
+}
+
+export const MentionList = forwardRef<MentionListRef, MentionListProps>(
+  function MentionList({ items, query, command }, ref) {
+    const { t } = useT("editor");
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [serverIssueItems, setServerIssueItems] = useState<MentionItem[]>([]);
+    const [isSearchingIssues, setIsSearchingIssues] = useState(false);
+    const [searchedIssueQuery, setSearchedIssueQuery] = useState("");
     const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+    const normalizedQuery = query.trim();
+
+    useEffect(() => {
+      const q = normalizedQuery;
+      setServerIssueItems([]);
+
+      if (!q) {
+        setIsSearchingIssues(false);
+        setSearchedIssueQuery("");
+        return;
+      }
+
+      const wsId = getCurrentWsId();
+      if (!wsId) {
+        setIsSearchingIssues(false);
+        setSearchedIssueQuery(q);
+        return;
+      }
+
+      let cancelled = false;
+      const controller = new AbortController();
+      setIsSearchingIssues(true);
+
+      const timer = setTimeout(() => {
+        void (async () => {
+          try {
+            const res = await api.searchIssues({
+              q,
+              limit: SERVER_ISSUE_SEARCH_LIMIT,
+              include_closed: true,
+              signal: controller.signal,
+            });
+            if (!cancelled && !controller.signal.aborted) {
+              setServerIssueItems(res.issues.map(issueToMention));
+            }
+          } catch {
+            // Aborted or network error: keep the synchronous cache results.
+          } finally {
+            if (!cancelled && !controller.signal.aborted) {
+              setSearchedIssueQuery(q);
+              setIsSearchingIssues(false);
+            }
+          }
+        })();
+      }, SERVER_SEARCH_DEBOUNCE_MS);
+
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+        controller.abort();
+      };
+    }, [normalizedQuery]);
+
+    const displayItems = useMemo(() => {
+      const currentServerIssueItems =
+        searchedIssueQuery === normalizedQuery ? serverIssueItems : [];
+      return mergeMentionItems(items, currentServerIssueItems).slice(0, MAX_ITEMS);
+    }, [items, normalizedQuery, searchedIssueQuery, serverIssueItems]);
 
     useEffect(() => {
       setSelectedIndex(0);
-    }, [items]);
+    }, [displayItems]);
 
     useEffect(() => {
       itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
@@ -91,23 +193,31 @@ const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
     const selectItem = useCallback(
       (index: number) => {
-        const item = items[index];
-        if (item) command(item);
+        const item = displayItems[index];
+        if (!item) return;
+        const wsId = getCurrentWsId();
+        if (wsId) recordMentionUsage(wsId, item);
+        command(item);
       },
-      [items, command],
+      [displayItems, command],
     );
 
     useImperativeHandle(ref, () => ({
       onKeyDown: ({ event }) => {
         if (event.key === "ArrowUp") {
-          setSelectedIndex((i) => (i + items.length - 1) % items.length);
+          if (displayItems.length === 0) return true;
+          setSelectedIndex(
+            (i) => (i + displayItems.length - 1) % displayItems.length,
+          );
           return true;
         }
         if (event.key === "ArrowDown") {
-          setSelectedIndex((i) => (i + 1) % items.length);
+          if (displayItems.length === 0) return true;
+          setSelectedIndex((i) => (i + 1) % displayItems.length);
           return true;
         }
         if (event.key === "Enter") {
+          if (displayItems.length === 0) return true;
           selectItem(selectedIndex);
           return true;
         }
@@ -115,15 +225,26 @@ const MentionList = forwardRef<MentionListRef, MentionListProps>(
       },
     }));
 
-    if (items.length === 0) {
+    if (displayItems.length === 0) {
+      const isWaitingForServer =
+        normalizedQuery !== "" &&
+        (isSearchingIssues || searchedIssueQuery !== normalizedQuery);
+
       return (
         <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
-          No results
+          {isWaitingForServer
+            ? t(($) => $.mention.searching)
+            : t(($) => $.mention.no_results)}
         </div>
       );
     }
 
-    const groups = groupItems(items);
+    const groups = groupItems(displayItems);
+    const groupLabel = (label: string): string => {
+      if (label === "Users") return t(($) => $.mention.group_users);
+      if (label === "Issues") return t(($) => $.mention.group_issues);
+      return label;
+    };
 
     // Build a flat index mapping: globalIndex → item
     let globalIndex = 0;
@@ -133,7 +254,7 @@ const MentionList = forwardRef<MentionListRef, MentionListProps>(
         {groups.map((group) => (
           <div key={group.label}>
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-              {group.label}
+              {groupLabel(group.label)}
             </div>
             {group.items.map((item) => {
               const idx = globalIndex++;
@@ -169,6 +290,7 @@ function MentionRow({
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
+  const { t } = useT("editor");
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -208,9 +330,14 @@ function MentionRow({
         actorType={item.type === "all" ? "member" : item.type}
         actorId={item.id}
         size={20}
+        showStatusDot
       />
-      <span className="truncate font-medium">{item.label}</span>
+      <span className="truncate font-medium">
+        {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
+      </span>
       {item.type === "agent" && (
+        // "Agent" is a glossary-protected product term — kept un-translated.
+        // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
       )}
     </button>
@@ -231,18 +358,13 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-const MAX_ITEMS = 15;
-
 export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
-  // Per-editor state lives in this closure so multiple ContentEditor instances
-  // (e.g. comment input + reply box) don't abort each other's searches.
+  // Renderer/popup instances live in this closure so each ContentEditor owns
+  // its own TipTap suggestion popup lifecycle.
   let renderer: ReactRenderer<MentionListRef> | null = null;
-  let activeCommand: ((item: MentionItem) => void) | null = null;
-  let searchSeq = 0;
-  let searchAbort: AbortController | null = null;
   let popup: HTMLDivElement | null = null;
 
   function buildSyncItems(query: string): MentionItem[] {
@@ -254,8 +376,17 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
-    const cachedIssues: Issue[] =
-      qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId))?.issues ?? [];
+    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+    const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
+
+    // Read current user identity imperatively — this factory runs outside
+    // React render so we can't useAuthStore() as a hook here. The Proxy in
+    // packages/core/auth/index.ts forwards `.getState()` to the registered
+    // store. Used to gate personal agents in the @mention list so members
+    // don't see (or auto-complete) agents they couldn't assign anyway.
+    const userId = useAuthStore.getState().user?.id ?? null;
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
 
@@ -273,11 +404,25 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       }));
 
     const agentItems: MentionItem[] = agents
-      .filter((a) => !a.archived_at && a.name.toLowerCase().includes(q))
+      .filter(
+        (a) =>
+          !a.archived_at &&
+          a.name.toLowerCase().includes(q) &&
+          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+      )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
-    // Cached issues give an instant first paint; the server search below
-    // adds done/cancelled and any other matches not in the local cache.
+    // Members and agents share a single ranked list — recently mentioned
+    // targets come first regardless of type, with an alphabetical fallback
+    // for everyone the user hasn't mentioned yet on this device.
+    const recency = getRecencyMap(wsId);
+    const userItems = sortUserItemsByRecency(
+      [...memberItems, ...agentItems],
+      recency,
+    );
+
+    // Cached issues give an instant first paint; MentionList adds server
+    // matches for done/cancelled and any other issues not in this cache.
     const issueItems: MentionItem[] = cachedIssues
       .filter(
         (i) =>
@@ -286,71 +431,26 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    return [...allItem, ...memberItems, ...agentItems, ...issueItems];
-  }
-
-  function startServerIssueSearch(query: string, syncItems: MentionItem[]) {
-    // Supersede any in-flight search; the next-arrived response wins.
-    if (searchAbort) searchAbort.abort();
-    const mySeq = ++searchSeq;
-    const wsId = getCurrentWsId();
-    if (!wsId) return;
-
-    void (async () => {
-      // Debounce: skip the fetch if a newer keystroke arrives within 150ms.
-      await new Promise((r) => setTimeout(r, 150));
-      if (mySeq !== searchSeq) return;
-
-      const controller = new AbortController();
-      searchAbort = controller;
-      try {
-        const res = await api.searchIssues({
-          q: query,
-          limit: 10,
-          include_closed: true,
-          signal: controller.signal,
-        });
-        if (mySeq !== searchSeq) return;
-        if (!renderer || !activeCommand) return;
-
-        const existingIssueIds = new Set(
-          syncItems.filter((i) => i.type === "issue").map((i) => i.id),
-        );
-        const extraIssueItems = res.issues
-          .map(issueToMention)
-          .filter((i) => !existingIssueIds.has(i.id));
-        if (extraIssueItems.length === 0) return;
-
-        const merged = [...syncItems, ...extraIssueItems].slice(0, MAX_ITEMS);
-        renderer.updateProps({ items: merged, command: activeCommand });
-      } catch {
-        // Aborted or network error: nothing to do — sync items remain.
-      }
-    })();
+    return [...allItem, ...userItems, ...issueItems];
   }
 
   return {
     items: ({ query }) => {
       const syncItems = buildSyncItems(query);
-      // Empty query has no server search — cached issues are enough, and
-      // we still bump the seq to cancel any pending fetch from a prior key.
-      if (query === "") {
-        if (searchAbort) searchAbort.abort();
-        ++searchSeq;
-      } else {
-        startServerIssueSearch(query, syncItems);
-      }
-      return syncItems.slice(0, MAX_ITEMS);
+      return syncItems;
     },
 
     render: () => {
       return {
         onStart: (props: SuggestionProps<MentionItem>) => {
           renderer = new ReactRenderer(MentionList, {
-            props: { items: props.items, command: props.command },
+            props: {
+              items: props.items,
+              query: props.query,
+              command: props.command,
+            },
             editor: props.editor,
           });
-          activeCommand = props.command;
 
           popup = document.createElement("div");
           popup.style.position = "fixed";
@@ -364,9 +464,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         onUpdate: (props: SuggestionProps<MentionItem>) => {
           renderer?.updateProps({
             items: props.items,
+            query: props.query,
             command: props.command,
           });
-          activeCommand = props.command;
           if (popup) updatePosition(popup, props.clientRect);
         },
 
@@ -404,13 +504,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       function cleanup() {
         renderer?.destroy();
         renderer = null;
-        activeCommand = null;
         popup?.remove();
         popup = null;
-        // Cancel any in-flight server search; its result would target a
-        // destroyed renderer.
-        if (searchAbort) searchAbort.abort();
-        ++searchSeq;
       }
     },
   };

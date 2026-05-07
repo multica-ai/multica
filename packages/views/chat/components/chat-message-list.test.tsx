@@ -59,7 +59,11 @@ describe("ChatMessageList", () => {
     );
 
     withQuery(
-      <ChatMessageList messages={[]} pendingTaskId={TASK_ID} isWaiting={true} />,
+      <ChatMessageList
+        messages={[]}
+        pendingTask={{ task_id: TASK_ID, status: "running" }}
+        availability={undefined}
+      />,
       qc,
     );
 
@@ -94,7 +98,7 @@ describe("ChatMessageList", () => {
     ];
 
     withQuery(
-      <ChatMessageList messages={messages} pendingTaskId={null} isWaiting={false} />,
+      <ChatMessageList messages={messages} pendingTask={null} availability={undefined} />,
       qc,
     );
 

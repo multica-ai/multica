@@ -57,6 +57,7 @@ _features/
 server/server
 data/
 .kilo
+.idea
 
 # connect binaries
 connect/connect

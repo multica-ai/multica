@@ -1,11 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
+import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { SerwistProvider } from "@serwist/next/react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import { LocaleSync } from "@/components/locale-sync";
+import {
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  type SupportedLocale,
+} from "@multica/core/i18n";
+import { RESOURCES } from "@multica/views/locales";
 import "./globals.css";
 
 // Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
@@ -39,6 +45,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+});
+// Editorial serif used for onboarding headlines. Italic support for h1 em
+// accents (e.g. "...on one shared board."). Only loaded on routes that
+// render the font; layout-shift-prevention handled by next/font's synthetic
+// fallback metrics, same as Inter.
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  variable: "--font-serif",
+  fallback: [
+    "ui-serif",
+    "Iowan Old Style",
+    "Apple Garamond",
+    "Baskerville",
+    "Times New Roman",
+    "serif",
+  ],
 });
 
 export const viewport: Viewport = {
@@ -97,26 +120,46 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+function isSupportedLocale(value: string | null): value is SupportedLocale {
+  return value !== null && (SUPPORTED_LOCALES as readonly string[]).includes(value);
+}
+
+// HTML lang attribute uses BCP-47 region tags that screen readers and font
+// stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
+// (script subtag is what we actually translate against), but the html element
+// expects a region-flavoured tag for accessibility tooling and CJK fallback.
+const HTML_LANG: Record<SupportedLocale, string> = {
+  en: "en",
+  "zh-Hans": "zh-CN",
+};
+
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const h = await headers();
+  const headerLocale = h.get("x-multica-locale");
+  const locale: SupportedLocale = isSupportedLocale(headerLocale)
+    ? headerLocale
+    : DEFAULT_LOCALE;
+  const resources = { [locale]: RESOURCES[locale] };
+
   return (
     <html
-      lang="en"
+      lang={HTML_LANG[locale]}
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable)}
+      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
+        {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider
           swUrl="/sw.js"
           disable={process.env.NODE_ENV === "development"}
           reloadOnOnline
         >
-          <LocaleSync />
           <ThemeProvider>
-            <WebProviders>
+            <WebProviders locale={locale} resources={resources}>
               {children}
             </WebProviders>
             <Toaster />

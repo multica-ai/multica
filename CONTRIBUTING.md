@@ -434,6 +434,7 @@ done
 
 #### 2. Create a test user and token (automated auth)
 
+<!-- CEREBRO-PATCH(no-master-code): cerebro removed the upstream 888888 master code; use the dev log scraping flow. -->
 In dev (no `RESEND_API_KEY`) the backend prints the verification code to its log instead of emailing it. Send the code, scrape it from the backend log, then verify:
 
 ```bash
@@ -541,6 +542,7 @@ This automatically:
 3. Starts and manages its own daemon instance
 4. Connects to the local backend
 
+<!-- CEREBRO-PATCH(no-master-code): cerebro removed the upstream 888888 master code; use the dev log scraping flow. -->
 Login in the Desktop UI with `dev@localhost` — read the verification code from the backend log (or query the `verification_code` table directly).
 
 If the backend runs on a non-default port (worktree), create
@@ -656,6 +658,19 @@ If you want to stop PostgreSQL and keep your local databases:
 ```bash
 make db-down
 ```
+
+If you want a fresh database for the current checkout only (drops the
+database named in `POSTGRES_DB`, recreates it, and runs all migrations):
+
+```bash
+make stop        # stop backend/frontend first
+make db-reset
+make start
+```
+
+- only affects the current env's database; other worktree databases are untouched
+- refuses to run if `DATABASE_URL` points at a remote host
+- pass `ENV_FILE=.env.worktree` to target a specific worktree
 
 If you want to wipe all local PostgreSQL data for this repo:
 

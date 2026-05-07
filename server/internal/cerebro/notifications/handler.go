@@ -40,7 +40,12 @@ func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
 
-	ids, err := h.Queries.ListActiveIssueIDsInWorkspace(r.Context(), util.ParseUUID(workspaceID))
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	ids, err := h.Queries.ListActiveIssueIDsInWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list active issue tasks")
 		return

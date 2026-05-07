@@ -8,6 +8,7 @@ import { ModalRegistry } from "../modals/registry";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { useAppBadgeSync } from "../inbox/use-app-badge";
+import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -38,6 +39,7 @@ export function DashboardLayout({
       }
     >
       <SidebarProvider className="h-svh">
+        <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
           {children}

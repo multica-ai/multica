@@ -1,9 +1,28 @@
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
 import { SearchCommand } from "./search-command";
 import { useSearchStore } from "./search-store";
+import enCommon from "../locales/en/common.json";
+import enAuth from "../locales/en/auth.json";
+import enSettings from "../locales/en/settings.json";
+import enSearch from "../locales/en/search.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, auth: enAuth, settings: enSettings, search: enSearch },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+const renderSearch = () => render(<SearchCommand />, { wrapper: I18nWrapper });
 
 const {
   mockPush,
@@ -81,7 +100,9 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
-  issueListOptions: () => ({ queryKey: ["issues", "ws-test", "list"], enabled: false }),
+  issueDetailOptions: (_wsId: string, id: string) => ({
+    queryKey: ["issues", "ws-test", "detail", id],
+  }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -94,12 +115,24 @@ vi.mock("@multica/core/modals", () => ({
   }),
 }));
 
+function resolveIssue(key: readonly unknown[]) {
+  // issueDetailOptions key shape: ["issues", wsId, "detail", id]
+  if (key[0] === "issues" && key[2] === "detail") {
+    const id = key[3];
+    return mockAllIssues.current.find((i) => i.id === id);
+  }
+  return undefined;
+}
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (opts: { queryKey: readonly unknown[] }) => {
+  useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
     if (key[0] === "workspaces") return { data: mockWorkspaces.current };
-    return { data: mockAllIssues.current };
+    if (opts.enabled === false) return { data: undefined };
+    return { data: resolveIssue(key) };
   },
+  useQueries: (opts: { queries: Array<{ queryKey: readonly unknown[] }> }) =>
+    opts.queries.map((q) => ({ data: resolveIssue(q.queryKey) })),
 }));
 
 vi.mock("../navigation", () => ({
@@ -146,7 +179,7 @@ describe("SearchCommand", () => {
   it("closes on a single Escape press from the search input", async () => {
     const user = userEvent.setup();
 
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.click(input);
@@ -162,7 +195,7 @@ describe("SearchCommand", () => {
   });
 
   it("shows only New Issue by default and hides Pages / Switch Workspace / low-frequency commands until query", () => {
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
@@ -180,7 +213,7 @@ describe("SearchCommand", () => {
 
   it("filters navigation pages by query", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "set");
@@ -194,7 +227,7 @@ describe("SearchCommand", () => {
 
   it("navigates to page on selection", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "settings");
@@ -216,7 +249,7 @@ describe("SearchCommand", () => {
       { id: "issue-2", identifier: "MUL-2", title: "Second issue", status: "done" },
     ];
 
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("First issue")).toBeInTheDocument();
@@ -227,7 +260,7 @@ describe("SearchCommand", () => {
 
   it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "new");
@@ -247,14 +280,14 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
-    expect(mockOpenModal).toHaveBeenCalledWith("create-issue");
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue");
     expect(useSearchStore.getState().open).toBe(false);
   });
 
   it("hides copy-link commands when not on an issue detail route", async () => {
     const user = userEvent.setup();
     mockPathname.current = "/ws-test/projects";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "copy");
@@ -274,7 +307,7 @@ describe("SearchCommand", () => {
     mockAllIssues.current = [
       { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "copy");
@@ -307,7 +340,7 @@ describe("SearchCommand", () => {
 
   it("filters theme commands by query keywords", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "dark");
@@ -325,7 +358,7 @@ describe("SearchCommand", () => {
   it("applies the selected theme and closes the palette", async () => {
     const user = userEvent.setup();
     mockTheme.current = "light";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "dark");
@@ -342,7 +375,7 @@ describe("SearchCommand", () => {
   it("matches theme action via generic 'theme' keyword and marks current theme", async () => {
     const user = userEvent.setup();
     mockTheme.current = "dark";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "theme");
@@ -369,7 +402,7 @@ describe("SearchCommand", () => {
       { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
       { id: "ws-beta", name: "Beta Co", slug: "beta" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "alpha");
@@ -400,7 +433,7 @@ describe("SearchCommand", () => {
       { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
       { id: "ws-beta", name: "Beta Co", slug: "beta" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "workspace");
@@ -426,7 +459,7 @@ describe("SearchCommand", () => {
       { id: "issue-1", identifier: "MUL-1", title: "Existing issue", status: "in_progress" },
     ];
 
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("Existing issue")).toBeInTheDocument();

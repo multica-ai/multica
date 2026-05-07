@@ -51,6 +51,7 @@ type CreateRuntimeSetupTokenParams struct {
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
+// CEREBRO-PATCH(sqlc-runtime-setup-token): cerebro modification of upstream file
 func (q *Queries) CreateRuntimeSetupToken(ctx context.Context, arg CreateRuntimeSetupTokenParams) (RuntimeSetupToken, error) {
 	row := q.db.QueryRow(ctx, createRuntimeSetupToken,
 		arg.TokenHash,

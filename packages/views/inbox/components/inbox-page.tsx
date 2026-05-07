@@ -16,12 +16,15 @@ import {
 } from "@dnd-kit/core";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useModalStore } from "@multica/core/modals";
+import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   inboxArchivedListOptions,
   inboxListInFolderOptions,
   activeIssueTasksOptions,
   deduplicateInboxItems,
+  useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
@@ -31,6 +34,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
+// CEREBRO-PATCH(inbox-page-folders): inbox folders moved to @multica/cerebro-inbox in Phase 6
 import {
   inboxFolderListOptions,
   inboxFolderMembershipsOptions,
@@ -39,7 +43,6 @@ import {
   useDeleteInboxFolder,
   useAddInboxFolderItem,
   useSetInboxFolderParent,
-// CEREBRO-PATCH(inbox-page-folders): inbox folders moved to @multica/cerebro-inbox in Phase 6
 } from "@multica/cerebro-inbox/core/folders";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -99,8 +102,10 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { ChannelListItem, InboxListItem, timeAgo } from "./inbox-list-item";
-import { typeLabels } from "./inbox-detail-label";
+import { ChannelListItem, InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { useTypeLabels } from "./inbox-detail-label";
+import { getInboxDisplayTitle } from "./inbox-display";
+import { useT } from "../../i18n";
 import { InboxChatPanel } from "./inbox-chat-panel";
 
 type ViewMode =
@@ -122,6 +127,7 @@ function isGroupByMode(s: string | null): s is GroupByMode {
 }
 
 export function InboxPage() {
+  const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   // ?chat=<id> selects a chat session (preferred). ?issue=<id> selects a
   // notification or issue. Both are also accepted as legacy aliases for
@@ -310,18 +316,14 @@ export function InboxPage() {
 
   const pendingChatIdRef = useRef<string | null>(null);
 
+  // CEREBRO-PATCH(inbox-page-resolved-tracking): Track the last key we actually resolved against the inbox list. Lets the
+  // fallback effect distinguish "shared-link to a notification not in our
+  // inbox" (never resolved → redirect to the issue page) from "item was in
+  // our inbox and just got removed" (was resolved → stay on /inbox).
+  const lastResolvedKeyRef = useRef<string>("");
   useEffect(() => {
-    if (loading) return;
-    if (!selectedKey) return;
-    if (selected) return;
-    if (selectedChatSession || selectedKey === "new-chat") return;
-    if (pendingChatIdRef.current === selectedKey) return;
-    // Don't redirect a `?chat=<id>` URL to the issue page — if the chat
-    // genuinely doesn't exist, leave the panel empty rather than sending
-    // the user to a "this issue does not exist" screen.
-    if (urlChat && !urlIssue) return;
-    replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths, urlChat, urlIssue]);
+    if (selected) lastResolvedKeyRef.current = selectedKey;
+  }, [selected, selectedKey]);
 
   useEffect(() => {
     if (pendingChatIdRef.current && chatSessions.some((s) => s.id === pendingChatIdRef.current)) {
@@ -344,19 +346,43 @@ export function InboxPage() {
     replace(url);
   }, [replace, wsPaths]);
 
+  // CEREBRO-PATCH(inbox-page-archive-chat): chat-session archive helper
+  // Upstream replaced archiveChatSession with deleteChatSession (#2115); preserve the
+  // cerebro "archive from inbox" UX by hard-deleting instead.
   const handleArchiveChat = useCallback(async (sessionId: string) => {
     if (sessionId === selectedKey) setSelectedKey(null, "");
-    await api.archiveChatSession(sessionId);
+    await api.deleteChatSession(sessionId);
     qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
   }, [selectedKey, setSelectedKey, wsId, qc]);
+
+  // Shared inbox links (?issue=<id>) may point to notifications not in this
+  // user's inbox (archived, or never received). Fall back to the issue page
+  // so the URL still resolves to something meaningful. But if the key was
+  // previously resolvable (e.g. the issue was just deleted in another tab
+  // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
+  // too — clear the selection and stay on /inbox instead.
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedKey) return;
+    if (selected) return;
+    // CEREBRO-PATCH(inbox-page-chat-fallback): don't redirect chat URLs to issue page
+    if (selectedChatSession || selectedKey === "new-chat") return;
+    if (pendingChatIdRef.current === selectedKey) return;
+    if (urlChat && !urlIssue) return;
+    if (lastResolvedKeyRef.current === selectedKey) {
+      setSelectedKey(null, "");
+      return;
+    }
+    replace(wsPaths.issueDetail(selectedKey));
+  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
   });
 
   const isMobile = useIsMobile();
-  const unreadCount = items.filter((i) => !i.read).length;
+  const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
@@ -364,34 +390,47 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
+  const timeAgo = useTimeAgo();
+  const typeLabels = useTypeLabels();
+
+
+  // Auto-mark-read whenever a selected item is unread — covers both click-
+  // to-select and URL-param-select (e.g. OS notification click on desktop).
+  // The mutation flips `read: true` optimistically, so this effect settles
+  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
+  // in handleSelect so URL-driven selection triggers it too.
+  const markReadMutate = markReadMutation.mutate;
+  const selectedId = selected?.id;
+  const selectedRead = selected?.read;
+  useEffect(() => {
+    if (!selectedId || selectedRead) return;
+    markReadMutate(selectedId, {
+      onError: () => toast.error(t(($) => $.errors.mark_read_failed)),
+    });
+  }, [selectedId, selectedRead, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
     setSelectedKey("issue", item.issue_id ?? item.id);
-    if (!item.read) {
-      markReadMutation.mutate(item.id, {
-        onError: () => toast.error("Failed to mark as read"),
-      });
-    }
   };
 
   const handleArchive = (id: string) => {
     const archived = items.find((i) => i.id === id);
     if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey(null, "");
     archiveMutation.mutate(id, {
-      onError: () => toast.error("Failed to archive"),
+      onError: () => toast.error(t(($) => $.errors.archive_failed)),
     });
   };
 
   const handleMarkAllRead = () => {
     markAllReadMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to mark all as read"),
+      onError: () => toast.error(t(($) => $.errors.mark_all_read_failed)),
     });
   };
 
   const handleArchiveAll = () => {
     setSelectedKey(null, "");
     archiveAllMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive all"),
+      onError: () => toast.error(t(($) => $.errors.archive_all_failed)),
     });
   };
 
@@ -399,14 +438,14 @@ export function InboxPage() {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey(null, "");
     archiveAllReadMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive read items"),
+      onError: () => toast.error(t(($) => $.errors.archive_all_read_failed)),
     });
   };
 
   const handleArchiveCompleted = () => {
     setSelectedKey(null, "");
     archiveCompletedMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive completed"),
+      onError: () => toast.error(t(($) => $.errors.archive_completed_failed)),
     });
   };
 
@@ -1051,6 +1090,7 @@ export function InboxPage() {
     </div>
   );
 
+  // CEREBRO-PATCH(inbox-folders): folder section drives the left rail
   const folderSection = (
     <FolderSection
       folders={folders}
@@ -1082,6 +1122,10 @@ export function InboxPage() {
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
 
+  // Key by issue_id (not inbox-item id): a new comment/reaction generates a
+  // new inbox notification for the same issue, and the dedup helper picks the
+  // newest one — keying on its id would remount IssueDetail on every event,
+  // wiping the comment composer draft and resetting scroll position.
   const detailContent = selectedChannel ? (
     <ChannelDetail
       key={selectedChannel.id}
@@ -1100,19 +1144,29 @@ export function InboxPage() {
     />
   ) : selected?.issue_id ? (
     <IssueDetail
-      key={selected.id}
+      key={selected.issue_id}
       issueId={selected.issue_id}
       defaultSidebarOpen={false}
       layoutId="multica_inbox_issue_detail_layout"
       highlightCommentId={selected.details?.comment_id ?? undefined}
       linkSelfInBreadcrumb
       onDelete={() => {
-        handleArchive(selected.id);
+        // Issue deletion CASCADE-deletes the inbox item server-side, and the
+        // issue:deleted WS event prunes it from the inbox cache. Just clear
+        // the selection — calling archive here would 404 on a row that no
+        // longer exists.
+        setSelectedKey(null, "");
+      }}
+      onDone={() => {
+        setSelectedKey(null, "");
+        archiveMutation.mutate(selected.id, {
+          onError: () => toast.error(t(($) => $.errors.archive_failed)),
+        });
       }}
     />
   ) : selected ? (
     <div className="p-3 sm:p-6">
-      <h2 className="text-lg font-semibold">{selected.title}</h2>
+      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>
@@ -1121,14 +1175,44 @@ export function InboxPage() {
           {selected.body}
         </div>
       )}
-      <div className="mt-4">
+      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
+        <div className="mt-4 rounded-md border bg-muted/40 p-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t(($) => $.detail.original_input)}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+        </div>
+      )}
+      <div className="mt-4 flex gap-2">
+        {selected.type === "quick_create_failed" && (
+          <Button
+            size="sm"
+            onClick={() => {
+              // Seed the legacy advanced form with the original prompt so the
+              // user can recover their input in the full editor instead of
+              // retyping. The agent picker hint becomes the assignee
+              // candidate (still editable).
+              const prompt = selected.details?.original_prompt ?? "";
+              const agentId = selected.details?.agent_id;
+              useIssueDraftStore.getState().setDraft({
+                description: prompt,
+                ...(agentId
+                  ? { assigneeType: "agent" as const, assigneeId: agentId }
+                  : {}),
+              });
+              useModalStore.getState().open("create-issue");
+            }}
+          >
+            {t(($) => $.detail.edit_advanced)}
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
           onClick={() => handleArchive(selected.id)}
         >
           <Archive className="mr-1.5 h-3.5 w-3.5" />
-          Archive
+          {t(($) => $.detail.archive)}
         </Button>
       </div>
     </div>
@@ -1168,7 +1252,7 @@ export function InboxPage() {
               className="gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
-              Inbox
+              {t(($) => $.page.back)}
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">

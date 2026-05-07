@@ -1,0 +1,190 @@
+{
+  "page": {
+    "title": "运行时",
+    "tagline": "为智能体跑 CLI 会话的机器和云端 worker。",
+    "learn_more": "了解更多 →",
+    "connect_remote": "连接远程机器",
+    "search_placeholder": "搜索运行时...",
+    "scope_mine": "我的",
+    "scope_all": "全部",
+    "live": "实时",
+    "live_tooltip": "实时更新 · 离线检测 75 秒以内",
+    "filter_all": "全部",
+    "filter_all_description": "当前视图下的所有运行时",
+    "empty": {
+      "title": "还没有运行时",
+      "hint": "桌面端会自动扫描本地机器。对于 AWS EC2 或其他远程机器，可使用连接向导。"
+    },
+    "no_matches": {
+      "title": "无匹配",
+      "with_query": "没有运行时匹配 \"{{query}}\"{{filterSuffix}}。",
+      "with_query_filter_suffix": "（在当前筛选下）",
+      "no_query": "当前筛选下没有匹配的运行时。",
+      "try_widening": "试试放宽筛选或清除条件。"
+    },
+    "bootstrapping": {
+      "title": "正在启动本地运行时...",
+      "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
+    }
+  },
+  "health": {
+    "online": {
+      "label": "在线",
+      "description": "最近 45 秒内收到心跳。可以派发 task。"
+    },
+    "recently_lost": {
+      "label": "最近失联",
+      "description": "失联不到 5 分钟——通常是短暂的网络抖动。"
+    },
+    "offline": {
+      "label": "离线",
+      "description": "5 分钟以上没有心跳。请重启守护进程或排查主机。"
+    },
+    "about_to_gc": {
+      "label": "即将清理",
+      "description": "离线 6 天以上。如不重连，将在 7 天时自动删除。"
+    }
+  },
+  "detail": {
+    "all_runtimes": "全部运行时",
+    "read_only": "只读",
+    "delete_aria": "删除运行时",
+    "delete_tooltip": "删除运行时",
+    "delete_button": "删除运行时",
+    "last_seen": "最后活跃 {{when}}",
+    "fact_owner": "所有者",
+    "fact_device": "设备",
+    "fact_runtime": "运行时",
+    "technical_details": "技术详情",
+    "fact_daemon_cli": "守护进程 CLI",
+    "fact_daemon_id": "守护进程 ID",
+    "serving_title": "服务中",
+    "serving_count_other": "{{count}} 个智能体",
+    "no_agents": "还没有智能体绑定到这个运行时。",
+    "diagnostics_title": "诊断",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "删除运行时",
+      "description": "确定要删除\"{{name}}\"吗？此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    },
+    "toast_deleted": "已删除运行时",
+    "toast_delete_failed": "删除运行时失败",
+    "running_chip_other": "· {{count}} 个进行中",
+    "queued_chip_other": "· {{count}} 个排队中"
+  },
+  "detail_page": {
+    "not_found_title": "未找到运行时",
+    "not_found_hint": "它可能已被删除，或你没有访问权限。"
+  },
+  "running_other": "{{count}} 个运行中",
+  "queued_other": "{{count}} 个排队中",
+  "connect": {
+    "title": "连接远程机器",
+    "description": "在远程机器（例如 AWS EC2）上运行这些命令，安装 Multica CLI 并注册为运行时。",
+    "step1": "1. 安装 CLI",
+    "step2": "2. 配置",
+    "step3": "3. 用个人访问令牌登录",
+    "step3_hint_prefix": "可在 ",
+    "step3_hint_destination": "设置 → Tokens",
+    "step3_hint_suffix": " 中创建。",
+    "step4": "4. 启动守护进程",
+    "security_label": "安全提示： ",
+    "security_body": "使用 EC2 IAM 角色或最小权限凭证。切勿把 root 凭证写入智能体的 ",
+    "security_body_suffix": "。守护进程只使用出站连接 —— 无需开放入站端口。",
+    "troubleshooting": "故障排查",
+    "trouble_check_status": "检查状态： ",
+    "trouble_view_logs": "查看日志： ",
+    "trouble_verify_provider": "验证 provider： ",
+    "trouble_remote_note_prefix": "桌面端只会自动扫描本地机器。远程机器需要单独运行 ",
+    "trouble_remote_note_suffix": "。",
+    "cancel": "取消",
+    "started_daemon": "我已启动守护进程",
+    "waiting_title": "正在等待运行时...",
+    "waiting_description": "正在监听远程守护进程的注册。此页面会自动更新，无需刷新。",
+    "waiting_hint_prefix": "在远程机器上运行 ",
+    "waiting_hint_suffix": " 来确认它在运行。",
+    "back": "返回",
+    "success_title": "运行时已连接！",
+    "success_description": "你的远程机器已注册为运行时。现在可以创建一个智能体，把 task 派发到它上。",
+    "view_runtime": "查看运行时",
+    "create_agent": "创建智能体"
+  },
+  "update": {
+    "cli_version_label": "CLI 版本：",
+    "version_unknown": "未知",
+    "managed_by_desktop": "由桌面端管理",
+    "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理 —— 升级桌面端即可升级 CLI。",
+    "latest": "最新",
+    "available": "可用",
+    "action": "更新",
+    "retry": "重试",
+    "unknown_error": "未知错误",
+    "initiate_failed": "启动更新失败",
+    "status": {
+      "pending": "等待守护进程...",
+      "running": "更新中...",
+      "completed": "更新完成。守护进程正在重启...",
+      "failed": "更新失败",
+      "timeout": "超时"
+    }
+  },
+  "charts": {
+    "heatmap_less": "少",
+    "heatmap_more": "多"
+  },
+  "list": {
+    "col_runtime": "运行时",
+    "col_health": "健康度",
+    "col_owner": "所有者",
+    "col_agents": "智能体",
+    "col_workload": "工作负载",
+    "col_cost": "费用 · 7 天",
+    "col_cli": "CLI",
+    "cost_delta_flat": "持平",
+    "cli_managed_badge": "桌面端",
+    "cli_update_available_aria": "有可用更新",
+    "cli_update_available_tooltip": "有可用更新：{{version}}",
+    "row_actions_aria": "行操作",
+    "delete_action": "删除",
+    "delete_permission_hint": "只有运行时所有者和工作区管理员可以删除这个运行时",
+    "delete_admin_hint": "只有运行时所有者和工作区管理员可以删除运行时。"
+  },
+  "usage": {
+    "period_label": "时间范围",
+    "kpi_cost_label": "费用 · {{days}} 天",
+    "kpi_cost_delta": "{{sign}}{{pct}}% 对比上期",
+    "kpi_cache_label": "缓存节省 · {{days}} 天",
+    "kpi_cache_hint": "命中率 {{pct}}% · 读取 {{reads}}",
+    "kpi_tokens_label": "Token · {{days}} 天",
+    "kpi_tokens_hint": "输入 {{input}} · 输出 {{output}}",
+    "when_title": "这个运行时在何时消耗",
+    "when_tab_daily": "按天",
+    "when_tab_hourly": "按小时",
+    "when_tab_heatmap": "热力图",
+    "heatmap_caption": "最近 26 周 · 每日 $ 强度（此处忽略上方时间范围）",
+    "legend_input": "输入",
+    "legend_output": "输出",
+    "legend_cache_write": "缓存写入",
+    "empty_no_usage": "此期间无使用记录。",
+    "empty_pricing_missing": "记录到 token，但缺少这些模型的价格：",
+    "empty_pricing_hint": "请在 packages/views/runtimes/utils.ts 的 MODEL_PRICING 中补充",
+    "empty_zero_cost": "记录到 token，但费用计算结果为 $0。",
+    "cost_by_title_agent": "按智能体分摊",
+    "cost_by_title_model": "按模型分摊",
+    "cost_by_tab_agent": "按智能体",
+    "cost_by_tab_model": "按模型",
+    "cost_by_caption_agent_other": "{{count}} 个智能体使用此运行时",
+    "cost_by_caption_model_other": "{{count}} 个模型已使用",
+    "daily_breakdown_toggle": "每日明细表",
+    "table_date": "日期",
+    "table_model": "模型",
+    "table_input": "输入",
+    "table_output": "输出",
+    "table_cache_r": "缓存读",
+    "table_cache_w": "缓存写",
+    "no_data": "还没有使用数据"
+  }
+}

@@ -20,6 +20,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FileText, Image as ImageIcon, Loader2, Download } from "lucide-react";
 import { isImageUrl } from "@multica/ui/markdown";
+import { useT } from "../../i18n";
 
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ import { isImageUrl } from "@multica/ui/markdown";
 // ---------------------------------------------------------------------------
 
 function FileCardView({ node, editor, getPos }: NodeViewProps) {
+  const { t } = useT("editor");
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
@@ -70,7 +72,7 @@ function FileCardView({ node, editor, getPos }: NodeViewProps) {
           <FileText className="size-4 shrink-0 text-muted-foreground" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm">{uploading ? `Uploading ${filename}` : filename}</p>
+          <p className="truncate text-sm">{uploading ? t(($) => $.file_card.uploading, { filename }) : filename}</p>
         </div>
         {canEmbed && isEditable && (
           <button

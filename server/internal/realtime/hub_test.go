@@ -1,11 +1,14 @@
 package realtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,15 +81,11 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	return conn
 }
 
-// totalClients counts all clients across all rooms.
+// totalClients counts all currently registered clients.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
-	count := 0
-	for _, clients := range hub.rooms {
-		count += len(clients)
-	}
-	return count
+	return len(hub.clients)
 }
 
 func TestHub_ClientRegistration(t *testing.T) {
@@ -221,4 +220,94 @@ func TestHub_MultipleBroadcasts(t *testing.T) {
 			t.Fatalf("message %d: expected %s, got %s", i, expected, received)
 		}
 	}
+}
+
+// TestHandleWebSocket_ClientIdentityFromQuery verifies that client_platform,
+// client_version, and client_os query params on the WS upgrade URL are read
+// by the handler and surfaced to the access log. Browsers cannot set custom
+// headers on WS upgrades, so this query-param channel is the only way to
+// preserve the same observability dimensions HTTP clients get via X-Client-*.
+func TestHandleWebSocket_ClientIdentityFromQuery(t *testing.T) {
+var buf bytes.Buffer
+var mu sync.Mutex
+handler := slog.NewJSONHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})
+prevDefault := slog.Default()
+slog.SetDefault(slog.New(handler))
+t.Cleanup(func() { slog.SetDefault(prevDefault) })
+
+_, server := newTestHub(t)
+defer server.Close()
+
+token := makeTestToken(t)
+wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+"/ws?workspace_id=" + testWorkspaceID +
+"&client_platform=desktop&client_version=1.2.3&client_os=macos"
+conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+if err != nil {
+t.Fatalf("dial: %v", err)
+}
+defer conn.Close()
+
+authMsg, _ := json.Marshal(map[string]any{
+"type":    "auth",
+"payload": map[string]string{"token": token},
+})
+if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
+t.Fatalf("write auth: %v", err)
+}
+conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+if _, _, err := conn.ReadMessage(); err != nil {
+t.Fatalf("read auth_ack: %v", err)
+}
+
+// Wait briefly for the "websocket connected" log line to be flushed.
+deadline := time.Now().Add(2 * time.Second)
+var found map[string]any
+for time.Now().Before(deadline) {
+mu.Lock()
+raw := buf.String()
+mu.Unlock()
+for _, line := range strings.Split(raw, "\n") {
+if line == "" {
+continue
+}
+var entry map[string]any
+if err := json.Unmarshal([]byte(line), &entry); err != nil {
+continue
+}
+if msg, _ := entry["msg"].(string); msg == "websocket connected" {
+found = entry
+break
+}
+}
+if found != nil {
+break
+}
+time.Sleep(20 * time.Millisecond)
+}
+
+if found == nil {
+t.Fatalf("did not observe \"websocket connected\" log entry; buffered logs:\n%s", buf.String())
+}
+if got, _ := found["client_platform"].(string); got != "desktop" {
+t.Errorf("client_platform = %q, want %q", got, "desktop")
+}
+if got, _ := found["client_version"].(string); got != "1.2.3" {
+t.Errorf("client_version = %q, want %q", got, "1.2.3")
+}
+if got, _ := found["client_os"].(string); got != "macos" {
+t.Errorf("client_os = %q, want %q", got, "macos")
+}
+}
+
+// lockedWriter is a thread-safe writer used to capture concurrent slog output.
+type lockedWriter struct {
+w  *bytes.Buffer
+mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+l.mu.Lock()
+defer l.mu.Unlock()
+return l.w.Write(p)
 }

@@ -31,6 +31,7 @@ type CreateAttachmentParams struct {
 	ChatMessageID pgtype.UUID `json:"chat_message_id"`
 }
 
+// CEREBRO-PATCH(sqlc-attachment): cerebro modification of upstream file
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (Attachment, error) {
 	row := q.db.QueryRow(ctx, createAttachment,
 		arg.ID,

@@ -102,8 +102,8 @@ func setupAccessFixture(t *testing.T) accessFixture {
 func loadMember(t *testing.T, userID string) db.Member {
 	t.Helper()
 	m, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(userID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(userID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 	if err != nil {
 		t.Fatalf("load member %s: %v", userID, err)
@@ -113,7 +113,7 @@ func loadMember(t *testing.T, userID string) db.Member {
 
 func loadProject(t *testing.T, projectID string) db.Project {
 	t.Helper()
-	p, err := testHandler.Queries.GetProject(context.Background(), util.ParseUUID(projectID))
+	p, err := testHandler.Queries.GetProject(context.Background(), util.MustParseUUID(projectID))
 	if err != nil {
 		t.Fatalf("load project %s: %v", projectID, err)
 	}
@@ -181,7 +181,7 @@ func TestCanAccessIssue_StandalonePrivacyRules(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(issueID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestCanAccessIssue_ProjectInheritance(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(issueID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}

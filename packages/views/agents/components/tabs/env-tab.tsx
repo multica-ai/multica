@@ -1,20 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Loader2,
-  Save,
-  Plus,
-  Trash2,
   Eye,
   EyeOff,
+  Loader2,
   Lock,
+  Plus,
+  Save,
+  Trash2,
 } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
+import { useT } from "../../../i18n";
 
 let nextEnvId = 0;
 
@@ -49,11 +49,14 @@ export function EnvTab({
   agent,
   readOnly = false,
   onSave,
+  onDirtyChange,
 }: {
   agent: Agent;
   readOnly?: boolean;
   onSave: (updates: Partial<Agent>) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const { t } = useT("agents");
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>(
     envMapToEntries(agent.custom_env ?? {}),
   );
@@ -63,6 +66,10 @@ export function EnvTab({
   const originalEnvMap = agent.custom_env ?? {};
   const dirty =
     JSON.stringify(currentEnvMap) !== JSON.stringify(originalEnvMap);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const addEnvEntry = () => {
     setEnvEntries([
@@ -99,16 +106,16 @@ export function EnvTab({
     const keys = envEntries.filter((e) => e.key.trim()).map((e) => e.key.trim());
     const uniqueKeys = new Set(keys);
     if (uniqueKeys.size < keys.length) {
-      toast.error("Duplicate environment variable keys");
+      toast.error(t(($) => $.tab_body.env.duplicate_keys_toast));
       return;
     }
 
     setSaving(true);
     try {
       await onSave({ custom_env: currentEnvMap });
-      toast.success("Environment variables saved");
+      toast.success(t(($) => $.tab_body.env.saved_toast));
     } catch {
-      toast.error("Failed to save environment variables");
+      toast.error(t(($) => $.tab_body.env.save_failed_toast));
     } finally {
       setSaving(false);
     }
@@ -116,15 +123,10 @@ export function EnvTab({
 
   if (readOnly) {
     return (
-      <div className="max-w-lg space-y-4">
-        <div>
-          <Label className="text-xs text-muted-foreground">
-            Environment Variables
-          </Label>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.
-          </p>
-        </div>
+      <div className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.env.intro_readonly)}
+        </p>
         {envEntries.length > 0 ? (
           <div className="space-y-2">
             {envEntries.map((entry) => (
@@ -132,50 +134,55 @@ export function EnvTab({
                 <Input
                   value={entry.key}
                   readOnly
-                  className="w-[40%] font-mono text-xs bg-muted"
+                  className="w-[40%] bg-muted font-mono text-xs"
                 />
                 <div className="relative flex-1">
                   <Input
                     type="password"
                     value="****"
                     readOnly
-                    className="pr-8 font-mono text-xs bg-muted"
+                    className="bg-muted pr-8 font-mono text-xs"
                   />
-                  <Lock className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Lock className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground italic">No environment variables configured.</p>
+          <p className="text-xs italic text-muted-foreground">
+            {t(($) => $.tab_body.env.empty_readonly)}
+          </p>
         )}
       </div>
     );
   }
 
   return (
-    <div className="max-w-lg space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <Label className="text-xs text-muted-foreground">
-            Environment Variables
-          </Label>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Injected into the agent process at launch (e.g. ANTHROPIC_API_KEY,
-            ANTHROPIC_BASE_URL)
-          </p>
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.env.intro_prefix)}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+            {"ANTHROPIC_API_KEY"}
+          </code>
+          {t(($) => $.tab_body.env.intro_separator)}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+            {"ANTHROPIC_BASE_URL"}
+          </code>
+          {t(($) => $.tab_body.env.intro_suffix)}
+        </p>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={addEnvEntry}
-          className="h-7 gap-1 text-xs"
+          className="shrink-0"
         >
           <Plus className="h-3 w-3" />
-          Add
+          {t(($) => $.tab_body.common.add)}
         </Button>
       </div>
+
       {envEntries.length > 0 && (
         <div className="space-y-2">
           {envEntries.map((entry, index) => (
@@ -183,7 +190,7 @@ export function EnvTab({
               <Input
                 value={entry.key}
                 onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
-                placeholder="KEY"
+                placeholder={t(($) => $.tab_body.env.key_placeholder)}
                 className="w-[40%] font-mono text-xs"
               />
               <div className="relative flex-1">
@@ -193,13 +200,14 @@ export function EnvTab({
                   onChange={(e) =>
                     updateEnvEntry(index, "value", e.target.value)
                   }
-                  placeholder="value"
+                  placeholder={t(($) => $.tab_body.env.value_placeholder)}
                   className="pr-8 font-mono text-xs"
                 />
                 <button
                   type="button"
                   onClick={() => toggleEnvVisibility(index)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={entry.visible ? t(($) => $.tab_body.env.hide_value_aria) : t(($) => $.tab_body.env.show_value_aria)}
                 >
                   {entry.visible ? (
                     <EyeOff className="h-3.5 w-3.5" />
@@ -208,26 +216,33 @@ export function EnvTab({
                   )}
                 </button>
               </div>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => removeEnvEntry(index)}
-                className="shrink-0 text-muted-foreground hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={t(($) => $.tab_body.env.remove_aria)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
       )}
 
-      <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-        {saving ? (
-          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-        ) : (
-          <Save className="h-3.5 w-3.5 mr-1.5" />
+      <div className="flex items-center justify-end gap-3">
+        {dirty && (
+          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
         )}
-        Save
-      </Button>
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.tab_body.common.save)}
+        </Button>
+      </div>
     </div>
   );
 }

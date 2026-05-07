@@ -3,3 +3,4 @@ export { StatusPicker } from "./status-picker";
 export { PriorityPicker } from "./priority-picker";
 export { AssigneePicker, canAssignAgent } from "./assignee-picker";
 export { DueDatePicker } from "./due-date-picker";
+export { LabelPicker } from "./label-picker";

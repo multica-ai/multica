@@ -1,0 +1,212 @@
+{
+  "preferences": {
+    "theme": {
+      "title": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": {
+      "title": "Language",
+      "english": "English",
+      "chinese": "中文",
+      "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
+    }
+  },
+  "page": {
+    "title": "Settings",
+    "my_account": "My Account",
+    "workspace_fallback": "Workspace",
+    "tabs": {
+      "profile": "Profile",
+      "preferences": "Preferences",
+      "notifications": "Notifications",
+      "tokens": "API Tokens",
+      "general": "General",
+      "repositories": "Repositories",
+      "labs": "Labs",
+      "members": "Members"
+    }
+  },
+  "account": {
+    "section_profile": "Profile",
+    "click_avatar_hint": "Click to upload avatar",
+    "name_label": "Name",
+    "save": "Update Profile",
+    "saving": "Updating...",
+    "toast_avatar_updated": "Avatar updated",
+    "toast_avatar_failed": "Failed to upload avatar",
+    "toast_profile_updated": "Profile updated",
+    "toast_profile_failed": "Failed to update profile"
+  },
+  "notifications": {
+    "title": "Inbox Notifications",
+    "description": "Control which events generate inbox notifications. Muted event types are silently filtered — you can still see them by visiting the issue directly.",
+    "toast_failed": "Failed to update notification settings",
+    "groups": {
+      "assignments": {
+        "label": "Assignments",
+        "description": "When you are assigned or unassigned from an issue"
+      },
+      "status_changes": {
+        "label": "Status changes",
+        "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
+      },
+      "comments": {
+        "label": "Comments & Mentions",
+        "description": "New comments on issues you follow, or when someone @mentions you"
+      },
+      "updates": {
+        "label": "Priority & Due date",
+        "description": "When priority or due date changes on issues you follow"
+      },
+      "agent_activity": {
+        "label": "Agent activity",
+        "description": "When an agent task completes or fails"
+      }
+    },
+    "system": {
+      "title": "System Notifications",
+      "description": "Control native OS notification banners shown when Multica is in the background.",
+      "label": "Show system notifications",
+      "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
+    }
+  },
+  "tokens": {
+    "title": "API Tokens",
+    "description": "Personal access tokens allow the CLI and external integrations to authenticate with your account.",
+    "name_placeholder": "Token name (e.g. My CLI)",
+    "expiry": {
+      "30": "30 days",
+      "90": "90 days",
+      "365": "1 year",
+      "never": "No expiry"
+    },
+    "create": "Create",
+    "creating": "Creating...",
+    "toast_load_failed": "Failed to load tokens",
+    "toast_create_failed": "Failed to create token",
+    "toast_revoked": "Token revoked",
+    "toast_revoke_failed": "Failed to revoke token",
+    "metadata_prefix": "{{prefix}}... · Created {{created}} · {{lastUsed}}",
+    "last_used_with_date": "Last used {{date}}",
+    "last_used_never": "Never used",
+    "expires_with_date": " · Expires {{date}}",
+    "revoke_aria": "Revoke {{name}}",
+    "revoke_tooltip": "Revoke",
+    "revoke_dialog": {
+      "title": "Revoke token",
+      "description": "This token will be permanently revoked and can no longer be used. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Revoke"
+    },
+    "created_dialog": {
+      "title": "Token created",
+      "description": "Copy your personal access token now. You won't be able to see it again.",
+      "copy_tooltip": "Copy token",
+      "done": "Done"
+    }
+  },
+  "workspace": {
+    "section_general": "General",
+    "name_label": "Name",
+    "description_label": "Description",
+    "description_placeholder": "What does this workspace focus on?",
+    "context_label": "Context",
+    "context_placeholder": "Background information and context for AI agents working in this workspace",
+    "slug_label": "Slug",
+    "save": "Save",
+    "saving": "Saving...",
+    "manage_hint": "Only admins and owners can update workspace settings.",
+    "toast_saved": "Workspace settings saved",
+    "toast_save_failed": "Failed to save workspace settings",
+    "danger_zone": "Danger Zone",
+    "leave_title": "Leave workspace",
+    "leave_sole_owner": "You're the only owner. Promote another member to owner first, or delete the workspace.",
+    "leave_sole_member": "You're the only member. Delete the workspace to leave.",
+    "leave_default": "Remove yourself from this workspace.",
+    "leave_button": "Leave workspace",
+    "leaving": "Leaving...",
+    "leave_confirm_title": "Leave workspace",
+    "leave_confirm_description": "Leave {{name}}? You will lose access until re-invited.",
+    "toast_leave_failed": "Failed to leave workspace",
+    "delete_title": "Delete workspace",
+    "delete_description": "Permanently delete this workspace and its data.",
+    "delete_button": "Delete workspace",
+    "deleting": "Deleting...",
+    "toast_delete_failed": "Failed to delete workspace",
+    "confirm_cancel": "Cancel",
+    "confirm_action": "Confirm"
+  },
+  "delete_workspace_dialog": {
+    "title": "Delete workspace",
+    "description": "This cannot be undone. All issues, agents, and data will be permanently removed.",
+    "type_to_confirm_prefix": "To confirm, type",
+    "type_to_confirm_suffix": " below.",
+    "cancel": "Cancel",
+    "confirm": "Delete workspace",
+    "deleting": "Deleting..."
+  },
+  "labs": {
+    "section_git": "Git",
+    "co_authored_by_label": "Co-authored-by trailer",
+    "co_authored_by_description_prefix": "Automatically add",
+    "co_authored_by_description_suffix": "to commits made by agents.",
+    "toast_failed": "Failed to update setting"
+  },
+  "repositories": {
+    "section_title": "Repositories",
+    "description": "Git repositories associated with this workspace. Agents use these to clone and work on code.",
+    "url_placeholder": "https://git.example.com/org/repo.git",
+    "description_placeholder": "Description (e.g. Go backend + Next.js frontend)",
+    "add": "Add repository",
+    "save": "Save",
+    "saving": "Saving...",
+    "manage_hint": "Only admins and owners can manage repositories.",
+    "toast_saved": "Repositories saved",
+    "toast_save_failed": "Failed to save repositories"
+  },
+  "members": {
+    "section_title": "Members ({{count}})",
+    "invite_title": "Invite member",
+    "invite_email_placeholder": "user@company.com",
+    "invite_button": "Invite",
+    "inviting": "Inviting...",
+    "toast_invitation_sent": "Invitation sent",
+    "toast_invitation_failed": "Failed to send invitation",
+    "no_members": "No members found.",
+    "pending_title": "Pending invitations ({{count}})",
+    "pending_status": "Pending",
+    "revoke_invitation_tooltip": "Revoke invitation",
+    "revoke_invitation_title": "Revoke invitation",
+    "revoke_invitation_description": "Revoke the invitation to {{email}}? They will no longer be able to join this workspace.",
+    "toast_invitation_revoked": "Invitation revoked",
+    "toast_invitation_revoke_failed": "Failed to revoke invitation",
+    "toast_role_updated": "Role updated",
+    "toast_role_failed": "Failed to update member",
+    "toast_member_removed": "Member removed",
+    "toast_member_remove_failed": "Failed to remove member",
+    "remove_member_title": "Remove {{name}}",
+    "remove_member_description": "Remove {{name}} from {{workspace}}? They will lose access to this workspace.",
+    "confirm_cancel": "Cancel",
+    "confirm_action": "Confirm",
+    "change_role": "Change role",
+    "remove_action": "Remove from workspace",
+    "cannot_demote_last_owner_title": "Promote another member to owner first — a workspace must keep at least one owner.",
+    "cannot_demote_last_owner": "Cannot demote the last owner",
+    "roles": {
+      "owner": {
+        "label": "Owner",
+        "description": "Full access, manage all settings"
+      },
+      "admin": {
+        "label": "Admin",
+        "description": "Manage members and settings"
+      },
+      "member": {
+        "label": "Member",
+        "description": "Create and work on issues"
+      }
+    }
+  }
+}

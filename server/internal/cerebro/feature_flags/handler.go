@@ -65,9 +65,19 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
 	rows, err := h.Queries.ListCerebroFeatureFlags(r.Context(), cerebrodb.ListCerebroFeatureFlagsParams{
-		WorkspaceID: util.ParseUUID(workspaceID),
-		UserID:      util.ParseUUID(userID),
+		WorkspaceID: wsUUID,
+		UserID:      userUUID,
 	})
 	if err != nil {
 		slog.Error("list cerebro feature flags failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -107,9 +117,19 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
 	if err := h.Queries.UpsertCerebroFeatureFlag(r.Context(), cerebrodb.UpsertCerebroFeatureFlagParams{
-		WorkspaceID: util.ParseUUID(workspaceID),
-		UserID:      util.ParseUUID(userID),
+		WorkspaceID: wsUUID,
+		UserID:      userUUID,
 		FlagKey:     key,
 		Enabled:     req.Enabled,
 	}); err != nil {

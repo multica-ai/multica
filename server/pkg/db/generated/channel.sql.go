@@ -35,7 +35,7 @@ func (q *Queries) CountUnreadInboxForChannel(ctx context.Context, arg CountUnrea
 }
 
 const getDMByMembers = `-- name: GetDMByMembers :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.kind, i.is_private FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.is_private FROM issue i
 WHERE i.workspace_id = $1
   AND i.kind = 'dm'
   AND EXISTS (
@@ -90,6 +90,7 @@ func (q *Queries) GetDMByMembers(ctx context.Context, arg GetDMByMembersParams) 
 		&i.ProjectID,
 		&i.OriginType,
 		&i.OriginID,
+		&i.FirstExecutedAt,
 		&i.Kind,
 		&i.IsPrivate,
 	)

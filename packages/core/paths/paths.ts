@@ -36,11 +36,14 @@ function workspaceScoped(slug: string) {
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     notifications: () => `${ws}/notifications`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,
+    runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     skills: () => `${ws}/skills`,
+    skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
     memberDetail: (memberId: string) => `${ws}/members/${encode(memberId)}`,
   };
@@ -53,6 +56,8 @@ export const paths = {
   login: () => "/login",
   newWorkspace: () => "/workspaces/new",
   invite: (id: string) => `/invite/${encode(id)}`,
+  invitations: () => "/invitations",
+  onboarding: () => "/onboarding",
   authCallback: () => "/auth/callback",
   root: () => "/",
 };
@@ -63,7 +68,7 @@ export type WorkspacePaths = ReturnType<typeof workspaceScoped>;
 // A path is global if it equals or begins with any of these.
 // Note: `/workspaces/` (trailing slash) is the prefix — `workspaces` is reserved,
 // so any path starting with `/workspaces/...` is system-owned, not user-owned.
-const GLOBAL_PREFIXES = ["/login", "/workspaces/", "/invite/", "/auth/", "/logout", "/signup"];
+const GLOBAL_PREFIXES = ["/login", "/workspaces/", "/invite/", "/invitations", "/onboarding", "/auth/", "/logout", "/signup"];
 
 export function isGlobalPath(path: string): boolean {
   return GLOBAL_PREFIXES.some((p) => path === p || path.startsWith(p));

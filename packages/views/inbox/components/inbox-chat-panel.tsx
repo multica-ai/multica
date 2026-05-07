@@ -175,8 +175,8 @@ export function InboxChatPanel({
         ) : hasMessages ? (
           <ChatMessageList
             messages={messages}
-            pendingTaskId={pendingTaskId}
-            isWaiting={!!pendingTaskId}
+            pendingTask={pendingTask ?? null}
+            availability={undefined}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">

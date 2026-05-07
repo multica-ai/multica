@@ -166,7 +166,7 @@ func (h *Handler) ExchangeRuntimeSetupToken(w http.ResponseWriter, r *http.Reque
 		UsedPatID: pgtype.UUID{Bytes: pat.ID.Bytes, Valid: true},
 	}); err != nil {
 		// Token already consumed by a concurrent caller — refuse to leak the PAT.
-		_ = h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
+		_, _ = h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
 			ID:     pat.ID,
 			UserID: setup.UserID,
 		})

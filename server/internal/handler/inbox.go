@@ -100,6 +100,10 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	// CEREBRO-PATCH(cerebro-inbox-folders): folder + archived branches use
 	// cerebro-only queries (folders feature, archived view) and the
@@ -110,7 +114,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	if folderID != "" {
 		rows, err := h.Queries.ListInboxItemsInFolder(r.Context(), db.ListInboxItemsInFolderParams{
 			ID:          parseUUID(folderID),
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 			UserID:      parseUUID(userID),
 		})
 		if err != nil {
@@ -145,7 +149,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Query().Get("archived") == "1" {
 		archived, err := h.Queries.ListArchivedInboxItemsUnfiled(r.Context(), db.ListArchivedInboxItemsUnfiledParams{
-			WorkspaceID:   parseUUID(workspaceID),
+			WorkspaceID:   wsUUID,
 			RecipientType: "member",
 			RecipientID:   parseUUID(userID),
 		})
@@ -180,7 +184,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := h.Queries.ListInboxItemsUnfiled(r.Context(), db.ListInboxItemsUnfiledParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   wsUUID,
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),
 	})
@@ -218,10 +222,11 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
 		return
 	}
-	item, err := h.Queries.MarkInboxRead(r.Context(), parseUUID(id))
+	item, err := h.Queries.MarkInboxRead(r.Context(), prev.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark read")
 		return
@@ -240,10 +245,11 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
 		return
 	}
-	item, err := h.Queries.ArchiveInboxItem(r.Context(), parseUUID(id))
+	item, err := h.Queries.ArchiveInboxItem(r.Context(), prev.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive")
 		return
@@ -297,9 +303,13 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   wsUUID,
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),
 	})
@@ -317,9 +327,13 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.MarkAllInboxRead(r.Context(), db.MarkAllInboxReadParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -342,9 +356,13 @@ func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveAllInbox(r.Context(), db.ArchiveAllInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -367,9 +385,13 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveAllReadInbox(r.Context(), db.ArchiveAllReadInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -392,9 +414,13 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveCompletedInbox(r.Context(), db.ArchiveCompletedInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {

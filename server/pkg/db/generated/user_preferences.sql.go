@@ -28,7 +28,7 @@ UPDATE "user"
 SET preferences = $1::jsonb,
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, preferences
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, preferences
 `
 
 type UpdateUserPreferencesParams struct {
@@ -36,6 +36,7 @@ type UpdateUserPreferencesParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
+// CEREBRO-PATCH(sqlc-user-preferences): cerebro modification of upstream file
 // Fork-specific: per-user preferences storage.
 // Kept in a dedicated file so upstream-merges don't conflict on user.sql.
 // Replaces the user's preferences JSONB blob wholesale. Caller is responsible
@@ -50,6 +51,12 @@ func (q *Queries) UpdateUserPreferences(ctx context.Context, arg UpdateUserPrefe
 		&i.AvatarUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
 		&i.Preferences,
 	)
 	return i, err

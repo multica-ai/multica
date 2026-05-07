@@ -124,7 +124,7 @@ func (q *Queries) GetMaxInboxFolderPosition(ctx context.Context, arg GetMaxInbox
 }
 
 const listArchivedChatSessionsUnfiled = `-- name: ListArchivedChatSessionsUnfiled :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1
@@ -154,6 +154,7 @@ type ListArchivedChatSessionsUnfiledRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -180,6 +181,7 @@ func (q *Queries) ListArchivedChatSessionsUnfiled(ctx context.Context, arg ListA
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UnreadSince,
+			&i.RuntimeID,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -278,7 +280,7 @@ func (q *Queries) ListArchivedInboxItemsUnfiled(ctx context.Context, arg ListArc
 }
 
 const listChatSessionsInFolder = `-- name: ListChatSessionsInFolder :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 JOIN inbox_folder_membership m
@@ -306,6 +308,7 @@ type ListChatSessionsInFolderRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -331,6 +334,7 @@ func (q *Queries) ListChatSessionsInFolder(ctx context.Context, arg ListChatSess
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UnreadSince,
+			&i.RuntimeID,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -344,7 +348,7 @@ func (q *Queries) ListChatSessionsInFolder(ctx context.Context, arg ListChatSess
 }
 
 const listChatSessionsUnfiled = `-- name: ListChatSessionsUnfiled :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1
@@ -374,6 +378,7 @@ type ListChatSessionsUnfiledRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -399,6 +404,7 @@ func (q *Queries) ListChatSessionsUnfiled(ctx context.Context, arg ListChatSessi
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UnreadSince,
+			&i.RuntimeID,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -461,6 +467,7 @@ type ListInboxFoldersParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
+// CEREBRO-PATCH(sqlc-inbox-folder): cerebro modification of upstream file
 func (q *Queries) ListInboxFolders(ctx context.Context, arg ListInboxFoldersParams) ([]InboxFolder, error) {
 	rows, err := q.db.Query(ctx, listInboxFolders, arg.WorkspaceID, arg.UserID)
 	if err != nil {

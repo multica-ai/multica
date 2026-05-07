@@ -18,7 +18,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "@multica/views/navigation";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { StatusIcon } from "@multica/views/issues/components";
-import { timeAgo } from "@multica/views/inbox/components/inbox-list-item";
+import { useTimeAgo } from "@multica/views/inbox/components/inbox-list-item";
 import { InboxDetailLabel } from "@multica/views/inbox/components/inbox-detail-label";
 
 const EMPTY: InboxItem[] = [];
@@ -217,6 +217,7 @@ interface RowProps {
 
 function NotificationRow({ item, onClick, onMarkRead, onArchive }: RowProps) {
   const isCritical = item.severity === "action_required";
+  const timeAgo = useTimeAgo();
   return (
     <div
       role="button"

@@ -2,11 +2,15 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClaudeHandleAssistantText(t *testing.T) {
@@ -533,6 +537,63 @@ func TestResolveSessionID(t *testing.T) {
 	}
 }
 
+func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Fake claude binary: drains stdin so writeClaudeInput succeeds, writes a
+	// canonical V8-abort line to stderr, then exits non-zero before emitting
+	// any stream-json to stdout. This is the exact failure mode that motivated
+	// PR #1674 — without sampling stderrBuf.Tail() after cmd.Wait() returns,
+	// Result.Error would be a useless "exit status 3".
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
+		"exit 3\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain message stream so the lifecycle goroutine can progress.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "claude exited with error") {
+			t.Fatalf("expected error to mention exit, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "V8 abort: assertion failed") {
+			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "claude stderr:") {
+			t.Fatalf("expected stderr label in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)
@@ -543,35 +604,9 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 }
 
 // CEREBRO-PATCH(claude-stderr-tail-tests): cerebro fork addition.
-// Tests below cover unexported package functions (newRingBuffer, formatEmptyOutputReason,
-// truncate); extracting to internal/cerebro/sandbox would require exporting those
-// internals. Per chunk-6 SA4 audit, kept inline with this marker.
-func TestRingBufferRetainsTail(t *testing.T) {
-	t.Parallel()
-
-	r := newRingBuffer(8)
-	if _, err := r.Write([]byte("abc")); err != nil {
-		t.Fatalf("write 1: %v", err)
-	}
-	if got := r.Snapshot(); got != "abc" {
-		t.Errorf("after small write: got %q, want %q", got, "abc")
-	}
-	// Crossing the cap drops from the head, not the tail.
-	if _, err := r.Write([]byte("defghij")); err != nil {
-		t.Fatalf("write 2: %v", err)
-	}
-	if got := r.Snapshot(); got != "cdefghij" {
-		t.Errorf("after wrap: got %q, want %q", got, "cdefghij")
-	}
-	// A single write larger than cap keeps only the trailing cap bytes.
-	if _, err := r.Write([]byte("0123456789ABCDEF")); err != nil {
-		t.Fatalf("write 3: %v", err)
-	}
-	if got := r.Snapshot(); got != "89ABCDEF" {
-		t.Errorf("after oversized write: got %q, want %q", got, "89ABCDEF")
-	}
-}
-
+// Tests below cover unexported package functions (formatEmptyOutputReason,
+// truncate); extracting to internal/cerebro/sandbox would require exporting
+// those internals. Per chunk-6 SA4 audit, kept inline with this marker.
 func TestFormatEmptyOutputReasonIncludesAvailableSignals(t *testing.T) {
 	t.Parallel()
 
@@ -591,11 +626,11 @@ func TestFormatEmptyOutputReasonIncludesAvailableSignals(t *testing.T) {
 			wantNotSubs: []string{"unparsed_stdout_lines", "stderr"},
 		},
 		{
-			name:             "with stderr tail",
-			exitCode:         1,
-			stderrTail:       "Error: invalid API key",
-			wantSubs:         []string{"exit=1", "stderr: Error: invalid API key"},
-			wantNotSubs:      []string{"unparsed_stdout_lines"},
+			name:        "with stderr tail",
+			exitCode:    1,
+			stderrTail:  "Error: invalid API key",
+			wantSubs:    []string{"exit=1", "stderr: Error: invalid API key"},
+			wantNotSubs: []string{"unparsed_stdout_lines"},
 		},
 		{
 			name:             "with unparseable lines",
@@ -629,5 +664,28 @@ func TestTruncateAddsEllipsis(t *testing.T) {
 	}
 	if got := truncate("0123456789ABCDEF", 8); got != "01234567…" {
 		t.Errorf("truncate: %q", got)
+	}
+}
+
+func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
+		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--output-format text") || strings.Contains(joined, "--permission-mode plan") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--max-budget-usd" && args[i+1] == "1.00" {
+			extraIdx = i
+		}
+		if args[i] == "--max-budget-usd" && args[i+1] == "2.00" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
 }

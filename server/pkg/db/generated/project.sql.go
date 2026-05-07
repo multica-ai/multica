@@ -225,6 +225,7 @@ type ListProjectsParams struct {
 	Priority    pgtype.Text `json:"priority"`
 }
 
+// CEREBRO-PATCH(sqlc-project): cerebro modification of upstream file
 func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
 	rows, err := q.db.Query(ctx, listProjects, arg.WorkspaceID, arg.Status, arg.Priority)
 	if err != nil {

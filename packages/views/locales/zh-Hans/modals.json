@@ -1,0 +1,136 @@
+{
+  "common": {
+    "back": "返回",
+    "close": "关闭",
+    "cancel": "取消",
+    "expand_tooltip": "展开",
+    "collapse_tooltip": "收起"
+  },
+  "create_workspace": {
+    "title": "创建新工作区",
+    "description": "工作区是团队协作处理项目和 issue 的共享空间。"
+  },
+  "delete_issue": {
+    "title": "删除 issue",
+    "description": "将永久删除该 issue 及其所有评论。此操作不可撤销。",
+    "hint": "工作区任何成员都可以删除 issue。",
+    "cancel": "取消",
+    "confirm": "删除",
+    "deleting": "删除中...",
+    "toast_deleted": "已删除 issue",
+    "toast_delete_failed": "删除 issue 失败"
+  },
+  "feedback": {
+    "title": "反馈",
+    "description": "告诉我们哪些好用、哪些不好用、希望接下来做什么。",
+    "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",
+    "toast_uploading": "请等待上传完成...",
+    "toast_too_long": "内容过长",
+    "toast_sent": "感谢反馈！",
+    "toast_failed": "发送反馈失败",
+    "send": "发送反馈",
+    "sending": "发送中..."
+  },
+  "issue_picker": {
+    "search_placeholder": "搜索 issue...",
+    "searching": "搜索中...",
+    "no_results": "未找到 issue。",
+    "prompt_to_search": "输入关键词搜索 issue"
+  },
+  "set_parent": {
+    "title": "设置父 issue",
+    "description": "搜索一个 issue，将其设为当前 issue 的父级",
+    "toast_failed": "更新 issue 失败",
+    "toast_success": "已将 {{identifier}} 设为父 issue"
+  },
+  "add_child": {
+    "title": "添加子 issue",
+    "description": "搜索一个 issue 添加为子 issue",
+    "toast_failed": "添加子 issue 失败",
+    "toast_success": "已添加 {{identifier}} 为子 issue"
+  },
+  "backlog_hint": {
+    "toast_status_failed": "更新状态失败"
+  },
+  "create_project": {
+    "title": "新建项目",
+    "title_breadcrumb": "新建项目",
+    "icon_tooltip": "选择图标",
+    "title_placeholder": "项目标题",
+    "description_placeholder": "添加描述...",
+    "lead": "负责人",
+    "no_lead": "无负责人",
+    "lead_placeholder": "指派负责人...",
+    "members_group": "成员",
+    "agents_group": "智能体",
+    "no_results": "未找到结果",
+    "submit": "创建项目",
+    "submitting": "创建中...",
+    "toast_created": "已创建项目",
+    "toast_failed": "创建项目失败",
+    "repos_pill": "代码仓库",
+    "repos_pill_count_one": "{{count}} 个仓库",
+    "repos_pill_count_other": "{{count}} 个仓库",
+    "repos_heading": "为此项目关联 GitHub 仓库",
+    "repos_empty": "还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "添加",
+    "repos_selected": "已选"
+  },
+  "create_issue": {
+    "sr_manual": "新建 issue",
+    "sr_agent": "快速创建 issue",
+    "manual_breadcrumb": "手动创建",
+    "agent_breadcrumb": "通过智能体创建",
+    "title_placeholder": "issue 标题",
+    "description_placeholder": "添加描述...",
+    "more_options_aria": "更多选项",
+    "submit": "创建 issue",
+    "submitting": "创建中...",
+    "toast_created": "已创建 issue",
+    "view_issue": "查看 issue",
+    "toast_failed": "创建 issue 失败",
+    "toast_link_subissues_all_failed": "关联子 issue 失败",
+    "toast_link_subissues_partial": "{{total}} 个子 issue 中有 {{failed}} 个关联失败",
+    "switch_to_agent": "切换到智能体",
+    "switch_to_agent_tooltip": "切换到通过智能体创建——一句话描述，让它替你建",
+    "switch_to_manual": "切换到手动",
+    "switch_to_manual_tooltip": "切换到手动创建——自己填字段",
+    "create_another": "继续创建",
+    "remove_parent_aria": "移除父级",
+    "remove_subissue_aria": "移除子 issue {{identifier}}",
+    "subissue_of": "{{identifier}} 的子 issue",
+    "subissue_chip": "子 issue：{{identifier}}",
+    "parent_with_id": "父：{{identifier}}",
+    "set_parent": "设置父 issue...",
+    "add_subissue": "添加子 issue...",
+    "remove_parent": "移除父级",
+    "set_parent_picker": {
+      "title": "设置父 issue",
+      "description": "搜索一个 issue 设为父级"
+    },
+    "add_subissue_picker": {
+      "title": "添加子 issue",
+      "description": "搜索一个 issue 设为子级"
+    },
+    "agent": {
+      "created_by": "创建者",
+      "select_agent_aria": "选择智能体",
+      "pick_an_agent": "选一个智能体...",
+      "no_agents": "暂无可用智能体。",
+      "version_missing": "该智能体的守护进程没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级守护进程并重连，或切换到手动创建。",
+      "version_below": "该智能体的守护进程 CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级守护进程，或切换到手动创建。",
+      "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
+      "submit": "创建",
+      "sending": "发送中...",
+      "uploading": "上传中...",
+      "sent_label": "已发送",
+      "sent_count": "已发送 {{count}}",
+      "version_blocked_tooltip": "守护进程 CLI 必须 ≥ {{min}}",
+      "toast_sent": "已交给智能体——完成后会在收件箱通知你",
+      "error_agent_unavailable_fallback": "智能体不可用，请换一个。",
+      "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",
+      "error_unknown": "提交失败，请重试。"
+    }
+  }
+}

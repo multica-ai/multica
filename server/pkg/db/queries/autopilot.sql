@@ -18,13 +18,13 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
-    workspace_id, project_id, title, description, assignee_id,
-    priority, status, execution_mode, issue_title_template,
+    workspace_id, title, description, assignee_id,
+    status, execution_mode, issue_title_template,
     created_by_type, created_by_id
 ) VALUES (
-    $1, sqlc.narg('project_id'), $2, sqlc.narg('description'), $3,
-    $4, $5, $6, sqlc.narg('issue_title_template'),
-    $7, $8
+    $1, $2, sqlc.narg('description'), $3,
+    $4, $5, sqlc.narg('issue_title_template'),
+    $6, $7
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
@@ -32,8 +32,6 @@ UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
-    project_id = sqlc.narg('project_id'),
-    priority = COALESCE(sqlc.narg('priority'), priority),
     status = COALESCE(sqlc.narg('status'), status),
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
@@ -159,8 +157,8 @@ RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
+VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
 RETURNING *;
 
 -- =====================
@@ -196,3 +194,43 @@ WHERE t.kind = 'schedule'
   AND t.next_run_at IS NULL
   AND t.cron_expression IS NOT NULL
   AND a.status = 'active';
+
+-- =====================
+-- Failure-rate auto-pause
+-- =====================
+
+-- name: SelectAutopilotsExceedingFailureThreshold :many
+-- Find active autopilots whose recent run failure rate exceeds the threshold.
+-- Counts only terminal runs (completed | failed | skipped); pending,
+-- issue_created and running are excluded so in-flight work isn't penalised.
+-- Used by the failure monitor to auto-pause sustained-failure autopilots
+-- (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
+-- that 100% failed for days, burning ~1.5k useless tasks per week).
+WITH stats AS (
+    SELECT autopilot_id,
+           count(*) FILTER (WHERE status IN ('completed', 'failed', 'skipped')) AS total,
+           count(*) FILTER (WHERE status = 'failed') AS failed
+    FROM autopilot_run
+    WHERE created_at >= sqlc.arg('since')::timestamptz
+    GROUP BY autopilot_id
+)
+SELECT a.id, a.workspace_id, a.title, a.assignee_id,
+       a.created_by_type, a.created_by_id,
+       s.total::bigint  AS total_runs,
+       s.failed::bigint AS failed_runs
+FROM autopilot a
+JOIN stats s ON s.autopilot_id = a.id
+WHERE a.status = 'active'
+  AND s.total >= sqlc.arg('min_runs')::bigint
+  AND s.failed::float8 / NULLIF(s.total, 0)::float8 >= sqlc.arg('fail_ratio_threshold')::float8
+ORDER BY s.failed DESC, a.id ASC;
+
+-- name: SystemPauseAutopilot :one
+-- Atomically pauses an autopilot only if it is currently active. Returns no
+-- rows when the autopilot was already paused/archived (or another worker
+-- raced first), letting the caller treat that as a benign no-op rather than
+-- an error.
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING *;

@@ -8,9 +8,24 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// minOpenclawVersion is the lowest openclaw version that emits its
+// --json result on stdout. PR #2101 swapped the adapter from reading
+// stderr to stdout; older builds wrote JSON to stderr and now appear
+// to silently produce no output. The check in Execute fails fast with
+// a hardcoded upgrade hint so users see an actionable message instead
+// of "openclaw returned no parseable output".
+const minOpenclawVersion = "2026.5.5"
+
+// openclawVersionPattern extracts a three-segment dotted version from
+// arbitrary `openclaw --version` output (e.g. "openclaw 2026.5.5",
+// "openclaw v2026.5.5 c37871e").
+var openclawVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
 // openclawBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
@@ -39,6 +54,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
+	if err := checkOpenclawVersion(ctx, execPath); err != nil {
+		return nil, err
+	}
+
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
@@ -52,20 +71,24 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	hideAgentWindow(cmd)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
 
-	// openclaw writes its --json output to stderr, not stdout.
-	stderr, err := cmd.StderrPipe()
+	// openclaw writes its --json output to stdout. Stderr carries log
+	// overflow (security warnings, tool errors, etc.) — capture it via a
+	// log writer so it surfaces in daemon logs without being fed into the
+	// JSON parser.
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("openclaw stderr pipe: %w", err)
+		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stdout = newLogWriter(b.cfg.Logger, "[openclaw:stdout] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -77,10 +100,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stderr when the context is cancelled so the scanner unblocks.
+	// Close stdout when the context is cancelled so the scanner unblocks.
 	go func() {
 		<-runCtx.Done()
-		_ = stderr.Close()
+		_ = stdout.Close()
 	}()
 
 	go func() {
@@ -89,7 +112,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processOutput(stderr, msgCh)
+		scanResult := b.processOutput(stdout, msgCh)
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
@@ -108,12 +131,19 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
-		// Build usage map. OpenClaw doesn't report model per-step, so we
-		// attribute all usage to the configured model (or "unknown").
+		// Build usage map. Prefer the model openclaw reported in
+		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).
+		// Fall back to opts.Model — which for openclaw is the agent name
+		// passed via `--agent`, not a real model identifier — only when
+		// the runtime didn't surface its own model. Last resort is the
+		// daemon's `unknown` placeholder.
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
+			model := scanResult.model
+			if model == "" {
+				model = opts.Model
+			}
 			if model == "" {
 				model = "unknown"
 			}
@@ -146,13 +176,88 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
-	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)...)
+	// OpenClaw binds models to pre-registered agents at `openclaw agents
+	// add/update --model` time; the daemon selects one at runtime by
+	// passing --agent <name>. The model dropdown populates its list from
+	// `openclaw agents list`, so opts.Model here is an agent name. Only
+	// inject when the user hasn't already set --agent via custom_args —
+	// custom_args wins for backward compatibility with existing configs.
+	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
+	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
+		args = append(args, "--agent", opts.Model)
+	}
+	args = append(args, customArgs...)
 
 	if opts.SystemPrompt != "" {
 		prompt = opts.SystemPrompt + "\n\n" + prompt
 	}
 	args = append(args, "--message", prompt)
 	return args
+}
+
+// customArgsContains reports whether args contains the given flag
+// (either as a standalone token "--flag" or in "--flag=value" form).
+func customArgsContains(args []string, flag string) bool {
+	prefix := flag + "="
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkOpenclawVersion runs `<execPath> --version` and returns a
+// user-facing error when the installed openclaw is older than
+// minOpenclawVersion. The returned error becomes the task's failure
+// comment, so the message intentionally names the detected version
+// and the upgrade command.
+func checkOpenclawVersion(ctx context.Context, execPath string) error {
+	cmd := exec.CommandContext(ctx, execPath, "--version")
+	hideAgentWindow(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("openclaw --version failed: %w", err)
+	}
+	detected, ok := parseOpenclawVersion(string(out))
+	if !ok {
+		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(string(out)))
+	}
+	if compareOpenclawVersion(detected, minOpenclawVersion) < 0 {
+		return fmt.Errorf("openclaw %s is below the minimum supported version %s. Run `openclaw update` to upgrade and try again.", detected, minOpenclawVersion)
+	}
+	return nil
+}
+
+// parseOpenclawVersion extracts the first three-segment dotted version
+// from arbitrary `openclaw --version` output. Returns ok=false when no
+// match is found.
+func parseOpenclawVersion(raw string) (string, bool) {
+	m := openclawVersionPattern.FindString(raw)
+	if m == "" {
+		return "", false
+	}
+	return m, true
+}
+
+// compareOpenclawVersion compares two three-segment dotted versions
+// numerically. Returns -1, 0, or +1 like bytes.Compare. Inputs must be
+// well-formed (matched by openclawVersionPattern); malformed segments
+// compare as zero.
+func compareOpenclawVersion(a, b string) int {
+	aParts := strings.SplitN(a, ".", 3)
+	bParts := strings.SplitN(b, ".", 3)
+	for i := 0; i < 3; i++ {
+		ai, _ := strconv.Atoi(aParts[i])
+		bi, _ := strconv.Atoi(bParts[i])
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
+	}
+	return 0
 }
 
 // ── Event handlers ──
@@ -164,11 +269,18 @@ type openclawEventResult struct {
 	output    string
 	sessionID string
 	usage     TokenUsage
+	// model is the LLM identifier reported by openclaw in its result blob
+	// (`meta.agentMeta.model`). Empty when the run did not emit it (older
+	// openclaw versions, partial outputs). Distinct from `opts.Model`,
+	// which for the openclaw backend is the openclaw *agent* name passed
+	// via `--agent`, not the underlying model.
+	model string
 }
 
-// processOutput reads the JSON output from openclaw --json stderr and returns
-// the parsed result. OpenClaw writes its JSON output to stderr, which may also
-// contain non-JSON log lines. The stream may contain:
+// processOutput reads the JSON output from openclaw --json stdout and returns
+// the parsed result. OpenClaw writes its JSON output to stdout; stderr carries
+// log overflow and is captured separately by the caller. The stream may
+// contain:
 //
 //   - NDJSON streaming events (type: "text", "tool_use", "tool_result", "error",
 //     "step_start", "step_finish") — emitted in real time as the agent works
@@ -182,6 +294,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 
 	var output strings.Builder
 	var sessionID string
+	var model string
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
@@ -260,6 +373,9 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			if res.sessionID != "" {
 				sessionID = res.sessionID
 			}
+			if res.model != "" {
+				model = res.model
+			}
 			// Prefer usage from the final result if no streaming events reported it.
 			u := res.usage
 			if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
@@ -269,12 +385,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		}
 
 		// Not JSON — treat as log line.
-		b.cfg.Logger.Debug("[openclaw:stderr] " + line)
+		b.cfg.Logger.Debug("[openclaw:stdout] " + line)
 		rawLines = append(rawLines, line)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stderr: %v", err)}
+		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", err)}
 	}
 
 	// If we got no events at all, fall back to raw output.
@@ -309,6 +425,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		output:    output.String(),
 		sessionID: sessionID,
 		usage:     usage,
+		model:     model,
 	}
 }
 
@@ -357,10 +474,18 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 	}
 
 	var sessionID string
+	var model string
 	var usage TokenUsage
 	if result.Meta.AgentMeta != nil {
 		if sid, ok := result.Meta.AgentMeta["sessionId"].(string); ok {
 			sessionID = sid
+		}
+		// `meta.agentMeta.model` is openclaw's true LLM identifier
+		// (e.g. "deepseek-chat", "claude-sonnet-4"). Take it as-is — the
+		// dashboard expects whatever string the runtime reports, mirroring
+		// claude/pi/codex which read model directly off their stream.
+		if m, ok := result.Meta.AgentMeta["model"].(string); ok {
+			model = strings.TrimSpace(m)
 		}
 		if u, ok := result.Meta.AgentMeta["usage"].(map[string]any); ok {
 			usage = parseOpenclawUsage(u)
@@ -372,6 +497,7 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 		output:    output.String(),
 		sessionID: sessionID,
 		usage:     usage,
+		model:     model,
 	}
 }
 
@@ -439,9 +565,9 @@ type openclawEvent struct {
 	CallID    string          `json:"callId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	Usage     map[string]any  `json:"usage,omitempty"`
-	Phase     string          `json:"phase,omitempty"`     // lifecycle event phase
-	Error     *openclawError  `json:"error,omitempty"`     // structured error object
-	Message   string          `json:"message,omitempty"`   // alternative error message field
+	Phase     string          `json:"phase,omitempty"`   // lifecycle event phase
+	Error     *openclawError  `json:"error,omitempty"`   // structured error object
+	Message   string          `json:"message,omitempty"` // alternative error message field
 }
 
 // errorMessage extracts a human-readable error message from the event,

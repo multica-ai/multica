@@ -63,6 +63,7 @@ type CreateWorkSessionParams struct {
 	Branch      pgtype.Text `json:"branch"`
 }
 
+// CEREBRO-PATCH(sqlc-work-session): cerebro modification of upstream file
 func (q *Queries) CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) (WorkSession, error) {
 	row := q.db.QueryRow(ctx, createWorkSession,
 		arg.WorkspaceID,

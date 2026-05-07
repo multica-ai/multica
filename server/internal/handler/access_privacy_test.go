@@ -26,8 +26,8 @@ func TestUpdateIssue_IsPrivateFlag(t *testing.T) {
 	ctx := newReqAs("GET", "/", testUserID, db.Member{}).Context()
 
 	owner, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(testUserID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 	if err != nil {
 		t.Fatalf("load owner: %v", err)

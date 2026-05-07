@@ -40,6 +40,8 @@ Closes #
 - [ ] I have added or updated tests where applicable
 - [ ] If this change affects the UI, I have included before/after screenshots
 - [ ] I have updated relevant documentation to reflect my changes
+- [ ] If I added a new runtime / coding tool / UI tab, I synced the change to **landing copy** (`apps/web/features/landing/i18n/`), **starter-content** (`packages/views/onboarding/utils/starter-content-content-*.ts`), and **relevant docs** (`apps/docs/content/docs/`)
+- [ ] If this PR touches Chinese product copy, I checked it against `apps/docs/content/docs/developers/conventions.zh.mdx` (terminology, mixed-rule for `task` / `issue` / `skill`)
 - [ ] I have considered and documented any risks above
 - [ ] I will address all reviewer comments before requesting merge
 
