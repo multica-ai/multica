@@ -175,3 +175,50 @@ func (q *Queries) ListChannelsForUser(ctx context.Context, arg ListChannelsForUs
 	}
 	return items, nil
 }
+
+const listLatestCommentsForIssues = `-- name: ListLatestCommentsForIssues :many
+SELECT DISTINCT ON (c.issue_id)
+       c.issue_id, c.author_type, c.author_id, c.content, c.created_at
+FROM comment c
+WHERE c.issue_id = ANY($1::uuid[])
+  AND c.type = 'comment'
+ORDER BY c.issue_id, c.created_at DESC
+`
+
+type ListLatestCommentsForIssuesRow struct {
+	IssueID    pgtype.UUID        `json:"issue_id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	Content    string             `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Returns the most recent user comment per issue from a list of issue IDs.
+// DISTINCT ON keeps a single row per issue — the latest one. Used by the
+// inbox to render a "Sara: shipping at 3" preview under each channel row
+// without doing N round-trips.
+func (q *Queries) ListLatestCommentsForIssues(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListLatestCommentsForIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listLatestCommentsForIssues, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLatestCommentsForIssuesRow{}
+	for rows.Next() {
+		var i ListLatestCommentsForIssuesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

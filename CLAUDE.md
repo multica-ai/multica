@@ -401,13 +401,45 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## CLI Release
+## Production Deploy (app.multica.io)
 
-**Prerequisite:** A CLI release must accompany every Production deployment.
+Production runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). There is no Vercel / Netlify / cloud deploy — everything ships from `origin/main` on the runner.
 
-1. Create a tag on the `main` branch: `git tag v0.x.x`
+**Deploy trigger.** GitHub posts a push event for `main` to a webhook listener on the runner (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`. **Merging a PR into `main` IS the deploy.** No tag, no release, no manual step required for app.multica.io to pick up the change.
+
+**What `.deploy/deploy.sh` does:**
+
+1. `git fetch origin main` + `git reset --hard origin/main` — exits early if there are no new commits.
+2. `pnpm install --frozen-lockfile`.
+3. `make build` — rebuilds the Go server + CLI binaries.
+4. `make migrate-up` — apply DB migrations.
+5. `pnpm --filter @multica/web build` — `apps/web/.next` is deleted first to avoid stale client-reference-manifest entries from incremental builds (Next.js 16 quirk).
+6. `launchctl kickstart -k` for backend, frontend, AND daemon. All three must restart (JEH-438) — `make build` overwrites the binary on disk but the running launchd process keeps the old one until kickstart.
+
+The committed `.deploy/deploy.sh.example` is the canonical script; the runner's `.deploy/deploy.sh` is gitignored because it embeds local paths. Update the example whenever the live script changes.
+
+**Manual fallback** — when the webhook is silent or the runner was offline:
+
+```bash
+ssh sara@<runner-host>
+bash ~/code/firtal-cerebro/.deploy/deploy.sh
+```
+
+Logs land in `.deploy/logs/deploy-latest.log` on the runner.
+
+**Verifying a deploy from outside the runner.** The server has no `/version` endpoint exposing the deployed git SHA, so an agent that merges to `main` cannot programmatically confirm the deploy fired. Either ask the runner operator, or trust the webhook fired and check the visible behaviour change at `https://app.multica.io`.
+
+**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to app.multica.io. Prod always runs `origin/main`, regardless of the latest CLI tag. The two pipelines are fully independent.
+
+## CLI Release (binary distribution)
+
+A CLI release publishes the `multica` binary to GitHub Releases + Homebrew tap. It is independent of the prod deploy above. Cut one whenever the distributed CLI should be brought in sync with what prod is running.
+
+1. Create a tag on `main`: `git tag v0.x.x`
 2. Push the tag: `git push origin v0.x.x`
-3. GitHub Actions automatically triggers `release.yml`: runs Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap
+3. GitHub Actions runs `release.yml`: Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap.
+
+`friday-release.yml` automates this every Friday at 14:00 UTC: computes the next semver from conventional commits since the previous tag and pushes the tag. Run it off-schedule via `workflow_dispatch` (with optional `dry_run` and `bump_override` inputs).
 
 By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
 

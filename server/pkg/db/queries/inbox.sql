@@ -1,13 +1,58 @@
 -- CEREBRO-PATCH(sqlc-inbox): cerebro modification of upstream file
 -- name: ListInboxItems :many
 -- Generic non-archived listing across both routes. Used only by tests today;
--- production paths use the route-specific ListInboxItemsUnfiled (route='inbox')
+-- production paths use the route-specific ListInboxFeed (route='inbox')
 -- and ListNotificationsItems (route='notifications') queries.
 SELECT i.*,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+ORDER BY i.created_at DESC;
+
+-- name: ListInboxFeed :many
+-- Inbox-routed items (route='inbox') for a user, not archived. Backs the
+-- default inbox view.
+SELECT i.*,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'inbox'
+ORDER BY i.created_at DESC;
+
+-- name: ListArchivedInboxFeed :many
+-- Archived inbox-routed items for a user. Backs the "show archived" view in
+-- the inbox kebab menu.
+SELECT i.*,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = true
+  AND i.route = 'inbox'
+ORDER BY i.created_at DESC;
+
+-- name: ListNotificationsItems :many
+-- Notifications-routed items (route='notifications') that are not archived.
+-- Mirrors ListInboxFeed but for the lighter-weight notifications page.
+SELECT i.*,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'notifications'
 ORDER BY i.created_at DESC;
 
 -- name: GetInboxItem :one
@@ -39,6 +84,15 @@ RETURNING *;
 -- name: ArchiveInboxByIssue :execrows
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
+
+-- name: MarkInboxReadByIssue :execrows
+-- Marks every unread, non-archived inbox_item for (recipient, issue) as read,
+-- regardless of route. Drives channel/DM auto-mark-read so notifications-routed
+-- rows are cleared too — without this they keep the channel's unread badge lit
+-- because CountUnreadInboxForChannel sums across both routes.
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND read = false AND archived = false;
 
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item

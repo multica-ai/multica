@@ -17,9 +17,6 @@ import type {
   AgentRunCount,
   AgentRuntime,
   InboxItem,
-  InboxFolder,
-  InboxFolderMembership,
-  InboxFolderItemType,
   IssueSubscriber,
   Comment,
   Reaction,
@@ -923,10 +920,13 @@ export class ApiClient {
     });
   }
 
+  async markChannelRead(id: string): Promise<{ count: number }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
   // Inbox
-  async listInbox(params?: { folder?: string; archived?: boolean }): Promise<InboxItem[]> {
+  async listInbox(params?: { archived?: boolean }): Promise<InboxItem[]> {
     const qs = new URLSearchParams();
-    if (params?.folder) qs.set("folder", params.folder);
     if (params?.archived) qs.set("archived", "1");
     const query = qs.toString();
     return this.fetch(`/api/inbox${query ? `?${query}` : ""}`);
@@ -989,7 +989,8 @@ export class ApiClient {
     return this.fetch("/api/inbox/notifications/archive-all", { method: "POST" });
   }
 
-  // Inbox folders
+  // CEREBRO-PATCH(inbox-folders-api): kept from cerebro fork — main removed
+  // the inbox-folders feature in JEH-650, but cerebro-inbox still uses it.
   async listInboxFolders(): Promise<InboxFolder[]> {
     return this.fetch("/api/inbox/folders");
   }
@@ -1045,7 +1046,7 @@ export class ApiClient {
     );
   }
 
-  // Notification preferences
+  // CEREBRO-PATCH(notification-preferences-api): cerebro feature, not in upstream.
   async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
     return this.fetch("/api/notification-preferences");
   }
@@ -1056,7 +1057,6 @@ export class ApiClient {
       body: JSON.stringify({ preferences }),
     });
   }
-
 
   // App Config
   async getConfig(): Promise<{
@@ -1337,10 +1337,9 @@ export class ApiClient {
   }
 
   // Chat Sessions
-  async listChatSessions(params?: { status?: string; folder?: string }): Promise<ChatSession[]> {
+  async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
-    if (params?.folder) qs.set("folder", params.folder);
     const query = qs.toString() ? `?${qs.toString()}` : "";
     return this.fetch(`/api/chat/sessions${query}`);
   }

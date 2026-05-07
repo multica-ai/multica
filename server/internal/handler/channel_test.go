@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // createSecondTestUser inserts an extra workspace member for tests that
@@ -232,6 +234,91 @@ func TestChannelsHiddenFromIssueList(t *testing.T) {
 	}
 }
 
+// TestListChannelsIncludesLastMessage verifies the inbox-preview contract:
+// each channel row in /api/channels carries the latest user comment so the
+// inbox sidebar can render "Sara: shipping at 3" without N+1 round-trips.
+// Channels with no messages must still appear, with last_message=null.
+func TestListChannelsIncludesLastMessage(t *testing.T) {
+	peerID, cleanup := createSecondTestUser(t, "last-msg-peer")
+	defer cleanup()
+
+	// Channel with messages.
+	w := httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "preview-test",
+		"member_ids": []string{peerID},
+	}))
+	var withMsgs ChannelResponse
+	json.NewDecoder(w.Body).Decode(&withMsgs)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, withMsgs.ID)
+	})
+
+	// Channel with no messages.
+	w = httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "no-messages",
+		"member_ids": []string{peerID},
+	}))
+	var empty ChannelResponse
+	json.NewDecoder(w.Body).Decode(&empty)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, empty.ID)
+	})
+
+	// Insert two comments on the first channel; the second one should win
+	// because it's newer.
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		 VALUES ($1, $2, 'member', $3, $4, 'comment', now() - interval '1 minute'),
+		        ($1, $2, 'member', $3, $5, 'comment', now())`,
+		withMsgs.ID, testWorkspaceID, testUserID, "earlier message", "shipping at 3",
+	); err != nil {
+		t.Fatalf("insert comments: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.ListChannels(w, newRequest("GET", "/api/channels", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChannels: expected 200, got %d", w.Code)
+	}
+	var list []ChannelResponse
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var got, gotEmpty *ChannelResponse
+	for i, c := range list {
+		if c.ID == withMsgs.ID {
+			got = &list[i]
+		}
+		if c.ID == empty.ID {
+			gotEmpty = &list[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("channel with messages not in list")
+	}
+	if got.LastMessage == nil {
+		t.Fatalf("expected last_message to be populated, got nil")
+	}
+	if got.LastMessage.Content != "shipping at 3" {
+		t.Fatalf("expected latest comment, got %q", got.LastMessage.Content)
+	}
+	if got.LastMessage.AuthorID != testUserID {
+		t.Fatalf("expected author %q, got %q", testUserID, got.LastMessage.AuthorID)
+	}
+
+	if gotEmpty == nil {
+		t.Fatalf("empty channel not in list")
+	}
+	if gotEmpty.LastMessage != nil {
+		t.Fatalf("expected last_message=nil for empty channel, got %+v", gotEmpty.LastMessage)
+	}
+}
+
 // TestGetChannelRejectsNonParticipant verifies subscriber-based access
 // control on GET /api/channels/{id}.
 func TestGetChannelRejectsNonParticipant(t *testing.T) {
@@ -263,5 +350,126 @@ func TestGetChannelRejectsNonParticipant(t *testing.T) {
 	testHandler.GetChannel(w, getReq)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+// TestMarkChannelReadClearsBothRoutes is the regression for JEH-651: opening a
+// channel must mark every unread inbox_item for that channel as read,
+// regardless of whether each row was routed to 'inbox' or 'notifications'.
+// CountUnreadInboxForChannel sums across both routes, so missing the
+// notifications side leaves the channel's unread badge stuck on.
+func TestMarkChannelReadClearsBothRoutes(t *testing.T) {
+	peerID, cleanup := createSecondTestUser(t, "mark-read")
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "mark-read-room",
+		"member_ids": []string{peerID},
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateChannel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created ChannelResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	// Drop the inbox row CreateChannel auto-seeded for the creator (if any),
+	// so the test starts from a known-empty inbox state.
+	testPool.Exec(context.Background(),
+		`DELETE FROM inbox_item WHERE recipient_id = $1 AND issue_id = $2`,
+		testUserID, created.ID,
+	)
+
+	ctx := context.Background()
+	// Two unread inbox_item rows for the calling user — one on each route.
+	for _, route := range []string{"inbox", "notifications"} {
+		if _, err := testHandler.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   parseUUID(testWorkspaceID),
+			RecipientType: "member",
+			RecipientID:   parseUUID(testUserID),
+			Type:          "comment",
+			Severity:      "info",
+			IssueID:       parseUUID(created.ID),
+			Title:         "new message (" + route + ")",
+			Route:         route,
+			Details:       []byte("{}"),
+		}); err != nil {
+			t.Fatalf("create %s inbox_item: %v", route, err)
+		}
+	}
+
+	// Sanity: the channel reports 2 unread before the mark-read call.
+	preCount, err := testHandler.Queries.CountUnreadInboxForChannel(ctx, db.CountUnreadInboxForChannelParams{
+		RecipientID: parseUUID(testUserID),
+		IssueID:     parseUUID(created.ID),
+	})
+	if err != nil {
+		t.Fatalf("CountUnreadInboxForChannel pre: %v", err)
+	}
+	if preCount != 2 {
+		t.Fatalf("expected 2 unread before mark-read, got %d", preCount)
+	}
+
+	w = httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels/"+created.ID+"/read", nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.MarkChannelRead(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("MarkChannelRead: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if got, _ := resp["count"].(float64); got != 2 {
+		t.Fatalf("expected count=2, got %v", resp["count"])
+	}
+
+	postCount, err := testHandler.Queries.CountUnreadInboxForChannel(ctx, db.CountUnreadInboxForChannelParams{
+		RecipientID: parseUUID(testUserID),
+		IssueID:     parseUUID(created.ID),
+	})
+	if err != nil {
+		t.Fatalf("CountUnreadInboxForChannel post: %v", err)
+	}
+	if postCount != 0 {
+		t.Fatalf("expected 0 unread after mark-read, got %d (notifications-route row likely not cleared)", postCount)
+	}
+}
+
+// TestMarkChannelReadRejectsNonParticipant locks down the access gate: a
+// member who isn't subscribed to the channel cannot clear unread state.
+func TestMarkChannelReadRejectsNonParticipant(t *testing.T) {
+	peerID, cleanup := createSecondTestUser(t, "mark-read-nope")
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "private-room",
+		"member_ids": []string{peerID},
+	}))
+	var created ChannelResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	// Drop testUserID from the channel so the requester is no longer a participant.
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM issue_subscriber WHERE issue_id = $1 AND user_id = $2`,
+		created.ID, testUserID,
+	); err != nil {
+		t.Fatalf("remove subscriber: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels/"+created.ID+"/read", nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.MarkChannelRead(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }

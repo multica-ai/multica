@@ -202,6 +202,7 @@ const sampleChannel: Channel = {
     { user_type: "member", user_id: "alice" },
   ],
   unread_count: 0,
+  last_message: null,
   created_at: "",
   updated_at: "",
 };

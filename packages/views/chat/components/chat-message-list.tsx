@@ -159,16 +159,36 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
   if (message.role === "user") {
+    // responded_at is set the moment the assistant turn answering this
+    // message is committed. While it's null the bubble shows a subtle
+    // dim + pulsing dot so the user can tell which of their messages
+    // are still in the queue (vs already answered earlier in the
+    // conversation).
+    const waiting = message.responded_at == null;
     return (
       <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so
-           * render them through the same pipeline as assistant replies.
-           * Neutralise prose's leading/trailing margin so single-line
-           * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown>{message.content}</Markdown>
+        <div
+          className={cn(
+            "flex items-end gap-1.5 max-w-[80%]",
+            waiting && "opacity-60",
+          )}
+        >
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words">
+            {/* User messages are authored as markdown in ContentEditor, so
+             * render them through the same pipeline as assistant replies.
+             * Neutralise prose's leading/trailing margin so single-line
+             * bubbles stay as compact as the plain-text version used to. */}
+            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+              <Markdown>{message.content}</Markdown>
+            </div>
           </div>
+          {waiting && (
+            <span
+              role="status"
+              aria-label="Waiting for agent"
+              className="size-1.5 shrink-0 mb-2 rounded-full bg-muted-foreground/60 animate-pulse"
+            />
+          )}
         </div>
       </div>
     );

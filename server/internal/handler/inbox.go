@@ -105,11 +105,9 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CEREBRO-PATCH(cerebro-inbox-folders): folder + archived branches use
-	// cerebro-only queries (folders feature, archived view) and the
-	// `_Unfiled` variant of the upstream list query so folder-filed items
-	// are excluded from the default inbox view. Upstream's plain
-	// ListInboxItems is replaced by ListInboxItemsUnfiled below.
+	// CEREBRO-PATCH(cerebro-inbox-folders): folder branch uses cerebro-only
+	// queries (folders feature). Upstream removed inbox folders in JEH-650
+	// but cerebro-inbox keeps them.
 	folderID := r.URL.Query().Get("folder")
 	if folderID != "" {
 		rows, err := h.Queries.ListInboxItemsInFolder(r.Context(), db.ListInboxItemsInFolderParams{
@@ -148,7 +146,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("archived") == "1" {
-		archived, err := h.Queries.ListArchivedInboxItemsUnfiled(r.Context(), db.ListArchivedInboxItemsUnfiledParams{
+		archived, err := h.Queries.ListArchivedInboxFeed(r.Context(), db.ListArchivedInboxFeedParams{
 			WorkspaceID:   wsUUID,
 			RecipientType: "member",
 			RecipientID:   parseUUID(userID),
@@ -166,6 +164,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 				RecipientID:   uuidToString(item.RecipientID),
 				Type:          item.Type,
 				Severity:      item.Severity,
+				Route:         item.Route,
 				IssueID:       uuidToPtr(item.IssueID),
 				ProjectID:     uuidToPtr(item.ProjectID),
 				Title:         item.Title,
@@ -183,7 +182,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.Queries.ListInboxItemsUnfiled(r.Context(), db.ListInboxItemsUnfiledParams{
+	items, err := h.Queries.ListInboxFeed(r.Context(), db.ListInboxFeedParams{
 		WorkspaceID:   wsUUID,
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),

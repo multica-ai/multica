@@ -21,6 +21,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // MembershipChecker verifies a user belongs to a workspace.
@@ -103,6 +104,16 @@ const (
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
 )
+
+// appPingPeriod is how often the server emits a JSON-level "server:ping"
+// message that browsers can observe (the WebSocket-protocol ping/pong frames
+// above are auto-handled by the browser and are not visible to JS). Clients
+// use the absence of any incoming message for ~2x this period to detect a
+// half-open or system-suspended (iOS PWA background) socket. var, not const,
+// so tests can shorten it without waiting for real seconds.
+var appPingPeriod = 25 * time.Second
+
+var serverPingFrame = []byte(`{"type":"` + protocol.EventServerPing + `","payload":{}}`)
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
@@ -907,9 +918,11 @@ func (c *Client) sendJSON(v any) {
 }
 
 func (c *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
+	pingTicker := time.NewTicker(pingPeriod)
+	appPingTicker := time.NewTicker(appPingPeriod)
 	defer func() {
-		ticker.Stop()
+		pingTicker.Stop()
+		appPingTicker.Stop()
 		c.conn.Close()
 	}()
 
@@ -925,9 +938,14 @@ func (c *Client) writePump() {
 				slog.Warn("websocket write error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
 				return
 			}
-		case <-ticker.C:
+		case <-pingTicker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case <-appPingTicker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.TextMessage, serverPingFrame); err != nil {
 				return
 			}
 		}

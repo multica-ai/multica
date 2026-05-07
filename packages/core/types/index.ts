@@ -54,9 +54,6 @@ export type {
   InboxItem,
   InboxSeverity,
   InboxItemType,
-  InboxFolder,
-  InboxFolderMembership,
-  InboxFolderItemType,
 } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";

@@ -94,6 +94,7 @@ describe("ChatMessageList", () => {
         content: "ignored — taskMessages drives rendering",
         task_id: COMPLETED_TASK_ID,
         created_at: "2026-05-02T00:00:00Z",
+        responded_at: null,
       },
     ];
 
@@ -106,6 +107,52 @@ describe("ChatMessageList", () => {
     // EarlyTool is hidden, LateTool is visible.
     expect(screen.queryByText("EarlyTool")).not.toBeInTheDocument();
     expect(screen.getByText("LateTool")).toBeInTheDocument();
+  });
+});
+
+describe("MessageBubble user → waiting indicator (JEH-654)", () => {
+  function userMessage(opts: { id: string; content: string; respondedAt: string | null }): ChatMessage {
+    return {
+      id: opts.id,
+      chat_session_id: "s1",
+      role: "user",
+      content: opts.content,
+      task_id: null,
+      created_at: "2026-05-07T10:00:00Z",
+      responded_at: opts.respondedAt,
+    };
+  }
+
+  it("shows a waiting indicator on user messages with responded_at == null", () => {
+    const qc = createTestQueryClient();
+    withQuery(
+      <ChatMessageList
+        messages={[userMessage({ id: "u-pending", content: "still in queue", respondedAt: null })]}
+        pendingTaskId={null}
+        isWaiting={false}
+      />,
+      qc,
+    );
+    expect(screen.getByLabelText("Waiting for agent")).toBeInTheDocument();
+  });
+
+  it("does not show the waiting indicator once responded_at is set", () => {
+    const qc = createTestQueryClient();
+    withQuery(
+      <ChatMessageList
+        messages={[
+          userMessage({
+            id: "u-answered",
+            content: "already answered",
+            respondedAt: "2026-05-07T10:00:30Z",
+          }),
+        ]}
+        pendingTaskId={null}
+        isWaiting={false}
+      />,
+      qc,
+    );
+    expect(screen.queryByLabelText("Waiting for agent")).not.toBeInTheDocument();
   });
 });
 

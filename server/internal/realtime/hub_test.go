@@ -191,6 +191,43 @@ func TestHub_BroadcastToMultipleClients(t *testing.T) {
 	}
 }
 
+func TestHub_AppLevelPingFrame(t *testing.T) {
+	prev := appPingPeriod
+	appPingPeriod = 50 * time.Millisecond
+	t.Cleanup(func() { appPingPeriod = prev })
+
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	// The browser cannot observe WebSocket-level ping frames; the server has
+	// to emit an application-level JSON message clients can see. Wait for two
+	// ticks so the test catches a missing ticker as well as a wrong format.
+	deadline := time.Now().Add(2 * time.Second)
+	pings := 0
+	for time.Now().Before(deadline) && pings < 2 {
+		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read error before observing two app-pings (%d so far): %v", pings, err)
+		}
+		var msg struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("invalid JSON frame: %v (%s)", err, raw)
+		}
+		if msg.Type == "server:ping" {
+			pings++
+		}
+	}
+	if pings < 2 {
+		t.Fatalf("expected at least 2 server:ping frames, got %d", pings)
+	}
+}
+
 func TestHub_MultipleBroadcasts(t *testing.T) {
 	hub, server := newTestHub(t)
 	defer server.Close()

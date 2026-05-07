@@ -16,6 +16,13 @@ ORDER BY cr.created_at DESC;
 SELECT * FROM skill_change_request
 WHERE id = $1;
 
+-- GetSkillChangeRequestForUpdate locks the row so concurrent reviews on the
+-- same change request can't race past the status check.
+-- name: GetSkillChangeRequestForUpdate :one
+SELECT * FROM skill_change_request
+WHERE id = $1
+FOR UPDATE;
+
 -- name: CreateSkillChangeRequest :one
 INSERT INTO skill_change_request (
     skill_id, title, description, base_version, proposed_version,

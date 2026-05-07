@@ -344,19 +344,31 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     };
 
+    // Channel rows in the inbox preview the latest message, so any change
+    // to comments on a channel needs to refresh the channel list cache.
+    // Cheap to over-invalidate here — the list is small and ws-bursty
+    // invalidation is debounced upstream.
+    const invalidateChannelList = () => {
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    };
+
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      invalidateChannelList();
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      invalidateChannelList();
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+      invalidateChannelList();
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
@@ -543,10 +555,11 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // Assistant message was just written and task flipped out of 'running'.
-      // Clear pending-task cache immediately so the live-timeline-vs-assistant
-      // race window collapses to zero — the subsequent refetch will confirm.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // Don't clear pending-task to {} here — invalidate + let the refetch
+      // decide. If a queued successor exists for this session, the next
+      // GetPendingChatTask returns it; clearing first creates a flicker
+      // window where the UI thinks nothing is pending and tears down its
+      // spinner / "waiting" markers, only to re-paint them on refetch.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -615,7 +628,8 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // See chat:done — invalidate, don't pre-clear. A queued successor
+      // would otherwise be hidden during the refetch round-trip.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -631,13 +645,12 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // FailTask writes a failure chat_message (mirroring CompleteTask's
-      // success message), so this path mirrors the task:completed handler:
-      // clear the pending signal AND invalidate the messages list so the
-      // failure bubble shows up without requiring a page refresh. Pre-#1823
-      // this branch only flipped pending — the comment "No new message"
-      // was true then, but FailTask now persists a row.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // Invalidate only — refetch decides whether a queued successor
+      // takes over (JEH-654). Pre-clearing pending would race the refetch
+      // and flicker the spinner off then on again.
+      // Also invalidate messages so the persisted failure bubble (FailTask
+      // writes a chat_message row, mirroring CompleteTask) shows without
+      // requiring a page refresh.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();

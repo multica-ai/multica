@@ -1,10 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel } from "@multica/core/types";
 
 const mockArchive = vi.hoisted(() => vi.fn());
-const mockMarkRead = vi.hoisted(() => vi.fn());
+const mockMarkChannelRead = vi.hoisted(() => vi.fn());
+const mockCreatePin = vi.hoisted(() => vi.fn());
+const mockDeletePin = vi.hoisted(() => vi.fn());
+const pinListData = vi.hoisted(() => ({ items: [] as Array<{ item_type: string; item_id: string }> }));
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
@@ -28,14 +31,10 @@ vi.mock("@multica/core/channels", () => ({
     queryKey: ["channels", "ws", "detail", "c1"],
     queryFn: () => Promise.resolve(undefined),
   }),
-  channelKeys: {
-    list: () => ["channels", "ws", "list"],
-    detail: () => ["channels", "ws", "detail", "c1"],
-  },
+  useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
 }));
 
 vi.mock("@multica/core/inbox/queries", () => ({
-  inboxKeys: { list: () => ["inbox", "ws", "list"] },
   inboxListOptions: () => ({
     queryKey: ["inbox", "ws", "list"],
     queryFn: () => Promise.resolve([]),
@@ -43,8 +42,16 @@ vi.mock("@multica/core/inbox/queries", () => ({
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useMarkInboxRead: () => ({ mutate: mockMarkRead }),
   useArchiveInbox: () => ({ mutate: mockArchive }),
+}));
+
+vi.mock("@multica/core/pins", () => ({
+  pinListOptions: () => ({
+    queryKey: ["pins", "ws", "me", "list"],
+    queryFn: () => Promise.resolve(pinListData.items),
+  }),
+  useCreatePin: () => ({ mutate: mockCreatePin }),
+  useDeletePin: () => ({ mutate: mockDeletePin }),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -54,14 +61,12 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (options: { queryKey: readonly unknown[] }) => {
+      const first = options.queryKey?.[0];
       const last = options.queryKey?.[options.queryKey.length - 1];
+      if (first === "pins" && last === "list") return { data: pinListData.items };
       if (last === "list") return { data: [] };
       return { data: undefined };
     },
-    useQueryClient: () => ({
-      setQueryData: vi.fn(),
-      invalidateQueries: vi.fn(),
-    }),
   };
 });
 
@@ -136,11 +141,17 @@ const baseChannel: Channel = {
     { user_type: "agent", user_id: "lando" },
   ],
   unread_count: 0,
+  last_message: null,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
 
 describe("ChannelDetail thread header", () => {
+  beforeEach(() => {
+    mockMarkChannelRead.mockClear();
+    mockArchive.mockClear();
+  });
+
   it("renders channel title, description and participant stack (excluding self)", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     expect(screen.getByText("growth")).toBeInTheDocument();
@@ -153,10 +164,41 @@ describe("ChannelDetail thread header", () => {
     expect(screen.getByTestId("avatar-lando")).toBeInTheDocument();
   });
 
-  it("disables the Pin button until JEH-592 lands", () => {
+  it("pins the channel when not yet pinned", async () => {
+    pinListData.items = [];
+    mockCreatePin.mockClear();
+    mockDeletePin.mockClear();
+    const user = userEvent.setup();
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     const pin = screen.getByLabelText("Pin to sidebar");
-    expect(pin).toBeDisabled();
+    expect(pin).not.toBeDisabled();
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    await user.click(pin);
+    expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "channel", item_id: "c1" });
+    expect(mockDeletePin).not.toHaveBeenCalled();
+  });
+
+  it("unpins when already pinned", async () => {
+    pinListData.items = [{ item_type: "channel", item_id: "c1" }];
+    mockCreatePin.mockClear();
+    mockDeletePin.mockClear();
+    const user = userEvent.setup();
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    const pin = screen.getByLabelText("Unpin from sidebar");
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    await user.click(pin);
+    expect(mockDeletePin).toHaveBeenCalledWith({ itemType: "channel", itemId: "c1" });
+    expect(mockCreatePin).not.toHaveBeenCalled();
+  });
+
+  it("uses item_type 'dm' for direct-message channels", async () => {
+    pinListData.items = [];
+    mockCreatePin.mockClear();
+    const user = userEvent.setup();
+    const dm: Channel = { ...baseChannel, kind: "dm", title: "alice" };
+    render(<ChannelDetail channelId="c1" initialChannel={dm} />);
+    await user.click(screen.getByLabelText("Pin to sidebar"));
+    expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "dm", item_id: "c1" });
   });
 
   it("archives the conversation and notifies the parent", async () => {
@@ -173,5 +215,23 @@ describe("ChannelDetail thread header", () => {
     // No inbox row exists in this test, so archive is a no-op on the
     // mutation but the parent is still told to clear its selection.
     expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls mark-channel-read once on mount when unread_count > 0", () => {
+    const unread: Channel = { ...baseChannel, unread_count: 3 };
+    const { rerender } = render(
+      <ChannelDetail channelId="c1" initialChannel={unread} />,
+    );
+    expect(mockMarkChannelRead).toHaveBeenCalledTimes(1);
+    expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");
+
+    // Re-render the same channel — must not fire again (idempotent per mount).
+    rerender(<ChannelDetail channelId="c1" initialChannel={unread} />);
+    expect(mockMarkChannelRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call mark-channel-read when unread_count is 0", () => {
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
 });

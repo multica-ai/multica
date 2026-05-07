@@ -7,8 +7,6 @@ export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
   archivedList: (wsId: string) => [...inboxKeys.all(wsId), "archived"] as const,
-  folderList: (wsId: string, folderId: string) =>
-    [...inboxKeys.all(wsId), "folder", folderId] as const,
   activeIssueTasks: (wsId: string) =>
     [...inboxKeys.all(wsId), "active-issue-tasks"] as const,
 };
@@ -38,14 +36,6 @@ export function inboxArchivedListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.archivedList(wsId),
     queryFn: () => api.listInbox({ archived: true }),
-  });
-}
-
-export function inboxListInFolderOptions(wsId: string, folderId: string) {
-  return queryOptions({
-    queryKey: inboxKeys.folderList(wsId, folderId),
-    queryFn: () => api.listInbox({ folder: folderId }),
-    enabled: !!folderId,
   });
 }
 

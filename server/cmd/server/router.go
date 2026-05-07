@@ -622,6 +622,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChannels)
 				r.Post("/", h.CreateChannel)
 				r.Get("/{id}", h.GetChannel)
+				r.Post("/{id}/read", h.MarkChannelRead)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:
@@ -689,15 +690,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/notifications/unread-count", h.CountUnreadNotifications)
 				r.Post("/notifications/mark-all-read", h.MarkAllNotificationsRead)
 				r.Post("/notifications/archive-all", h.ArchiveAllNotifications)
-				// Folders
-				r.Get("/folders", h.ListInboxFolders)
-				r.Post("/folders", h.CreateInboxFolder)
-				r.Get("/folder-memberships", h.ListInboxFolderMemberships)
-				r.Patch("/folders/{folderId}", h.UpdateInboxFolder)
-				r.Put("/folders/{folderId}/parent", h.SetInboxFolderParent)
-				r.Delete("/folders/{folderId}", h.DeleteInboxFolder)
-				r.Post("/folders/{folderId}/items", h.AddInboxFolderItem)
-				r.Delete("/folders/{folderId}/items/{itemType}/{itemId}", h.RemoveInboxFolderItem)
 			})
 
 			// Notification preferences

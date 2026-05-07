@@ -35,27 +35,38 @@ type ChannelMember struct {
 	UserID   string `json:"user_id"`
 }
 
+// ChannelLastMessage is the latest user comment on a channel, surfaced on
+// the channel list so the inbox can render a "Sara: shipping at 3" preview
+// under each row. Nil when the channel has no messages yet.
+type ChannelLastMessage struct {
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at"`
+}
+
 // ChannelResponse is the JSON payload for a channel. It mirrors a subset of
 // IssueResponse — the fields that mean something for chat — and adds the
 // participant list and unread count.
 type ChannelResponse struct {
-	ID           string          `json:"id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	Number       int32           `json:"number"`
-	Identifier   string          `json:"identifier"`
-	Kind         string          `json:"kind"`
-	Title        string          `json:"title"`
-	Description  *string         `json:"description"`
-	Status       string          `json:"status"`
-	ProjectID    *string         `json:"project_id"`
-	AssigneeType *string         `json:"assignee_type"`
-	AssigneeID   *string         `json:"assignee_id"`
-	CreatorType  string          `json:"creator_type"`
-	CreatorID    string          `json:"creator_id"`
-	Participants []ChannelMember `json:"participants"`
-	UnreadCount  int64           `json:"unread_count"`
-	CreatedAt    string          `json:"created_at"`
-	UpdatedAt    string          `json:"updated_at"`
+	ID           string              `json:"id"`
+	WorkspaceID  string              `json:"workspace_id"`
+	Number       int32               `json:"number"`
+	Identifier   string              `json:"identifier"`
+	Kind         string              `json:"kind"`
+	Title        string              `json:"title"`
+	Description  *string             `json:"description"`
+	Status       string              `json:"status"`
+	ProjectID    *string             `json:"project_id"`
+	AssigneeType *string             `json:"assignee_type"`
+	AssigneeID   *string             `json:"assignee_id"`
+	CreatorType  string              `json:"creator_type"`
+	CreatorID    string              `json:"creator_id"`
+	Participants []ChannelMember     `json:"participants"`
+	UnreadCount  int64               `json:"unread_count"`
+	LastMessage  *ChannelLastMessage `json:"last_message"`
+	CreatedAt    string              `json:"created_at"`
+	UpdatedAt    string              `json:"updated_at"`
 }
 
 // CreateChannelRequest is the body for POST /api/channels. For kind='dm'
@@ -250,6 +261,14 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch the latest-message lookup so the inbox can render previews
+	// without N+1 round-trips.
+	channelIDs := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		channelIDs = append(channelIDs, row.ID)
+	}
+	lastMessages := h.lastMessagesForChannels(r.Context(), channelIDs)
+
 	prefix := h.getIssuePrefix(r.Context(), parseUUID(workspaceID))
 	resp := make([]ChannelResponse, 0, len(rows))
 	for _, row := range rows {
@@ -269,12 +288,37 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 			CreatorID:    uuidToString(row.CreatorID),
 			Participants: h.loadParticipants(r.Context(), row.ID),
 			UnreadCount:  h.unreadInboxCount(r.Context(), userID, row.ID),
+			LastMessage:  lastMessages[uuidToString(row.ID)],
 			CreatedAt:    timestampToString(row.CreatedAt),
 			UpdatedAt:    timestampToString(row.UpdatedAt),
 		}
 		resp = append(resp, channel)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// lastMessagesForChannels returns the latest comment per channel keyed by
+// channel ID. Failures are non-fatal — the inbox still renders, just
+// without previews — so we log and continue.
+func (h *Handler) lastMessagesForChannels(ctx context.Context, channelIDs []pgtype.UUID) map[string]*ChannelLastMessage {
+	out := make(map[string]*ChannelLastMessage, len(channelIDs))
+	if len(channelIDs) == 0 {
+		return out
+	}
+	rows, err := h.Queries.ListLatestCommentsForIssues(ctx, channelIDs)
+	if err != nil {
+		slog.Warn("failed to fetch latest channel comments", "error", err)
+		return out
+	}
+	for _, row := range rows {
+		out[uuidToString(row.IssueID)] = &ChannelLastMessage{
+			AuthorType: row.AuthorType,
+			AuthorID:   uuidToString(row.AuthorID),
+			Content:    row.Content,
+			CreatedAt:  timestampToString(row.CreatedAt),
+		}
+	}
+	return out
 }
 
 // GetChannel handles GET /api/channels/{id}. Refuses if the issue is not a
@@ -313,10 +357,69 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.channelToResponse(r.Context(), issue, userID))
 }
 
+// MarkChannelRead handles POST /api/channels/{id}/read. Marks every unread
+// inbox_item for this channel/DM and the calling user as read in one shot —
+// across BOTH inbox- and notifications-routed rows. CountUnreadInboxForChannel
+// sums across routes, so missing the notifications side leaves the channel
+// list stuck in "unread". Broadcasts inbox:batch-read so other tabs of the
+// same user clear their badge without a refetch.
+func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	id := chi.URLParam(r, "id")
+
+	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	subscribed, err := h.Queries.IsIssueSubscriber(r.Context(), db.IsIssueSubscriberParams{
+		IssueID:  issue.ID,
+		UserType: "member",
+		UserID:   parseUUID(userID),
+	})
+	if err != nil || !subscribed {
+		writeError(w, http.StatusForbidden, "not a participant of this channel")
+		return
+	}
+
+	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+		WorkspaceID:   parseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(userID),
+		IssueID:       issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark channel read")
+		return
+	}
+
+	slog.Info("channel: mark read", append(logger.RequestAttrs(r), "user_id", userID, "channel_id", id, "count", count)...)
+	h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+		"recipient_id": userID,
+		"issue_id":     id,
+		"count":        count,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 // channelToResponse converts a full Issue row into a ChannelResponse.
 // Only safe to call once the caller has verified the issue's kind.
 func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserID string) ChannelResponse {
 	prefix := h.getIssuePrefix(ctx, i.WorkspaceID)
+	lastMessages := h.lastMessagesForChannels(ctx, []pgtype.UUID{i.ID})
 	return ChannelResponse{
 		ID:           uuidToString(i.ID),
 		WorkspaceID:  uuidToString(i.WorkspaceID),
@@ -333,6 +436,7 @@ func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserI
 		CreatorID:    uuidToString(i.CreatorID),
 		Participants: h.loadParticipants(ctx, i.ID),
 		UnreadCount:  h.unreadInboxCount(ctx, viewerUserID, i.ID),
+		LastMessage:  lastMessages[uuidToString(i.ID)],
 		CreatedAt:    timestampToString(i.CreatedAt),
 		UpdatedAt:    timestampToString(i.UpdatedAt),
 	}

@@ -218,6 +218,9 @@ export function ChatWindow() {
       // Pre-#status-pill the pending-task seed lived after `await
       // sendChatMessage` and the pill blinked in a few hundred ms after the
       // user's message — small but visible "did it actually send?" gap.
+      // responded_at:null marks the user message as awaiting the agent so
+      // MessageBubble shows the queued/streaming indicator until the server
+      // returns the real row with a timestamp.
       const sentAt = new Date().toISOString();
       const optimistic: ChatMessage = {
         id: `optimistic-${Date.now()}`,
@@ -226,6 +229,7 @@ export function ChatWindow() {
         content: finalContent,
         task_id: null,
         created_at: sentAt,
+        responded_at: null,
       };
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
@@ -249,14 +253,25 @@ export function ChatWindow() {
         messageId: result.message_id,
         taskId: result.task_id,
       });
-      // Replace the temporary task_id with the server's real one (so the WS
-      // task: handlers can match against it) and snap the anchor to the
-      // server's created_at — keeping the elapsed-seconds reading stable.
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: result.task_id,
-        status: "queued",
-        created_at: result.created_at,
-      });
+      // Only update pending-task if nothing else is in flight (JEH-654).
+      // Overwriting an already-running task with a freshly-queued successor
+      // would flip ChatMessageList's pendingTaskId mid-stream and hide the
+      // live timeline. Once the running task finishes, the WS chat:done
+      // handler invalidates pending-task and refetch surfaces the next
+      // queued task. When we DO seed (no in-flight task), use the server's
+      // real task_id and created_at so WS task:handlers match and the
+      // StatusPill timer stays anchored to server time.
+      qc.setQueryData<ChatPendingTask | undefined>(
+        chatKeys.pendingTask(sessionId),
+        (existing) =>
+          existing?.task_id
+            ? existing
+            : {
+                task_id: result.task_id,
+                status: "queued",
+                created_at: result.created_at,
+              },
+      );
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
     },
     [
