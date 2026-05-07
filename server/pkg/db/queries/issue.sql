@@ -1,7 +1,8 @@
 -- name: ListIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id,
+       estimate_minutes
 FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
@@ -25,9 +26,10 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id
+    parent_issue_id, position, due_date, number, project_id, estimate_minutes
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    sqlc.narg('estimate_minutes')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -46,6 +48,10 @@ UPDATE issue SET
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
+    estimate_minutes = CASE
+        WHEN sqlc.arg('estimate_minutes_present')::boolean THEN sqlc.narg('estimate_minutes')
+        ELSE estimate_minutes
+    END,
     phase_state = COALESCE(sqlc.narg('phase_state')::jsonb, phase_state),
     updated_at = now()
 WHERE id = $1
@@ -63,10 +69,10 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, due_date, number, project_id,
-    origin_type, origin_id
+    origin_type, origin_id, estimate_minutes
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('estimate_minutes')
 ) RETURNING *;
 
 -- name: DeleteIssue :exec
@@ -75,7 +81,8 @@ DELETE FROM issue WHERE id = $1;
 -- name: ListOpenIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, due_date, created_at, updated_at, number, project_id,
+       estimate_minutes
 FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
@@ -125,6 +132,52 @@ WHERE workspace_id = $1
 GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+
+-- name: GetIssueComputedEstimate :one
+WITH RECURSIVE issue_tree AS (
+    SELECT
+        i.id,
+        i.parent_issue_id,
+        i.estimate_minutes,
+        i.assignee_type,
+        0 AS depth
+    FROM issue i
+    WHERE i.id = $1
+
+    UNION ALL
+
+    SELECT
+        child.id,
+        child.parent_issue_id,
+        child.estimate_minutes,
+        child.assignee_type,
+        issue_tree.depth + 1 AS depth
+    FROM issue child
+    JOIN issue_tree ON child.parent_issue_id = issue_tree.id
+    WHERE issue_tree.depth < 50
+),
+direct_children AS (
+    SELECT COUNT(*) AS count
+    FROM issue
+    WHERE parent_issue_id = $1
+)
+SELECT CASE
+    WHEN (SELECT count FROM direct_children) = 0 THEN (
+        SELECT COALESCE(root.estimate_minutes, 0) FROM issue root WHERE root.id = $1
+    )
+    ELSE (
+        SELECT COALESCE(SUM(t.estimate_minutes), 0)::int
+        FROM issue_tree t
+        WHERE t.id <> $1
+          AND t.estimate_minutes IS NOT NULL
+          AND (t.assignee_type IS NULL OR t.assignee_type = 'member')
+          AND NOT EXISTS (
+              SELECT 1
+              FROM issue child
+              WHERE child.parent_issue_id = t.id
+          )
+    )
+END::int AS computed_estimate_minutes;
 
 -- name: MarkIssueFirstExecuted :one
 -- Flips first_executed_at from NULL to now() atomically. Returns the row if

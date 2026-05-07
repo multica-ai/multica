@@ -509,15 +509,15 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 
 	// Update status only — should preserve title
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "in_progress",
+		"status": "todo",
 	})
 	if resp.StatusCode != 200 {
 		t.Fatalf("UpdateIssue: expected 200, got %d", resp.StatusCode)
 	}
 	var updated map[string]any
 	readJSON(t, resp, &updated)
-	if updated["status"] != "in_progress" {
-		t.Fatalf("expected status 'in_progress', got '%s'", updated["status"])
+	if updated["status"] != "todo" {
+		t.Fatalf("expected status 'todo', got '%s'", updated["status"])
 	}
 	if updated["title"] != "Integration test issue" {
 		t.Fatalf("title should be preserved, got '%s'", updated["title"])
@@ -535,7 +535,7 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 	if updated2["title"] != "Renamed integration issue" {
 		t.Fatalf("expected title 'Renamed integration issue', got '%s'", updated2["title"])
 	}
-	if updated2["status"] != "in_progress" {
+	if updated2["status"] != "todo" {
 		t.Fatalf("status should be preserved, got '%s'", updated2["status"])
 	}
 
@@ -893,7 +893,7 @@ func TestWebSocketIntegration(t *testing.T) {
 
 	// Update the issue — should trigger another broadcast
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "in_progress",
+		"status": "todo",
 	})
 	resp.Body.Close()
 

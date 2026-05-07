@@ -165,36 +165,37 @@ func (h *Handler) checkStatusFlipPolicy(r *http.Request, userID, workspaceID, pr
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	PhaseState         json.RawMessage         `json:"phase_state,omitempty"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID                      string                  `json:"id"`
+	WorkspaceID             string                  `json:"workspace_id"`
+	Number                  int32                   `json:"number"`
+	Identifier              string                  `json:"identifier"`
+	Title                   string                  `json:"title"`
+	Description             *string                 `json:"description"`
+	Status                  string                  `json:"status"`
+	Priority                string                  `json:"priority"`
+	AssigneeType            *string                 `json:"assignee_type"`
+	AssigneeID              *string                 `json:"assignee_id"`
+	CreatorType             string                  `json:"creator_type"`
+	CreatorID               string                  `json:"creator_id"`
+	ParentIssueID           *string                 `json:"parent_issue_id"`
+	ProjectID               *string                 `json:"project_id"`
+	EstimateMinutes         *int32                  `json:"estimate_minutes"`
+	ComputedEstimateMinutes *int32                  `json:"computed_estimate_minutes,omitempty"`
+	Position                float64                 `json:"position"`
+	DueDate                 *string                 `json:"due_date"`
+	CreatedAt               string                  `json:"created_at"`
+	UpdatedAt               string                  `json:"updated_at"`
+	PhaseState              json.RawMessage         `json:"phase_state,omitempty"`
+	Reactions               []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments             []AttachmentResponse    `json:"attachments,omitempty"`
 	// CodeRabbit / GitHub PR linkage. Set by the GitHub webhook handler when
 	// a PR is opened referencing this issue's identifier (e.g. "MUL-50").
-	PrURL              *string                 `json:"pr_url"`
-	PrNumber           *int32                  `json:"pr_number"`
-	PrRepo             *string                 `json:"pr_repo"`
-	Labels             []IssueLabelResponse    `json:"labels"`
-	Links              []IssueLinkResponse     `json:"links"`
+	PrURL    *string              `json:"pr_url"`
+	PrNumber *int32               `json:"pr_number"`
+	PrRepo   *string              `json:"pr_repo"`
+	Labels   []IssueLabelResponse `json:"labels"`
+	Links    []IssueLinkResponse  `json:"links"`
 }
-
 
 // int4ToPtr converts a pgtype.Int4 to *int32 (nil when invalid).
 func int4ToPtr(v pgtype.Int4) *int32 {
@@ -204,33 +205,45 @@ func int4ToPtr(v pgtype.Int4) *int32 {
 	return &v.Int32
 }
 
+func int32ToInt4(v *int32) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{Valid: false}
+	}
+	return pgtype.Int4{Int32: *v, Valid: true}
+}
+
+func int32Ptr(v int32) *int32 {
+	return &v
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Description:   textToPtr(i.Description),
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
-		PhaseState:    bytesToRawJSON(i.PhaseState),
-		PrURL:         textToPtr(i.PrUrl),
-		PrNumber:      int4ToPtr(i.PrNumber),
-		PrRepo:        textToPtr(i.PrRepo),
-		Labels:        []IssueLabelResponse{},
-		Links:         []IssueLinkResponse{},
+		ID:              uuidToString(i.ID),
+		WorkspaceID:     uuidToString(i.WorkspaceID),
+		Number:          i.Number,
+		Identifier:      identifier,
+		Title:           i.Title,
+		Description:     textToPtr(i.Description),
+		Status:          i.Status,
+		Priority:        i.Priority,
+		AssigneeType:    textToPtr(i.AssigneeType),
+		AssigneeID:      uuidToPtr(i.AssigneeID),
+		CreatorType:     i.CreatorType,
+		CreatorID:       uuidToString(i.CreatorID),
+		ParentIssueID:   uuidToPtr(i.ParentIssueID),
+		ProjectID:       uuidToPtr(i.ProjectID),
+		EstimateMinutes: int4ToPtr(i.EstimateMinutes),
+		Position:        i.Position,
+		DueDate:         timestampToPtr(i.DueDate),
+		CreatedAt:       timestampToString(i.CreatedAt),
+		UpdatedAt:       timestampToString(i.UpdatedAt),
+		PhaseState:      bytesToRawJSON(i.PhaseState),
+		PrURL:           textToPtr(i.PrUrl),
+		PrNumber:        int4ToPtr(i.PrNumber),
+		PrRepo:          textToPtr(i.PrRepo),
+		Labels:          []IssueLabelResponse{},
+		Links:           []IssueLinkResponse{},
 	}
 }
 
@@ -238,52 +251,54 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Description:   textToPtr(i.Description),
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
-		Labels:        []IssueLabelResponse{},
-		Links:         []IssueLinkResponse{},
+		ID:              uuidToString(i.ID),
+		WorkspaceID:     uuidToString(i.WorkspaceID),
+		Number:          i.Number,
+		Identifier:      identifier,
+		Title:           i.Title,
+		Description:     textToPtr(i.Description),
+		Status:          i.Status,
+		Priority:        i.Priority,
+		AssigneeType:    textToPtr(i.AssigneeType),
+		AssigneeID:      uuidToPtr(i.AssigneeID),
+		CreatorType:     i.CreatorType,
+		CreatorID:       uuidToString(i.CreatorID),
+		ParentIssueID:   uuidToPtr(i.ParentIssueID),
+		ProjectID:       uuidToPtr(i.ProjectID),
+		EstimateMinutes: int4ToPtr(i.EstimateMinutes),
+		Position:        i.Position,
+		DueDate:         timestampToPtr(i.DueDate),
+		CreatedAt:       timestampToString(i.CreatedAt),
+		UpdatedAt:       timestampToString(i.UpdatedAt),
+		Labels:          []IssueLabelResponse{},
+		Links:           []IssueLinkResponse{},
 	}
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Description:   textToPtr(i.Description),
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
-		Labels:        []IssueLabelResponse{},
-		Links:         []IssueLinkResponse{},
+		ID:              uuidToString(i.ID),
+		WorkspaceID:     uuidToString(i.WorkspaceID),
+		Number:          i.Number,
+		Identifier:      identifier,
+		Title:           i.Title,
+		Description:     textToPtr(i.Description),
+		Status:          i.Status,
+		Priority:        i.Priority,
+		AssigneeType:    textToPtr(i.AssigneeType),
+		AssigneeID:      uuidToPtr(i.AssigneeID),
+		CreatorType:     i.CreatorType,
+		CreatorID:       uuidToString(i.CreatorID),
+		ParentIssueID:   uuidToPtr(i.ParentIssueID),
+		ProjectID:       uuidToPtr(i.ProjectID),
+		EstimateMinutes: int4ToPtr(i.EstimateMinutes),
+		Position:        i.Position,
+		DueDate:         timestampToPtr(i.DueDate),
+		CreatedAt:       timestampToString(i.CreatedAt),
+		UpdatedAt:       timestampToString(i.UpdatedAt),
+		Labels:          []IssueLabelResponse{},
+		Links:           []IssueLinkResponse{},
 	}
 }
 
@@ -414,7 +429,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -854,7 +869,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = issueListRowToResponse(issue, prefix)
 	}
 	h.enrichIssuesWithLabels(ctx, resp)
-		h.enrichIssuesWithLinks(ctx, resp)
+	h.enrichIssuesWithLinks(ctx, resp)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -870,6 +885,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	if computed, err := h.Queries.GetIssueComputedEstimate(r.Context(), issue.ID); err == nil {
+		resp.ComputedEstimateMinutes = int32Ptr(computed)
+	} else {
+		slog.Warn("get computed issue estimate failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id)...)
+	}
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
@@ -950,16 +970,17 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title           string   `json:"title"`
+	Description     *string  `json:"description"`
+	Status          string   `json:"status"`
+	Priority        string   `json:"priority"`
+	AssigneeType    *string  `json:"assignee_type"`
+	AssigneeID      *string  `json:"assignee_id"`
+	ParentIssueID   *string  `json:"parent_issue_id"`
+	ProjectID       *string  `json:"project_id"`
+	EstimateMinutes *int32   `json:"estimate_minutes"`
+	DueDate         *string  `json:"due_date"`
+	AttachmentIDs   []string `json:"attachment_ids,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1074,20 +1095,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
-		ProjectID:          projectID,
+		WorkspaceID:     parseUUID(workspaceID),
+		Title:           req.Title,
+		Description:     ptrToText(req.Description),
+		Status:          status,
+		Priority:        priority,
+		AssigneeType:    assigneeType,
+		AssigneeID:      assigneeID,
+		CreatorType:     creatorType,
+		CreatorID:       parseUUID(actualCreatorID),
+		ParentIssueID:   parentIssueID,
+		Position:        0,
+		DueDate:         dueDate,
+		Number:          issueNumber,
+		ProjectID:       projectID,
+		EstimateMinutes: int32ToInt4(req.EstimateMinutes),
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -1138,17 +1160,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string          `json:"title"`
-	Description        *string          `json:"description"`
-	Status             *string          `json:"status"`
-	Priority           *string          `json:"priority"`
-	AssigneeType       *string          `json:"assignee_type"`
-	AssigneeID         *string          `json:"assignee_id"`
-	Position           *float64         `json:"position"`
-	DueDate            *string          `json:"due_date"`
-	ParentIssueID      *string          `json:"parent_issue_id"`
-	ProjectID          *string          `json:"project_id"`
-	PhaseState         json.RawMessage  `json:"phase_state"`
+	Title           *string         `json:"title"`
+	Description     *string         `json:"description"`
+	Status          *string         `json:"status"`
+	Priority        *string         `json:"priority"`
+	AssigneeType    *string         `json:"assignee_type"`
+	AssigneeID      *string         `json:"assignee_id"`
+	Position        *float64        `json:"position"`
+	DueDate         *string         `json:"due_date"`
+	ParentIssueID   *string         `json:"parent_issue_id"`
+	ProjectID       *string         `json:"project_id"`
+	EstimateMinutes *int32          `json:"estimate_minutes"`
+	PhaseState      json.RawMessage `json:"phase_state"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1274,6 +1297,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
+	}
+	if _, ok := rawFields["estimate_minutes"]; ok {
+		params.EstimateMinutesPresent = true
+		params.EstimateMinutes = int32ToInt4(req.EstimateMinutes)
 	}
 
 	// phase_state: set when a JSON object is provided. Explicit JSON null is
@@ -1675,6 +1702,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
+		if _, ok := rawUpdates["estimate_minutes"]; ok {
+			params.EstimateMinutesPresent = true
+			params.EstimateMinutes = int32ToInt4(req.Updates.EstimateMinutes)
+		}
 
 		// Validate the resulting assignee pair when this batch update touches
 		// either assignee field. Skip the issue silently on failure.
@@ -1798,4 +1829,3 @@ func bytesToRawJSON(b []byte) json.RawMessage {
 	}
 	return json.RawMessage(b)
 }
-

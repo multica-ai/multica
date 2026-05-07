@@ -73,6 +73,13 @@ export class TestApiClient {
         });
       }
 
+      await client.query(
+        `UPDATE "user"
+         SET onboarded_at = COALESCE(onboarded_at, now()),
+             starter_content_state = COALESCE(starter_content_state, 'dismissed')
+         WHERE email = $1`,
+        [email],
+      );
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
       return data;

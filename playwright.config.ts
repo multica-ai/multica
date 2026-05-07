@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 30000,
   retries: 0,
+  workers: 1,
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
     headless: true,

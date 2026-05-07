@@ -92,6 +92,9 @@ export interface Issue {
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
+  estimate_minutes?: number | null;
+  /** Detail responses include the parent roll-up; list responses omit it. */
+  computed_estimate_minutes?: number | null;
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];
@@ -110,4 +113,3 @@ export interface Issue {
   created_at: string;
   updated_at: string;
 }
-
