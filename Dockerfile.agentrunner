@@ -28,7 +28,10 @@ RUN apk add --no-cache \
       bash \
       tini \
       nodejs \
-      npm
+      npm \
+      rsync \
+      jq \
+      kubectl
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && npm cache clean --force
