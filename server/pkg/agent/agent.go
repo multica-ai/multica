@@ -154,7 +154,7 @@ var launchHeaders = map[string]string{
 	"pi":       "pi (json mode)",
 	"kimi":     "kimi acp",
 	"kiro":     "kiro-cli acp",
-	"deepseek": "deepseek app-server",
+	"deepseek": "deepseek app-server (native)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

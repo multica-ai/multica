@@ -389,24 +389,133 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 }
 
 // discoverDeepseekModels spins up a throwaway `deepseek app-server
-// --stdio` process and drives the same minimal ACP handshake to
-// surface the model catalog. DeepSeek-TUI uses `app-server --stdio`
-// instead of the `acp` subcommand used by Hermes/Kimi/Kiro, but
-// speaks the same JSON-RPC 2.0 protocol underneath.
+// --stdio` process and queries the model catalog via the native
+// `app/models` JSON-RPC method. DeepSeek-TUI does NOT speak ACP —
+// it has its own protocol where `app/models` returns a structured
+// list of available models with provider and capability information.
 //
-// If ACP discovery fails (e.g. the binary is too old for app-server),
-// we fall back to a static catalog of DeepSeek's flagship models.
+// If discovery fails (binary missing, API error), we fall back to a
+// static catalog of DeepSeek's flagship models.
 func discoverDeepseekModels(ctx context.Context, executablePath string) ([]Model, error) {
-	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:   "deepseek",
-		clientName:   "multica-model-discovery",
-		tmpdirPrefix: "multica-deepseek-discovery-",
-		args:         []string{"app-server", "--stdio"},
-	})
-	if err != nil || len(models) == 0 {
+	bin := executablePath
+	if bin == "" {
+		bin = "deepseek"
+	}
+
+	discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(discoverCtx, bin, "app-server", "--stdio")
+	cmd.Stderr = io.Discard
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
 		return deepseekStaticModels(), nil
 	}
-	return models, nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return deepseekStaticModels(), nil
+	}
+	if err := cmd.Start(); err != nil {
+		return deepseekStaticModels(), nil
+	}
+	defer func() {
+		stdin.Close()
+		_ = cmd.Wait()
+	}()
+
+	// Send app/models request.
+	req, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "app/models",
+		"params":  map[string]any{},
+	})
+	req = append(req, '\n')
+	if _, err := stdin.Write(req); err != nil {
+		return deepseekStaticModels(), nil
+	}
+
+	// Read lines until we get the JSON-RPC response.
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+
+	type dsModel struct {
+		ID               string   `json:"id"`
+		Provider         string   `json:"provider"`
+		Aliases          []string `json:"aliases"`
+		SupportsTools    bool     `json:"supports_tools"`
+		SupportsReasoning bool   `json:"supports_reasoning"`
+	}
+	type dsModelsResult struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Models []dsModel `json:"models"`
+		} `json:"data"`
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+
+		// Skip push events (have "type", no "id").
+		if _, hasType := raw["type"]; hasType {
+			continue
+		}
+		if _, hasID := raw["id"]; !hasID {
+			continue
+		}
+
+		// Parse the result.
+		resultData, ok := raw["result"]
+		if !ok {
+			break
+		}
+
+		var result dsModelsResult
+		if err := json.Unmarshal(resultData, &result); err != nil || !result.OK || len(result.Data.Models) == 0 {
+			break
+		}
+
+		var models []Model
+		for i, m := range result.Data.Models {
+			label := m.ID
+			if m.Provider != "" && !strings.HasPrefix(m.ID, m.Provider+"/") {
+				label = m.ID
+			}
+			models = append(models, Model{
+				ID:       m.ID,
+				Label:    label,
+				Provider: m.Provider,
+				Default:  i == 0,
+			})
+		}
+
+		// Shut down the process.
+		shutdown, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "id": 2,
+			"method": "shutdown", "params": map[string]any{},
+		})
+		_, _ = stdin.Write(append(shutdown, '\n'))
+
+		return models, nil
+	}
+
+	// Shut down on failure path.
+	shutdown, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 2,
+		"method": "shutdown", "params": map[string]any{},
+	})
+	_, _ = stdin.Write(append(shutdown, '\n'))
+
+	return deepseekStaticModels(), nil
 }
 
 // deepseekStaticModels is a fallback catalog for DeepSeek models when
