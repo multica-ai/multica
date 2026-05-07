@@ -284,6 +284,23 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.27",
+        date: "2026-05-07",
+        title: "Chat 更顺手，Skill 支持 GitHub 导入，稳定性更好",
+        changes: [],
+        features: [
+          "支持直接通过 GitHub 链接导入可复用 Skill",
+        ],
+        improvements: [
+          "Chat 和 Inbox 更顺手，历史更清晰，复制回复更方便，归档后能更快处理下一项",
+          "Issue 操作会保留更多上下文，例如更容易找到对应本地文件夹，子 Issue 也会带上正确的项目和状态",
+          "Autopilot 连续失败后会自动暂停，异常自动化更容易发现和修复",
+        ],
+        fixes: [
+          "中文输入、桌面端升级、长 Issue 时间线和实时状态展示更稳定",
+        ],
+      },
+      {
         version: "0.2.26",
         date: "2026-05-06",
         title: "i18n 全量铺开、长 Issue Timeline 提速与系统通知开关",

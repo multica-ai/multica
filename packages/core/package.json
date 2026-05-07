@@ -14,6 +14,7 @@
     "./types/*": "./types/*.ts",
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",
+    "./api/schema": "./api/schema.ts",
     "./api/ws-client": "./api/ws-client.ts",
     "./config": "./config/index.ts",
     "./auth": "./auth/index.ts",
@@ -92,6 +93,7 @@
     "i18next": "catalog:",
     "posthog-js": "catalog:",
     "react-i18next": "catalog:",
+    "zod": "catalog:",
     "zustand": "catalog:"
   },
   "peerDependencies": {

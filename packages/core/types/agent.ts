@@ -95,6 +95,11 @@ export interface AgentTask {
    * with a meaningful title instead of falling through to "Untracked").
    */
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  /**
+   * Local working directory pinned for this task by the daemon. Empty until
+   * the daemon reports a work_dir (typically once execution starts).
+   */
+  work_dir?: string;
 }
 
 export interface Agent {

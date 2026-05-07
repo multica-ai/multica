@@ -179,7 +179,15 @@ var issueSearchCmd = &cobra.Command{
 }
 
 var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+	// PUL-13 status-flow rework (rev 2.2):
+	// New lifecycle values: waiting, planned, developing, deployed.
+	// Legacy values in_review and done remain accepted as CLI aliases for
+	// 30 days after PR1 lands (see runIssueStatus). PR7 cleanup migration
+	// removes them from the CHECK constraint and from this list.
+	"backlog", "todo", "in_progress",
+	"waiting", "planned", "developing", "deployed",
+	"in_review", "done",
+	"blocked", "cancelled",
 }
 
 func init() {
@@ -708,6 +716,25 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
+
+	// PUL-13 grace-period aliases. Maps legacy CLI inputs to new lifecycle
+	// values during the 30-day deprecation window between PR1 (this) and
+	// PR7 cleanup. After PR7 these values are rejected by both the CHECK
+	// constraint and this CLI.
+	switch status {
+	case "in_review":
+		fmt.Fprintln(os.Stderr,
+			"warning: 'in_review' is deprecated; mapping to 'waiting'. "+
+				"This alias will be removed after the 30-day grace period.")
+		status = "waiting"
+	case "done":
+		fmt.Fprintln(os.Stderr,
+			"warning: 'done' is deprecated; mapping to 'deployed'. "+
+				"deployed_at is NOT set by this alias — the real Forge webhook "+
+				"is the only source for deployed_at. This alias will be removed "+
+				"after the 30-day grace period.")
+		status = "deployed"
+	}
 
 	valid := false
 	for _, s := range validIssueStatuses {

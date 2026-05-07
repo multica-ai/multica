@@ -72,6 +72,11 @@ type RouterOptions struct {
 	HTTPMetrics  *obsmetrics.HTTPMetrics
 	DaemonHub    *daemonws.Hub
 	DaemonWakeup service.TaskWakeupNotifier
+	// HeartbeatScheduler, when non-nil, replaces the default synchronous
+	// passthrough scheduler on the constructed Handler. main.go injects a
+	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
+	// tests leave this nil and get the legacy synchronous behavior.
+	HeartbeatScheduler handler.HeartbeatScheduler
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -111,6 +116,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
+	}
+	if opts.HeartbeatScheduler != nil {
+		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
