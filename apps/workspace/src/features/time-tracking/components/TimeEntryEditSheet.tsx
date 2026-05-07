@@ -326,7 +326,7 @@ export function TimeEntryEditSheet({ entry, onClose }: TimeEntryEditSheetProps) 
             </Button>
             <Button
               size="sm"
-              disabled={updateMutation.isPending || isRunning}
+              disabled={updateMutation.isPending}
               onClick={handleSave}
             >
               Save
