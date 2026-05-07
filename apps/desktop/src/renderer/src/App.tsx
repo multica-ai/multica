@@ -120,55 +120,53 @@ function AppContent() {
 
   // Pre-workspace overlay routing for desktop. Mirrors the web entry-point
   // judgment in callback / login:
-  //   un-onboarded:
+  //   zero workspaces:
   //     pending invites on email → /invitations overlay
-  //     no invites               → /onboarding overlay
-  //   already onboarded:
-  //     zero workspaces          → /workspaces/new overlay
-  //     ≥1 workspaces            → no overlay, fall through to dashboard
+  //     no invites & !onboarded  → /onboarding overlay
+  //     no invites &  onboarded  → /workspaces/new overlay
+  //   ≥1 workspaces              → no overlay, fall through to dashboard
   //
-  // The "un-onboarded but in workspace" state is now physically impossible
-  // because backend transactions atomically set onboarded_at when a user
-  // joins the `member` table. Anyone with workspaces is by definition
-  // onboarded.
+  // Users with zero workspaces always get the invitation lookup first —
+  // they have no sidebar in which pending-invitation chips could surface,
+  // so accepting an invite has to be possible from this entry point.
+  // Onboarded users with at least one workspace skip the wall; new invites
+  // for them surface in the sidebar dropdown instead.
   useEffect(() => {
     if (!user || !workspaceListFetched) return undefined;
-    const { overlay, open } = useWindowOverlayStore.getState();
+    const { overlay } = useWindowOverlayStore.getState();
     if (overlay) return undefined;
     if (wsCount > 0) return undefined;
-    if (!hasOnboarded) {
-      // Look up pending invitations by email. Network blip is non-fatal —
-      // fall through to onboarding so the user isn't stuck on a blank
-      // window. The sidebar's pending-invitations dropdown will surface
-      // missed invites later once they're onboarded.
-      let cancelled = false;
-      void api
-        .listMyInvitations()
-        .then((invites) => {
-          if (cancelled) return;
-          const { overlay: latestOverlay, open: latestOpen } =
-            useWindowOverlayStore.getState();
-          if (latestOverlay) return;
-          if (invites.length > 0) {
-            qc.setQueryData(workspaceKeys.myInvitations(), invites);
-            latestOpen({ type: "invitations" });
-          } else {
-            latestOpen({ type: "onboarding" });
-          }
-        })
-        .catch(() => {
-          if (cancelled) return;
-          const { overlay: latestOverlay, open: latestOpen } =
-            useWindowOverlayStore.getState();
-          if (latestOverlay) return;
-          latestOpen({ type: "onboarding" });
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-    open({ type: "new-workspace" });
-    return undefined;
+    // Look up pending invitations by email. Network blip is non-fatal —
+    // fall through to onboarding / new-workspace so the user isn't stuck
+    // on a blank window.
+    let cancelled = false;
+    const fallbackOverlayType: "onboarding" | "new-workspace" = hasOnboarded
+      ? "new-workspace"
+      : "onboarding";
+    void api
+      .listMyInvitations()
+      .then((invites) => {
+        if (cancelled) return;
+        const { overlay: latestOverlay, open: latestOpen } =
+          useWindowOverlayStore.getState();
+        if (latestOverlay) return;
+        if (invites.length > 0) {
+          qc.setQueryData(workspaceKeys.myInvitations(), invites);
+          latestOpen({ type: "invitations" });
+        } else {
+          latestOpen({ type: fallbackOverlayType });
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const { overlay: latestOverlay, open: latestOpen } =
+          useWindowOverlayStore.getState();
+        if (latestOverlay) return;
+        latestOpen({ type: fallbackOverlayType });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
   // Validate persisted tab state against the current user's workspace list,

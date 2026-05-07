@@ -147,6 +147,41 @@ describe("CallbackPage", () => {
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
+  it("onboarded user with zero workspaces and pending invitations lands on /invitations", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockListWorkspaces.mockResolvedValue([]);
+    mockListMyInvitations.mockResolvedValue([
+      {
+        id: "inv-1",
+        workspace_id: "ws-1",
+        workspace_name: "Acme",
+        role: "member",
+        status: "pending",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.invitations());
+    });
+    expect(mockPush).not.toHaveBeenCalledWith(paths.newWorkspace());
+  });
+
+  it("onboarded user with zero workspaces and no invitations lands on /workspaces/new", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockListWorkspaces.mockResolvedValue([]);
+    mockListMyInvitations.mockResolvedValue([]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
+    });
+    // Without a sidebar to surface invites in, we always check.
+    expect(mockListMyInvitations).toHaveBeenCalled();
+  });
+
   it("onboarded user ignores unsafe next= targets and lands on the default destination", async () => {
     mockLoginWithGoogle.mockResolvedValue(
       makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),

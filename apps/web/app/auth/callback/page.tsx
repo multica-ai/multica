@@ -75,14 +75,15 @@ function CallbackContent() {
             return;
           }
 
-          // 2. Un-onboarded users may have pending invitations on their
-          //    email even when no `next=` was carried (came from a fresh
-          //    login on app.multica.ai instead of clicking the email link,
-          //    or `state` was lost across the round-trip). Look them up by
-          //    email and route to the batch /invitations page if any.
-          //    Already-onboarded users skip this lookup — their new invites
-          //    surface in the sidebar dropdown, not as a forced wall.
-          if (!onboarded) {
+          // 2. Users without a sidebar yet (un-onboarded, or onboarded but
+          //    with zero workspaces) may have pending invitations on their
+          //    email — route them to the batch /invitations page so they
+          //    can join an existing workspace before being asked to create
+          //    one. Onboarded users with at least one workspace skip this
+          //    lookup; their new invites surface in the sidebar dropdown
+          //    rather than as a forced wall.
+          const noSidebarYet = !onboarded || wsList.length === 0;
+          if (noSidebarYet) {
             try {
               const invites = await api.listMyInvitations();
               if (invites.length > 0) {

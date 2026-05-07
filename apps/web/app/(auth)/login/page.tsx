@@ -30,17 +30,21 @@ import { useT } from "@multica/views/i18n";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
- * Un-onboarded users with pending invitations on their email get routed to
- * the batch /invitations page; everyone else falls through to the standard
- * resolver. A network blip on listMyInvitations is non-fatal — we fall
- * through rather than trap the user on an error screen.
+ * Users with pending invitations on their email get routed to the batch
+ * /invitations page when they have no sidebar to surface invites in —
+ * either they haven't onboarded yet, or they're onboarded but have zero
+ * workspaces (e.g. left their only one). Onboarded users with at least
+ * one workspace skip the wall and see new invites in the sidebar
+ * dropdown instead. A network blip on listMyInvitations is non-fatal —
+ * we fall through rather than trap the user on an error screen.
  */
 async function resolveLoggedInDestination(
   qc: QueryClient,
   hasOnboarded: boolean,
   workspaces: Workspace[],
 ): Promise<string> {
-  if (!hasOnboarded) {
+  const noSidebarYet = !hasOnboarded || workspaces.length === 0;
+  if (noSidebarYet) {
     try {
       const invites = await api.listMyInvitations();
       if (invites.length > 0) {
