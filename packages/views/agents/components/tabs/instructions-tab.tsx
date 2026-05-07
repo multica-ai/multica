@@ -42,6 +42,9 @@ export function InstructionsTab({
           Define this agent&apos;s identity and working style. These instructions are
           injected into the agent&apos;s context for every task.
         </p>
+        <p className="text-xs text-muted-foreground/70 mt-1 italic">
+          This agent also inherits instructions from System defaults and your Personal defaults (configured in Settings).
+        </p>
       </div>
 
       <textarea

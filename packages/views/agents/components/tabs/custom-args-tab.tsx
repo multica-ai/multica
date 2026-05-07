@@ -86,6 +86,9 @@ export function CustomArgsTab({
             Additional CLI arguments appended to the agent command at launch.
             Supported flags depend on the agent's CLI.
           </p>
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            This agent also inherits custom arguments from System defaults and your Personal defaults.
+          </p>
           {launchHeader && (
             <p className="mt-2 text-xs text-muted-foreground">
               Launch mode:{" "}

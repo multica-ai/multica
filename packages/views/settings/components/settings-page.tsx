@@ -1,9 +1,13 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2, Bell } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Bell, Bot } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useAuthStore } from "@multica/core/auth";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { AccountTab } from "./account-tab";
 import { AppearanceTab } from "./appearance-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -11,12 +15,15 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { AgentDefaultsTab } from "./agent-defaults-tab";
+import { MyAgentDefaultsTab } from "./my-agent-defaults-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
   { value: "notifications", label: "Notifications", icon: Bell },
   { value: "appearance", label: "Appearance", icon: Palette },
   { value: "tokens", label: "API Tokens", icon: Key },
+  { value: "my-agent-defaults", label: "Agent Defaults", icon: Bot },
 ];
 
 const workspaceTabs = [
@@ -39,6 +46,18 @@ interface SettingsPageProps {
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
+  const user = useAuthStore((s) => s.user);
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
+  const isAdminOrOwner =
+    currentMember?.role === "owner" || currentMember?.role === "admin";
+
+  // Build workspace tabs dynamically — only show Agent Defaults for admin/owner
+  const effectiveWorkspaceTabs = isAdminOrOwner
+    ? [...workspaceTabs, { value: "agent-defaults", label: "Agent Defaults", icon: Bot }]
+    : workspaceTabs;
 
   return (
     <Tabs defaultValue="profile" orientation="vertical" className="flex-1 min-h-0 gap-0">
@@ -67,7 +86,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? "Workspace"}
           </span>
-          {workspaceTabs.map((tab) => (
+          {effectiveWorkspaceTabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               <tab.icon className="h-4 w-4" />
               {tab.label}
@@ -83,9 +102,13 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="appearance"><AppearanceTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
+          <TabsContent value="my-agent-defaults"><MyAgentDefaultsTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          {isAdminOrOwner && (
+            <TabsContent value="agent-defaults"><AgentDefaultsTab /></TabsContent>
+          )}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}
