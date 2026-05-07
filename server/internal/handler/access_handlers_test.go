@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(access-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"
@@ -106,15 +108,15 @@ func setupFilterFixture(t *testing.T) filterFixture {
 	})
 
 	memberMember, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(memberID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(memberID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 	if err != nil {
 		t.Fatalf("load member: %v", err)
 	}
 	outsideMember, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.ParseUUID(outsideID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(outsideID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
 	})
 	if err != nil {
 		t.Fatalf("load outside member: %v", err)

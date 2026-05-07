@@ -1,0 +1,28 @@
+{
+  "name": "@multica/cerebro-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./components/jump-to-latest-button": "./components/jump-to-latest-button.tsx",
+    "./hooks/use-sticky-bottom": "./hooks/use-sticky-bottom.ts"
+  },
+  "dependencies": {
+    "@multica/ui": "workspace:*",
+    "lucide-react": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

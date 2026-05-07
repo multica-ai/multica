@@ -24,8 +24,9 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 multica setup self-host
 ```
 
-This clones the repository, starts all services via Docker Compose, installs the `multica` CLI, then configures it for localhost.
+This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
 
+<!-- CEREBRO-PATCH(no-master-code): cerebro removed the upstream 888888 master code. -->
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or read the verification code from the backend container log (`docker compose -f docker-compose.selfhost.yml logs backend`). See [Step 2 — Log In](#step-2--log-in) for details.
 
 > **Prerequisites:** Docker and Docker Compose must be installed. The script checks for this and provides install links if missing.
@@ -54,6 +55,10 @@ make selfhost
 
 `make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
 
+By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
+If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
+`make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
+
 Once ready:
 
 - **Frontend:** http://localhost:3000
@@ -63,10 +68,13 @@ Once ready:
 
 ### Step 2 — Log In
 
-Open http://localhost:3000 in your browser. Pick one of the following to log in:
+<!-- CEREBRO-PATCH(no-master-code): cerebro removed the upstream 888888 master code. We keep upstream's APP_ENV / ALLOW_SIGNUP / GOOGLE_CLIENT_ID notes but drop the deterministic-code path. -->
+Open http://localhost:3000 in your browser. The Docker self-host stack defaults to `APP_ENV=production` (set in `docker-compose.selfhost.yml`). Pick one of the following to log in:
 
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Evaluation / private network without email:** verification codes are generated server-side and printed to the backend container logs. Tail them with `docker compose -f docker-compose.selfhost.yml logs -f backend` and look for `[DEV] Verification code for ...:`.
+
+Changes to `ALLOW_SIGNUP` and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads both from `/api/config` at runtime, so no web rebuild is needed.
 
 ### Step 3 — Install CLI & Start Daemon
 
@@ -83,12 +91,15 @@ brew install multica-ai/tap/multica
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- [GitHub Copilot CLI](https://docs.github.com/en/copilot) (`copilot` on PATH)
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
 - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
 - [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
 - Gemini (`gemini` on PATH)
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
+- Kimi (`kimi` on PATH)
+- Kiro CLI (`kiro-cli` on PATH)
 
 ### b) One-command setup
 
@@ -153,14 +164,15 @@ This reconfigures the CLI for multica.ai, re-authenticates, and restarts the dae
 
 > Your local Docker services are unaffected. Stop them separately if you no longer need them.
 
-## Rebuilding After Updates
+## Upgrading
 
 ```bash
-git pull
-make selfhost
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Migrations run automatically on backend startup.
+Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
+If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 ---
 
@@ -183,6 +195,7 @@ echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
 Then start everything:
 
 ```bash
+docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 

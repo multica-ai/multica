@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-038-pinned-items): cerebro modification of upstream file
 -- Pinned items: per-user quick-access items in the sidebar
 CREATE TABLE IF NOT EXISTS pinned_item (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

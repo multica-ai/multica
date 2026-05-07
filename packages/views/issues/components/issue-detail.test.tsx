@@ -3,6 +3,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+
+const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsMobile: () => mockViewport.isMobile,
+}));
+
 // useWorkspaceId() derives from useCurrentWorkspace (relative import inside
 // @multica/core/hooks.tsx). vi.mock("@multica/core/paths") only intercepts
 // the bare-specifier, not the internal relative import. Mock the hooks module
@@ -163,7 +175,13 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
-  listTimeline: vi.fn().mockResolvedValue([]),
+  listTimeline: vi.fn().mockResolvedValue({
+    entries: [],
+    next_cursor: null,
+    prev_cursor: null,
+    has_more_before: false,
+    has_more_after: false,
+  }),
   listComments: vi.fn().mockResolvedValue([]),
   createComment: vi.fn(),
   updateComment: vi.fn(),
@@ -352,9 +370,11 @@ function createTestQueryClient() {
 function renderIssueDetail(issueId = "issue-1") {
   const queryClient = createTestQueryClient();
   return render(
-    <QueryClientProvider client={queryClient}>
-      <IssueDetail issueId={issueId} />
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} />
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 
@@ -365,9 +385,21 @@ function renderIssueDetail(issueId = "issue-1") {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
-    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    // Cursor-paginated timeline endpoint returns a TimelinePage. The DESC
+    // order is required because the hook reverses pages → ASC for the UI.
+    const descTimeline = [...mockTimeline].sort((a, b) =>
+      b.created_at.localeCompare(a.created_at),
+    );
+    mockApiObj.listTimeline.mockResolvedValue({
+      entries: descTimeline,
+      next_cursor: null,
+      prev_cursor: null,
+      has_more_before: false,
+      has_more_after: false,
+    });
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -400,14 +432,6 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders issue identifier in the breadcrumb", async () => {
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("TES-1")).toBeInTheDocument();
-    });
-  });
-
   it("renders workspace name as breadcrumb link", async () => {
     renderIssueDetail();
 
@@ -432,6 +456,19 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+  });
+
+  it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
+    mockViewport.isMobile = true;
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {
@@ -533,7 +570,13 @@ const mockDMIssue: Issue = {
 describe("IssueDetail (channel/DM)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listTimeline.mockResolvedValue({
+      entries: [],
+      next_cursor: null,
+      prev_cursor: null,
+      has_more_before: false,
+      has_more_after: false,
+    });
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });

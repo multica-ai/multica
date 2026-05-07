@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow } from "electron";
+import { app, ipcMain, BrowserWindow, shell } from "electron";
 import { execFile } from "child_process";
 import {
   readFile,
@@ -316,6 +316,36 @@ function bundledCliPath(): string {
   );
 }
 
+async function probeCliBinary(
+  bin: string,
+  source: "bundled" | "managed" | "path",
+): Promise<string | null> {
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        bin,
+        ["version", "--output", "json"],
+        { timeout: 5_000 },
+        (err, out) => {
+          if (err) reject(err);
+          else resolve(out);
+        },
+      );
+    });
+    const parsed = JSON.parse(stdout) as { version?: string };
+    if (typeof parsed.version === "string" && parsed.version.length > 0) {
+      return parsed.version;
+    }
+    console.warn(
+      `[daemon] ignoring ${source} CLI at ${bin}: version output was missing or invalid`,
+    );
+    return null;
+  } catch (err) {
+    console.warn(`[daemon] ignoring ${source} CLI at ${bin}:`, err);
+    return null;
+  }
+}
+
 /**
  * Returns a usable `multica` binary path. Priority:
  *   1. Cached result from a previous successful resolve.
@@ -339,27 +369,55 @@ async function resolveCliBinary(): Promise<string | null> {
   cliResolvePromise = (async () => {
     const bundled = bundledCliPath();
     if (existsSync(bundled)) {
-      console.log(`[daemon] using bundled CLI at ${bundled}`);
-      cachedCliBinary = bundled;
-      return bundled;
+      const version = await probeCliBinary(bundled, "bundled");
+      if (version) {
+        console.log(`[daemon] using bundled CLI at ${bundled}`);
+        cachedCliBinary = bundled;
+        cachedCliBinaryVersion = version;
+        return bundled;
+      }
     }
 
     const managed = managedCliPath();
     if (existsSync(managed)) {
-      cachedCliBinary = managed;
-      return managed;
+      const version = await probeCliBinary(managed, "managed");
+      if (version) {
+        cachedCliBinary = managed;
+        cachedCliBinaryVersion = version;
+        return managed;
+      }
     }
 
     try {
-      const installed = await ensureManagedCli();
-      cachedCliBinary = installed;
-      return installed;
+      const installed = await ensureManagedCli({
+        forceInstall: existsSync(managed),
+      });
+      const version = await probeCliBinary(installed, "managed");
+      if (version) {
+        cachedCliBinary = installed;
+        cachedCliBinaryVersion = version;
+        return installed;
+      }
+      console.warn(
+        `[daemon] managed CLI at ${installed} failed validation after install`,
+      );
     } catch (err) {
       console.warn("[daemon] CLI auto-install failed, falling back to PATH:", err);
-      const onPath = findCliOnPath();
-      cachedCliBinary = onPath;
-      return onPath;
     }
+
+    const onPath = findCliOnPath();
+    if (onPath) {
+      const version = await probeCliBinary(onPath, "path");
+      if (version) {
+        cachedCliBinary = onPath;
+        cachedCliBinaryVersion = version;
+        return onPath;
+      }
+    }
+
+    cachedCliBinary = null;
+    cachedCliBinaryVersion = null;
+    return null;
   })();
 
   try {
@@ -370,11 +428,10 @@ async function resolveCliBinary(): Promise<string | null> {
 }
 
 /**
- * Reads the version of the currently resolved CLI binary by invoking
- * `multica version --output json`. Cached for the process lifetime — the
- * bundled binary doesn't change after `bundle-cli.mjs` runs at dev/build time.
+ * Reads the version of the currently resolved CLI binary. Cached for the
+ * process lifetime — the bundled binary doesn't change after bundle time.
  * Returns null on any failure (unknown `go` at bundle time, broken binary,
- * etc.) so callers can fail open.
+ * wrong-arch bundled binary, etc.) so callers can fail open.
  */
 async function getCliBinaryVersion(): Promise<string | null> {
   if (cachedCliBinaryVersion !== undefined) return cachedCliBinaryVersion;
@@ -383,24 +440,7 @@ async function getCliBinaryVersion(): Promise<string | null> {
     cachedCliBinaryVersion = null;
     return null;
   }
-  try {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(
-        bin,
-        ["version", "--output", "json"],
-        { timeout: 5_000 },
-        (err, out) => {
-          if (err) reject(err);
-          else resolve(out);
-        },
-      );
-    });
-    const parsed = JSON.parse(stdout) as { version?: string };
-    cachedCliBinaryVersion = parsed.version ?? null;
-  } catch (err) {
-    console.warn("[daemon] failed to read CLI binary version:", err);
-    cachedCliBinaryVersion = null;
-  }
+  cachedCliBinaryVersion = await probeCliBinary(bin, "path");
   return cachedCliBinaryVersion;
 }
 
@@ -872,6 +912,20 @@ export function setupDaemonManager(
 
   ipcMain.on("daemon:stop-log-stream", () => {
     stopLogTail();
+  });
+
+  // Reveal the daemon's log file in the user's default editor / Console
+  // app. Acts as the escape hatch when the in-app log viewer isn't enough
+  // (full history, complex search, copy-to-clipboard at scale).
+  ipcMain.handle("daemon:open-log-file", async () => {
+    const active = await ensureActiveProfile();
+    const logPath = profileLogPath(active.name);
+    if (!existsSync(logPath)) {
+      return { success: false, error: "Log file not found yet" };
+    }
+    // shell.openPath returns "" on success, error string on failure.
+    const error = await shell.openPath(logPath);
+    return error === "" ? { success: true } : { success: false, error };
   });
 
   // First-run CLI install kicks off here. Status bar shows "Setting up…"

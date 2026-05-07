@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { source } from "@/lib/source";
 import { DocsPanelClient, type DocPage } from "./docs-panel-client";
+// CEREBRO-PATCH(docs-panel-mdx-shims): see ./cerebro-mdx-shims.tsx for rationale.
+import { cerebroMdxComponents } from "./cerebro-mdx-shims";
 
 /**
  * Multica-styled Callout — used by some MDX content (e.g. self-hosting docs)
@@ -15,7 +17,9 @@ function Callout({ children }: { children: ReactNode }) {
   );
 }
 
-const mdxComponents = { Callout };
+// Local Callout takes precedence over the shim's; spread cerebro shims
+// first so the local override wins.
+const mdxComponents = { ...cerebroMdxComponents, Callout };
 
 export function DocsPanel() {
   // source.getPages() returns all docs collected by fumadocs-mdx. We

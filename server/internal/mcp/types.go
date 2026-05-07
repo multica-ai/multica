@@ -1,5 +1,7 @@
 package mcp
 
+// CEREBRO-PATCH(mcp-types): cerebro modification of upstream file
+
 import "encoding/json"
 
 // JSON-RPC 2.0 types for the Model Context Protocol (MCP).

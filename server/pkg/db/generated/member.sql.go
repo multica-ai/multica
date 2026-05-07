@@ -133,6 +133,7 @@ WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
 
+// CEREBRO-PATCH(sqlc-member): cerebro modification of upstream file
 func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]Member, error) {
 	rows, err := q.db.Query(ctx, listMembers, workspaceID)
 	if err != nil {

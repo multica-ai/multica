@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-013-runtime-usage): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS runtime_usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     runtime_id UUID NOT NULL REFERENCES agent_runtime(id) ON DELETE CASCADE,

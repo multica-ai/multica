@@ -13,6 +13,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// InboxItemResponse is the JSON shape returned for an inbox_item row.
+//
+// CEREBRO-PATCH(cerebro-inbox-fields): Route and ProjectID are cerebro-only
+// inbox_item columns added by cerebro DB migrations; the rest of this struct
+// is upstream.
 type InboxItemResponse struct {
 	ID            string          `json:"id"`
 	WorkspaceID   string          `json:"workspace_id"`
@@ -42,7 +47,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		RecipientID:   uuidToString(i.RecipientID),
 		Type:          i.Type,
 		Severity:      i.Severity,
-		Route:         i.Route,
+		Route:         i.Route, // CEREBRO-PATCH(cerebro-inbox-fields)
 		IssueID:       uuidToPtr(i.IssueID),
 		Title:         i.Title,
 		Body:          textToPtr(i.Body),
@@ -63,7 +68,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		RecipientID:   uuidToString(r.RecipientID),
 		Type:          r.Type,
 		Severity:      r.Severity,
-		Route:         r.Route,
+		Route:         r.Route, // CEREBRO-PATCH(cerebro-inbox-fields)
 		IssueID:       uuidToPtr(r.IssueID),
 		Title:         r.Title,
 		Body:          textToPtr(r.Body),
@@ -95,10 +100,14 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	if r.URL.Query().Get("archived") == "1" {
 		archived, err := h.Queries.ListArchivedInboxFeed(r.Context(), db.ListArchivedInboxFeedParams{
-			WorkspaceID:   parseUUID(workspaceID),
+			WorkspaceID:   wsUUID,
 			RecipientType: "member",
 			RecipientID:   parseUUID(userID),
 		})
@@ -134,7 +143,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := h.Queries.ListInboxFeed(r.Context(), db.ListInboxFeedParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   wsUUID,
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),
 	})
@@ -172,10 +181,11 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
 		return
 	}
-	item, err := h.Queries.MarkInboxRead(r.Context(), parseUUID(id))
+	item, err := h.Queries.MarkInboxRead(r.Context(), prev.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark read")
 		return
@@ -194,10 +204,11 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if _, ok := h.loadInboxItemForUser(w, r, id); !ok {
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
 		return
 	}
-	item, err := h.Queries.ArchiveInboxItem(r.Context(), parseUUID(id))
+	item, err := h.Queries.ArchiveInboxItem(r.Context(), prev.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive")
 		return
@@ -251,9 +262,13 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   parseUUID(workspaceID),
+		WorkspaceID:   wsUUID,
 		RecipientType: "member",
 		RecipientID:   parseUUID(userID),
 	})
@@ -271,9 +286,13 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.MarkAllInboxRead(r.Context(), db.MarkAllInboxReadParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -296,9 +315,13 @@ func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveAllInbox(r.Context(), db.ArchiveAllInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -321,9 +344,13 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveAllReadInbox(r.Context(), db.ArchiveAllReadInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -346,9 +373,13 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
 	count, err := h.Queries.ArchiveCompletedInbox(r.Context(), db.ArchiveCompletedInboxParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		RecipientID: parseUUID(userID),
 	})
 	if err != nil {
@@ -365,25 +396,5 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-// ListActiveIssueTasks returns the set of issue IDs in the current workspace
-// that have at least one in-flight task. Drives the "agent is working"
-// indicator on inbox list rows so users can see which conversations have an
-// agent currently executing without opening each one.
-func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireUserID(w, r); !ok {
-		return
-	}
-	workspaceID := ctxWorkspaceID(r.Context())
-
-	ids, err := h.Queries.ListActiveIssueIDsInWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list active issue tasks")
-		return
-	}
-
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, uuidToString(id))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"issue_ids": out})
-}
+// ListActiveIssueTasks moved to server/internal/cerebro/notifications/handler.go
+// (cerebro-only handler — wired in router.go via cerebroNotificationsHandler).

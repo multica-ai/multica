@@ -1,5 +1,7 @@
 package agent
 
+// CEREBRO-PATCH(agent-gemini-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"
@@ -34,6 +36,8 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	args := buildGeminiArgs(prompt, opts, b.cfg.Logger)
 
+	// CEREBRO-PATCH(agent-gemini-sandbox): prepareCommand wraps the agent in
+	// the daemon sandbox when enabled; falls back to plain exec.CommandContext.
 	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
 	if err != nil {
 		cancel()
@@ -45,6 +49,7 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sandboxCleanup()
 		}
 	}()
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {

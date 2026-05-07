@@ -1,0 +1,26 @@
+{
+  "name": "@multica/cerebro-realtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./handlers": "./handlers.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/cerebro-artifacts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

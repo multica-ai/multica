@@ -18,6 +18,24 @@ import { create } from "zustand";
 // inside the workspace:deleted/member:removed handlers — irrelevant to
 // the chat lifecycle assertions below. We let them resolve normally.
 
+// useRealtimeSync also calls useHasOnboarded() which reads the global
+// auth-store proxy (registerAuthStore at app boot). Tests don't boot the
+// platform, so we mock the module to short-circuit the proxy with a
+// synthetic state — the chat-lifecycle assertions don't care about
+// onboarded_at, they just need the proxy not to throw.
+const mockAuthState = {
+  user: { id: "global-user", onboarded_at: "2026-01-01T00:00:00Z" },
+};
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign(
+    (selector?: (s: typeof mockAuthState) => unknown) =>
+      selector ? selector(mockAuthState) : mockAuthState,
+    { getState: () => mockAuthState },
+  ),
+  registerAuthStore: vi.fn(),
+  createAuthStore: vi.fn(),
+}));
+
 import { useRealtimeSync } from "@multica/core/realtime";
 import type { WSClient } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";

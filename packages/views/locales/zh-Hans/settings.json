@@ -1,0 +1,212 @@
+{
+  "preferences": {
+    "theme": {
+      "title": "主题",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "language": {
+      "title": "语言",
+      "english": "English",
+      "chinese": "中文",
+      "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
+    }
+  },
+  "page": {
+    "title": "设置",
+    "my_account": "我的账号",
+    "workspace_fallback": "工作区",
+    "tabs": {
+      "profile": "个人资料",
+      "preferences": "偏好设置",
+      "notifications": "通知",
+      "tokens": "API Token",
+      "general": "通用",
+      "repositories": "代码仓库",
+      "labs": "实验室",
+      "members": "成员"
+    }
+  },
+  "account": {
+    "section_profile": "个人资料",
+    "click_avatar_hint": "点击上传头像",
+    "name_label": "姓名",
+    "save": "更新资料",
+    "saving": "更新中...",
+    "toast_avatar_updated": "头像已更新",
+    "toast_avatar_failed": "上传头像失败",
+    "toast_profile_updated": "资料已更新",
+    "toast_profile_failed": "更新资料失败"
+  },
+  "notifications": {
+    "title": "收件箱通知",
+    "description": "控制哪些事件会产生收件箱通知。被静默的事件类型仍然存在——可以直接到 issue 页面查看。",
+    "toast_failed": "更新通知设置失败",
+    "groups": {
+      "assignments": {
+        "label": "分配",
+        "description": "你被分配或取消分配某个 issue 时"
+      },
+      "status_changes": {
+        "label": "状态变更",
+        "description": "你订阅的 issue 状态变化时（例如 todo、in progress、done）"
+      },
+      "comments": {
+        "label": "评论与提及",
+        "description": "你订阅的 issue 有新评论，或有人 @ 你时"
+      },
+      "updates": {
+        "label": "优先级与截止日期",
+        "description": "你订阅的 issue 优先级或截止日期变更时"
+      },
+      "agent_activity": {
+        "label": "智能体活动",
+        "description": "智能体 task 完成或失败时"
+      }
+    },
+    "system": {
+      "title": "系统通知",
+      "description": "控制 Multica 在后台时是否显示操作系统的原生通知横幅。",
+      "label": "显示系统通知",
+      "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
+    }
+  },
+  "tokens": {
+    "title": "API Token",
+    "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。",
+    "name_placeholder": "Token 名称（例如：我的 CLI）",
+    "expiry": {
+      "30": "30 天",
+      "90": "90 天",
+      "365": "1 年",
+      "never": "永不过期"
+    },
+    "create": "创建",
+    "creating": "创建中...",
+    "toast_load_failed": "加载 token 失败",
+    "toast_create_failed": "创建 token 失败",
+    "toast_revoked": "已吊销 token",
+    "toast_revoke_failed": "吊销 token 失败",
+    "metadata_prefix": "{{prefix}}... · 创建于 {{created}} · {{lastUsed}}",
+    "last_used_with_date": "最后使用 {{date}}",
+    "last_used_never": "未使用",
+    "expires_with_date": " · {{date}} 过期",
+    "revoke_aria": "吊销 {{name}}",
+    "revoke_tooltip": "吊销",
+    "revoke_dialog": {
+      "title": "吊销 token",
+      "description": "该 token 将被永久吊销且不再可用。此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "吊销"
+    },
+    "created_dialog": {
+      "title": "Token 已创建",
+      "description": "立即复制你的个人访问 token——它不会再次显示。",
+      "copy_tooltip": "复制 token",
+      "done": "完成"
+    }
+  },
+  "workspace": {
+    "section_general": "通用",
+    "name_label": "名称",
+    "description_label": "描述",
+    "description_placeholder": "这个工作区主要做什么？",
+    "context_label": "上下文",
+    "context_placeholder": "供工作区中的智能体参考的背景信息和上下文",
+    "slug_label": "Slug",
+    "save": "保存",
+    "saving": "保存中...",
+    "manage_hint": "只有管理员和所有者可以修改工作区设置。",
+    "toast_saved": "已保存工作区设置",
+    "toast_save_failed": "保存工作区设置失败",
+    "danger_zone": "危险操作",
+    "leave_title": "离开工作区",
+    "leave_sole_owner": "你是唯一的所有者。请先把另一位成员升级为所有者，或者删除工作区。",
+    "leave_sole_member": "你是唯一的成员。请删除工作区来离开。",
+    "leave_default": "从该工作区中移除你自己。",
+    "leave_button": "离开工作区",
+    "leaving": "离开中...",
+    "leave_confirm_title": "离开工作区",
+    "leave_confirm_description": "确认离开 {{name}}？再次加入需要重新被邀请。",
+    "toast_leave_failed": "离开工作区失败",
+    "delete_title": "删除工作区",
+    "delete_description": "永久删除该工作区及其所有数据。",
+    "delete_button": "删除工作区",
+    "deleting": "删除中...",
+    "toast_delete_failed": "删除工作区失败",
+    "confirm_cancel": "取消",
+    "confirm_action": "确认"
+  },
+  "delete_workspace_dialog": {
+    "title": "删除工作区",
+    "description": "此操作不可撤销。所有 issue、智能体和数据都将被永久删除。",
+    "type_to_confirm_prefix": "确认请输入",
+    "type_to_confirm_suffix": "。",
+    "cancel": "取消",
+    "confirm": "删除工作区",
+    "deleting": "删除中..."
+  },
+  "labs": {
+    "section_git": "Git",
+    "co_authored_by_label": "Co-authored-by trailer",
+    "co_authored_by_description_prefix": "自动给智能体的 commit 加上",
+    "co_authored_by_description_suffix": "。",
+    "toast_failed": "更新设置失败"
+  },
+  "repositories": {
+    "section_title": "代码仓库",
+    "description": "与该工作区关联的 Git 仓库。智能体会从这里 clone 代码并完成工作。",
+    "url_placeholder": "https://git.example.com/org/repo.git",
+    "description_placeholder": "描述（例如：Go 后端 + Next.js 前端）",
+    "add": "添加仓库",
+    "save": "保存",
+    "saving": "保存中...",
+    "manage_hint": "只有管理员和所有者可以管理代码仓库。",
+    "toast_saved": "已保存代码仓库",
+    "toast_save_failed": "保存代码仓库失败"
+  },
+  "members": {
+    "section_title": "成员（{{count}}）",
+    "invite_title": "邀请成员",
+    "invite_email_placeholder": "user@company.com",
+    "invite_button": "邀请",
+    "inviting": "邀请中...",
+    "toast_invitation_sent": "已发送邀请",
+    "toast_invitation_failed": "发送邀请失败",
+    "no_members": "未找到成员。",
+    "pending_title": "待处理邀请（{{count}}）",
+    "pending_status": "待处理",
+    "revoke_invitation_tooltip": "撤销邀请",
+    "revoke_invitation_title": "撤销邀请",
+    "revoke_invitation_description": "撤销发给 {{email}} 的邀请？对方将不能再加入该工作区。",
+    "toast_invitation_revoked": "已撤销邀请",
+    "toast_invitation_revoke_failed": "撤销邀请失败",
+    "toast_role_updated": "已更新角色",
+    "toast_role_failed": "更新成员失败",
+    "toast_member_removed": "已移除成员",
+    "toast_member_remove_failed": "移除成员失败",
+    "remove_member_title": "移除 {{name}}",
+    "remove_member_description": "从 {{workspace}} 中移除 {{name}}？该成员将失去对该工作区的访问权限。",
+    "confirm_cancel": "取消",
+    "confirm_action": "确认",
+    "change_role": "更改角色",
+    "remove_action": "从工作区移除",
+    "cannot_demote_last_owner_title": "请先把另一位成员升级为所有者——工作区必须至少保留一位所有者。",
+    "cannot_demote_last_owner": "不能降级最后一位所有者",
+    "roles": {
+      "owner": {
+        "label": "所有者",
+        "description": "完全访问权限，可管理所有设置"
+      },
+      "admin": {
+        "label": "管理员",
+        "description": "管理成员与设置"
+      },
+      "member": {
+        "label": "成员",
+        "description": "创建并处理 issue"
+      }
+    }
+  }
+}

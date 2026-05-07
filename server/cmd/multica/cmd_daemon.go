@@ -65,6 +65,7 @@ func init() {
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
@@ -81,6 +82,7 @@ func init() {
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
 	daemonCmd.AddCommand(daemonStartCmd)
@@ -174,11 +176,29 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = daemonSysProcAttr()
+	// On Windows we want to break the child out of the parent shell's Job
+	// Object so the daemon survives parent-shell exit. If the parent's Job
+	// has not granted BREAKAWAY_OK, CreateProcess returns
+	// ERROR_ACCESS_DENIED — fall back to spawning without breakaway, which
+	// matches the pre-fix behaviour. On Unix the bool is a no-op.
+	child.SysProcAttr = daemonSysProcAttr(true)
 
 	if err := child.Start(); err != nil {
-		logFile.Close()
-		return fmt.Errorf("start daemon: %w", err)
+		if isAccessDeniedSpawnErr(err) {
+			// Retry without breakaway. Reset the cmd state — exec.Cmd is
+			// not safe to Start() twice, so build a fresh one.
+			child = exec.Command(exePath, args...)
+			child.Stdout = logFile
+			child.Stderr = logFile
+			child.SysProcAttr = daemonSysProcAttr(false)
+			if err := child.Start(); err != nil {
+				logFile.Close()
+				return fmt.Errorf("start daemon (no breakaway): %w", err)
+			}
+		} else {
+			logFile.Close()
+			return fmt.Errorf("start daemon: %w", err)
+		}
 	}
 	logFile.Close()
 	pid := child.Process.Pid
@@ -241,6 +261,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		args = append(args, "--agent-timeout", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		args = append(args, "--codex-semantic-inactivity-timeout", d.String())
+	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
 	}
@@ -281,6 +304,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
 		overrides.AgentTimeout = d
+	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		overrides.CodexSemanticInactivityTimeout = d
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
@@ -327,12 +353,26 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = daemonSysProcAttr()
+		// Break out of the parent's Job Object on Windows; see the
+		// runDaemonBackground call site for rationale.
+		child.SysProcAttr = daemonSysProcAttr(true)
 
 		if err := child.Start(); err != nil {
-			logFile.Close()
-			logger.Error("failed to start new daemon", "error", err)
-			return nil
+			if isAccessDeniedSpawnErr(err) {
+				child = exec.Command(restartBin, args...)
+				child.Stdout = logFile
+				child.Stderr = logFile
+				child.SysProcAttr = daemonSysProcAttr(false)
+				if err := child.Start(); err != nil {
+					logFile.Close()
+					logger.Error("failed to start new daemon (no breakaway)", "error", err)
+					return nil
+				}
+			} else {
+				logFile.Close()
+				logger.Error("failed to start new daemon", "error", err)
+				return nil
+			}
 		}
 		logFile.Close()
 		child.Process.Release()
@@ -360,17 +400,19 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	if health["status"] == "running" {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
-			if p, err := os.FindProcess(int(pid)); err == nil {
-				fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-				_ = stopDaemonProcess(p)
-				for i := 0; i < 10; i++ {
-					time.Sleep(500 * time.Millisecond)
-					sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
-					h := checkDaemonHealthOnPort(sctx, healthPort)
-					scancel()
-					if h["status"] != "running" {
-						break
-					}
+			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+			if err := requestDaemonShutdown(healthPort); err != nil {
+				if p, perr := os.FindProcess(int(pid)); perr == nil {
+					_ = p.Kill()
+				}
+			}
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+				h := checkDaemonHealthOnPort(sctx, healthPort)
+				scancel()
+				if h["status"] != "running" {
+					break
 				}
 			}
 		}
@@ -409,8 +451,17 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := stopDaemonProcess(process); err != nil {
-		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
+	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
+	// rather than an OS signal. On Windows the daemon is spawned with
+	// DETACHED_PROCESS so it shares no console with us, which means
+	// GenerateConsoleCtrlEvent can't reach it; HTTP works on both
+	// platforms and triggers the same context-cancel path the daemon
+	// already uses for self-restart.
+	if err := requestDaemonShutdown(healthPort); err != nil {
+		fmt.Fprintf(os.Stderr, "Graceful shutdown request failed: %v — falling back to forced kill.\n", err)
+		if kerr := process.Kill(); kerr != nil {
+			return fmt.Errorf("kill daemon (pid %d): %w", int(pid), kerr)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -429,6 +480,27 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing a running task.")
+	return nil
+}
+
+// requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
+// to exit gracefully. Returns an error if the request could not be delivered
+// (network error, non-2xx status, or the endpoint predates this change).
+func requestDaemonShutdown(healthPort int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
 	return nil
 }
 

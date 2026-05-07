@@ -6,6 +6,8 @@
 // budget caps over-estimate rather than under-estimate spend (fail-safe).
 package pricing
 
+// CEREBRO-PATCH(pricing-pricing): cerebro modification of upstream file
+
 import (
 	"log/slog"
 	"math"

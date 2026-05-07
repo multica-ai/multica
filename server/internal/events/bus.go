@@ -1,5 +1,7 @@
 package events
 
+// CEREBRO-PATCH(events-bus-cerebro): cerebro modification of upstream file
+
 import (
 	"log/slog"
 	"sync"
@@ -13,10 +15,17 @@ type Event struct {
 	ActorID     string
 	Payload     any // JSON-serializable, same shape as current WS payloads
 
-	// AudienceUserIDs, when non-nil, restricts WS fan-out to clients whose
-	// userID is present in this slice. Used for project-restricted /
+	// CEREBRO-PATCH(events-audience-user-ids): when non-nil, restricts WS fan-out
+	// to clients whose userID is present in this slice. Used for project-restricted /
 	// standalone-private events. nil means broadcast to whole workspace.
 	AudienceUserIDs []string
+
+	// Optional scope hints used by the realtime fanout layer to route the
+	// event to a more specific scope than `workspace:{WorkspaceID}`. When set
+	// these tell the listener which Redis stream / Hub room to publish on
+	// without re-deserializing Payload. See MUL-1138 phase 1.
+	TaskID        string
+	ChatSessionID string
 }
 
 // Handler is a function that processes an event.

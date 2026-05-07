@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-budget): cerebro modification of upstream file
 -- name: GetWorkspaceBudgetConfig :one
 -- Returns NULL row (sql.ErrNoRows) when the workspace owner hasn't completed
 -- the setup wizard yet. Callers treat that as "no caps configured".

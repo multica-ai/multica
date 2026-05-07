@@ -10,3 +10,16 @@ sql:
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_empty_slices: true
+  # CEREBRO-PATCH(sqlc-cerebro-package): generates a separate cerebrodb package
+  - engine: "postgresql"
+    queries: "internal/cerebro/queries/"
+    schema:
+      - "migrations/"
+      - "internal/cerebro/db/migrations/"
+    gen:
+      go:
+        package: "cerebrodb"
+        out: "internal/cerebro/db/generated"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_empty_slices: true

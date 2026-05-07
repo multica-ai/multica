@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(list-row-cerebro): cerebro modification of upstream file
+
 import { memo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
@@ -11,8 +13,11 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
+import { IssueActionsContextMenu } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
 
 export interface ChildProgress {
   done: number;
@@ -48,20 +53,24 @@ export const ListRow = memo(function ListRow({
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showDueDate = storeProperties.dueDate && issue.due_date;
+  const showLabels = storeProperties.labels && labels.length > 0;
   const hasChildren = childIssues && childIssues.length > 0;
 
   return (
-    <>
+    <IssueActionsContextMenu issue={issue}>
+      <div>
       <div
-        className={`group/row flex h-9 items-center gap-2 text-sm transition-colors hover:bg-accent/50 ${
+        className={`group/row flex h-9 items-center gap-2 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
         } ${indent ? "pr-4" : "px-4"}`}
       >
+        {/* CEREBRO-PATCH(list-row-tree-expand): inline sub-issue expander */}
         {hasChildren && (
           <button
             type="button"
@@ -71,7 +80,7 @@ export const ListRow = memo(function ListRow({
             <ChevronRight className={`size-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} />
           </button>
         )}
-        <div className={`relative flex shrink-0 items-center justify-center w-4 h-4 ${!hasChildren && !indent ? "" : ""}`}>
+        <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
           <PriorityIcon
             priority={issue.priority}
             className={selected ? "hidden" : "group-hover/row:hidden"}
@@ -102,10 +111,22 @@ export const ListRow = memo(function ListRow({
                 </span>
               </span>
             )}
+            {showLabels && (
+              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                {labels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 3 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 3}
+                  </span>
+                )}
+              </span>
+            )}
           </span>
           {showProject && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-              <span aria-hidden="true" className="shrink-0">{project!.icon || "📁"}</span>
+              <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
           )}
@@ -119,10 +140,12 @@ export const ListRow = memo(function ListRow({
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
               size={20}
+              enableHoverCard
             />
           )}
         </AppLink>
       </div>
+      {/* CEREBRO-PATCH(list-row-tree-expand): inline child issues when expanded */}
       {hasChildren && expanded && (
         <div className="relative ml-[22px]">
           {/* Vertical tree line */}
@@ -138,6 +161,7 @@ export const ListRow = memo(function ListRow({
           ))}
         </div>
       )}
-    </>
+      </div>
+    </IssueActionsContextMenu>
   );
 });

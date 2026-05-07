@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-036-search-index-lower): cerebro modification of upstream file
 -- Rebuild pg_bigm GIN indexes on LOWER() expressions so that
 -- LOWER(column) LIKE pattern queries can utilize them.
 -- pg_bigm 1.2 (RDS) does not support ILIKE index scans;

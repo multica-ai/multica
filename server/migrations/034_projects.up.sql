@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-034-projects): cerebro modification of upstream file
 -- Project table
 CREATE TABLE IF NOT EXISTS project (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

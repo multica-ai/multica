@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-046-agent-unique-name): cerebro modification of upstream file
 -- Migration: 046_agent_unique_name
 -- Enforces uniqueness of agent names within a workspace so that the API can
 -- return a clear 409 Conflict instead of a silent duplicate or a 500 error.

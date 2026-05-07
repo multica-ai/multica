@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-test): cerebro modification of upstream file
+
 import (
 	"sync"
 	"testing"

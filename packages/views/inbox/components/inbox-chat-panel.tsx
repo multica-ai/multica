@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(inbox-chat-panel): cerebro modification of upstream file
+
 import { useCallback, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -14,10 +16,9 @@ import {
 import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
-import { canAssignAgent } from "../../issues/components";
-import { ChatMessageList, ChatMessageSkeleton } from "../../chat/components/chat-message-list";
-import { ChatStatusLine } from "../../chat/components/chat-status-line";
-import { ChatInput } from "../../chat/components/chat-input";
+import { canAssignAgent } from "@multica/views/issues/components";
+import { ChatMessageList, ChatMessageSkeleton, ChatInput } from "@multica/views/chat";
+import { ChatStatusLine } from "@multica/cerebro-chat/views";
 import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -181,8 +182,8 @@ export function InboxChatPanel({
         ) : hasMessages ? (
           <ChatMessageList
             messages={messages}
-            pendingTaskId={pendingTaskId}
-            isWaiting={!!pendingTaskId}
+            pendingTask={pendingTask ?? null}
+            availability={undefined}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">

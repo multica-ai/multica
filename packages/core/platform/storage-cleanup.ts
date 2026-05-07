@@ -17,6 +17,7 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica:chat:drafts",
   "multica:chat:expanded",
   "multica_navigation",
+  "cerebro_feature_flags", // CEREBRO-PATCH(feature-flags-storage): cerebro-fork persist key
 ];
 
 /** Remove all workspace-scoped storage entries for the given workspace slug. */

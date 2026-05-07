@@ -1,4 +1,5 @@
-import { queryOptions } from "@tanstack/react-query";
+// CEREBRO-PATCH(core-inbox-queries): cerebro modification of upstream file
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem } from "../types";
 
@@ -48,6 +49,22 @@ export function activeIssueTasksOptions(wsId: string) {
     queryFn: () => api.listActiveIssueTasks(),
     staleTime: Infinity,
   });
+}
+
+/**
+ * Unread inbox count for the given workspace, aligned with what the inbox
+ * list UI renders: archived items excluded, then deduplicated by issue so a
+ * single issue with three unread notifications counts once.
+ */
+export function useInboxUnreadCount(wsId: string | null | undefined): number {
+  const { data } = useQuery({
+    queryKey: inboxKeys.list(wsId ?? ""),
+    queryFn: () => api.listInbox(),
+    enabled: !!wsId,
+    select: (items: InboxItem[]) =>
+      deduplicateInboxItems(items).filter((i) => !i.read).length,
+  });
+  return data ?? 0;
 }
 
 /**

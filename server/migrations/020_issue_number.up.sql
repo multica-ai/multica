@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-020-issue-number): cerebro modification of upstream file
 -- Add issue_prefix and issue_counter to workspace for human-readable issue IDs.
 ALTER TABLE workspace
     ADD COLUMN IF NOT EXISTS issue_prefix TEXT NOT NULL DEFAULT '',

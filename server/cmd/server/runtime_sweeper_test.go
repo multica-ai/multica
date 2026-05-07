@@ -78,6 +78,49 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
 }
 
+func TestRefreshAgentStatusFromTasks(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	queries := db.New(testPool)
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to seed idle agent status: %v", err)
+	}
+
+	agent, err := queries.RefreshAgentStatusFromTasks(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("RefreshAgentStatusFromTasks with dispatched task failed: %v", err)
+	}
+	if agent.Status != "working" {
+		t.Fatalf("expected dispatched task to refresh agent status to working, got %q", agent.Status)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'cancelled', completed_at = now()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("failed to cancel seeded task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'working' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to reseed working agent status: %v", err)
+	}
+
+	agent, err = queries.RefreshAgentStatusFromTasks(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("RefreshAgentStatusFromTasks with no active tasks failed: %v", err)
+	}
+	if agent.Status != "idle" {
+		t.Fatalf("expected cancelled-only task set to refresh agent status to idle, got %q", agent.Status)
+	}
+}
+
 // TestSweepStaleTasksBroadcastsWithWorkspaceID verifies that when the task sweeper
 // fails a stale running task, the task:failed event is broadcast with the correct
 // WorkspaceID so it reaches frontend WebSocket clients (events without WorkspaceID
@@ -127,7 +170,7 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 
 	// Call broadcastFailedTasks — this is what we're testing
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	broadcastFailedTasks(context.Background(), queries, nil, bus, failedTasks)
 
 	// Verify the event was published with WorkspaceID (the core of the bug fix)
 	mu.Lock()
@@ -195,7 +238,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 		t.Fatal("expected at least 1 stale task")
 	}
 
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	broadcastFailedTasks(context.Background(), queries, nil, bus, failedTasks)
 
 	// Verify agent status is now "idle" in DB
 	var agentStatus string
@@ -256,7 +299,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 		t.Fatal("expected at least 1 stale dispatched task")
 	}
 
-	broadcastFailedTasks(context.Background(), queries, bus, failedTasks)
+	broadcastFailedTasks(context.Background(), queries, nil, bus, failedTasks)
 
 	// Verify DB: task should be failed
 	var status string
@@ -378,7 +421,7 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	}
 
 	// This is what we're testing: issue must be reset from in_progress → todo.
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
 	var issueStatus string
 	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
@@ -449,7 +492,7 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 		t.Fatalf("FailStaleTasks failed: %v", err)
 	}
 
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
 	// Issue should remain in_review — the sweeper must not clobber agent progress.
 	var issueStatus string

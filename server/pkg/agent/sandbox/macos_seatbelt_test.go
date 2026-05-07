@@ -2,6 +2,8 @@
 
 package sandbox
 
+// CEREBRO-PATCH(agent-sandbox-macos-seatbelt-test): cerebro modification of upstream file
+
 import (
 	"os"
 	"os/exec"

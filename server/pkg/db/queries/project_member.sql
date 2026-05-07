@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-project-member): cerebro modification of upstream file
 -- name: ListProjectMembers :many
 SELECT pm.*, u.name, u.email, u.avatar_url
 FROM project_member pm

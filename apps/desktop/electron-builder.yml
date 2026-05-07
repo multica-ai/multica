@@ -21,23 +21,34 @@ mac:
     - zip
   # Hardcoded name avoids the `@multica/desktop-*` subdirectory that
   # `${name}` produces for scoped package names.
-  artifactName: multica-desktop-${version}-${arch}.${ext}
+  # Naming scheme: multica-desktop-<version>-<platform>-<arch>.<ext>
+  # so the filename alone surfaces kind, version, platform, and CPU arch.
+  artifactName: multica-desktop-${version}-mac-${arch}.${ext}
   # Notarize via notarytool. Requires APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
   # + APPLE_TEAM_ID env vars at package time. Non-mac contributors are
   # unaffected because `pnpm package` already requires the Developer ID
   # signing cert — notarization is a strict superset.
   notarize: true
 dmg:
-  artifactName: multica-desktop-${version}-${arch}.${ext}
+  artifactName: multica-desktop-${version}-mac-${arch}.${ext}
 linux:
   target:
     - AppImage
     - deb
-  artifactName: ${name}-${version}-${arch}.${ext}
+    - rpm
+  artifactName: multica-desktop-${version}-linux-${arch}.${ext}
+rpm:
+  # Disable RPM build-id symlinks. Electron apps embed the upstream Electron
+  # binary, whose GNU build-id is identical across every app shipping the same
+  # Electron version (Slack, VS Code, Discord, ...). Without this, our RPM
+  # would own /usr/lib/.build-id/<hash> paths and collide with any other
+  # Electron RPM already installed, breaking `dnf install` on Fedora/RHEL.
+  fpm:
+    - "--rpm-rpmbuild-define=_build_id_links none"
 win:
   target:
     - nsis
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: multica-desktop-${version}-windows-${arch}.${ext}
 publish:
   provider: github
   owner: multica-ai

@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Conventions reference
+
+The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
+
+- **`apps/docs/content/docs/developers/conventions.mdx`** (English)
+- **`apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
+
+Read that page before:
+
+- Writing or editing translations (`packages/views/locales/`)
+- Naming a new route, package, file, DB column, or TS type
+- Writing Chinese product copy (UI strings, error messages, docs)
+
+The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
+
 ## Project Context
 
 Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.
@@ -106,6 +121,7 @@ pnpm ui:add badge                # Adds component to packages/ui/components/ui/
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
 make db-down          # Stop shared PostgreSQL
+make db-reset         # Drop + recreate current env's DB, then re-run migrations (local only; stop backend first)
 ```
 
 ### CI Requirements
@@ -134,6 +150,17 @@ make start-worktree     # Start using .env.worktree
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Avoid broad refactors unless required by the task.
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
+
+### Backend Handler UUID Parsing Convention
+
+Every Go handler in `server/internal/handler/` follows these rules. The convention exists because `util.ParseUUID` used to silently return a zero UUID on invalid input, which caused #1661 — a `DELETE` returning 204 success while the SQL `DELETE` matched zero rows.
+
+- **Resource path params that accept either a UUID or a human-readable identifier** (e.g. `chi.URLParam(r, "id")` for an issue, which accepts both `MUL-123` and a UUID) MUST be resolved through the dedicated loader (`loadIssueForUser` / `loadSkillForUser` / `loadAgentForUser` / `requireDaemonRuntimeAccess`). After resolution, all subsequent DB calls — especially `Queries.Delete*` / `Queries.Update*` — MUST use `entity.ID` from the resolved object. Never round-trip the raw URL string through `parseUUID` for a write query.
+- **Pure-UUID inputs from request boundaries** (URL params that are always UUIDs, request body fields, query params, headers) MUST be validated with `parseUUIDOrBadRequest(w, s, fieldName)`. On invalid input it writes a 400 and returns `ok=false` — return immediately.
+- **Trusted UUID round-trips** (sqlc-returned UUIDs being passed back into queries, test fixtures) use `parseUUID(s)` which calls `util.MustParseUUID` and panics on invalid input. A panic here means an unguarded user-input string slipped in — that is a real bug. `chi`'s `middleware.Recoverer` translates the panic into a 500 so the process keeps running.
+- **`util.ParseUUID(s) (pgtype.UUID, error)`** is the only safe variant outside the handler package. Always check the error.
+
+When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
 
 ### Package Boundary Rules
 
@@ -176,6 +203,37 @@ Both apps share the same CSS foundation from `packages/ui/styles/`.
 - **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
 - **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
 
+## Cerebro Extension Discipline
+
+> **STOP rule for AI agents.** Before editing any file in the upstream zone (paths matching `scripts/cerebro-zones.txt` — currently `packages/views/**`, `packages/core/**`, `packages/ui/**`, `server/**`), STOP and propose a path to the user. Do not silently edit upstream-zone files — every unmarked edit is silently overwritten by the next upstream merge.
+>
+> **Three protection paths exist:**
+>
+> 1. **CEREBRO-PATCH marker** — small inline change (≤5 lines), add `// CEREBRO-PATCH(<name>):` and document in `docs/cerebro-patches.md`.
+> 2. **Move to cerebro zone** — extract larger changes to `packages/cerebro-*/`, `server/internal/cerebro/`, or a new sibling file with `cerebro-` prefix that the upstream file imports via a small marked import.
+> 3. **Land the fix upstream first** at `multica-ai/multica`, then sync down — for genuine bugs that aren't cerebro-specific.
+>
+> **The agent picks the recommended path and explains the trade-off in plain language**, then asks the user yes/no. Example: *"This is a 1-line tweak to upstream behavior. I recommend path 1 (mark inline). Alternative: path 3 if you want this fixed for everyone. OK with path 1?"* Never present the user with raw "1/2/3 — pick one" without a recommendation. The user is not expected to know which is right; the agent's job is to recommend.
+>
+> Files OUTSIDE the upstream zones (e.g. `apps/web/**`, `apps/desktop/**` today) can be edited freely. But if you add a substantial cerebro-only feature in those folders, prefer a `cerebro-` filename prefix so a future zone expansion catches it automatically.
+
+This fork keeps cerebro-specific code separate from upstream multica so we can pull upstream syncs cleanly. Every contributor (human or AI) is bound by these four rules:
+
+1. **All new cerebro features land in `packages/cerebro-*/` or `server/internal/cerebro/*`.** Never modify upstream-files unless the modification is irreducible. The cerebro zone is excluded from the upstream-zone-guard CI check; landing in the right zone removes review friction.
+
+2. **When you must modify an upstream file**, mark the change with `// CEREBRO-PATCH(<descriptive-name>):` on the changed line, and document it in `docs/cerebro-patches.md`. Each patch must be ≤5 lines. Markers must appear on added (`^+`) lines in the diff — `scripts/validate-cerebro-patches.sh` enforces this in CI.
+
+3. **Cerebro database migrations use the `9NNN_cerebro_*.sql` namespace.** Today they live alongside upstream migrations in `server/migrations/`; a multi-dir scanner + relocation to `server/migrations/cerebro/` is planned (see `docs/upstream-sync/preflight/P4.md`). Until then, the 9000+ numerical gap is the namespace boundary — never use a 9-prefix for an upstream migration, and never use a non-9-prefix for a cerebro migration.
+
+4. **Feature flag every cerebro feature** via `@multica/cerebro-feature-flags` so the user can disable cerebro behaviors without redeploy. Default values live in `packages/cerebro-feature-flags/registry.ts`. Server overrides are per-workspace + per-user. Defaults are applied client-side — server stores only overrides.
+
+Enforcement:
+- `scripts/validate-cerebro-patches.sh` (run as `upstream-zone-guard` CI job) validates rule 2 on every PR.
+- `scripts/cerebro-zones.txt` is the source of truth for "what counts as upstream zone" — keep it in sync if package layout changes.
+- The cerebro-types package augments upstream interfaces (`packages/cerebro-types/augment.ts`) when adding fields to upstream models — avoids needing CEREBRO-PATCH for type extensions.
+
+When in doubt: land in the cerebro zone. Pulling cerebro features back if the upstream sync demands it is far cheaper than fighting merge conflicts forever.
+
 ## Desktop-specific Rules
 
 These rules apply to `apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.
@@ -190,26 +248,18 @@ Every path in the desktop app falls into exactly one category. Choosing the wron
 
 **Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
 
-### Workspace identity singleton
+### Workspace context
 
-`setCurrentWorkspace(slug, uuid)` in `@multica/core/platform` is the single source of truth for "which workspace is active right now". Three consumers depend on it:
-
-1. API client's `X-Workspace-Slug` header.
-2. Zustand per-workspace storage namespace.
-3. Chrome gating (`{slug && <AppSidebar />}` on desktop, similar on web).
-
-Normally set by `WorkspaceRouteLayout` when its route mounts. Critically: **unmount does NOT clear it.** Any code that leaves workspace context (leave workspace, delete workspace, force navigation to overlay) must call `setCurrentWorkspace(null, null)` explicitly — otherwise the realtime `workspace:deleted` handler races the mutation, chrome gating stays truthy while the workspace is gone from cache, and `useWorkspaceId` throws.
+`setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the single source of truth for the active workspace. `WorkspaceRouteLayout` sets it on mount; unmount does NOT clear it. Code that leaves workspace context (leave/delete workspace, force-navigate to overlay) must call `setCurrentWorkspace(null, null)` explicitly.
 
 ### Workspace destructive operations
 
-Leave / Delete workspace flows must follow this order:
+Leave / Delete workspace flows must follow this order, otherwise concurrent refetches race and the renderer hard-reloads:
 
-1. Read destination from cached workspace list (no extra fetch).
+1. Read destination from cached workspace list.
 2. `setCurrentWorkspace(null, null)`.
-3. `navigation.push(destination)` — switch to next workspace or open new-workspace overlay.
+3. `navigation.push(destination)`.
 4. THEN `await mutation.mutateAsync(workspaceId)`.
-
-Reversing step 4 with steps 1–3 (mutate first, navigate after) causes a three-way race between the mutation's `onSettled` invalidate, the explicit `navigateAway`, and the realtime handler's `relocateAfterWorkspaceLoss` — all refetching the same `workspaces` query concurrently. One gets cancelled, bubbles as `CancelledError`, and triggers `window.location.assign` → full renderer reload / white screen.
 
 ### Tab isolation
 
@@ -217,28 +267,25 @@ Tabs are grouped per workspace in `stores/tab-store.ts`. The TabBar shows only t
 
 Cross-workspace `push(path)` is detected by the navigation adapter (`platform/navigation.tsx`) and translated into `switchWorkspace(slug, targetPath)` — NOT a navigation within the current tab's router. Don't bypass the adapter; always go through `useNavigation()` from shared code.
 
-### Drag region (macOS window-move)
+### Drag region (macOS)
 
-Every full-window desktop view (login, overlay, any page that covers the native title bar) needs a top drag strip so users can move the window. On macOS the traffic lights are hidden via `useImmersiveMode` in overlay-style contexts, so the drag strip also gives back that corner for pointer-drag.
+Every full-window desktop view (anything outside the dashboard shell) must mount `<DragStrip />` from `@multica/views/platform` as the first flex child of the page root, otherwise users can't drag the window. Interactive UI inside the top 48px needs `WebkitAppRegion: "no-drag"` to stay clickable.
 
-**Pattern**: flex child at top, not absolute overlay.
+## Browser smoke-testing
 
-```tsx
-<div className="fixed inset-0 z-50 flex flex-col bg-background">
-  <div className="h-12 shrink-0" style={{ WebkitAppRegion: "drag" }} />
-  <div className="flex-1 overflow-auto" style={{ WebkitAppRegion: "no-drag" }}>
-    {/* page content — interactive elements need their own "no-drag" */}
-  </div>
-</div>
-```
+When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI features, the URL in the browser tab decides which server you are testing — **not** which checkout you have open in the editor.
 
-Why flex, not absolute: the absolute-strip + `z-index` approach relies on stacking-context hit-testing, which isn't reliable for `-webkit-app-region`. A real flex row with no siblings at that pixel is unambiguous. Height matches `MainTopBar` (48px / `h-12`) for consistency.
+**ALWAYS verify the smoke-test target before drawing conclusions:**
 
-Canonical examples: `components/window-overlay.tsx`, `pages/login.tsx`.
+1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
+2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
+   - `sara.tailbde0.ts.net/...` → sara.local mac mini (separate checkout, often on `main`)
+   - `app.multica.io` / `*.firtal.com` → production
+   - any tailscale `.ts.net` host → another machine
+3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
+4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
 
-### UX vs platform chrome
-
-UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (drag strip, `useImmersiveMode`, tab system interaction, traffic-light accommodation) lives in desktop-only code. Violating this split always produces platform divergence — if a button exists on desktop but not on web for the same flow, it's a signal the UX escaped into platform code.
+If a smoke test result conflicts with this rule (you "tested it" but were on the wrong host), discard the result. The cost of running again on the right host is low; the cost of shipping based on a false signal is high.
 
 ## UI/UX Rules
 

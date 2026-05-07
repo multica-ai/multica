@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(comment-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"
@@ -12,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
-	"github.com/multica-ai/multica/server/internal/sanitize"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -97,8 +98,19 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	var comments []db.Comment
 	var err error
 
+	// When neither limit nor offset is specified, default to the most recent
+	// 50 comments. The previous behavior returned every comment unbounded,
+	// which let an agent or browser call accidentally pull thousands of rows
+	// (see issue #1968). Callers that want everything must opt in with a
+	// large explicit --limit; a 100-cap on the server side stays in place via
+	// the timeline endpoint, but this endpoint is used by humans + the CLI
+	// where the cap is the documented 50 default.
+	if !hasPagination {
+		limit = 50
+		hasPagination = true
+	}
 	switch {
-	case sinceTime.Valid && hasPagination:
+	case sinceTime.Valid:
 		if limit == 0 {
 			limit = 50
 		}
@@ -109,18 +121,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			Limit:       limit,
 			Offset:      offset,
 		})
-	case sinceTime.Valid:
-		// Apply a server-side cap to prevent unbounded result sets when
-		// --since is used without --limit.
-		comments, err = h.Queries.ListCommentsSincePaginated(r.Context(), db.ListCommentsSincePaginatedParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			CreatedAt:   sinceTime,
-			Limit:       500,
-			Offset:      0,
-		})
-		hasPagination = true
-	case hasPagination:
+	default:
 		if limit == 0 {
 			limit = 50
 		}
@@ -129,11 +130,6 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: issue.WorkspaceID,
 			Limit:       limit,
 			Offset:      offset,
-		})
-	default:
-		comments, err = h.Queries.ListComments(r.Context(), db.ListCommentsParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
 		})
 	}
 	if err != nil {
@@ -204,23 +200,62 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
-		parentID = parseUUID(*req.ParentID)
+		var parsed pgtype.UUID
+		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
+		if !ok {
+			return
+		}
+		parentID = parsed
 		parent, err := h.Queries.GetComment(r.Context(), parentID)
-		if err != nil || uuidToString(parent.IssueID) != issueID {
+		if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
 			writeError(w, http.StatusBadRequest, "invalid parent comment")
 			return
 		}
 		parentComment = &parent
 	}
 
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	// Defense against resumed-session drift: when an agent posts from inside a
+	// comment-triggered task AND the comment is being posted on that same
+	// issue, the parent_id must exactly match the task's trigger comment.
+	// Resumed Claude sessions otherwise carry forward a previous turn's
+	// --parent UUID and silently misplace the reply.
+	//
+	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
+	// request, so an agent legitimately commenting on a different issue must
+	// not be blocked by its current task's trigger. Assignment-triggered
+	// tasks (no TriggerCommentID) are also unaffected.
+	if authorType == "agent" {
+		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
+			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
+			if parseErr == nil {
+				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+				if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+					if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+						writeError(w, http.StatusConflict,
+							"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+						return
+					}
+				}
+			}
+		}
+	}
 
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
-	// Sanitize HTML to prevent stored XSS.
-	req.Content = sanitize.HTML(req.Content)
+	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
+	// rendering layer (rehype-sanitize) and at the editor layer
+	// (@tiptap/markdown with html:false). Running an HTML sanitizer here would
+	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
+	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
@@ -238,8 +273,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Link uploaded attachments to this comment.
-	if len(req.AttachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, req.AttachmentIDs)
+	if len(attachmentIDs) > 0 {
+		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
 	}
 
 	// Fetch linked attachments so the response includes them.
@@ -366,6 +401,39 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 	return true // Reply to member thread without agent participation — suppress
 }
 
+// shouldInheritParentMentions decides whether a reply with no explicit
+// mentions should inherit the parent (thread root) comment's mentions.
+//
+// Inheritance lets a member who started a thread by @mentioning an agent
+// continue the conversation with that agent without re-typing the mention
+// on every follow-up reply.
+//
+// It is intentionally narrow:
+//
+//   - Only when the reply contains zero mentions of its own. Any explicit
+//     mention in the reply is a deliberate choice about who to involve.
+//   - Only when the reply author is a member. Agent-authored replies must
+//     never inherit, otherwise an agent posting in a thread whose root
+//     mentioned another agent would re-trigger that agent and create a loop.
+//   - Only when the parent author is a member. When an agent authors a
+//     comment that @mentions another agent, it is typically a one-shot
+//     delegation (e.g. an agent posting a PR completion that @mentions a
+//     reviewer agent). Subsequent member follow-ups in the same thread are
+//     directed at the assignee, not at the delegated agent — inheriting
+//     would re-trigger the delegated agent on every plain reply.
+func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
+	if parentComment == nil {
+		return false
+	}
+	if len(replyMentions) > 0 {
+		return false
+	}
+	if replyAuthorType == "agent" {
+		return false
+	}
+	return parentComment.AuthorType == "member"
+}
+
 // enqueueMentionedAgentTasks parses @agent mentions from comment content and
 // enqueues a task for each mentioned agent. When parentComment is non-nil
 // (i.e. the comment is a reply), mentions from the parent (thread root) are
@@ -381,12 +449,7 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
-	// When replying in a thread, inherit mentions from the parent comment
-	// so that agents mentioned in the thread root are triggered by replies —
-	// but only when the reply contains no mentions at all (a plain follow-up).
-	// If the reply explicitly @mentions anyone (agents or members), the user
-	// is making a deliberate choice about who to involve; don't auto-inherit.
-	if parentComment != nil && len(mentions) == 0 {
+	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
@@ -436,12 +499,20 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
 
 	// Load comment scoped to current workspace.
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	existing, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -473,11 +544,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize HTML to prevent stored XSS.
-	req.Content = sanitize.HTML(req.Content)
+	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
-		ID:      parseUUID(commentId),
+		ID:      commentUUID,
 		Content: req.Content,
 	})
 	if err != nil {
@@ -505,11 +575,20 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+
 	// Load comment scoped to current workspace.
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          parseUUID(commentId),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
@@ -530,9 +609,17 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), parseUUID(commentId))
+	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
 
-	if err := h.Queries.DeleteComment(r.Context(), parseUUID(commentId)); err != nil {
+	// Cancel any active tasks triggered by this comment so the agent does not
+	// run with the now-deleted content already embedded in its prompt. Must
+	// run before DeleteComment because the FK ON DELETE SET NULL would
+	// otherwise nullify trigger_comment_id and orphan those tasks in queued.
+	if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID); err != nil {
+		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+	}
+
+	if err := h.Queries.DeleteComment(r.Context(), comment.ID); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
@@ -540,9 +627,11 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
+	// CEREBRO-PATCH(comment-delete-audience): restrict comment:deleted fan-out
+	// to project members for private projects.
 	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
 	h.publishToAudience(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
-		"comment_id": commentId,
+		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
 	}, h.audienceForIssue(r.Context(), parentIssue))
 	w.WriteHeader(http.StatusNoContent)

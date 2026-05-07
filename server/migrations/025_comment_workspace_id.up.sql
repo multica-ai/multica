@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-025-comment-workspace-id): cerebro modification of upstream file
 ALTER TABLE comment ADD COLUMN IF NOT EXISTS workspace_id UUID REFERENCES workspace(id) ON DELETE CASCADE;
 
 -- Backfill from issue.workspace_id

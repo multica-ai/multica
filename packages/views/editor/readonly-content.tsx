@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(readonly-content-cerebro): cerebro modification of upstream file
+
 /**
  * ReadonlyContent — lightweight markdown renderer for readonly content display.
  *
@@ -16,29 +18,34 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
 } from "react-markdown";
+import rehypeKatex from "rehype-katex";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/core/attachments/viewable";
+import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
+import { useT } from "../i18n";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
+import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +53,140 @@ import "./content-editor.css";
 // ---------------------------------------------------------------------------
 
 const lowlight = createLowlight(common);
+
+type MermaidAPI = typeof import("mermaid").default;
+
+type MermaidLayout = {
+  width?: number;
+  height?: number;
+};
+
+let mermaidPromise: Promise<MermaidAPI> | null = null;
+
+function getMermaid(): Promise<MermaidAPI> {
+  mermaidPromise ??= import("mermaid").then(({ default: mermaid }) => mermaid);
+
+  return mermaidPromise;
+}
+
+function toLegacyColor(color: string, fallback: string, ownerDocument: Document): string {
+  const canvas = ownerDocument.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return fallback;
+
+  // Mermaid's color parser only supports legacy color syntax. Canvas can parse
+  // modern CSS Color 4 values such as oklch(), then getImageData gives concrete
+  // 8-bit sRGB bytes that Mermaid can consume safely.
+  context.fillStyle = "#000";
+  context.fillStyle = color || fallback;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+
+  return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function resolveCssColor(
+  host: HTMLElement,
+  variableName: string,
+  fallback: string,
+): string {
+  const probe = host.ownerDocument.createElement("span");
+  probe.style.color = `var(${variableName})`;
+  probe.style.display = "none";
+  host.appendChild(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+
+  return toLegacyColor(color || fallback, fallback, host.ownerDocument);
+}
+
+function getMermaidThemeVariables(host: HTMLElement | null) {
+  if (!host) {
+    return {
+      primaryColor: "rgb(245, 245, 245)",
+      primaryBorderColor: "rgb(59, 130, 246)",
+      primaryTextColor: "rgb(17, 24, 39)",
+      lineColor: "rgb(107, 114, 128)",
+      fontFamily: "inherit",
+    };
+  }
+
+  return {
+    primaryColor: resolveCssColor(host, "--muted", "rgb(245, 245, 245)"),
+    primaryBorderColor: resolveCssColor(host, "--primary", "rgb(59, 130, 246)"),
+    primaryTextColor: resolveCssColor(host, "--foreground", "rgb(17, 24, 39)"),
+    lineColor: resolveCssColor(host, "--muted-foreground", "rgb(107, 114, 128)"),
+    fontFamily: "inherit",
+  };
+}
+
+function getSandboxCssVariables(host: HTMLElement | null): string {
+  const styles = host ? getComputedStyle(host) : null;
+  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
+    .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
+    .join(" ");
+}
+
+function getMermaidLayout(svg: string): MermaidLayout {
+  const viewBoxMatch = svg.match(
+    /viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i,
+  );
+  const [, , , widthValue, heightValue] = viewBoxMatch ?? [];
+  const width = widthValue ? Number.parseFloat(widthValue) : undefined;
+  const height = heightValue ? Number.parseFloat(heightValue) : undefined;
+
+  if (width && height && width > 0 && height > 0) {
+    return {
+      width: Math.ceil(width),
+      height: Math.ceil(height),
+    };
+  }
+
+  return {};
+}
+
+function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
+  const cssVariables = getSandboxCssVariables(host);
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+}
+
+function buildExpandedMermaidDocument(svg: string, host: HTMLElement | null): string {
+  const cssVariables = getSandboxCssVariables(host);
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { width: 100%; height: 100%; } body { margin: 0; display: flex; align-items: center; justify-content: center; background: transparent; } svg { max-width: 100%; max-height: 100%; width: auto; height: auto; }</style></head><body>${svg}</body></html>`;
+}
+
+function useThemeVersion() {
+  const [themeVersion, setThemeVersion] = useState(0);
+
+  useEffect(() => {
+    const bumpThemeVersion = () => setThemeVersion((version) => version + 1);
+    const observer = new MutationObserver(bumpThemeVersion);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme"],
+    });
+    if (document.body) {
+      observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-theme"],
+      });
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    mediaQuery.addEventListener("change", bumpThemeVersion);
+
+    return () => {
+      observer.disconnect();
+      mediaQuery.removeEventListener("change", bumpThemeVersion);
+    };
+  }, []);
+
+  return themeVersion;
+}
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -69,6 +210,7 @@ const sanitizeSchema = {
     code: [
       ...(defaultSchema.attributes?.code ?? []),
       ["className", /^language-/],
+      ["className", /^math-/],
       ["className", /^hljs/],
     ],
     img: [
@@ -156,6 +298,7 @@ function ReadonlyLink({
   );
 }
 
+// CEREBRO-PATCH(readonly-content-cerebro): file-card div renderer with attachment viewer
 function FileCardDiv({
   node,
   children,
@@ -227,12 +370,152 @@ function FileCardDiv({
   );
 }
 
+function MermaidLightbox({
+  srcDoc,
+  onClose,
+}: {
+  srcDoc: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="mermaid-diagram-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mermaid diagram fullscreen view"
+      onClick={onClose}
+    >
+      <iframe
+        className="mermaid-diagram-lightbox-frame"
+        sandbox=""
+        srcDoc={srcDoc}
+        title="Mermaid diagram fullscreen"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>,
+    document.body,
+  );
+}
+
+function MermaidDiagram({ chart }: { chart: string }) {
+  const { t } = useT("editor");
+  const reactId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const diagramId = useMemo(
+    () => `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
+    [reactId],
+  );
+  const themeVersion = useThemeVersion();
+  const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
+  const [expandedDocument, setExpandedDocument] = useState<string | null>(null);
+  const [layout, setLayout] = useState<MermaidLayout>({});
+  const [error, setError] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderDiagram() {
+      try {
+        setError(null);
+        setSandboxedDocument(null);
+        setExpandedDocument(null);
+        setLayout({});
+        const mermaid = await getMermaid();
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: "base",
+          themeVariables: getMermaidThemeVariables(containerRef.current),
+        });
+        const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
+        if (!cancelled) {
+          setLayout(getMermaidLayout(renderedSvg));
+          setSandboxedDocument(
+            buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
+          );
+          setExpandedDocument(
+            buildExpandedMermaidDocument(renderedSvg, containerRef.current),
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram");
+        }
+      }
+    }
+
+    void renderDiagram();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chart, diagramId, themeVersion]);
+
+  if (error) {
+    return (
+      <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
+        <p>{t(($) => $.mermaid.render_error)}</p>
+        <pre>
+          <code>{chart}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="mermaid-diagram" aria-label="Mermaid diagram">
+      {sandboxedDocument ? (
+        <>
+          <iframe
+            className="mermaid-diagram-frame"
+            sandbox=""
+            srcDoc={sandboxedDocument}
+            style={{
+              height: layout.height ? `${layout.height}px` : undefined,
+              width: layout.width ? `${layout.width}px` : undefined,
+            }}
+            title="Mermaid diagram"
+          />
+          <div className="mermaid-diagram-toolbar">
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              title="Open fullscreen"
+              aria-label="Open Mermaid diagram fullscreen"
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          </div>
+          {lightboxOpen && expandedDocument && (
+            <MermaidLightbox
+              srcDoc={expandedDocument}
+              onClose={() => setLightboxOpen(false)}
+            />
+          )}
+        </>
+      ) : (
+        <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
+      )}
+    </div>
+  );
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
 
   // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
   img: function ReadonlyImage({ src, alt }) {
+    const { t } = useT("editor");
     const [lightbox, setLightbox] = useState(false);
     const imgSrc = typeof src === "string" ? src : "";
     const imgAlt = alt ?? "";
@@ -244,9 +527,9 @@ const components: Partial<Components> = {
     const handleCopyLink = async () => {
       try {
         await navigator.clipboard.writeText(imgSrc);
-        toast.success("Link copied");
+        toast.success(t(($) => $.image.link_copied));
       } catch {
-        toast.error("Failed to copy link");
+        toast.error(t(($) => $.image.copy_link_failed));
       }
     };
 
@@ -259,13 +542,13 @@ const components: Partial<Components> = {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={handleView} title="View image">
+            <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
               <Maximize2 className="size-3.5" />
             </button>
-            <button type="button" onClick={handleDownload} title="Download">
+            <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
               <Download className="size-3.5" />
             </button>
-            <button type="button" onClick={handleCopyLink} title="Copy link">
+            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
               <LinkIcon className="size-3.5" />
             </button>
           </span>
@@ -293,6 +576,10 @@ const components: Partial<Components> = {
     const isBlock =
       node?.position &&
       node.position.start.line !== node.position.end.line;
+
+    if (isBlock && lang === "mermaid") {
+      return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+    }
 
     if (!isBlock && !lang) {
       // Inline code — CSS handles styling via .rich-text-editor code
@@ -322,7 +609,12 @@ const components: Partial<Components> = {
   },
 
   // Pre — pass through (CSS handles styling via .rich-text-editor pre)
-  pre: ({ children }) => <pre>{children}</pre>,
+  pre: ({ children }) => {
+    if (isValidElement(children) && children.type === MermaidDiagram) {
+      return <>{children}</>;
+    }
+    return <pre>{children}</pre>;
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -340,7 +632,17 @@ interface ReadonlyContentProps {
   attachments?: Attachment[];
 }
 
-export function ReadonlyContent({ content, className, attachments }: ReadonlyContentProps) {
+// Memoized so a long timeline of comments (Inbox + IssueDetail) does not
+// re-run the full react-markdown + rehype-* + lowlight pipeline on every
+// parent re-render. Props are `content` and `className` (both strings), so
+// React.memo's default shallow comparison is value-equality here.
+// CEREBRO-PATCH(readonly-content-cerebro): pass attachments through preprocessing
+// so file-card renderer can route clicks to in-app viewer.
+export const ReadonlyContent = memo(function ReadonlyContent({
+  content,
+  className,
+  attachments,
+}: ReadonlyContentProps) {
   const attachmentsByUrl = useMemo(() => {
     if (!attachments?.length) return undefined;
     const map = new Map<string, string>();
@@ -357,8 +659,8 @@ export function ReadonlyContent({ content, className, attachments }: ReadonlyCon
   return (
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
-        remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
       >
@@ -367,4 +669,4 @@ export function ReadonlyContent({ content, className, attachments }: ReadonlyCon
       <LinkHoverCard {...hover} />
     </div>
   );
-}
+});

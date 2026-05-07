@@ -48,6 +48,7 @@ type CreateArtifactParams struct {
 	RequesterUserID pgtype.UUID `json:"requester_user_id"`
 }
 
+// CEREBRO-PATCH(sqlc-artifact): cerebro modification of upstream file
 func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error) {
 	row := q.db.QueryRow(ctx, createArtifact,
 		arg.ID,

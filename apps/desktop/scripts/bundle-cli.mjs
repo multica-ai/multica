@@ -13,7 +13,7 @@
 // skip the build and fall through to auto-install at runtime. A genuine
 // Go compile error is fatal — you want that to block dev, not hide.
 
-import { access, chmod, copyFile, mkdir } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -23,8 +23,54 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
 const serverDir = join(repoRoot, "server");
 
-const binName = process.platform === "win32" ? "multica.exe" : "multica";
-const srcBinary = join(serverDir, "bin", binName);
+const PLATFORM_TO_GOOS = {
+  darwin: "darwin",
+  linux: "linux",
+  win32: "windows",
+};
+
+const SUPPORTED_ARCHS = new Set(["x64", "arm64"]);
+
+function runtimePlatformFromArgs(argv) {
+  const flagIndex = argv.indexOf("--target-platform");
+  if (flagIndex === -1) return process.platform;
+  return argv[flagIndex + 1] ?? "";
+}
+
+function runtimeArchFromArgs(argv) {
+  const flagIndex = argv.indexOf("--target-arch");
+  if (flagIndex === -1) return process.arch;
+  return argv[flagIndex + 1] ?? "";
+}
+
+function normalizeRuntimePlatform(platform) {
+  if (platform in PLATFORM_TO_GOOS) return platform;
+  throw new Error(
+    `[bundle-cli] unsupported target platform: ${platform}. ` +
+      "Use darwin, linux, or win32.",
+  );
+}
+
+function normalizeRuntimeArch(arch) {
+  if (SUPPORTED_ARCHS.has(arch)) return arch;
+  throw new Error(
+    `[bundle-cli] unsupported target architecture: ${arch}. ` +
+      "Use x64 or arm64.",
+  );
+}
+
+function binaryNameForPlatform(platform) {
+  return platform === "win32" ? "multica.exe" : "multica";
+}
+
+const targetPlatform = normalizeRuntimePlatform(
+  runtimePlatformFromArgs(process.argv.slice(2)),
+);
+const targetArch = normalizeRuntimeArch(runtimeArchFromArgs(process.argv.slice(2)));
+const goos = PLATFORM_TO_GOOS[targetPlatform];
+const goarch = targetArch === "x64" ? "amd64" : targetArch;
+const binName = binaryNameForPlatform(targetPlatform);
+const srcBinary = join(serverDir, "bin", `${goos}-${goarch}`, binName);
 const destDir = join(repoRoot, "apps", "desktop", "resources", "bin");
 const destBinary = join(destDir, binName);
 
@@ -61,8 +107,9 @@ if (hasGo()) {
   const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;
 
   console.log(
-    `[bundle-cli] go build → ${srcBinary} (version=${version} commit=${commit})`,
+    `[bundle-cli] go build → ${srcBinary} (${goos}/${goarch}, version=${version} commit=${commit})`,
   );
+  await mkdir(join(serverDir, "bin", `${goos}-${goarch}`), { recursive: true });
   execFileSync(
     "go",
     [
@@ -70,10 +117,19 @@ if (hasGo()) {
       "-ldflags",
       ldflags,
       "-o",
-      join("bin", binName),
+      srcBinary,
       "./cmd/multica",
     ],
-    { cwd: serverDir, stdio: "inherit" },
+    {
+      cwd: serverDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        CGO_ENABLED: "0",
+        GOOS: goos,
+        GOARCH: goarch,
+      },
+    },
   );
 } else {
   console.warn(
@@ -88,9 +144,11 @@ if (!(await exists(srcBinary))) {
     `[bundle-cli] ${srcBinary} not present — Desktop will fall back to ` +
       `auto-installing the latest release at runtime.`,
   );
+  await rm(destDir, { recursive: true, force: true });
   process.exit(0);
 }
 
+await rm(destDir, { recursive: true, force: true });
 await mkdir(destDir, { recursive: true });
 await copyFile(srcBinary, destBinary);
 await chmod(destBinary, 0o755);

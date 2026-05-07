@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(editor-preprocess): cerebro modification of upstream file
 import { preprocessLinks, preprocessMentionShortcodes, preprocessFileCards } from "@multica/ui/markdown";
 import { configStore } from "@multica/core/config";
 

@@ -104,6 +104,7 @@ SELECT workspace_id, default_user_daily_cap_cents, default_user_monthly_cap_cent
 WHERE workspace_id = $1
 `
 
+// CEREBRO-PATCH(sqlc-budget): cerebro modification of upstream file
 // Returns NULL row (sql.ErrNoRows) when the workspace owner hasn't completed
 // the setup wizard yet. Callers treat that as "no caps configured".
 func (q *Queries) GetWorkspaceBudgetConfig(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceBudgetConfig, error) {

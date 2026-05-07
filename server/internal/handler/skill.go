@@ -17,21 +17,57 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// sanitizeNullBytes removes null bytes (0x00) from strings.
+// PostgreSQL rejects null bytes in text columns with
+// "invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)".
+func sanitizeNullBytes(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
+}
+
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID             string   `json:"id"`
-	WorkspaceID    string   `json:"workspace_id"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	Content        string   `json:"content"`
-	Config         any      `json:"config"`
-	CreatedBy      *string  `json:"created_by"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
+	Config      any    `json:"config"`
+	CreatedBy   *string `json:"created_by"`
+	// CEREBRO-PATCH(skill-ownership): cerebro skill ownership / approval /
+	// versioning fields.
 	OwnerID        *string  `json:"owner_id"`
 	ApproverIDs    []string `json:"approver_ids"`
 	CurrentVersion string   `json:"current_version"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+}
+
+// SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
+// has except `content`. SKILL.md bodies routinely run 50–200KB and shipping
+// them in list payloads bloats responses past CLI timeouts on high-latency
+// links (GH multica-ai/multica#2174). Detail endpoints still return the full
+// SkillResponse with content.
+type SkillSummaryResponse struct {
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Config      any     `json:"config"`
+	CreatedBy   *string `json:"created_by"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
+// AgentSkillSummary is the still-narrower shape used for skills embedded in
+// an Agent payload (`GET /api/agents`, `GET /api/agents/{id}`). The agent
+// list batch query only joins enough columns to render the assignee chip in
+// the UI; the standalone `/api/agents/{id}/skills` endpoint returns the full
+// SkillSummaryResponse for callers that need the source/origin info.
+type AgentSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type SkillFileResponse struct {
@@ -49,14 +85,6 @@ type SkillWithFilesResponse struct {
 }
 
 func skillToResponse(s db.Skill) SkillResponse {
-	var config any
-	if s.Config != nil {
-		json.Unmarshal(s.Config, &config)
-	}
-	if config == nil {
-		config = map[string]any{}
-	}
-
 	approverIDs := make([]string, 0, len(s.ApproverIds))
 	for _, u := range s.ApproverIds {
 		if u.Valid {
@@ -65,18 +93,51 @@ func skillToResponse(s db.Skill) SkillResponse {
 	}
 
 	return SkillResponse{
-		ID:             uuidToString(s.ID),
-		WorkspaceID:    uuidToString(s.WorkspaceID),
-		Name:           s.Name,
-		Description:    s.Description,
-		Content:        s.Content,
-		Config:         config,
-		CreatedBy:      uuidToPtr(s.CreatedBy),
+		ID:          uuidToString(s.ID),
+		WorkspaceID: uuidToString(s.WorkspaceID),
+		Name:        s.Name,
+		Description: s.Description,
+		Content:     s.Content,
+		Config:      decodeSkillConfig(s.Config),
+		CreatedBy:   uuidToPtr(s.CreatedBy),
+		// CEREBRO-PATCH(skill-ownership): ownership / approval / versioning.
 		OwnerID:        uuidToPtr(s.OwnerID),
 		ApproverIDs:    approverIDs,
 		CurrentVersion: s.CurrentVersion,
 		CreatedAt:      timestampToString(s.CreatedAt),
 		UpdatedAt:      timestampToString(s.UpdatedAt),
+	}
+}
+
+// decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
+// missing or unparseable so the API surface always returns a JSON object.
+func decodeSkillConfig(raw []byte) any {
+	var config any
+	if raw != nil {
+		_ = json.Unmarshal(raw, &config)
+	}
+	if config == nil {
+		return map[string]any{}
+	}
+	return config
+}
+
+func skillSummaryToResponse(
+	id, workspaceID pgtype.UUID,
+	name, description string,
+	config []byte,
+	createdBy pgtype.UUID,
+	createdAt, updatedAt pgtype.Timestamptz,
+) SkillSummaryResponse {
+	return SkillSummaryResponse{
+		ID:          uuidToString(id),
+		WorkspaceID: uuidToString(workspaceID),
+		Name:        name,
+		Description: description,
+		Config:      decodeSkillConfig(config),
+		CreatedBy:   uuidToPtr(createdBy),
+		CreatedAt:   timestampToString(createdAt),
+		UpdatedAt:   timestampToString(updatedAt),
 	}
 }
 
@@ -158,15 +219,18 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -203,6 +267,11 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID := parseUUID(creatorID)
 
 	var req CreateSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -222,28 +291,17 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	config, _ := json.Marshal(req.Config)
-	if req.Config == nil {
-		config = []byte("{}")
-	}
-
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   creatorUUID,
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Config:      config,
-		CreatedBy:   parseUUID(creatorID),
-		OwnerID:     parseUUID(creatorID),
+		Config:      req.Config,
+		Files:       req.Files,
+		// CEREBRO-PATCH(skill-create-owner): owner defaults to creator inside
+		// createSkillWithFiles when unset.
+		OwnerID: creatorUUID,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -252,44 +310,6 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(req.Files))
-	for _, f := range req.Files {
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.Path,
-			Content: f.Content,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create skill file: "+err.Error())
-			return
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	// Snapshot v1.0.0 so the version-history view always has a baseline and
-	// the first change request has something to diff against.
-	if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
-		SkillID:     skill.ID,
-		Version:     skill.CurrentVersion,
-		Content:     skill.Content,
-		Files:       skillFilesToVersionJSON(fileResps),
-		Description: skill.Description,
-		CreatedBy:   parseUUID(creatorID),
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to snapshot initial version: "+err.Error())
-		return
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
@@ -391,13 +411,13 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		ID: parseUUID(id),
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		params.Description = pgtype.Text{String: sanitizeNullBytes(*req.Description), Valid: true}
 	}
 	if req.Content != nil {
-		params.Content = pgtype.Text{String: *req.Content, Valid: true}
+		params.Content = pgtype.Text{String: sanitizeNullBytes(*req.Content), Valid: true}
 	}
 	if req.Config != nil {
 		config, _ := json.Marshal(req.Config)
@@ -425,8 +445,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		for _, f := range req.Files {
 			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 				SkillID: skill.ID,
-				Path:    f.Path,
-				Content: f.Content,
+				Path:    sanitizeNullBytes(f.Path),
+				Content: sanitizeNullBytes(f.Content),
 			})
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
@@ -467,12 +487,12 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteSkill(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.DeleteSkill(r.Context(), skill.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(skill.WorkspaceID))
-	h.publish(protocol.EventSkillDeleted, uuidToString(skill.WorkspaceID), actorType, actorID, map[string]any{"skill_id": id})
+	h.publish(protocol.EventSkillDeleted, uuidToString(skill.WorkspaceID), actorType, actorID, map[string]any{"skill_id": uuidToString(skill.ID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -533,11 +553,22 @@ type githubContentEntry struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	Type        string `json:"type"` // "file" or "dir"
+	URL         string `json:"url"`
 	DownloadURL string `json:"download_url"`
 }
 
 type githubRepoInfo struct {
 	DefaultBranch string `json:"default_branch"`
+}
+
+type githubTreeResponse struct {
+	Tree      []githubTreeEntry `json:"tree"`
+	Truncated bool              `json:"truncated"`
+}
+
+type githubTreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"` // "blob" or "tree"
 }
 
 // fetchGitHubDefaultBranch returns the default branch of a GitHub repository.
@@ -735,7 +766,8 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	//   skills/{name}/SKILL.md          (most common)
 	//   .claude/skills/{name}/SKILL.md  (Claude Code native discovery)
 	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
-	//   {name}/SKILL.md                 (skill at repo root level)
+	//   {name}/SKILL.md                 (e.g. anthropics/skills layout)
+	//   SKILL.md                        (single-skill repo: the repo is the skill)
 	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
 	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
@@ -750,15 +782,32 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	var skillMdBody []byte
 	var skillDir string
 	for _, dir := range candidatePaths {
-		body, err := fetchRawFile(httpClient, rawPrefix+"/"+dir+"/SKILL.md")
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, dir+"/SKILL.md"))
 		if err == nil {
 			skillMdBody = body
 			skillDir = dir
 			break
 		}
 	}
+	// Single-skill repos place SKILL.md at the repository root. Try it as a
+	// fast path before the tree-listing fallback to avoid a recursive tree
+	// API call for a common case. Verify the frontmatter name matches so a
+	// stray root SKILL.md in a multi-skill repo can't get picked up for an
+	// unrelated skill URL.
 	if skillMdBody == nil {
-		return nil, fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, "SKILL.md"))
+		if err == nil {
+			if name, _ := parseSkillFrontmatter(string(body)); name == skillName {
+				skillMdBody = body
+				skillDir = ""
+			}
+		}
+	}
+	if skillMdBody == nil {
+		skillDir, skillMdBody, err = resolveGitHubSkillDirByName(httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Parse name and description from YAML frontmatter
@@ -774,8 +823,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	}
 
 	// 2. List supporting files via GitHub API
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
-		url.PathEscape(owner), url.PathEscape(repo), skillDir, url.QueryEscape(defaultBranch))
+	apiURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
 	dirResp, err := httpClient.Get(apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Can't list files — return what we have (SKILL.md only)
@@ -788,15 +836,21 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 
 	var entries []githubContentEntry
 	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+		slog.Warn("skills.sh import: failed to decode top-level directory listing", "url", apiURL, "error", err)
 		return result, nil
 	}
 
 	// 3. Recursively collect files (excluding SKILL.md and LICENSE)
 	var allFiles []githubContentEntry
+	slog.Info("skills.sh import: collecting supporting files", "skill", skillName, "top_level_entries", len(entries))
 	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
+	slog.Info("skills.sh import: collected supporting files", "skill", skillName, "files", len(allFiles))
 
 	// 4. Download each file
-	basePath := skillDir + "/"
+	basePath := ""
+	if skillDir != "" {
+		basePath = skillDir + "/"
+	}
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
 			continue
@@ -814,6 +868,42 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	return result, nil
 }
 
+func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: HTTP %d", owner, repo, skillName, resp.StatusCode)
+	}
+
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
+	}
+
+	skillPaths := extractSkillMdPaths(tree.Tree)
+	preferred, remaining := partitionSkillMdPaths(skillName, skillPaths)
+	if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, preferred); ok {
+		return dir, body, nil
+	}
+	if !tree.Truncated {
+		if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining); ok {
+			return dir, body, nil
+		}
+		return "", nil, skillMdNotFoundError(owner, repo, skillName)
+	}
+
+	slog.Warn("skills.sh import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
+	if dir, body, ok := findSkillDirFromConventionalPrefixes(httpClient, owner, repo, defaultBranch, rawPrefix, skillName); ok {
+		return dir, body, nil
+	}
+	return "", nil, fmt.Errorf("repository %s/%s tree is too large to scan exhaustively for skill %s", owner, repo, skillName)
+}
+
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
 func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
 	for _, entry := range entries {
@@ -825,20 +915,207 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
 			// Fetch subdirectory contents
-			subURL := parentURL + "/" + url.PathEscape(entry.Name)
+			subURL := entry.URL
+			if subURL == "" {
+				parsed, err := url.Parse(parentURL)
+				if err != nil {
+					slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+					continue
+				}
+				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
+				subURL = parsed.String()
+			}
 			subResp, err := httpClient.Get(subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
+				attrs := []any{"url", subURL}
 				if subResp != nil {
+					attrs = append(attrs, "status", subResp.StatusCode)
 					subResp.Body.Close()
 				}
+				if err != nil {
+					attrs = append(attrs, "error", err)
+				}
+				slog.Warn("skills.sh import: failed to list subdirectory", attrs...)
 				continue
 			}
 			var subEntries []githubContentEntry
-			json.NewDecoder(subResp.Body).Decode(&subEntries)
+			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
+				subResp.Body.Close()
+				slog.Warn("skills.sh import: failed to decode subdirectory listing", "url", subURL, "error", err)
+				continue
+			}
 			subResp.Body.Close()
 			collectGitHubFiles(httpClient, subEntries, out, subURL)
 		}
 	}
+}
+
+func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
+	prefixes := []string{"skills", ".claude/skills", "plugin/skills"}
+	var skillPaths []string
+	for _, prefix := range prefixes {
+		paths, err := listGitHubSkillMdPaths(httpClient, owner, repo, prefix, defaultBranch)
+		if err != nil {
+			slog.Warn("skills.sh import: failed to list conventional skill prefix", "prefix", prefix, "error", err)
+			continue
+		}
+		skillPaths = append(skillPaths, paths...)
+	}
+
+	preferred, remaining := partitionSkillMdPaths(skillName, skillPaths)
+	if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, preferred); ok {
+		return dir, body, true
+	}
+	return findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining)
+}
+
+func listGitHubSkillMdPaths(httpClient *http.Client, owner, repo, repoPath, ref string) ([]string, error) {
+	apiURL := buildGitHubContentsURL(owner, repo, repoPath, ref)
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var entries []githubContentEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	collectGitHubSkillMdPaths(httpClient, entries, &paths, apiURL)
+	return paths, nil
+}
+
+func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentEntry, out *[]string, parentURL string) {
+	for _, entry := range entries {
+		lower := strings.ToLower(entry.Name)
+		if entry.Type == "file" {
+			if lower == "skill.md" {
+				*out = append(*out, entry.Path)
+			}
+			continue
+		}
+		if entry.Type != "dir" {
+			continue
+		}
+
+		subURL := entry.URL
+		if subURL == "" {
+			parsed, err := url.Parse(parentURL)
+			if err != nil {
+				slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+				continue
+			}
+			parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
+			subURL = parsed.String()
+		}
+
+		subResp, err := httpClient.Get(subURL)
+		if err != nil || subResp.StatusCode != http.StatusOK {
+			attrs := []any{"url", subURL}
+			if subResp != nil {
+				attrs = append(attrs, "status", subResp.StatusCode)
+				subResp.Body.Close()
+			}
+			if err != nil {
+				attrs = append(attrs, "error", err)
+			}
+			slog.Warn("skills.sh import: failed to list skill metadata subdirectory", attrs...)
+			continue
+		}
+
+		var subEntries []githubContentEntry
+		if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
+			subResp.Body.Close()
+			slog.Warn("skills.sh import: failed to decode skill metadata subdirectory", "url", subURL, "error", err)
+			continue
+		}
+		subResp.Body.Close()
+		collectGitHubSkillMdPaths(httpClient, subEntries, out, subURL)
+	}
+}
+
+func extractSkillMdPaths(entries []githubTreeEntry) []string {
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type != "blob" || (!strings.HasSuffix(entry.Path, "/SKILL.md") && entry.Path != "SKILL.md") {
+			continue
+		}
+		paths = append(paths, entry.Path)
+	}
+	return paths
+}
+
+func partitionSkillMdPaths(skillName string, skillPaths []string) (preferred []string, remaining []string) {
+	for _, skillPath := range skillPaths {
+		if isLikelySkillPathMatch(skillName, skillPath) {
+			preferred = append(preferred, skillPath)
+			continue
+		}
+		remaining = append(remaining, skillPath)
+	}
+	return preferred, remaining
+}
+
+func findMatchingSkillDirByFrontmatter(httpClient *http.Client, rawPrefix, skillName string, skillPaths []string) (string, []byte, bool) {
+	for _, skillPath := range skillPaths {
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillPath))
+		if err != nil {
+			slog.Warn("skills.sh import: fallback SKILL.md fetch failed", "path", skillPath, "error", err)
+			continue
+		}
+		name, _ := parseSkillFrontmatter(string(body))
+		if name == skillName {
+			return skillDirFromSkillFilePath(skillPath), body, true
+		}
+	}
+	return "", nil, false
+}
+
+func isLikelySkillPathMatch(skillName, skillPath string) bool {
+	dir := strings.ToLower(skillDirFromSkillFilePath(skillPath))
+	base := strings.ToLower(filepath.Base(dir))
+	for _, hint := range skillNameHints(skillName) {
+		if strings.Contains(dir, hint) || strings.Contains(base, hint) || strings.Contains(hint, base) {
+			return true
+		}
+	}
+	return false
+}
+
+func skillNameHints(skillName string) []string {
+	skillName = strings.ToLower(skillName)
+	parts := strings.Split(skillName, "-")
+	seen := map[string]struct{}{}
+	var hints []string
+
+	addHint := func(value string) {
+		value = strings.TrimSpace(value)
+		if len(value) < 3 {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		hints = append(hints, value)
+	}
+
+	addHint(skillName)
+	for i := 1; i < len(parts); i++ {
+		addHint(strings.Join(parts[i:], "-"))
+	}
+	for _, part := range parts {
+		addHint(part)
+	}
+	return hints
 }
 
 // parseSkillFrontmatter extracts name and description from YAML frontmatter in SKILL.md.
@@ -879,6 +1156,41 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
+func buildRawGitHubURL(rawPrefix, repoPath string) string {
+	parts := strings.Split(strings.Trim(repoPath, "/"), "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	if len(escaped) == 0 {
+		return rawPrefix
+	}
+	return rawPrefix + "/" + strings.Join(escaped, "/")
+}
+
+func buildGitHubContentsURL(owner, repo, repoPath, ref string) string {
+	base := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents",
+		url.PathEscape(owner), url.PathEscape(repo))
+	if repoPath == "" {
+		return base + "?ref=" + url.QueryEscape(ref)
+	}
+	return base + "/" + strings.TrimPrefix(buildRawGitHubURL("", repoPath), "/") + "?ref=" + url.QueryEscape(ref)
+}
+
+func skillDirFromSkillFilePath(path string) string {
+	if path == "SKILL.md" {
+		return ""
+	}
+	return strings.TrimSuffix(path, "/SKILL.md")
+}
+
+func skillMdNotFoundError(owner, repo, skillName string) error {
+	return fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+}
+
 // --- Import handler ---
 
 func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
@@ -888,6 +1200,11 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID := parseUUID(creatorID)
 
 	var req ImportSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -915,24 +1232,25 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create skill in database
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
+	files := make([]CreateSkillFileRequest, 0, len(imported.files))
+	for _, f := range imported.files {
+		if !validateFilePath(f.path) {
+			continue
+		}
+		files = append(files, CreateSkillFileRequest{
+			Path:    f.path,
+			Content: f.content,
+		})
 	}
-	defer tx.Rollback(r.Context())
 
-	qtx := h.Queries.WithTx(tx)
-
-	skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-		WorkspaceID: parseUUID(workspaceID),
+	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   creatorUUID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
-		Config:      []byte("{}"),
-		CreatedBy:   parseUUID(creatorID),
-		OwnerID:     parseUUID(creatorID),
+		Config:      map[string]any{},
+		Files:       files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -941,47 +1259,6 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
-	}
-
-	fileResps := make([]SkillFileResponse, 0, len(imported.files))
-	for _, f := range imported.files {
-		if !validateFilePath(f.path) {
-			continue
-		}
-		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    f.path,
-			Content: f.content,
-		})
-		if err != nil {
-			continue
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	// Snapshot v1.0.0 baseline so imported skills get the same version-history
-	// behaviour as user-created ones — otherwise ListSkillVersions returns
-	// empty for imports and any future change request has no base to diff.
-	if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
-		SkillID:     skill.ID,
-		Version:     skill.CurrentVersion,
-		Content:     skill.Content,
-		Files:       skillFilesToVersionJSON(fileResps),
-		Description: "Imported from " + req.URL,
-		CreatedBy:   parseUUID(creatorID),
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to snapshot imported version: "+err.Error())
-		return
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
@@ -1033,8 +1310,8 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 
 	sf, err := h.Queries.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 		SkillID: skill.ID,
-		Path:    req.Path,
-		Content: req.Content,
+		Path:    sanitizeNullBytes(req.Path),
+		Content: sanitizeNullBytes(req.Content),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
@@ -1055,7 +1332,18 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileID := chi.URLParam(r, "fileId")
-	if err := h.Queries.DeleteSkillFile(r.Context(), parseUUID(fileID)); err != nil {
+	fileUUID, ok := parseUUIDOrBadRequest(w, fileID, "file id")
+	if !ok {
+		return
+	}
+	// Verify the file belongs to the parent skill we just authorized — guards
+	// against deleting a file owned by a different skill via the URL param.
+	file, err := h.Queries.GetSkillFile(r.Context(), fileUUID)
+	if err != nil || uuidToString(file.SkillID) != uuidToString(skill.ID) {
+		writeError(w, http.StatusNotFound, "skill file not found")
+		return
+	}
+	if err := h.Queries.DeleteSkillFile(r.Context(), file.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
@@ -1071,15 +1359,18 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1099,6 +1390,10 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
+	if !ok {
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -1114,10 +1409,10 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, skillID := range req.SkillIDs {
+	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: agent.ID,
-			SkillID: parseUUID(skillID),
+			SkillID: skillID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
 			return
@@ -1130,15 +1425,18 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated skills list.
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})

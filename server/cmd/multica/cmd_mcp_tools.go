@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools): cerebro modification of upstream file
+
 import (
 	"context"
 	"fmt"

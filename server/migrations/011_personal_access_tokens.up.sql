@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-011-personal-access-tokens): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS personal_access_token (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,

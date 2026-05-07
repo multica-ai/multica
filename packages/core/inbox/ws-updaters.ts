@@ -1,6 +1,7 @@
+// CEREBRO-PATCH(core-inbox-ws-updaters): cerebro modification of upstream file
 import type { QueryClient } from "@tanstack/react-query";
 import { appBadgeKeys, inboxKeys } from "./queries";
-import { notificationsKeys } from "../notifications/queries";
+import { notificationsKeys } from "@multica/cerebro-notifications/core/queries";
 import type { InboxItem, IssueStatus } from "../types";
 
 export function onInboxNew(
@@ -34,6 +35,19 @@ export function onInboxIssueStatusChanged(
     old?.map((i) =>
       i.issue_id === issueId ? { ...i, issue_status: status } : i,
     ),
+  );
+}
+
+// Mirrors the DB-level ON DELETE CASCADE on inbox_item.issue_id: when an issue
+// is deleted, all inbox items that referenced it are gone server-side, so drop
+// them from the cache too.
+export function onInboxIssueDeleted(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+    old?.filter((i) => i.issue_id !== issueId),
   );
 }
 

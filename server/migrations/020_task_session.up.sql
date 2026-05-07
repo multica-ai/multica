@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-020-task-session): cerebro modification of upstream file
 -- Add session persistence columns to agent_task_queue.
 -- session_id: the Claude Code session ID returned after execution.
 -- work_dir: the working directory used during execution.

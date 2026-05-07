@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-artifact): cerebro modification of upstream file
 export type ArtifactKind = "report" | "plan" | "decision" | "diagram" | "note";
 
 export type ArtifactFormat = "md" | "html" | "pdf";

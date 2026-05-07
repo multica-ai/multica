@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-user-preferences): cerebro modification of upstream file
 -- Fork-specific: per-user preferences storage.
 -- Kept in a dedicated file so upstream-merges don't conflict on user.sql.
 

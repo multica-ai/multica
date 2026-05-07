@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(page-header-cerebro): cerebro modification of upstream file
+
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebar } from "@multica/ui/components/ui/sidebar";
 

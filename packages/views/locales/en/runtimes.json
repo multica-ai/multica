@@ -1,0 +1,197 @@
+{
+  "page": {
+    "title": "Runtimes",
+    "tagline": "Machines and cloud workers running CLI sessions for your agents.",
+    "learn_more": "Learn more →",
+    "connect_remote": "Connect remote machine",
+    "search_placeholder": "Search runtimes…",
+    "scope_mine": "Mine",
+    "scope_all": "All",
+    "live": "Live",
+    "live_tooltip": "Real-time updates · offline detection up to 75s",
+    "filter_all": "All",
+    "filter_all_description": "All runtimes in this view",
+    "empty": {
+      "title": "No runtimes yet",
+      "hint": "Desktop auto-scans your local machine. For AWS EC2 or other remote machines, connect them using the setup wizard."
+    },
+    "no_matches": {
+      "title": "No matches",
+      "with_query": "No runtimes match \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " in this filter",
+      "no_query": "No runtimes match this filter.",
+      "try_widening": " Try widening the scope or clearing filters."
+    },
+    "bootstrapping": {
+      "title": "Starting local runtime…",
+      "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Online",
+      "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
+    },
+    "recently_lost": {
+      "label": "Recently lost",
+      "description": "Lost contact under 5 minutes ago — often a brief network blip."
+    },
+    "offline": {
+      "label": "Offline",
+      "description": "No heartbeat for 5+ minutes. Restart the daemon or investigate the host."
+    },
+    "about_to_gc": {
+      "label": "About to GC",
+      "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
+    }
+  },
+  "detail": {
+    "all_runtimes": "All runtimes",
+    "read_only": "Read-only",
+    "delete_aria": "Delete runtime",
+    "delete_tooltip": "Delete runtime",
+    "delete_button": "Delete runtime",
+    "last_seen": "last seen {{when}}",
+    "fact_owner": "Owner",
+    "fact_device": "Device",
+    "fact_runtime": "Runtime",
+    "technical_details": "Technical details",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "Daemon ID",
+    "serving_title": "Serving",
+    "serving_count_one": "{{count}} agent",
+    "serving_count_other": "{{count}} agents",
+    "no_agents": "No agents are bound to this runtime yet.",
+    "diagnostics_title": "Diagnostics",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "Delete Runtime",
+      "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    },
+    "toast_deleted": "Runtime deleted",
+    "toast_delete_failed": "Failed to delete runtime",
+    "running_chip_one": "· {{count}} running",
+    "running_chip_other": "· {{count}} running",
+    "queued_chip_one": "· {{count}} queued",
+    "queued_chip_other": "· {{count}} queued"
+  },
+  "detail_page": {
+    "not_found_title": "Runtime not found",
+    "not_found_hint": "It may have been deleted or you may not have access."
+  },
+  "running_one": "{{count}} running",
+  "running_other": "{{count}} running",
+  "queued_one": "{{count}} queued",
+  "queued_other": "{{count}} queued",
+  "connect": {
+    "title": "Connect a remote machine",
+    "description": "Run these commands on your remote machine (e.g. AWS EC2) to install the Multica CLI and register it as a runtime.",
+    "step1": "1. Install the CLI",
+    "step2": "2. Configure",
+    "step3": "3. Login with a personal access token",
+    "step3_hint_prefix": "Create one in ",
+    "step3_hint_destination": "Settings → Tokens",
+    "step3_hint_suffix": ".",
+    "step4": "4. Start the daemon",
+    "security_label": "Security: ",
+    "security_body": "Use an EC2 IAM role or least-privilege credentials. Never put root keys into agent ",
+    "security_body_suffix": ". The daemon uses outbound connections only — no inbound ports needed.",
+    "troubleshooting": "Troubleshooting",
+    "trouble_check_status": "Check status: ",
+    "trouble_view_logs": "View logs: ",
+    "trouble_verify_provider": "Verify provider: ",
+    "trouble_remote_note_prefix": "Desktop auto-scans only your local machine. Remote machines must run ",
+    "trouble_remote_note_suffix": " separately.",
+    "cancel": "Cancel",
+    "started_daemon": "I've started the daemon",
+    "waiting_title": "Waiting for runtime…",
+    "waiting_description": "Listening for your remote daemon to register. This page updates automatically — no need to refresh.",
+    "waiting_hint_prefix": "Run ",
+    "waiting_hint_suffix": " on the remote machine to verify it's running.",
+    "back": "Back",
+    "success_title": "Runtime connected!",
+    "success_description": "Your remote machine has registered as a runtime. You can now create an agent that dispatches tasks to it.",
+    "view_runtime": "View runtime",
+    "create_agent": "Create an agent"
+  },
+  "update": {
+    "cli_version_label": "CLI Version:",
+    "version_unknown": "unknown",
+    "managed_by_desktop": "Managed by Desktop",
+    "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
+    "latest": "Latest",
+    "available": "available",
+    "action": "Update",
+    "retry": "Retry",
+    "unknown_error": "Unknown error",
+    "initiate_failed": "Failed to initiate update",
+    "status": {
+      "pending": "Waiting for daemon...",
+      "running": "Updating...",
+      "completed": "Update complete. Daemon is restarting...",
+      "failed": "Update failed",
+      "timeout": "Timeout"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Less",
+    "heatmap_more": "More"
+  },
+  "list": {
+    "col_runtime": "Runtime",
+    "col_health": "Health",
+    "col_owner": "Owner",
+    "col_agents": "Agents",
+    "col_workload": "Workload",
+    "col_cost": "Cost · 7d",
+    "col_cli": "CLI",
+    "cost_delta_flat": "flat",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Update available",
+    "cli_update_available_tooltip": "Update available: {{version}}",
+    "row_actions_aria": "Row actions",
+    "delete_action": "Delete",
+    "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",
+    "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime."
+  },
+  "usage": {
+    "period_label": "Period",
+    "kpi_cost_label": "Cost · {{days}}D",
+    "kpi_cost_delta": "{{sign}}{{pct}}% vs prev",
+    "kpi_cache_label": "Cache savings · {{days}}D",
+    "kpi_cache_hint": "{{pct}}% hit · {{reads}} reads",
+    "kpi_tokens_label": "Tokens · {{days}}D",
+    "kpi_tokens_hint": "in {{input}} · out {{output}}",
+    "when_title": "When this runtime spent",
+    "when_tab_daily": "Daily",
+    "when_tab_hourly": "Hourly",
+    "when_tab_heatmap": "Heatmap",
+    "heatmap_caption": "Last 26 weeks · daily $ intensity (period selector ignored here)",
+    "legend_input": "Input",
+    "legend_output": "Output",
+    "legend_cache_write": "Cache write",
+    "empty_no_usage": "No usage in this period.",
+    "empty_pricing_missing": "Tokens recorded but pricing missing for:",
+    "empty_pricing_hint": "Add to MODEL_PRICING in packages/views/runtimes/utils.ts",
+    "empty_zero_cost": "Tokens recorded but cost calculation returned $0.",
+    "cost_by_title_agent": "Cost by agent",
+    "cost_by_title_model": "Cost by model",
+    "cost_by_tab_agent": "By agent",
+    "cost_by_tab_model": "By model",
+    "cost_by_caption_agent_one": "{{count}} agent on this runtime",
+    "cost_by_caption_agent_other": "{{count}} agents on this runtime",
+    "cost_by_caption_model_one": "{{count}} model used",
+    "cost_by_caption_model_other": "{{count}} models used",
+    "daily_breakdown_toggle": "Daily breakdown table",
+    "table_date": "Date",
+    "table_model": "Model",
+    "table_input": "Input",
+    "table_output": "Output",
+    "table_cache_r": "Cache R",
+    "table_cache_w": "Cache W",
+    "no_data": "No usage data yet"
+  }
+}

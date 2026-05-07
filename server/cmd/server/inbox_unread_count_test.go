@@ -90,7 +90,11 @@ func TestCountUnreadInboxForUserAllWorkspaces(t *testing.T) {
 	// Wrong-route (notifications) row on issueC: must not register.
 	insertInboxItem(t, testWorkspaceID, recipientID, issueC, "notifications", false, false, at(3))
 
-	count, err := queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(recipientID))
+	recipientUUID, err := util.ParseUUID(recipientID)
+	if err != nil {
+		t.Fatalf("ParseUUID(recipientID): %v", err)
+	}
+	count, err := queries.CountUnreadInboxForUserAllWorkspaces(ctx, recipientUUID)
 	if err != nil {
 		t.Fatalf("CountUnreadInboxForUserAllWorkspaces: %v", err)
 	}
@@ -103,7 +107,11 @@ func TestCountUnreadInboxForUserAllWorkspaces(t *testing.T) {
 	otherEmail := "badge-count-bystander@multica.ai"
 	otherID := createTestUser(t, otherEmail)
 	t.Cleanup(func() { cleanupTestUser(t, otherEmail) })
-	otherCount, err := queries.CountUnreadInboxForUserAllWorkspaces(ctx, util.ParseUUID(otherID))
+	otherUUID, err := util.ParseUUID(otherID)
+	if err != nil {
+		t.Fatalf("ParseUUID(otherID): %v", err)
+	}
+	otherCount, err := queries.CountUnreadInboxForUserAllWorkspaces(ctx, otherUUID)
 	if err != nil {
 		t.Fatalf("CountUnreadInboxForUserAllWorkspaces (bystander): %v", err)
 	}

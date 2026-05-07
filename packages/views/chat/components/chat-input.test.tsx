@@ -39,7 +39,7 @@ vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("../../preferences/use-submit-on-enter", () => ({
+vi.mock("@multica/cerebro-preferences/views", () => ({
   useSubmitOnEnter: () => false,
 }));
 
@@ -52,7 +52,7 @@ vi.mock("../../editor", () => {
         defaultValue?: string;
         placeholder?: string;
       },
-      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void }>,
+      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void }>,
     ) => {
       useImperativeHandle(ref, () => ({
         getMarkdown: () => editorMarkdown.value,
@@ -60,6 +60,7 @@ vi.mock("../../editor", () => {
           editorMarkdown.value = "";
         },
         uploadFile: () => {},
+        blur: () => {},
       }));
       return (
         <div>

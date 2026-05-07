@@ -1,0 +1,357 @@
+{
+  "page": {
+    "title": "Agents",
+    "tagline": "AI teammates that pick up issues, comment, and update status.",
+    "learn_more": "Learn more →",
+    "new_agent": "New agent",
+    "search_placeholder": "Search agents…",
+    "show_archived": "Show archived ({{count}}) →",
+    "of_total": "{{visible}} of {{total}}",
+    "list_load_failed": "Couldn't load agents",
+    "list_load_failed_default": "Something went wrong fetching the agent list.",
+    "try_again": "Try again"
+  },
+  "scope": {
+    "mine": "Mine",
+    "all": "All"
+  },
+  "sort": {
+    "label_recent": "Recent activity",
+    "label_name": "Name",
+    "label_runs": "Most runs",
+    "label_created": "Recently created"
+  },
+  "availability": {
+    "all": "All",
+    "online": "Online",
+    "unstable": "Unstable",
+    "offline": "Offline"
+  },
+  "workload": {
+    "working": "Working",
+    "queued": "Queued",
+    "idle": "Idle"
+  },
+  "archived": {
+    "active_link": "Active agents",
+    "title": "Archived agents"
+  },
+  "empty": {
+    "title": "No agents yet",
+    "description": "Create an agent and assign it issues, like any teammate. Local agents run on your machine; cloud agents run on Multica's runtime."
+  },
+  "no_matches": {
+    "title": "No matches",
+    "search_archived": "No archived agents match \"{{query}}\".",
+    "no_archived": "No archived agents yet.",
+    "search_active": "No agents match \"{{query}}\".",
+    "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
+    "no_filter_match": "No agents match this filter."
+  },
+  "columns": {
+    "agent": "Agent",
+    "status": "Status",
+    "workload": "Workload",
+    "runtime": "Runtime",
+    "activity_7d": "Activity (7d)",
+    "runs": "Runs"
+  },
+  "row": {
+    "you": "You",
+    "archived": "Archived",
+    "no_description": "No description",
+    "fallback_runtime_cloud": "Cloud",
+    "fallback_runtime_local": "Local",
+    "actions_aria": "Row actions"
+  },
+  "activity_tooltip": {
+    "created_today": "Created today",
+    "created_days_ago_one": "Created {{count}} day ago",
+    "created_days_ago_other": "Created {{count}} days ago",
+    "last_7_days": "Last 7 days",
+    "no_activity": "No activity",
+    "runs_one": "{{count}} run",
+    "runs_other": "{{count}} runs",
+    "failed_suffix": " · {{count}} failed ({{percent}}%)"
+  },
+  "row_actions": {
+    "cancel_all_tasks": "Cancel all tasks",
+    "duplicate": "Duplicate",
+    "restore": "Restore",
+    "archive": "Archive",
+    "agent_archived_toast": "Agent archived",
+    "archive_failed_toast": "Failed to archive agent",
+    "agent_restored_toast": "Agent restored",
+    "restore_failed_toast": "Failed to restore agent",
+    "no_tasks_to_cancel_toast": "No active tasks to cancel",
+    "cancelled_tasks_toast_one": "Cancelled {{count}} task",
+    "cancelled_tasks_toast_other": "Cancelled {{count}} tasks",
+    "cancel_failed_toast": "Failed to cancel tasks",
+    "cancel_dialog_title": "Cancel all tasks for \"{{name}}\"?",
+    "cancel_dialog_no_tasks": "There are no active tasks to cancel.",
+    "cancel_dialog_running_one": "{{count}} running",
+    "cancel_dialog_queued_one": "{{count}} queued",
+    "cancel_dialog_impact_one": "This will cancel {{summary}} task.",
+    "cancel_dialog_impact_other": "This will cancel {{summary}} tasks.",
+    "cancel_dialog_running_note": " Running tasks may take up to 5 seconds to fully halt.",
+    "cancel_dialog_irreversible": " Cancelled tasks cannot be resumed.",
+    "cancel_dialog_keep": "Keep them",
+    "cancel_dialog_confirm": "Cancel all tasks",
+    "archive_dialog_title": "Archive \"{{name}}\"?",
+    "archive_dialog_description": "The agent won't be assignable or mentionable, and any active tasks will be cancelled. All history is preserved and you can restore it later.",
+    "archive_dialog_cancel": "Cancel",
+    "archive_dialog_confirm": "Archive"
+  },
+  "detail": {
+    "back_to_agents": "Agents",
+    "back_to_agents_full": "Back to agents",
+    "not_found_title": "Agent not found",
+    "not_found_default": "This agent may have been archived or deleted.",
+    "try_again": "Try again",
+    "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
+    "restore": "Restore",
+    "archive_dialog_title": "Archive agent?",
+    "archive_dialog_description": "\"{{name}}\" will be archived. It won't be assignable or mentionable, but all history is preserved. You can restore it later.",
+    "archive_dialog_cancel": "Cancel",
+    "archive_dialog_confirm": "Archive",
+    "more_archive": "Archive Agent",
+    "agent_updated_toast": "Agent updated",
+    "update_failed_toast": "Failed to update agent",
+    "agent_archived_toast": "Agent archived",
+    "archive_failed_toast": "Failed to archive agent",
+    "agent_restored_toast": "Agent restored",
+    "restore_failed_toast": "Failed to restore agent"
+  },
+  "inspector": {
+    "section_properties": "Properties",
+    "section_details": "Details",
+    "section_skills": "Skills",
+    "prop_runtime": "Runtime",
+    "prop_model": "Model",
+    "prop_visibility": "Visibility",
+    "prop_concurrency": "Concurrency",
+    "prop_owner": "Owner",
+    "prop_created": "Created",
+    "prop_updated": "Updated",
+    "no_description_placeholder": "No description",
+    "change_avatar_aria": "Change avatar",
+    "avatar_updated_toast": "Avatar updated",
+    "avatar_upload_failed_toast": "Failed to upload avatar",
+    "rename_title": "Rename agent",
+    "rename_placeholder": "Agent name",
+    "rename_required": "Name is required",
+    "edit_description_title": "Edit description",
+    "description_placeholder": "What does this agent do?",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "skill_attach": {
+    "trigger_aria": "Attach a workspace skill",
+    "trigger_label": "Attach"
+  },
+  "pickers": {
+    "concurrency_tooltip": "Concurrency · {{value}} max concurrent tasks",
+    "concurrency_range": "Max concurrent tasks ({{min}}–{{max}})",
+    "runtime_none": "No runtime",
+    "runtime_tooltip": "Runtime · {{name}} · {{status}}",
+    "runtime_tooltip_none": "Runtime · none selected",
+    "runtime_online": "online",
+    "runtime_offline": "offline",
+    "runtime_owned_by": "owned by {{name}}",
+    "runtime_empty": "No runtimes",
+    "model_default": "Default",
+    "model_tooltip": "Model · {{value}}",
+    "model_managed_by_runtime": "Managed by runtime",
+    "model_search_placeholder": "Search or type a model ID",
+    "model_discovering": "Discovering models…",
+    "model_default_badge": "default",
+    "model_empty": "No models available",
+    "model_empty_with_dot": "No models available.",
+    "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
+    "model_custom_use": "Use \"{{value}}\"",
+    "model_clear": "Clear (use provider default)",
+    "model_clear_title": "Clear and fall back to the runtime's provider default"
+  },
+  "model_dropdown": {
+    "label": "Model",
+    "select_runtime_first": "Select a runtime first",
+    "default_provider": "Default (provider)",
+    "runtime_offline_manual": "Runtime offline — enter manually",
+    "managed_by_runtime_title": "Model selection is managed by this runtime.",
+    "managed_by_runtime_hint": "Configure the model on the runtime host (e.g. Hermes reads it from its own config file).",
+    "discovery_failed": "discovery failed",
+    "clear_full": "Clear selection (use provider default)"
+  },
+  "tabs": {
+    "activity": "Activity",
+    "instructions": "Instructions",
+    "skills": "Skills",
+    "environment": "Environment",
+    "custom_args": "Custom Args",
+    "discard_dialog_title": "Discard unsaved changes?",
+    "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
+    "discard_keep": "Keep editing",
+    "discard_confirm": "Discard changes"
+  },
+  "create_dialog": {
+    "title_create": "Create Agent",
+    "title_duplicate": "Duplicate Agent",
+    "description_create": "Create a new AI agent for your workspace.",
+    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
+    "name_label": "Name",
+    "name_placeholder": "e.g. Deep Research Agent",
+    "description_label": "Description",
+    "description_placeholder": "What does this agent do?",
+    "visibility_label": "Visibility",
+    "runtime_label": "Runtime",
+    "runtime_filter_mine": "Mine",
+    "runtime_filter_all": "All",
+    "runtime_loading": "Loading runtimes...",
+    "runtime_none": "No runtime available",
+    "runtime_register_first": "Register a runtime before creating an agent",
+    "runtime_cloud_badge": "Cloud",
+    "duplicate_copy_suffix": " (Copy)",
+    "create": "Create",
+    "creating": "Creating...",
+    "cancel": "Cancel",
+    "create_failed_toast": "Failed to create agent"
+  },
+  "tab_body": {
+    "common": {
+      "save": "Save",
+      "add": "Add",
+      "unsaved_changes": "Unsaved changes"
+    },
+    "instructions": {
+      "intro": "Define this agent's identity and working style. Injected into the agent's context for every task. Markdown is supported.",
+      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
+    },
+    "env": {
+      "intro_readonly": "Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.",
+      "empty_readonly": "No environment variables configured.",
+      "intro_prefix": "Injected into the agent process at launch (e.g. ",
+      "intro_separator": ", ",
+      "intro_suffix": ").",
+      "key_placeholder": "KEY",
+      "value_placeholder": "value",
+      "show_value_aria": "Show value",
+      "hide_value_aria": "Hide value",
+      "remove_aria": "Remove variable",
+      "duplicate_keys_toast": "Duplicate environment variable keys",
+      "saved_toast": "Environment variables saved",
+      "save_failed_toast": "Failed to save environment variables"
+    },
+    "custom_args": {
+      "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",
+      "launch_mode_prefix": "Launch mode: ",
+      "launch_mode_args_placeholder": "<your args>",
+      "input_placeholder": "--flag value",
+      "remove_aria": "Remove argument",
+      "saved_toast": "Custom arguments saved",
+      "save_failed_toast": "Failed to save custom arguments"
+    },
+    "skills": {
+      "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
+      "add_action": "Add skill",
+      "import_hint": "Importing creates a workspace copy that your team can edit and reuse.",
+      "empty_title": "No skills assigned",
+      "empty_hint": "Add workspace skills to share team knowledge with this agent.",
+      "remove_failed_toast": "Failed to remove skill",
+      "add_dialog_title": "Add skill",
+      "add_dialog_description": "Select a workspace skill to assign to this agent.",
+      "add_dialog_empty": "All workspace skills are already assigned.",
+      "add_dialog_cancel": "Cancel",
+      "add_failed_toast": "Failed to add skill"
+    },
+    "activity": {
+      "section_now": "Now",
+      "section_last_30d": "Last 30 days",
+      "section_recent": "Recent work",
+      "subtitle_no_active": "No active work",
+      "subtitle_active_one": "{{count}} active task",
+      "subtitle_active_other": "{{count}} active tasks",
+      "subtitle_performance": "Performance",
+      "subtitle_no_recent": "Nothing finished yet",
+      "subtitle_recent_progress": "{{shown}} of {{total}}",
+      "subtitle_recent_latest": "{{count}} latest",
+      "empty_now": "This agent isn't running anything right now.",
+      "empty_30d": "No completions in the last 30 days.",
+      "empty_recent": "This agent hasn't completed anything yet.",
+      "show_more": "Show more →",
+      "runs_one": "run",
+      "runs_other": "runs",
+      "success_pct": "{{percent}}% success",
+      "avg_duration": "avg {{value}}",
+      "failed_count": "{{count}} failed",
+      "source_issue": "Issue",
+      "source_chat": "Chat",
+      "source_autopilot": "Autopilot",
+      "source_untracked": "Untracked",
+      "source_quick_create": "Quick create",
+      "source_creating_issue": "Creating issue",
+      "source_chat_session": "Chat session",
+      "source_autopilot_run": "Autopilot run",
+      "issue_short_fallback": "Issue {{prefix}}…",
+      "triggered_by": "Triggered by",
+      "open_issue_aria": "Open issue",
+      "open_issue_tooltip": "Open issue",
+      "transcript_tooltip": "View transcript",
+      "cancel_task_aria": "Cancel task",
+      "cancel_task_tooltip": "Cancel task",
+      "cancelling_tooltip": "Cancelling…",
+      "cancel_failed_toast": "Failed to cancel task",
+      "started_prefix": "Started {{when}}",
+      "dispatched_prefix": "Dispatched {{when}}",
+      "queued_prefix": "Queued {{when}}"
+    }
+  },
+  "char_counter": {
+    "over_limit": " · {{count}} over limit"
+  },
+  "presence": {
+    "queue_badge": "+{{count}} queued"
+  },
+  "visibility": {
+    "private": {
+      "label": "Personal",
+      "tooltip": "Personal · only you and workspace admins can use this agent"
+    },
+    "workspace": {
+      "label": "Workspace",
+      "tooltip": "Workspace · everyone in this workspace can use this agent"
+    }
+  },
+  "profile_card": {
+    "unavailable": "Agent unavailable",
+    "detail_link": "Detail →",
+    "runtime_label": "Runtime",
+    "skills_label": "Skills",
+    "owner_label": "Owner",
+    "unknown_runtime": "Unknown runtime"
+  },
+  "transcript": {
+    "dialog_title": "Agent Execution Transcript",
+    "status_running": "Running",
+    "status_completed": "Completed",
+    "status_failed": "Failed",
+    "filter": "Filter",
+    "clear_filters": "Clear filters",
+    "tool_calls_one": "{{count}} tool call",
+    "tool_calls_other": "{{count}} tool calls",
+    "events_one": "{{count}} events",
+    "events_other": "{{count}} events",
+    "events_filtered": "{{shown}} of {{total}} events",
+    "copy_all": "Copy all",
+    "copy_filtered": "Copy filtered",
+    "copied": "Copied",
+    "waiting_events": "Waiting for events...",
+    "no_data": "No execution data recorded."
+  },
+  "task_failure": {
+    "agent_error": "Agent execution error",
+    "timeout": "Task timed out",
+    "runtime_offline": "Daemon offline",
+    "runtime_recovery": "Daemon restarted",
+    "manual": "Cancelled by user"
+  }
+}

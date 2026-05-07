@@ -1,1 +1,1 @@
-export { MemberDetailPage } from "./member-detail-page";
+export { MemberProfileCard } from "./member-profile-card";

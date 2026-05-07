@@ -1,1 +1,1 @@
-export { RuntimeSetupDocsPage as default } from "@multica/views/docs";
+export { RuntimeSetupDocsPage as default } from "@multica/cerebro-runtime/views/docs";

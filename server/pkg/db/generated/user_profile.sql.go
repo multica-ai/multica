@@ -25,6 +25,7 @@ SELECT user_id, persona, language, length_pref, autonomy_pref, tech_pref, anti_p
 WHERE user_id = $1
 `
 
+// CEREBRO-PATCH(sqlc-user-profile): cerebro modification of upstream file
 func (q *Queries) GetUserProfile(ctx context.Context, userID pgtype.UUID) (UserProfile, error) {
 	row := q.db.QueryRow(ctx, getUserProfile, userID)
 	var i UserProfile

@@ -30,6 +30,10 @@ jobs:
         run: pnpm install
 
       - name: Build, type check, and test
+        # Match main's CI: lint is not enforced in CI (the codebase has
+        # ~73 i18next/no-literal-string violations on main that would
+        # block every PR if lint were enforced). When the team is ready
+        # to clean up the violations, add `lint` back to this command.
         run: pnpm exec turbo build typecheck test
 
   backend:
@@ -48,10 +52,24 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
-      # 64 bytes — satisfies the >= 32-byte requirement enforced by auth.JWTSecret().
+      # CEREBRO-PATCH(ci-jwt-secret): 64 bytes — satisfies the >= 32-byte requirement enforced by auth.JWTSecret().
       JWT_SECRET: ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad
+      # Wires up the RedisLocalSkill*_test.go suite. Distinct from REDIS_URL
+      # (which would flip the server binary itself onto the Redis-backed
+      # realtime relay + request stores); the tests talk to this Redis
+      # directly so they run alongside the Postgres-backed suite.
+      REDIS_TEST_URL: redis://localhost:6379/1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -70,3 +88,17 @@ jobs:
 
       - name: Test
         run: cd server && go test ./...
+
+  upstream-zone-guard:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      BASE_REF: origin/main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate CEREBRO-PATCH markers
+        run: bash scripts/validate-cerebro-patches.sh

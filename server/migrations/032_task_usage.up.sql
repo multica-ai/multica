@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-032-task-usage): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS task_usage (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_id UUID NOT NULL REFERENCES agent_task_queue(id) ON DELETE CASCADE,

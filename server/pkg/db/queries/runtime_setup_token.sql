@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-runtime-setup-token): cerebro modification of upstream file
 -- name: CreateRuntimeSetupToken :one
 INSERT INTO runtime_setup_token (
     token_hash,

@@ -1,1 +1,7 @@
-export { InboxPage as default } from "@multica/views/inbox";
+"use client";
+
+import { InboxPage } from "@multica/views/inbox";
+
+export default function InboxRoute() {
+  return <InboxPage />;
+}

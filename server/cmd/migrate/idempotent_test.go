@@ -1,5 +1,7 @@
 package main
 
+// CEREBRO-PATCH(migrate-idempotent-test): cerebro modification of upstream file
+
 import (
 	"context"
 	"crypto/rand"

@@ -1,0 +1,36 @@
+{
+  "name": "@multica/cerebro-attachments",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./core/queries": "./core/queries.ts",
+    "./core/viewable": "./core/viewable.ts",
+    "./views": "./views/index.tsx",
+    "./views/pages": "./views/pages/index.ts"
+  },
+  "dependencies": {
+    "@multica/cerebro-artifacts": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "lucide-react": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

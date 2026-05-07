@@ -24,6 +24,7 @@ type CreateArtifactFolderParams struct {
 	ParentID    pgtype.UUID `json:"parent_id"`
 }
 
+// CEREBRO-PATCH(sqlc-artifact-folder): cerebro modification of upstream file
 func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFolderParams) (ArtifactFolder, error) {
 	row := q.db.QueryRow(ctx, createArtifactFolder,
 		arg.ID,

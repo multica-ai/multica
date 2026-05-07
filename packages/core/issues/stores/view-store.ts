@@ -1,5 +1,7 @@
 "use client";
 
+// CEREBRO-PATCH(core-issues-view-store): cerebro modification of upstream file
+
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -21,6 +23,7 @@ export interface CardProperties {
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
+  labels: boolean;
 }
 
 export interface ActorFilterValue {
@@ -42,6 +45,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "assignee", label: "Assignee" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
+  { key: "labels", label: "Labels" },
   { key: "childProgress", label: "Sub-issue progress" },
 ];
 
@@ -54,6 +58,7 @@ export interface IssueViewState {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -67,6 +72,7 @@ export interface IssueViewState {
   toggleCreatorFilter: (value: ActorFilterValue) => void;
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
+  toggleLabelFilter: (labelId: string) => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -86,6 +92,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
+  labelFilters: [],
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -95,6 +102,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     dueDate: true,
     project: true,
     childProgress: true,
+    labels: true,
   },
   listCollapsedStatuses: [],
   subIssueDisplay: "standalone",
@@ -148,6 +156,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     })),
   toggleNoProject: () =>
     set((state) => ({ includeNoProject: !state.includeNoProject })),
+  toggleLabelFilter: (labelId) =>
+    set((state) => ({
+      labelFilters: state.labelFilters.includes(labelId)
+        ? state.labelFilters.filter((id) => id !== labelId)
+        : [...state.labelFilters, labelId],
+    })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -173,6 +187,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       creatorFilters: [],
       projectFilters: [],
       includeNoProject: false,
+      labelFilters: [],
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -204,13 +219,40 @@ export const viewStorePersistOptions = (name: string) => ({
     creatorFilters: state.creatorFilters,
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
+    labelFilters: state.labelFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
     subIssueDisplay: state.subIssueDisplay,
   }),
+  // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
+  // saved before a new toggle was introduced wins entirely and the new key is
+  // missing — the dropdown switch then reads `undefined` and renders unchecked
+  // even though defaults treat it as on. Deep-merge `cardProperties` so newly
+  // added toggles inherit their default value for existing users.
+  merge: mergeViewStatePersisted,
 });
+
+/**
+ * Reusable persist `merge` for view-state stores. Generic over T so the same
+ * deep-merge for `cardProperties` works for both the issues view store and
+ * the my-issues view store (which extends IssueViewState).
+ */
+export function mergeViewStatePersisted<T extends IssueViewState>(
+  persisted: unknown,
+  current: T,
+): T {
+  const p = (persisted ?? {}) as Partial<T>;
+  return {
+    ...current,
+    ...p,
+    cardProperties: {
+      ...current.cardProperties,
+      ...(p.cardProperties ?? {}),
+    },
+  };
+}
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */
 export function createIssueViewStore(persistKey: string): StoreApi<IssueViewState> {

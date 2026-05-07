@@ -80,6 +80,12 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Surface the resulting auth.json state (file kind only, never contents)
+	// so operators diagnosing token-refresh failures can tell whether the
+	// per-task home is tracking the shared ~/.codex/auth.json or has drifted
+	// into a stale local copy.
+	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
+
 	// Copy config files (isolated per task).
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
@@ -89,12 +95,34 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Drop `[[skills.config]]` entries inherited from the user's
+	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
+	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
+	// `missing field path` and bails out of `thread/start`. Multica writes the
+	// agent's active skills directly to `codex-home/skills/`, so the
+	// user-level registry is redundant here. See codex_skill_strip.go.
+	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
+		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
+	}
+
+	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+	}
+
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
 	// need to fall back to danger-full-access because of openai/codex#10390;
 	// see codex_sandbox.go for the full rationale.
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+	}
+
+	// Disable Codex native multi-agent inside daemon-managed task sessions
+	// so the parent thread's `turn/completed` is not interpreted as task
+	// completion while spawned subagents are still running. See
+	// codex_multi_agent.go for the full rationale and escape hatch.
+	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 
 	return nil
@@ -114,6 +142,38 @@ func resolveSharedCodexHome() string {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
+	src := filepath.Join(sharedHome, "plugins", "cache")
+	dst := filepath.Join(codexHome, "plugins", "cache")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared plugin cache dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create codex plugin dir: %w", err)
+	}
+
+	if fi, err := os.Lstat(dst); err == nil {
+		isLink := fi.Mode()&os.ModeSymlink != 0
+		if isLink {
+			if target, readlinkErr := os.Readlink(dst); readlinkErr == nil && target == src {
+				return nil
+			}
+			if err := os.Remove(dst); err != nil {
+				return fmt.Errorf("remove stale plugin cache link: %w", err)
+			}
+		} else {
+			if err := os.RemoveAll(dst); err != nil {
+				return fmt.Errorf("remove stale plugin cache path: %w", err)
+			}
+		}
+	}
+
+	if err := createDirLink(src, dst); err != nil {
+		return fmt.Errorf("expose shared plugin cache: %w", err)
+	}
+	return nil
 }
 
 // ensureDirSymlink creates a symlink dst → src for a directory.
@@ -141,38 +201,67 @@ func ensureDirSymlink(src, dst string) error {
 	return createDirLink(src, dst)
 }
 
-// ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.
-// If dst already exists as a correct symlink, it's a no-op. If dst is a broken
-// symlink, it's replaced.
+// ensureSymlink ensures dst tracks src. If src doesn't exist, it's a no-op.
+// If dst is already a symlink pointing at src, it's a no-op. Otherwise — a
+// wrong-target symlink, a broken symlink, or a regular file left over from a
+// prior createFileLink copy fallback — dst is removed and recreated via
+// createFileLink so the per-task home doesn't drift from the shared source.
+//
+// The "regular file" branch matters on Windows: when os.Symlink fails (no
+// Developer Mode / not elevated), createFileLink falls back to copying the
+// file. Without this re-creation step, a once-stale auth.json would never
+// pick up token refreshes from the shared ~/.codex/auth.json, leaving Codex
+// stuck on a revoked refresh token across env reuses (issue #2081).
 func ensureSymlink(src, dst string) error {
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		return nil // source doesn't exist — skip
 	}
 
-	// Check if dst already exists.
 	if fi, err := os.Lstat(dst); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			// It's a symlink — check if it points to the right place.
-			target, err := os.Readlink(dst)
-			if err == nil && target == src {
-				return nil // already correct
+			if target, err := os.Readlink(dst); err == nil && target == src {
+				return nil // symlink already points to src
 			}
-			// Wrong target — remove and recreate.
-			os.Remove(dst)
-		} else {
-			// Regular file exists — don't overwrite.
-			return nil
+		}
+		// Wrong-target symlink, broken symlink, or stale regular file —
+		// drop it so createFileLink can re-link/re-copy from the current src.
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove stale dst %s: %w", dst, err)
 		}
 	}
 
 	return createFileLink(src, dst)
 }
 
+// logCodexAuthState records the kind of auth.json the per-task CODEX_HOME
+// ended up with — symlink (with target), regular file (with size + mtime),
+// or missing — so an operator chasing refresh_token_reused / token_expired
+// reports can immediately tell whether the per-task home is tracking the
+// shared ~/.codex/auth.json or has drifted into a stale local copy.
+//
+// Never logs the file contents.
+func logCodexAuthState(authPath string, logger *slog.Logger) {
+	fi, err := os.Lstat(authPath)
+	if err != nil {
+		logger.Info("execenv: codex auth.json absent", "path", authPath, "error", err)
+		return
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(authPath)
+		logger.Info("execenv: codex auth.json is symlink", "path", authPath, "target", target)
+		return
+	}
+	logger.Info("execenv: codex auth.json is regular file",
+		"path", authPath,
+		"size", fi.Size(),
+		"mtime", fi.ModTime().UTC(),
+	)
+}
+
 // (The daemon used to write a minimal inline config here; the authoritative
 // sandbox/network directives now live in a managed block rendered by
 // codex_sandbox.go's ensureCodexSandboxConfig so they can be updated
 // idempotently without touching user-managed keys.)
-
 
 // copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.
 // If dst already exists, it's not overwritten.

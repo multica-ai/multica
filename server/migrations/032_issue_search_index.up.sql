@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-032-issue-search-index): cerebro modification of upstream file
 -- Enable pg_bigm extension for bigram-based full-text search (CJK-friendly).
 -- Skips gracefully if pg_bigm is not available (e.g. CI environments).
 DO $$

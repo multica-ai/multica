@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-inbox): cerebro modification of upstream file
 -- name: ListInboxItems :many
 -- Generic non-archived listing across both routes. Used only by tests today;
 -- production paths use the route-specific ListInboxFeed (route='inbox')

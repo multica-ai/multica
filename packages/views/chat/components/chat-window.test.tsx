@@ -9,8 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // review caught a paste-duplicate of `<ChatStatusLine />` in this file, and
 // no test guarded against it. This test exists to make that regression loud.
 
-vi.mock("./chat-status-line", () => ({
+vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => <div data-testid="chat-status-line" />,
+  getToolSummary: () => null,
 }));
 
 vi.mock("./chat-message-list", () => ({
@@ -24,6 +25,24 @@ vi.mock("./chat-input", () => ({
 
 vi.mock("./chat-resize-handles", () => ({
   ChatResizeHandles: () => null,
+}));
+
+vi.mock("./context-anchor", () => ({
+  ContextAnchorButton: () => null,
+  ContextAnchorCard: () => null,
+  buildAnchorMarkdown: () => "",
+  useRouteAnchorCandidate: () => ({ candidate: null, isResolving: false }),
+}));
+
+vi.mock("./chat-session-history", () => ({
+  ChatSessionHistory: () => null,
+}));
+
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (key: unknown) =>
+      typeof key === "function" ? "" : String(key ?? ""),
+  }),
 }));
 
 vi.mock("./use-chat-resize", () => ({
@@ -87,6 +106,10 @@ vi.mock("@multica/core/chat/queries", () => ({
   pendingChatTaskOptions: () => ({
     queryKey: ["pending-task"],
     queryFn: async () => ({ task_id: "task-live", status: "running" }),
+  }),
+  pendingChatTasksOptions: () => ({
+    queryKey: ["pending-tasks"],
+    queryFn: async () => ({ tasks: [] }),
   }),
   chatKeys: { messages: (id: string) => ["messages", id], pendingTask: (id: string) => ["pending-task", id] },
 }));

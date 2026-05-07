@@ -13,7 +13,39 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/util"
 )
+
+// resolveTextFlag picks between a `--<name>` flag value and a paired
+// `--<name>-stdin` flag, mirroring the existing `--content` / `--content-stdin`
+// pattern. It returns the resolved string and an error when both are set or
+// stdin is requested but produces no body. Inline flag values are passed
+// through util.UnescapeBackslashEscapes so bash-double-quoted `\n` becomes a
+// real newline; stdin bodies are returned verbatim so literal backslashes
+// survive intact.
+func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
+	stdinFlag := flagName + "-stdin"
+	useStdin, _ := cmd.Flags().GetBool(stdinFlag)
+	inline, _ := cmd.Flags().GetString(flagName)
+	if useStdin && inline != "" {
+		return "", false, fmt.Errorf("--%s and --%s are mutually exclusive", flagName, stdinFlag)
+	}
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", false, fmt.Errorf("read stdin for --%s: %w", stdinFlag, err)
+		}
+		body := strings.TrimSuffix(string(data), "\n")
+		if body == "" {
+			return "", false, fmt.Errorf("stdin content for --%s is empty", stdinFlag)
+		}
+		return body, true, nil
+	}
+	if inline == "" {
+		return "", false, nil
+	}
+	return util.UnescapeBackslashEscapes(inline), true, nil
+}
 
 var issueCmd = &cobra.Command{
 	Use:   "issue",
@@ -132,6 +164,13 @@ var issueRunMessagesCmd = &cobra.Command{
 	RunE:  runIssueRunMessages,
 }
 
+var issueRerunCmd = &cobra.Command{
+	Use:   "rerun <id>",
+	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
+	Args:  exactArgs(1),
+	RunE:  runIssueRerun,
+}
+
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title or description",
@@ -154,6 +193,7 @@ func init() {
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -168,7 +208,8 @@ func init() {
 	issueListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
-	issueListCmd.Flags().String("assignee", "", "Filter by assignee name")
+	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member or agent; fuzzy match)")
+	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
@@ -178,10 +219,12 @@ func init() {
 
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
-	issueCreateCmd.Flags().String("description", "", "Issue description")
+	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent)")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent; fuzzy match)")
+	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
@@ -190,10 +233,12 @@ func init() {
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
-	issueUpdateCmd.Flags().String("description", "", "New description")
+	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
-	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent)")
+	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent; fuzzy match)")
+	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -203,26 +248,30 @@ func init() {
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue assign
-	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent)")
+	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent; fuzzy match)")
+	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
-	issueCommentListCmd.Flags().Int("limit", 0, "Maximum number of comments to return (0 = all)")
+	issueCommentListCmd.Flags().Int("limit", 50, "Maximum number of comments to return (0 = server default of 50, max ~100 depending on server)")
 	issueCommentListCmd.Flags().Int("offset", 0, "Number of comments to skip")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// issue rerun
+	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
 
 	// issue comment add
-	issueCommentAddCmd.Flags().String("content", "", "Comment content (required unless --content-stdin)")
-	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (avoids shell escaping issues)")
+	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -236,11 +285,13 @@ func init() {
 	issueSubscriberListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue subscriber add
-	issueSubscriberAddCmd.Flags().String("user", "", "Member or agent name to subscribe (defaults to the caller)")
+	issueSubscriberAddCmd.Flags().String("user", "", "Member or agent name to subscribe (fuzzy match; defaults to the caller)")
+	issueSubscriberAddCmd.Flags().String("user-id", "", "Member or agent UUID to subscribe (mutually exclusive with --user)")
 	issueSubscriberAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue subscriber remove
-	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (defaults to the caller)")
+	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (fuzzy match; defaults to the caller)")
+	issueSubscriberRemoveCmd.Flags().String("user-id", "", "Member or agent UUID to unsubscribe (mutually exclusive with --user)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -274,11 +325,11 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
 		params.Set("limit", fmt.Sprintf("%d", v))
 	}
-	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
-		_, aID, resolveErr := resolveAssignee(ctx, client, v)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve assignee: %w", resolveErr)
-		}
+	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve assignee: %w", resolveErr)
+	}
+	if hasAssignee {
 		params.Set("assignee_id", aID)
 	}
 	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
@@ -379,6 +430,15 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
+// isHTTPURL reports whether path is an http:// or https:// URL.
+// Used to skip URL-shaped values passed to --attachment, which only
+// accepts local file paths. Trims surrounding whitespace because
+// agent-generated commands sometimes copy URLs with stray spaces.
+func isHTTPURL(path string) bool {
+	p := strings.TrimSpace(path)
+	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -400,8 +460,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	body := map[string]any{"title": title}
-	if v, _ := cmd.Flags().GetString("description"); v != "" {
-		body["description"] = v
+	desc, hasDesc, err := resolveTextFlag(cmd, "description")
+	if err != nil {
+		return err
+	}
+	if hasDesc {
+		body["description"] = desc
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		body["status"] = v
@@ -418,13 +482,55 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
-	if v, _ := cmd.Flags().GetString("assignee"); v != "" {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve assignee: %w", resolveErr)
-		}
+	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve assignee: %w", resolveErr)
+	}
+	if hasAssignee {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
+	}
+
+	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
+	// before invoking the agent, the agent's `multica issue create` call
+	// inherits the env var and tags the new issue with origin_type=
+	// quick_create + origin_id=<task_id>. The completion handler then
+	// locates the issue deterministically by origin instead of "most
+	// recent issue by this agent", which is racy when max_concurrent_tasks
+	// > 1 and the agent is creating other issues in parallel.
+	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
+		body["origin_type"] = "quick_create"
+		body["origin_id"] = taskID
+	}
+
+	// Pre-validate attachments BEFORE creating the issue so a bad path
+	// can never produce a half-created issue (which would otherwise
+	// trigger callers — especially the agent doing quick-create — to
+	// retry the whole `issue create` and end up with duplicates).
+	//
+	//   - http(s) URLs are not local files; the API only accepts local
+	//     paths here. Warn and skip rather than fail — a markdown image
+	//     URL embedded in the prompt should never be re-attached, and
+	//     skipping is the safest outcome for that case.
+	//   - Anything else is treated as a local path and read upfront.
+	//     A read failure here is a real user/agent mistake (typo,
+	//     missing file) and we surface it pre-create so the issue
+	//     never lands.
+	type pendingAttachment struct {
+		path string
+		data []byte
+	}
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
 	}
 
 	var result map[string]any
@@ -433,16 +539,17 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Upload attachments and link them to the newly created issue.
+	// Failures here are partial-success: the issue exists already, so
+	// turning a non-zero exit on the caller would invite a retry that
+	// duplicates the issue. Warn on stderr and continue.
 	issueID := strVal(result, "id")
-	for _, filePath := range attachments {
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+	for _, att := range pending {
+		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
+				att.path, strVal(result, "identifier"), uploadErr)
+			continue
 		}
-		if _, uploadErr := client.UploadFile(ctx, data, filePath, issueID); uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -475,9 +582,12 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("title")
 		body["title"] = v
 	}
-	if cmd.Flags().Changed("description") {
-		v, _ := cmd.Flags().GetString("description")
-		body["description"] = v
+	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") {
+		desc, _, err := resolveTextFlag(cmd, "description")
+		if err != nil {
+			return err
+		}
+		body["description"] = desc
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
@@ -495,14 +605,15 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
-	if cmd.Flags().Changed("assignee") {
-		v, _ := cmd.Flags().GetString("assignee")
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
+	if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("assignee-id") {
+		aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id")
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
-		body["assignee_type"] = aType
-		body["assignee_id"] = aID
+		if hasAssignee {
+			body["assignee_type"] = aType
+			body["assignee_id"] = aID
+		}
 	}
 	if cmd.Flags().Changed("parent") {
 		v, _ := cmd.Flags().GetString("parent")
@@ -541,12 +652,14 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
+	toNameSet := cmd.Flags().Changed("to")
+	toIDSet := cmd.Flags().Changed("to-id")
 
-	if toName == "" && !unassign {
-		return fmt.Errorf("provide --to <name> or --unassign")
+	if !toNameSet && !toIDSet && !unassign {
+		return fmt.Errorf("provide --to <name>, --to-id <uuid>, or --unassign")
 	}
-	if toName != "" && unassign {
-		return fmt.Errorf("--to and --unassign are mutually exclusive")
+	if (toNameSet || toIDSet) && unassign {
+		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -558,16 +671,20 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	body := map[string]any{}
+	displayTarget := toName
 	if unassign {
 		body["assignee_type"] = nil
 		body["assignee_id"] = nil
 	} else {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, toName)
+		aType, aID, _, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "to", "to-id")
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
+		if displayTarget == "" {
+			displayTarget = truncateID(aID)
+		}
 	}
 
 	var result map[string]any
@@ -578,7 +695,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	if unassign {
 		fmt.Fprintf(os.Stderr, "Issue %s unassigned.\n", truncateID(args[0]))
 	} else {
-		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", truncateID(args[0]), toName)
+		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", truncateID(args[0]), displayTarget)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -706,25 +823,11 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
-	content, _ := cmd.Flags().GetString("content")
-	useStdin, _ := cmd.Flags().GetBool("content-stdin")
-
-	if content != "" && useStdin {
-		return fmt.Errorf("--content and --content-stdin are mutually exclusive")
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
 	}
-
-	if useStdin {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		content = strings.TrimSuffix(string(data), "\n")
-		if content == "" {
-			return fmt.Errorf("stdin content is empty")
-		}
-	}
-
-	if content == "" {
+	if !hasContent {
 		return fmt.Errorf("--content or --content-stdin is required")
 	}
 
@@ -744,9 +847,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Upload attachments and collect their IDs.
+	// Upload attachments and collect their IDs. URLs are skipped with a
+	// warning — `--attachment` only accepts local file paths, and a
+	// markdown image URL embedded in agent-supplied content should never
+	// be re-uploaded as if it were a file. Unlike `issue create`, this
+	// path uploads BEFORE posting the comment, so a hard failure on a
+	// real (local) attachment correctly aborts the whole call.
 	var attachmentIDs []string
 	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
 			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
@@ -903,6 +1015,28 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 // Search command
 // ---------------------------------------------------------------------------
 
+func runIssueRerun(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var task map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/rerun", map[string]any{}, &task); err != nil {
+		return fmt.Errorf("rerun issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, task)
+	}
+	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), strVal(task, "agent_id"))
+	return nil
+}
+
 func runIssueSearch(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1024,11 +1158,11 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 
 	body := map[string]any{}
 	userName, _ := cmd.Flags().GetString("user")
-	if userName != "" {
-		uType, uID, resolveErr := resolveAssignee(ctx, client, userName)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve user: %w", resolveErr)
-		}
+	uType, uID, hasUser, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "user", "user-id")
+	if resolveErr != nil {
+		return fmt.Errorf("resolve user: %w", resolveErr)
+	}
+	if hasUser {
 		body["user_type"] = uType
 		body["user_id"] = uID
 	}
@@ -1042,6 +1176,8 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 	target := "caller"
 	if userName != "" {
 		target = userName
+	} else if hasUser {
+		target = truncateID(uID)
 	}
 	if action == "subscribe" {
 		fmt.Fprintf(os.Stderr, "Subscribed %s to issue %s.\n", target, truncateID(issueID))
@@ -1071,9 +1207,35 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
 
-	nameLower := strings.ToLower(name)
-	var matches []assigneeMatch
+	input := strings.TrimSpace(name)
+	if input == "" {
+		return "", "", fmt.Errorf("no member or agent found matching %q", name)
+	}
+	inputLower := strings.ToLower(input)
+
+	// Matches are collected into three priority buckets. Higher-priority buckets
+	// short-circuit lower-priority matching so that, e.g., an exact name match
+	// always wins over a substring collision with another candidate.
+	//   1. idMatches        — full UUID or 8-char ShortID (as shown by `truncateID`).
+	//   2. exactMatches     — case-insensitive full name equality.
+	//   3. substringMatches — preserves the existing partial-name UX.
+	var idMatches, exactMatches, substringMatches []assigneeMatch
 	var errs []error
+
+	classify := func(entityType, id, displayName string) {
+		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
+		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
+			idMatches = append(idMatches, match)
+			return
+		}
+		if strings.EqualFold(displayName, input) {
+			exactMatches = append(exactMatches, match)
+			return
+		}
+		if strings.Contains(strings.ToLower(displayName), inputLower) {
+			substringMatches = append(substringMatches, match)
+		}
+	}
 
 	// Search members.
 	var members []map[string]any
@@ -1081,14 +1243,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch members: %w", err))
 	} else {
 		for _, m := range members {
-			mName := strVal(m, "name")
-			if strings.Contains(strings.ToLower(mName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "member",
-					ID:   strVal(m, "user_id"),
-					Name: mName,
-				})
-			}
+			classify("member", strVal(m, "user_id"), strVal(m, "name"))
 		}
 	}
 
@@ -1099,14 +1254,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 	} else {
 		for _, a := range agents {
-			aName := strVal(a, "name")
-			if strings.Contains(strings.ToLower(aName), nameLower) {
-				matches = append(matches, assigneeMatch{
-					Type: "agent",
-					ID:   strVal(a, "id"),
-					Name: aName,
-				})
-			}
+			classify("agent", strVal(a, "id"), strVal(a, "name"))
 		}
 	}
 
@@ -1115,18 +1263,102 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (s
 		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", errs[0], errs[1])
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("no member or agent found matching %q", name)
-	case 1:
-		return matches[0].Type, matches[0].ID, nil
-	default:
-		var parts []string
-		for _, m := range matches {
-			parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	for _, bucket := range [][]assigneeMatch{idMatches, exactMatches, substringMatches} {
+		switch len(bucket) {
+		case 0:
+			continue
+		case 1:
+			return bucket[0].Type, bucket[0].ID, nil
+		default:
+			return "", "", ambiguousAssigneeError(input, bucket)
 		}
-		return "", "", fmt.Errorf("ambiguous assignee %q; matches:\n%s", name, strings.Join(parts, "\n"))
 	}
+	return "", "", fmt.Errorf("no member or agent found matching %q", input)
+}
+
+func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
+	parts := make([]string, 0, len(matches))
+	for _, m := range matches {
+		parts = append(parts, fmt.Sprintf("  %s %q (%s)", m.Type, m.Name, truncateID(m.ID)))
+	}
+	return fmt.Errorf("ambiguous assignee %q; matches:\n%s", input, strings.Join(parts, "\n"))
+}
+
+// resolveAssigneeByID strictly resolves a canonical UUID to (assignee_type,
+// assignee_id) by looking it up against the workspace's members and agents.
+// It is the deterministic counterpart to resolveAssignee: callers that already
+// hold a UUID (e.g. agents reading IDs from `multica workspace members
+// --output json`) should use this instead of round-tripping through name
+// matching, which can be ambiguous in workspaces with overlapping names.
+func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string) (string, string, error) {
+	if client.WorkspaceID == "" {
+		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+	input := strings.TrimSpace(id)
+	if !uuidRegexp.MatchString(input) {
+		return "", "", fmt.Errorf("expected a canonical UUID, got %q", id)
+	}
+
+	var members []map[string]any
+	memberErr := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+
+	var agents []map[string]any
+	agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
+	agentErr := client.GetJSON(ctx, agentPath, &agents)
+
+	if memberErr != nil && agentErr != nil {
+		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", memberErr, agentErr)
+	}
+
+	for _, m := range members {
+		if strings.EqualFold(strVal(m, "user_id"), input) {
+			return "member", strVal(m, "user_id"), nil
+		}
+	}
+	for _, a := range agents {
+		if strings.EqualFold(strVal(a, "id"), input) {
+			return "agent", strVal(a, "id"), nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no member or agent found with ID %q", input)
+}
+
+// pickAssigneeFromFlags reads a (name-flag, id-flag) pair off cmd and resolves
+// it to (assignee_type, assignee_id). The third return reports whether either
+// flag was *explicitly set*; callers use it to decide whether to write
+// `assignee_*` into the request body. The two flags are mutually exclusive —
+// passing both is rejected up-front so a script that accidentally sets both
+// never silently applies one over the other.
+//
+// Presence is detected via Flags().Changed (not value-emptiness): a script
+// that interpolates an empty env var (`--assignee-id "$MAYBE_UUID"`) must
+// fail loudly through resolveAssignee/resolveAssigneeByID rather than silently
+// degrade to "no filter / unassigned / subscribe caller", which would defeat
+// the strict-UUID guarantee the new flags exist for.
+func pickAssigneeFromFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, nameFlag, idFlag string) (string, string, bool, error) {
+	nameSet := cmd.Flags().Changed(nameFlag)
+	idSet := cmd.Flags().Changed(idFlag)
+	if nameSet && idSet {
+		return "", "", false, fmt.Errorf("--%s and --%s are mutually exclusive", nameFlag, idFlag)
+	}
+	if idSet {
+		idVal, _ := cmd.Flags().GetString(idFlag)
+		t, i, err := resolveAssigneeByID(ctx, client, idVal)
+		if err != nil {
+			return "", "", true, err
+		}
+		return t, i, true, nil
+	}
+	if nameSet {
+		name, _ := cmd.Flags().GetString(nameFlag)
+		t, i, err := resolveAssignee(ctx, client, name)
+		if err != nil {
+			return "", "", true, err
+		}
+		return t, i, true, nil
+	}
+	return "", "", false, nil
 }
 
 func formatAssignee(issue map[string]any) string {

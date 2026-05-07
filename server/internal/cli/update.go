@@ -17,10 +17,83 @@ import (
 	"time"
 )
 
+const DefaultUpdateDownloadTimeout = 120 * time.Second
+
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
+	TagName string               `json:"tag_name"`
+	HTMLURL string               `json:"html_url"`
+	Assets  []GitHubReleaseAsset `json:"assets"`
+}
+
+type GitHubReleaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+func releaseArchiveExtension(goos string) string {
+	if goos == "windows" {
+		return "zip"
+	}
+	return "tar.gz"
+}
+
+func normalizeReleaseTag(targetVersion string) string {
+	tag := strings.TrimSpace(targetVersion)
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	return tag
+}
+
+func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
+	tag := normalizeReleaseTag(targetVersion)
+	version := strings.TrimPrefix(tag, "v")
+	ext := releaseArchiveExtension(goos)
+	// Prefer the versioned name (current scheme); fall back to the legacy
+	// `multica_{os}_{arch}` name for releases that still ship it.
+	return []string{
+		fmt.Sprintf("multica-cli-%s-%s-%s.%s", version, goos, goarch, ext),
+		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
+	}
+}
+
+func findReleaseAsset(assets []GitHubReleaseAsset, targetVersion, goos, goarch string) (*GitHubReleaseAsset, error) {
+	for _, candidate := range releaseAssetCandidates(targetVersion, goos, goarch) {
+		for i := range assets {
+			if assets[i].Name == candidate {
+				return &assets[i], nil
+			}
+		}
+	}
+
+	candidates := strings.Join(releaseAssetCandidates(targetVersion, goos, goarch), ", ")
+	return nil, fmt.Errorf("no matching release asset for %s/%s (tried: %s)", goos, goarch, candidates)
+}
+
+func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+	return &release, nil
 }
 
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
@@ -93,9 +166,21 @@ func UpdateViaBrew() (string, error) {
 	return string(out), nil
 }
 
+func updateDownloadTimeoutOrDefault(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return DefaultUpdateDownloadTimeout
+	}
+	return timeout
+}
+
 // UpdateViaDownload downloads the latest release binary from GitHub and replaces
 // the current executable in-place. Returns the combined output message and any error.
 func UpdateViaDownload(targetVersion string) (string, error) {
+	return UpdateViaDownloadWithTimeout(targetVersion, DefaultUpdateDownloadTimeout)
+}
+
+// UpdateViaDownloadWithTimeout downloads the latest release binary with a caller-selected timeout.
+func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
 	// Determine current binary path.
 	exePath, err := os.Executable()
 	if err != nil {
@@ -106,21 +191,20 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("resolve symlink: %w", err)
 	}
 
-	// Build download URL: multica_{os}_{arch}.{tar.gz|zip}
-	// GoReleaser produces .zip for Windows and .tar.gz for everything else.
-	tag := targetVersion
-	if !strings.HasPrefix(tag, "v") {
-		tag = "v" + tag
+	tag := normalizeReleaseTag(targetVersion)
+	release, err := fetchReleaseByTag(tag)
+	if err != nil {
+		return "", fmt.Errorf("fetch release metadata: %w", err)
 	}
-	ext := "tar.gz"
-	if runtime.GOOS == "windows" {
-		ext = "zip"
+	asset, err := findReleaseAsset(release.Assets, tag, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", err
 	}
-	assetName := fmt.Sprintf("multica_%s_%s.%s", runtime.GOOS, runtime.GOARCH, ext)
-	downloadURL := fmt.Sprintf("https://github.com/multica-ai/multica/releases/download/%s/%s", tag, assetName)
+	downloadURL := asset.BrowserDownloadURL
+	assetName := asset.Name
 
 	// Download the archive.
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: updateDownloadTimeoutOrDefault(downloadTimeout)}
 	resp, err := client.Get(downloadURL)
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
@@ -172,8 +256,9 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	// Replace the original binary.
-	if err := os.Rename(tmpPath, exePath); err != nil {
+	// Replace the original binary. On Windows this moves the running executable
+	// aside first; on Unix a plain rename over the running inode is fine.
+	if err := replaceBinary(tmpPath, exePath); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("replace binary: %w", err)
 	}
@@ -241,4 +326,3 @@ func extractBinaryFromZip(r io.Reader, name string) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("binary %q not found in archive", name)
 }
-

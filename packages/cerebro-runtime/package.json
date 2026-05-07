@@ -1,0 +1,32 @@
+{
+  "name": "@multica/cerebro-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./views": "./views/index.ts",
+    "./views/docs": "./views/docs/index.ts"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(user-preferences-handler): cerebro modification of upstream file
+
 import (
 	"encoding/json"
 	"log/slog"

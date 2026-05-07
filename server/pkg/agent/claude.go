@@ -1,9 +1,12 @@
 package agent
 
+// CEREBRO-PATCH(agent-claude-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -59,6 +62,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
+	// CEREBRO-PATCH(agent-claude-sandbox): prepareCommand wraps the agent in
+	// the daemon sandbox when enabled; falls back to plain exec.CommandContext.
 	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
 	if err != nil {
 		cancel()
@@ -70,6 +75,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sandboxCleanup()
 		}
 	}()
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -93,13 +99,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			stdin = nil
 		}
 	}
-	// Tee stderr to a ring buffer so we can quote the tail when claude exits
-	// 0 with empty stdout (sandbox denial, missing auth, model reject, …).
-	// Without this, the only diagnostic was "claude returned empty output"
-	// in the daemon comment and a Debug-level kernel message in the daemon
-	// log nobody reads. See JEH-405.
-	stderrTail := newRingBuffer(stderrTailBytes)
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[claude:stderr] "), stderrTail)
+	// CEREBRO-PATCH(agent-claude-stderr-tail-cap): claude needs a larger 64KB
+	// stderr tail cap (vs upstream's 2KB default) for empty-output diagnostics
+	// (JEH-405) — sandbox denials, missing auth, and model rejects often
+	// produce more than 2KB of trailing stderr context.
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), stderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -107,10 +112,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 	if err := writeClaudeInput(stdin, prompt); err != nil {
+		// claude almost certainly died during startup (broken pipe). The
+		// real reason is sitting in stderrBuf — surface it the same way the
+		// post-handshake error path does, otherwise the daemon log is the
+		// only place that knows whether it was a V8 abort, a missing native
+		// module, or anything else. cmd.Wait() flushes os/exec's stderr
+		// copy goroutine, so stderrBuf.Tail() is safe to read.
 		closeStdin()
 		cancel()
 		_ = cmd.Wait()
-		return nil, fmt.Errorf("write claude input: %w", err)
+		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 	}
 	closeStdin()
 
@@ -182,7 +193,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				closeStdin()
 				sessionID = msg.SessionID
@@ -226,14 +237,23 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
 		}
 
-		// Empty-output diagnostic (JEH-405): a clean exit with no stdout
-		// is otherwise reported as "claude returned empty output" with no
-		// reason. Surface the actual signals (exit code, stderr tail,
-		// unparseable line count) so the daemon can forward them in the
-		// task comment instead of the operator having to ssh into the
-		// host and grep daemon.err.log.
+		// CEREBRO-PATCH(agent-claude-empty-output-diagnostic): empty-output
+		// diagnostic (JEH-405). A clean exit with no stdout is otherwise
+		// reported as "claude returned empty output" with no reason. Surface
+		// the actual signals (exit code, stderr tail, unparseable line count)
+		// so the daemon can forward them in the task comment instead of the
+		// operator having to ssh into the host and grep daemon.err.log.
 		if finalStatus == "completed" && output.Len() == 0 {
-			finalError = formatEmptyOutputReason(exitCode, unparseableCount, firstUnparseable, stderrTail.Snapshot())
+			finalError = formatEmptyOutputReason(exitCode, unparseableCount, firstUnparseable, stderrBuf.Tail())
+		}
+
+		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
+		// observed every byte claude wrote to stderr before exiting, so
+		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
+		// non-empty failure message; callers upstream surface this as the
+		// task's error field, which is the only place users see it.
+		if finalError != "" {
+			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
 		}
 
 		b.cfg.Logger.Info("claude finished",
@@ -243,6 +263,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			"exit_code", exitCode,
 			"unparseable_lines", unparseableCount,
 		)
+
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {
@@ -466,6 +487,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
 	return args
 }
@@ -607,6 +629,7 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	cmd := exec.CommandContext(ctx, execPath, "--version")
+	hideAgentWindow(cmd)
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

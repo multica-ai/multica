@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-059-task-tokens): cerebro modification of upstream file
 -- Per-task scoped tokens. Replace the daemon's full PAT with a short-lived,
 -- scope-limited token that the agent process is allowed to see. If the agent
 -- is compromised (prompt injection, exfiltration), the blast radius is the

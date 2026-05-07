@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-056-attachment-chat-message): cerebro modification of upstream file
 -- Allow attachments to be linked to a chat message in addition to issues
 -- and comments. Existing rows keep issue_id / comment_id, the new column
 -- starts NULL so no existing data is touched.

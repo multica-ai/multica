@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-001-init): cerebro modification of upstream file
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 

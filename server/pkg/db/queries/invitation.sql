@@ -47,4 +47,16 @@ WHERE id = $1 AND status = 'pending';
 
 -- name: GetPendingInvitationByEmail :one
 SELECT * FROM workspace_invitation
-WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending';
+WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now();
+
+-- name: ExpireStalePendingInvitations :exec
+-- Mark any past-due pending invitations for (workspace_id, invitee_email) as expired,
+-- so the next CreateInvitation does not collide with the partial unique index
+-- idx_invitation_unique_pending (which is WHERE status = 'pending' and cannot
+-- itself reference now() in its predicate).
+UPDATE workspace_invitation
+SET status = 'expired', updated_at = now()
+WHERE workspace_id = $1
+  AND invitee_email = $2
+  AND status = 'pending'
+  AND expires_at <= now();

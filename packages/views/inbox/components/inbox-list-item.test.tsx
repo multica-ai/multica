@@ -18,6 +18,32 @@ vi.mock("@multica/core/auth", () => ({
     selector({ user: { id: "me" } }),
 }));
 
+// Translate the few strings this test asserts on (titles / labels). The
+// component uses the selector form t(($) => $.list.archive_tooltip), so we
+// resolve against the same shape the en/inbox.json bundle exposes.
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (
+      selectorOrKey: unknown,
+    ): string => {
+      const dict = {
+        list: {
+          archive_tooltip: "Archive",
+        },
+      };
+      if (typeof selectorOrKey === "function") {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (selectorOrKey as (d: any) => string)(dict) ?? "";
+        } catch {
+          return "";
+        }
+      }
+      return typeof selectorOrKey === "string" ? selectorOrKey : "";
+    },
+  }),
+}));
+
 import { ChannelListItem, InboxListItem } from "./inbox-list-item";
 
 function makeIssueInboxItem(overrides: Partial<InboxItem> = {}): InboxItem {

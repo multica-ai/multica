@@ -1,7 +1,26 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen, type RenderOptions } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enSettings from "../../locales/en/settings.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, settings: enSettings },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function render(ui: React.ReactElement, options?: RenderOptions) {
+  return rtlRender(ui, { wrapper: I18nWrapper, ...options });
+}
 
 // The shared Dialog is a Base UI portal that's awkward to test — strip it to
 // simple pass-through wrappers. The typed-confirmation logic lives in the

@@ -29,9 +29,7 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,7 +40,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
-      # JWT_SECRET must be set in .env (>= 32 bytes). Backend refuses to boot otherwise.
+      METRICS_ADDR: ${METRICS_ADDR:-}
+      # CEREBRO-PATCH(jwt-secret-required): JWT_SECRET must be set in .env (>= 32 bytes). Backend refuses to boot otherwise.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env (>= 32 bytes); generate one with: openssl rand -hex 32}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
@@ -58,17 +57,15 @@ services:
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
+      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
     restart: unless-stopped
 
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-      args:
-        REMOTE_API_URL: http://backend:8080
-        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+    image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       - backend
     ports:

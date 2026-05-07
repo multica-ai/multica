@@ -1,0 +1,233 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "Instructions any agent in this workspace can use.",
+    "learn_more": "Learn more →",
+    "new_skill": "New skill",
+    "search_placeholder": "Search skills…",
+    "scopes": {
+      "all": { "label": "All", "description": "All skills in this workspace" },
+      "used": { "label": "In use", "description": "Skills assigned to at least one agent" },
+      "unused": { "label": "Unused", "description": "Skills not assigned to any agent" },
+      "mine": { "label": "Created by me", "description": "Skills you created" }
+    },
+    "empty": {
+      "title": "No skills yet",
+      "description": "Create your first skill, import one from a URL, or copy one from a connected runtime — and every agent in the workspace can use it."
+    },
+    "no_matches": {
+      "title": "No matches",
+      "with_query": "No skills match \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " in this filter",
+      "filter_only": "No skills match this filter.",
+      "try_different": " Try a different query."
+    },
+    "intro_banner": {
+      "title": "Shared with your workspace.",
+      "body": "Anyone can create a skill, import one from a URL, or copy one from their local runtime — and every agent can use it.",
+      "highlight": "Local runtime skills stay private until you copy one here."
+    },
+    "list_error": {
+      "title": "Couldn't load skills",
+      "fallback": "Something went wrong fetching the skill list.",
+      "retry": "Try again"
+    },
+    "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete."
+  },
+  "table": {
+    "name": "Name",
+    "used_by": "Used by",
+    "source": "Source · Added by",
+    "updated": "Updated",
+    "no_description": "No description",
+    "lock_tooltip": "Read-only — only creator or admin can edit",
+    "unused": "— unused",
+    "by_creator": "by {{name}}",
+    "source_manual": "Created manually",
+    "source_runtime_named": "From {{name}}",
+    "source_runtime_provider": "From {{provider}} runtime",
+    "source_runtime_unknown": "From a runtime",
+    "source_clawhub": "From ClawHub",
+    "source_skills_sh": "From Skills.sh"
+  },
+  "detail": {
+    "all_skills": "All skills",
+    "read_only": "Read-only",
+    "delete_aria": "Delete skill",
+    "delete_tooltip": "Delete skill",
+    "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
+    "files_label": "Files · {{count}}",
+    "add_file_aria": "Add file",
+    "add_file_tooltip": "Add file",
+    "delete_file": "Delete file",
+    "name_aria": "Skill name",
+    "name_placeholder": "skill-name",
+    "description_label": "Description",
+    "description_placeholder": "One sentence describing when an agent should use this skill…",
+    "subline": {
+      "origin_runtime_named": "Local runtime · {{name}}",
+      "origin_runtime_provider": "Local runtime · {{provider}}",
+      "origin_runtime_unknown": "Local runtime",
+      "origin_clawhub": "Imported · ClawHub",
+      "origin_skills_sh": "Imported · Skills.sh",
+      "origin_workspace": "Workspace",
+      "updated_label": "Updated {{when}}",
+      "by_creator": "by {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Someone else updated this skill",
+      "body": "Your edits are preserved. Discard to pull their changes, or Save to overwrite."
+    },
+    "save_bar": {
+      "unsaved": "Unsaved changes — will overwrite the live skill on save",
+      "discard": "Discard",
+      "save": "Save changes",
+      "saving": "Saving…"
+    },
+    "sidebar": {
+      "metadata": "Metadata",
+      "created": "Created",
+      "updated": "Updated",
+      "created_by": "Created by",
+      "files": "Files",
+      "id": "ID",
+      "origin": "Origin",
+      "used_by_one": "Used by {{count}} agent",
+      "used_by_other": "Used by {{count}} agents",
+      "permissions": "Permissions",
+      "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
+      "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
+      "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
+      "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign."
+    },
+    "origin_card": {
+      "imported_runtime": "Imported from local runtime",
+      "imported_clawhub": "Imported from ClawHub",
+      "imported_skills_sh": "Imported from Skills.sh",
+      "provider": "provider · {{provider}}"
+    },
+    "not_found": {
+      "title": "Skill not found",
+      "fallback": "This skill may have been deleted or you lost access.",
+      "back": "Back to Skills"
+    },
+    "toast_saved": "Skill saved",
+    "toast_save_failed": "Failed to save skill",
+    "toast_deleted": "Skill deleted",
+    "toast_delete_failed": "Failed to delete skill",
+    "delete_dialog": {
+      "title": "Delete skill?",
+      "description_with_agents_one": "This will permanently delete \"{{name}}\" and remove it from {{count}} agent currently using it.",
+      "description_with_agents_other": "This will permanently delete \"{{name}}\" and remove it from {{count}} agents currently using it.",
+      "description_no_agents": "This will permanently delete \"{{name}}\" and remove it from all agents.",
+      "warning": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "deleting": "Deleting…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Add",
+      "cancel": "Cancel",
+      "errors": {
+        "empty": "Path cannot be empty.",
+        "absolute": "Absolute paths are not allowed.",
+        "double_dot": "Paths cannot contain \"..\".",
+        "reserved": "SKILL.md is reserved for the main file.",
+        "exists": "A file at this path already exists."
+      }
+    }
+  },
+  "create": {
+    "back": "Back",
+    "back_aria": "Back to method chooser",
+    "close": "Close",
+    "close_aria": "Close",
+    "method": {
+      "chooser": {
+        "title": "New skill",
+        "desc": "Choose how you want to add a skill to this workspace."
+      },
+      "manual": {
+        "title": "Create manually",
+        "desc": "Write a new SKILL.md from scratch."
+      },
+      "url": {
+        "title": "Import from URL",
+        "desc": "Fetch a published skill by URL. Files are pulled server-side."
+      },
+      "runtime": {
+        "title": "Copy from runtime",
+        "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+      }
+    },
+    "method_card": {
+      "manual_title": "Create manually",
+      "manual_desc": "Start from a blank SKILL.md and write your own instructions.",
+      "url_title": "Import from URL",
+      "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
+      "runtime_title": "Copy from runtime",
+      "runtime_desc": "Promote a skill already installed on your local runtime."
+    },
+    "manual": {
+      "name_label": "Name",
+      "name_placeholder": "e.g. review-helper",
+      "name_hint": "Must be unique within the workspace.",
+      "description_label": "Description",
+      "description_placeholder": "One sentence on when to assign this skill to an agent.",
+      "name_conflict_hint": " Try a different name and submit again.",
+      "fallback_error": "Failed to create skill",
+      "cancel": "Cancel",
+      "submit": "Create skill",
+      "submitting": "Creating…",
+      "toast_created": "Skill created"
+    },
+    "url": {
+      "url_label": "Skill URL",
+      "supported_sources": "Supported sources",
+      "import": "Import",
+      "importing": "Importing…",
+      "importing_clawhub": "Importing from ClawHub…",
+      "importing_skills_sh": "Importing from Skills.sh…",
+      "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
+      "fallback_error": "Import failed",
+      "cancel": "Cancel",
+      "toast_imported": "Skill imported"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Runtime",
+    "runtime_placeholder": "Select a local runtime",
+    "no_local_runtimes_title": "No local runtimes available",
+    "no_local_runtimes_hint": "Connect a local runtime to browse and import its local skills.",
+    "choose_runtime": "Choose a runtime to continue",
+    "must_be_online": "Runtime must be online to browse local skills.",
+    "load_failed": "Failed to load runtime local skills",
+    "not_supported": "This runtime provider does not expose local skill inventory yet.",
+    "no_skills_title": "No local skills found",
+    "no_skills_hint": "This runtime does not have any discoverable local skills yet.",
+    "ignored_files_hint": "Symlinks, unreadable files, oversized files, and very large bundles are ignored during import.",
+    "ready": "Ready to import",
+    "into_workspace": "into this workspace.",
+    "select_skill": "Select a skill to continue.",
+    "import_button": "Import to Workspace",
+    "importing": "Importing…",
+    "skill_files_one": "{{count}} file",
+    "skill_files_other": "{{count}} files",
+    "skill_name_label": "Workspace skill name",
+    "skill_description_label": "Description",
+    "skill_description_placeholder": "Optional — describe when an agent should use this skill.",
+    "toast_imported": "Skill imported",
+    "toast_import_failed": "Failed to import skill"
+  },
+  "file_tree": {
+    "no_files": "No files"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Edit",
+    "preview_tooltip": "Preview",
+    "no_content": "*No content yet*",
+    "markdown_placeholder": "Write markdown content...",
+    "raw_placeholder": "File content..."
+  }
+}

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(core-types-inbox): cerebro modification of upstream file
 import type { IssueStatus } from "./issue";
 
 export type InboxSeverity = "action_required" | "attention" | "info";
@@ -16,7 +17,9 @@ export type InboxItemType =
   | "task_failed"
   | "agent_blocked"
   | "agent_completed"
-  | "reaction_added";
+  | "reaction_added"
+  | "quick_create_done"
+  | "quick_create_failed";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-033-chat): cerebro modification of upstream file
 -- Add chat session and chat message tables for the agent chat feature.
 
 -- chat_session: persistent chat between a user and an agent.

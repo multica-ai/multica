@@ -14,12 +14,12 @@ vi.mock("@multica/ui/hooks/use-scroll-fade", () => ({
   useScrollFade: () => ({}),
 }));
 
-vi.mock("@multica/ui/hooks/use-sticky-bottom", () => ({
+vi.mock("@multica/cerebro-ui/hooks/use-sticky-bottom", () => ({
   useStickyBottom: () => ({ hasNewBelow: false, scrollToBottom: () => {} }),
 }));
 
 import { ChatMessageList } from "./chat-message-list";
-import { ChatStatusLine } from "./chat-status-line";
+import { ChatStatusLine } from "@multica/cerebro-chat/views";
 
 const TASK_ID = "task-live-1";
 const COMPLETED_TASK_ID = "task-done-1";
@@ -59,7 +59,11 @@ describe("ChatMessageList", () => {
     );
 
     withQuery(
-      <ChatMessageList messages={[]} pendingTaskId={TASK_ID} isWaiting={true} />,
+      <ChatMessageList
+        messages={[]}
+        pendingTask={{ task_id: TASK_ID, status: "running" }}
+        availability={undefined}
+      />,
       qc,
     );
 
@@ -71,7 +75,13 @@ describe("ChatMessageList", () => {
     expect(screen.getByText(".../foo/bar.ts")).toBeInTheDocument();
   });
 
-  it("keeps non-final tool groups collapsed in completed assistant messages", () => {
+  it("keeps tool groups collapsed in completed assistant messages", () => {
+    // After upstream PR #2151, intermediate tool steps in a completed
+    // assistant message render inside a single OuterProcessFold that is
+    // collapsed by default (defaultOpen = isStreaming, and isStreaming is
+    // false for a persisted message). We assert the fold renders closed
+    // and that no tool names leak into the document until the user opens
+    // it manually.
     const qc = createTestQueryClient();
     qc.setQueryData(
       chatKeys.taskMessages(COMPLETED_TASK_ID),
@@ -95,14 +105,13 @@ describe("ChatMessageList", () => {
     ];
 
     withQuery(
-      <ChatMessageList messages={messages} pendingTaskId={null} isWaiting={false} />,
+      <ChatMessageList messages={messages} pendingTask={null} availability={undefined} />,
       qc,
     );
 
-    // Last group is open (current default), early group stays collapsed —
-    // EarlyTool is hidden, LateTool is visible.
+    // Outer fold is closed → neither early nor late tool visible.
     expect(screen.queryByText("EarlyTool")).not.toBeInTheDocument();
-    expect(screen.getByText("LateTool")).toBeInTheDocument();
+    expect(screen.queryByText("LateTool")).not.toBeInTheDocument();
   });
 });
 
@@ -124,8 +133,8 @@ describe("MessageBubble user → waiting indicator (JEH-654)", () => {
     withQuery(
       <ChatMessageList
         messages={[userMessage({ id: "u-pending", content: "still in queue", respondedAt: null })]}
-        pendingTaskId={null}
-        isWaiting={false}
+        pendingTask={null}
+        availability={undefined}
       />,
       qc,
     );
@@ -143,8 +152,8 @@ describe("MessageBubble user → waiting indicator (JEH-654)", () => {
             respondedAt: "2026-05-07T10:00:30Z",
           }),
         ]}
-        pendingTaskId={null}
-        isWaiting={false}
+        pendingTask={null}
+        availability={undefined}
       />,
       qc,
     );

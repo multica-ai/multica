@@ -536,6 +536,7 @@ type ListInboxItemsRow struct {
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 }
 
+// CEREBRO-PATCH(sqlc-inbox): cerebro modification of upstream file
 // Generic non-archived listing across both routes. Used only by tests today;
 // production paths use the route-specific ListInboxFeed (route='inbox')
 // and ListNotificationsItems (route='notifications') queries.

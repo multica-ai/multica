@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-types): cerebro modification of upstream file
+
 import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
@@ -18,43 +20,66 @@ type Runtime struct {
 
 // RepoData holds repository information from the workspace.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description"`
+	URL string `json:"url"`
+}
+
+// ProjectResourceData mirrors handler.ProjectResourceData — a single project
+// resource as delivered to the daemon. resource_ref is type-specific JSON.
+type ProjectResourceData struct {
+	ID           string          `json:"id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        string          `json:"label,omitempty"`
 }
 
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID                    string     `json:"id"`
-	AgentID               string     `json:"agent_id"`
-	RuntimeID             string     `json:"runtime_id"`
-	IssueID               string     `json:"issue_id"`
-	WorkspaceID           string     `json:"workspace_id"`
-	Agent                 *AgentData `json:"agent,omitempty"`
-	Repos                 []RepoData `json:"repos,omitempty"`
-	PriorSessionID        string     `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
-	PriorWorkDir          string     `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
-	TriggerCommentID      string     `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
-	ChatMessages          []string   `json:"chat_messages,omitempty"`           // user messages newer than the last assistant reply (oldest first)
-	// ChatMessage is the latest user message, kept for backwards compat with
-	// daemons built before JEH-330 introduced ChatMessages. Old daemons read
-	// chat_message and would see an empty prompt without this field. New
-	// daemons (and buildChatPrompt) read ChatMessages and ignore this.
-	// Remove once every deployed runtime is on a post-JEH-330 binary.
-	ChatMessage string `json:"chat_message,omitempty"`
-	UserProfilePrompt     string     `json:"user_profile_prompt,omitempty"`     // compiled per-user communication prompt (JEH-304)
-	// TaskToken is a short-lived (~1h), scope-limited token (mtt_) the
-	// daemon must inject as MULTICA_TOKEN for the spawned agent process.
-	// Falling back to the daemon's own PAT would defeat the security
-	// model — agents must NEVER see the daemon's full token. JEH-324.
+	ID                      string                `json:"id"`
+	AgentID                 string                `json:"agent_id"`
+	RuntimeID               string                `json:"runtime_id"`
+	IssueID                 string                `json:"issue_id"`
+	WorkspaceID             string                `json:"workspace_id"`
+	Agent                   *AgentData            `json:"agent,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
+	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	// CEREBRO-PATCH(daemon-task-chat-messages): cerebro accumulates a list of
+	// user messages newer than the last assistant reply (oldest first) so the
+	// daemon can build a prompt covering bursts; ChatMessage stays for
+	// backwards compat with pre-JEH-330 daemons.
+	ChatMessages            []string              `json:"chat_messages,omitempty"`             // user messages newer than the last assistant reply (oldest first)
+	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
+	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
+	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
+	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	// CEREBRO-PATCH(daemon-task-user-profile-prompt): compiled per-user
+	// communication prompt (JEH-304).
+	UserProfilePrompt string `json:"user_profile_prompt,omitempty"`
+	// CEREBRO-PATCH(daemon-task-token): TaskToken is a short-lived (~1h),
+	// scope-limited token (mtt_) the daemon must inject as MULTICA_TOKEN
+	// for the spawned agent process. Falling back to the daemon's own PAT
+	// would defeat the security model — agents must NEVER see the daemon's
+	// full token. JEH-324.
 	TaskToken string `json:"task_token,omitempty"`
-	// SandboxEnabled is the per-runtime sandbox override (JEH-418). nil
-	// means "no override, fall back to the daemon's MULTICA_ENABLE_SANDBOX
-	// default"; true/false force sandbox on/off for this task regardless
-	// of the env var. Carried on every claim so an admin's UI toggle takes
-	// effect at the next claim — no daemon restart needed.
+	// CEREBRO-PATCH(daemon-task-sandbox-enabled): per-runtime sandbox
+	// override (JEH-418). nil means "no override, fall back to the daemon's
+	// MULTICA_ENABLE_SANDBOX default"; true/false force sandbox on/off for
+	// this task regardless of the env var. Carried on every claim so an
+	// admin's UI toggle takes effect at the next claim — no daemon restart
+	// needed.
 	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
 }
 
@@ -67,9 +92,11 @@ type AgentData struct {
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	// SandboxAllowlist is an admin-set list of additional outbound hosts
-	// (host:port) that this specific agent is allowed to reach when the
-	// macOS sandbox is enabled. Merged on top of the daemon-wide allowlist.
+	Model string `json:"model,omitempty"`
+	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
+	// additional outbound hosts (host:port) that this specific agent is
+	// allowed to reach when the macOS sandbox is enabled. Merged on top of
+	// the daemon-wide allowlist.
 	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }
 
@@ -98,12 +125,13 @@ type TaskUsageEntry struct {
 
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status     string           `json:"status"`
-	Comment    string           `json:"comment"`
-	BranchName string           `json:"branch_name,omitempty"`
-	EnvType    string           `json:"env_type,omitempty"`
-	SessionID  string           `json:"session_id,omitempty"` // Claude session ID for future resumption
-	WorkDir    string           `json:"work_dir,omitempty"`   // working directory used during execution
-	EnvRoot    string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
-	Usage      []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	Status        string           `json:"status"`
+	Comment       string           `json:"comment"`
+	BranchName    string           `json:"branch_name,omitempty"`
+	EnvType       string           `json:"env_type,omitempty"`
+	SessionID     string           `json:"session_id,omitempty"` // Claude session ID for future resumption
+	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
+	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
+	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
 }

@@ -25,6 +25,8 @@
   --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
                "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
                sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style",
+                "Apple Garamond", Baskerville, "Times New Roman", serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
                monospace;
 }

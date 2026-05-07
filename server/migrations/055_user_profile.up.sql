@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-055-user-profile): cerebro modification of upstream file
 -- Per-user agent communication profile (JEH-304).
 -- One profile per user, global across workspaces. The compiled prompt
 -- (see packages/core/profile/compile.ts) is injected into every agent call

@@ -9,18 +9,18 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import {
-  WORKSPACE_SLUG_CONFLICT_ERROR,
-  WORKSPACE_SLUG_FORMAT_ERROR,
   WORKSPACE_SLUG_REGEX,
   isWorkspaceSlugConflict,
   nameToWorkspaceSlug,
 } from "./slug";
+import { useT } from "../i18n";
 
 export interface CreateWorkspaceFormProps {
-  onSuccess: (workspace: Workspace) => void;
+  onSuccess: (workspace: Workspace) => void | Promise<void>;
 }
 
 export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
+  const { t } = useT("workspace");
   const createWorkspace = useCreateWorkspace();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -29,7 +29,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
-      ? WORKSPACE_SLUG_FORMAT_ERROR
+      ? t(($) => $.create_form.errors.slug_format)
       : null;
   const slugError = slugValidationError ?? slugServerError;
   const canSubmit =
@@ -57,11 +57,11 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
         onSuccess,
         onError: (error) => {
           if (isWorkspaceSlugConflict(error)) {
-            setSlugServerError(WORKSPACE_SLUG_CONFLICT_ERROR);
-            toast.error("Choose a different workspace URL");
+            setSlugServerError(t(($) => $.create_form.errors.slug_taken));
+            toast.error(t(($) => $.create_form.errors.slug_conflict_toast));
             return;
           }
-          toast.error("Failed to create workspace");
+          toast.error(t(($) => $.create_form.errors.create_failed));
         },
       },
     );
@@ -71,20 +71,21 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
     <Card className="w-full">
       <CardContent className="space-y-4 pt-6">
         <div className="space-y-1.5">
-          <Label htmlFor="ws-name">Workspace Name</Label>
+          <Label htmlFor="ws-name">{t(($) => $.create_form.name_label)}</Label>
           <Input
             id="ws-name"
             autoFocus
             type="text"
             value={name}
             onChange={(e) => handleNameChange(e.target.value)}
-            placeholder="My Workspace"
+            placeholder={t(($) => $.create_form.name_placeholder)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="ws-slug">Workspace URL</Label>
+          <Label htmlFor="ws-slug">{t(($) => $.create_form.url_label)}</Label>
           <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
+            {/* eslint-disable-next-line i18next/no-literal-string -- brand URL prefix, not translatable */}
             <span className="pl-3 text-sm text-muted-foreground select-none">
               multica.ai/
             </span>
@@ -93,7 +94,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
               type="text"
               value={slug}
               onChange={(e) => handleSlugChange(e.target.value)}
-              placeholder="my-workspace"
+              placeholder={t(($) => $.create_form.url_placeholder)}
               className="border-0 shadow-none focus-visible:ring-0"
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             />
@@ -108,7 +109,9 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
           onClick={handleCreate}
           disabled={createWorkspace.isPending || !canSubmit}
         >
-          {createWorkspace.isPending ? "Creating..." : "Create workspace"}
+          {createWorkspace.isPending
+            ? t(($) => $.create_form.submitting)
+            : t(($) => $.create_form.submit)}
         </Button>
       </CardContent>
     </Card>

@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(editor-link-handler): cerebro modification of upstream file
 /**
  * Shared link handling utilities for the editor system.
  *

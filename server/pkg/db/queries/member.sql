@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(sqlc-member): cerebro modification of upstream file
 -- name: ListMembers :many
 SELECT * FROM member
 WHERE workspace_id = $1

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { DocumentNewPage } from "@multica/views/artifacts/pages";
+import { DocumentNewPage } from "@multica/cerebro-artifacts/views/pages";
 
 export default function Page() {
   const params = useSearchParams();

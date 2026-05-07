@@ -1,0 +1,37 @@
+{
+  "page": {
+    "breadcrumb": "我的 issue",
+    "workspace_fallback": "工作区",
+    "empty_title": "没有分配给你的 issue",
+    "empty_description": "你创建或被分配到的 issue 会显示在这里。"
+  },
+  "header": {
+    "scope": {
+      "assigned_label": "已分配",
+      "assigned_description": "分配给我的 issue",
+      "created_label": "我创建的",
+      "created_description": "我创建的 issue",
+      "agents_label": "我的智能体",
+      "agents_description": "分配给我的智能体的 issue"
+    },
+    "filter_button": "筛选",
+    "filter_status": "状态",
+    "filter_priority": "优先级",
+    "issue_count_other": "{{count}} 个 issue",
+    "reset_filters": "重置所有筛选",
+    "display_settings": "显示设置",
+    "ordering": "排序",
+    "ascending": "升序",
+    "descending": "降序",
+    "card_properties": "卡片属性",
+    "view_board": "看板视图",
+    "view_list": "列表视图",
+    "view_label": "视图",
+    "view_board_short": "看板",
+    "view_list_short": "列表",
+    "sort_manual": "手动"
+  },
+  "errors": {
+    "move_failed": "移动 issue 失败"
+  }
+}

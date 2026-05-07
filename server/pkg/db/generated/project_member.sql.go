@@ -95,6 +95,7 @@ type ListProjectMembersRow struct {
 	AvatarUrl   pgtype.Text        `json:"avatar_url"`
 }
 
+// CEREBRO-PATCH(sqlc-project-member): cerebro modification of upstream file
 func (q *Queries) ListProjectMembers(ctx context.Context, projectID pgtype.UUID) ([]ListProjectMembersRow, error) {
 	rows, err := q.db.Query(ctx, listProjectMembers, projectID)
 	if err != nil {

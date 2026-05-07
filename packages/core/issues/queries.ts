@@ -1,6 +1,13 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { ListIssuesParams } from "../types";
+import type {
+  IssueStatus,
+  ListIssuesParams,
+  ListIssuesCache,
+  TimelinePage,
+  TimelinePageParam,
+} from "../types";
+import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
@@ -16,40 +23,76 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
+  /**
+   * Cursor-paginated timeline cache. Around-mode lookups use a separate cache
+   * (keyed by the anchor id) so an Inbox-jump fetch does not pollute the
+   * default latest-page cache that the regular issue list path consumes.
+   */
+  timeline: (issueId: string, around?: string | null) =>
+    around
+      ? (["issues", "timeline", issueId, "around", around] as const)
+      : (["issues", "timeline", issueId] as const),
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Per-issue task list (issue-detail Execution log section). */
+  tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
+  /** Prefix-match key for invalidating tasks across all issues — used by
+   *  the global WS task: prefix path so any task lifecycle event refreshes
+   *  every per-issue list, regardless of which issue is currently mounted. */
+  tasksAll: () => ["issues", "tasks"] as const,
 };
 
-export type MyIssuesFilter = Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id">;
+export type MyIssuesFilter = Pick<
+  ListIssuesParams,
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+>;
 
-export const CLOSED_PAGE_SIZE = 50;
+/** Page size per status column. */
+export const ISSUE_PAGE_SIZE = 50;
+
+/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+
+/** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
+export function flattenIssueBuckets(data: ListIssuesCache) {
+  const out = [];
+  for (const status of PAGINATED_STATUSES) {
+    const bucket = data.byStatus[status];
+    if (bucket) out.push(...bucket.issues);
+  }
+  return out;
+}
+
+async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+  const responses = await Promise.all(
+    PAGINATED_STATUSES.map((status) =>
+      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
+    ),
+  );
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  PAGINATED_STATUSES.forEach((status, i) => {
+    const res = responses[i]!;
+    byStatus[status] = { issues: res.issues, total: res.total };
+  });
+  return { byStatus };
+}
 
 /**
- * CACHE SHAPE NOTE: The raw cache stores ListIssuesResponse ({ issues, total, doneTotal }),
- * but `select` transforms it to Issue[] for consumers. Mutations and ws-updaters
- * must use setQueryData<ListIssuesResponse>(...) — NOT setQueryData<Issue[]>.
+ * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
+ * by status, each with `{ issues, total }`), and `select` flattens it to
+ * `Issue[]` for consumers. Mutations and ws-updaters must use
+ * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches all open issues + first page of done issues. Use useLoadMoreDoneIssues()
- * to paginate additional done items into the cache.
+ * Fetches the first page of each paginated status in parallel. Use
+ * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
 export function issueListOptions(wsId: string) {
   return queryOptions({
     queryKey: issueKeys.list(wsId),
-    queryFn: async () => {
-      const [openRes, closedRes] = await Promise.all([
-        api.listIssues({ open_only: true }),
-        api.listIssues({ status: "done", limit: CLOSED_PAGE_SIZE, offset: 0 }),
-      ]);
-      return {
-        issues: [...openRes.issues, ...closedRes.issues],
-        total: openRes.total + closedRes.total,
-        doneTotal: closedRes.total,
-      };
-    },
-    select: (data) => data.issues,
+    queryFn: () => fetchFirstPages(),
+    select: flattenIssueBuckets,
   });
 }
 
@@ -64,23 +107,8 @@ export function myIssueListOptions(
 ) {
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: async () => {
-      const [openRes, closedRes] = await Promise.all([
-        api.listIssues({ open_only: true, ...filter }),
-        api.listIssues({
-          status: "done",
-          limit: CLOSED_PAGE_SIZE,
-          offset: 0,
-          ...filter,
-        }),
-      ]);
-      return {
-        issues: [...openRes.issues, ...closedRes.issues],
-        total: openRes.total + closedRes.total,
-        doneTotal: closedRes.total,
-      };
-    },
-    select: (data) => data.issues,
+    queryFn: () => fetchFirstPages(filter),
+    select: flattenIssueBuckets,
   });
 }
 
@@ -112,10 +140,40 @@ export function childIssuesOptions(wsId: string, id: string) {
   });
 }
 
-export function issueTimelineOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+/**
+ * Infinite-query options for the cursor-paginated timeline. The first page is
+ * either the latest 50 entries (no `around`) or a 50-wide window centered on
+ * the given comment/activity id (Inbox jump path). `getNextPageParam` walks
+ * older; `getPreviousPageParam` walks newer.
+ */
+export function issueTimelineInfiniteOptions(
+  issueId: string,
+  around?: string | null,
+) {
+  return infiniteQueryOptions<
+    TimelinePage,
+    Error,
+    { pages: TimelinePage[]; pageParams: TimelinePageParam[] },
+    readonly unknown[],
+    TimelinePageParam
+  >({
+    queryKey: issueKeys.timeline(issueId, around ?? null),
+    initialPageParam: around
+      ? ({ mode: "around", id: around } as TimelinePageParam)
+      : ({ mode: "latest" } as TimelinePageParam),
+    queryFn: ({ pageParam }) => api.listTimeline(issueId, pageParam),
+    // Walk older: append a page below the current oldest (last entry of the
+    // last loaded page). undefined = no more older entries.
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more_before && lastPage.next_cursor
+        ? ({ mode: "before", cursor: lastPage.next_cursor } as TimelinePageParam)
+        : undefined,
+    // Walk newer: prepend a page above the current newest (first entry of the
+    // first loaded page). undefined = at the latest, no newer to fetch.
+    getPreviousPageParam: (firstPage) =>
+      firstPage.has_more_after && firstPage.prev_cursor
+        ? ({ mode: "after", cursor: firstPage.prev_cursor } as TimelinePageParam)
+        : undefined,
   });
 }
 

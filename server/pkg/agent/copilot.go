@@ -1,5 +1,7 @@
 package agent
 
+// CEREBRO-PATCH(agent-copilot-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"
@@ -197,6 +199,8 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
 
+	// CEREBRO-PATCH(agent-copilot-sandbox): prepareCommand wraps the agent in
+	// the daemon sandbox when enabled; falls back to plain exec.CommandContext.
 	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
 	if err != nil {
 		cancel()
@@ -208,6 +212,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			sandboxCleanup()
 		}
 	}()
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {

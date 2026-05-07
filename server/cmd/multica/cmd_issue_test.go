@@ -5,11 +5,98 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// pipeStdin replaces os.Stdin with a pipe seeded by the given body for the
+// duration of fn, so resolveTextFlag's --content-stdin / --description-stdin
+// branch can be exercised in unit tests without spawning a subprocess.
+func pipeStdin(t *testing.T, body string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	if _, err := w.WriteString(body); err != nil {
+		t.Fatalf("write pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	orig := os.Stdin
+	os.Stdin = r
+	defer func() {
+		os.Stdin = orig
+		_ = r.Close()
+	}()
+	fn()
+}
+
+// newFlagTestCmd builds a throwaway cobra.Command carrying the inline +
+// stdin flag pair that resolveTextFlag expects.
+func newFlagTestCmd(name string) *cobra.Command {
+	c := &cobra.Command{Use: "test"}
+	c.Flags().String(name, "", "")
+	c.Flags().Bool(name+"-stdin", false, "")
+	return c
+}
+
+func TestResolveTextFlag(t *testing.T) {
+	t.Run("inline value is unescaped", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description", `para1\n\npara2`)
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != "para1\n\npara2" {
+			t.Errorf("got %q, want decoded paragraphs", got)
+		}
+	})
+
+	t.Run("stdin body is preserved verbatim", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-stdin", "true")
+		body := "first line\nsecond line with a literal \\n in it\n"
+		pipeStdin(t, body, func() {
+			got, ok, err := resolveTextFlag(c, "description")
+			if err != nil || !ok {
+				t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+			}
+			// strings.TrimSuffix one trailing newline like content-stdin.
+			want := "first line\nsecond line with a literal \\n in it"
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	})
+
+	t.Run("inline + stdin is rejected", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description", "inline")
+		_ = c.Flags().Set("description-stdin", "true")
+		if _, _, err := resolveTextFlag(c, "description"); err == nil {
+			t.Fatalf("expected mutually-exclusive error")
+		}
+	})
+
+	t.Run("missing both returns hasValue=false", func(t *testing.T) {
+		c := newFlagTestCmd("description")
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if ok || got != "" {
+			t.Errorf("expected absent flag to yield (\"\", false), got (%q, %v)", got, ok)
+		}
+	})
+}
 
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
@@ -133,6 +220,354 @@ func TestResolveAssignee(t *testing.T) {
 		_, _, err := resolveAssignee(ctx, noWSClient, "alice")
 		if err == nil {
 			t.Fatal("expected error for missing workspace ID")
+		}
+	})
+}
+
+// TestResolveAssigneeExactMatchWins covers the substring-collision scenario from
+// multica-ai/multica#1620: when one name is a substring of another (e.g.
+// "reviewer" vs "peer-reviewer"), an exact match on the shorter name must
+// short-circuit substring matching instead of erroring out as ambiguous.
+func TestResolveAssigneeExactMatchWins(t *testing.T) {
+	agentsResp := []map[string]any{
+		{"id": "f656eab8-1111-1111-1111-111111111111", "name": "reviewer"},
+		{"id": "9b0ff9a2-2222-2222-2222-222222222222", "name": "peer-reviewer"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("exact shorter name resolves to shorter agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "reviewer")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want (agent, f656eab8-...)", aType, aID)
+		}
+	})
+
+	t.Run("exact longer name still resolves unambiguously", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "peer-reviewer")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "9b0ff9a2-2222-2222-2222-222222222222" {
+			t.Errorf("got (%q, %q), want (agent, 9b0ff9a2-...)", aType, aID)
+		}
+	})
+
+	t.Run("exact match is case-insensitive and tolerates whitespace", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "  Reviewer  ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want exact reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("substring-only input falls back and stays ambiguous", func(t *testing.T) {
+		// "review" matches both agents via substring and neither via exact name,
+		// so the existing ambiguity error is preserved.
+		_, _, err := resolveAssignee(ctx, client, "review")
+		if err == nil {
+			t.Fatal("expected error for ambiguous substring match")
+		}
+		if got := err.Error(); !strings.Contains(got, "ambiguous") {
+			t.Errorf("expected ambiguous error, got: %s", got)
+		}
+	})
+}
+
+// TestResolveAssigneeByID covers the ID/ShortID escape hatch from
+// multica-ai/multica#1620: passing a full UUID or its 8-char prefix must
+// resolve directly without going through name matching.
+func TestResolveAssigneeByID(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "f656eab8-1111-1111-1111-111111111111", "name": "reviewer"},
+		{"id": "9b0ff9a2-2222-2222-2222-222222222222", "name": "peer-reviewer"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("full UUID resolves agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "f656eab8-1111-1111-1111-111111111111")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("8-char ShortID resolves agent", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "f656eab8")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("uppercase ShortID still resolves", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "F656EAB8")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "f656eab8-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want reviewer agent", aType, aID)
+		}
+	})
+
+	t.Run("ShortID resolves a member", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "aaaaaaaa")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want Alice", aType, aID)
+		}
+	})
+}
+
+// TestResolveAssigneeByIDStrict covers the strict UUID resolver that backs
+// --assignee-id / --to-id / --user-id. Unlike resolveAssignee it must reject
+// non-UUID inputs (no name fallback) and surface a clear error when the UUID
+// is well-formed but not present in the workspace.
+func TestResolveAssigneeByIDStrict(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+		{"id": "192b9cca-2222-2222-2222-222222222222", "name": "Open Claw - J"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	t.Run("full UUID resolves the right agent in a substring-collision workspace", func(t *testing.T) {
+		// This is the MUL-1254 scenario: agent "J" is unreachable by name
+		// because every other agent has "J" in it. UUID lookup must
+		// deterministically pick the right one.
+		aType, aID, err := resolveAssigneeByID(ctx, client, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q), want agent J", aType, aID)
+		}
+	})
+
+	t.Run("uppercase UUID is normalized", func(t *testing.T) {
+		aType, aID, err := resolveAssigneeByID(ctx, client, "5FB87AC7-23B5-4A7A-81FA-ED295A54545D")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q), want agent J", aType, aID)
+		}
+	})
+
+	t.Run("UUID resolves a member", func(t *testing.T) {
+		aType, aID, err := resolveAssigneeByID(ctx, client, "aaaaaaaa-1111-1111-1111-111111111111")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q), want Alice", aType, aID)
+		}
+	})
+
+	t.Run("non-UUID input is rejected without name fallback", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "Alice")
+		if err == nil {
+			t.Fatal("expected error for non-UUID input")
+		}
+		if !strings.Contains(err.Error(), "UUID") {
+			t.Errorf("expected UUID error, got: %v", err)
+		}
+	})
+
+	t.Run("UUID prefix (ShortID) is rejected — strict mode requires canonical form", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "5fb87ac7")
+		if err == nil {
+			t.Fatal("expected error for ShortID")
+		}
+	})
+
+	t.Run("well-formed UUID with no matching entity errors", func(t *testing.T) {
+		_, _, err := resolveAssigneeByID(ctx, client, "deadbeef-1111-1111-1111-111111111111")
+		if err == nil {
+			t.Fatal("expected error for missing entity")
+		}
+		if !strings.Contains(err.Error(), "no member or agent") {
+			t.Errorf("expected not-found error, got: %v", err)
+		}
+	})
+
+	t.Run("missing workspace ID", func(t *testing.T) {
+		noWSClient := cli.NewAPIClient(srv.URL, "", "test-token")
+		_, _, err := resolveAssigneeByID(ctx, noWSClient, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		if err == nil {
+			t.Fatal("expected error for missing workspace ID")
+		}
+	})
+}
+
+// TestPickAssigneeFromFlags covers the flag-pair picker that backs every
+// assignee-taking command. The mutual-exclusion guard is the load-bearing
+// piece — silently preferring one side would let a buggy script set both
+// flags and assign the wrong entity.
+func TestPickAssigneeFromFlags(t *testing.T) {
+	membersResp := []map[string]any{
+		{"user_id": "aaaaaaaa-1111-1111-1111-111111111111", "name": "Alice"},
+	}
+	agentsResp := []map[string]any{
+		{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode(membersResp)
+		case "/api/agents":
+			json.NewEncoder(w).Encode(agentsResp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	ctx := context.Background()
+
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "test"}
+		c.Flags().String("assignee", "", "")
+		c.Flags().String("assignee-id", "", "")
+		return c
+	}
+
+	t.Run("neither flag set returns hasValue=false", func(t *testing.T) {
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, newCmd(), "assignee", "assignee-id")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if has {
+			t.Errorf("expected hasValue=false")
+		}
+	})
+
+	t.Run("name flag uses fuzzy resolver", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "Alice")
+		typ, id, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err != nil || !has || typ != "member" || id != "aaaaaaaa-1111-1111-1111-111111111111" {
+			t.Errorf("got (%q, %q, %v, %v), want Alice", typ, id, has, err)
+		}
+	})
+
+	t.Run("id flag uses strict resolver", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee-id", "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		typ, id, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err != nil || !has || typ != "agent" || id != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+			t.Errorf("got (%q, %q, %v, %v), want agent J", typ, id, has, err)
+		}
+	})
+
+	t.Run("both flags set is rejected", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "Alice")
+		_ = c.Flags().Set("assignee-id", "5fb87ac7-23b5-4a7a-81fa-ed295a54545d")
+		_, _, _, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected mutually-exclusive error")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually-exclusive error, got: %v", err)
+		}
+	})
+
+	// Explicit-empty regression: a script that interpolates an empty env var
+	// into `--assignee-id "$MAYBE_UUID"` must NOT silently route through the
+	// "no flag set" branch — that would defeat the whole point of the strict
+	// UUID flag (issue list returning everything, create leaving the issue
+	// unassigned, subscriber add subscribing the caller). Detection is via
+	// Flags().Changed, so an explicit empty string surfaces as a UUID error.
+	t.Run("explicit empty --assignee-id surfaces as UUID error, not silent skip", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee-id", "")
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected UUID error for explicit empty assignee-id")
+		}
+		if !has {
+			t.Errorf("expected hasValue=true so caller treats this as a real attempt, not a no-op")
+		}
+		if !strings.Contains(err.Error(), "UUID") {
+			t.Errorf("expected UUID-shaped error, got: %v", err)
+		}
+	})
+
+	t.Run("explicit empty --assignee surfaces as not-found, not silent skip", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "")
+		_, _, has, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil {
+			t.Fatal("expected resolver error for explicit empty assignee")
+		}
+		if !has {
+			t.Errorf("expected hasValue=true so caller treats this as a real attempt, not a no-op")
+		}
+	})
+
+	t.Run("explicit empty on both flags is mutually exclusive (set wins over value)", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("assignee", "")
+		_ = c.Flags().Set("assignee-id", "")
+		_, _, _, err := pickAssigneeFromFlags(ctx, client, c, "assignee", "assignee-id")
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually-exclusive error, got: %v", err)
 		}
 	})
 }

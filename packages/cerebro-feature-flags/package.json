@@ -1,0 +1,30 @@
+{
+  "name": "@multica/cerebro-feature-flags",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

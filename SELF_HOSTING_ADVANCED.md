@@ -14,6 +14,15 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | `JWT_SECRET` | **Mandatory.** Secret key for signing JWT tokens. Must be at least 32 bytes — the backend refuses to boot otherwise. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
+### Database Pool Tuning (Optional)
+
+These have sensible defaults and only need to be set when tuning a large or constrained deployment. Precedence (highest first): env var → `pool_*` query params on `DATABASE_URL` → built-in default.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_MAX_CONNS` | pgxpool max connections per pod. `pod_count × DATABASE_MAX_CONNS` should stay well below the Postgres `max_connections` ceiling. With a connection pooler (PgBouncer / RDS Proxy / Supavisor) in front, this can be raised significantly. | `25` |
+| `DATABASE_MIN_CONNS` | pgxpool warm baseline connections per pod. Auto-clamped to `DATABASE_MAX_CONNS`. | `5` |
+
 ### Email (Required for Authentication)
 
 Multica uses email-based magic link authentication via [Resend](https://resend.com).
@@ -23,6 +32,7 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
+<!-- CEREBRO-PATCH(no-master-code): cerebro removed the upstream 888888 master code. -->
 > **Note:** Without `RESEND_API_KEY` configured, verification codes are printed to the backend log instead of emailed (look for `[DEV] Verification code for ...:`). Useful for local development on a single machine; configure Resend before exposing the instance to other users.
 
 ### Google OAuth (Optional)
@@ -33,24 +43,46 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
 
-### File Storage (Optional)
+Changes take effect after restarting the backend / compose stack. The web UI reads `GOOGLE_CLIENT_ID` from `/api/config` at runtime, so no web rebuild is needed.
 
-For file uploads and attachments, configure S3 and CloudFront:
+### Signup Controls (Optional)
 
 | Variable | Description |
 |----------|-------------|
-| `S3_BUCKET` | S3 bucket name |
-| `S3_REGION` | AWS region (default: `us-west-2`) |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain |
+| `ALLOW_SIGNUP` | Set to `false` to disable new user signups on a private instance |
+| `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
+| `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
+
+Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` from `/api/config` at runtime, so no web rebuild is needed.
+
+### File Storage (Optional)
+
+For file uploads and attachments, configure S3 and (optionally) CloudFront:
+
+| Variable | Description |
+|----------|-------------|
+| `S3_BUCKET` | Bucket name only (e.g. `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public URL from `S3_BUCKET` + `S3_REGION` |
+| `S3_REGION` | AWS region (default: `us-west-2`). Must match the bucket's actual region — used for both SDK signing and public URLs |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this switches the public URL to path-style |
+| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
-| `COOKIE_DOMAIN` | Domain for CloudFront auth cookies |
+
+### Cookies
+
+| Variable | Description |
+|----------|-------------|
+| `COOKIE_DOMAIN` | Optional `Domain` attribute for session + CloudFront cookies. **Leave empty** for single-host deployments (localhost, LAN IP, or a single hostname). Only set it when the frontend and backend sit on different subdomains of one registered domain (e.g. `.example.com`). **Do not use an IP literal** — RFC 6265 forbids IP addresses in the cookie `Domain` attribute and browsers will drop such `Set-Cookie` headers. |
+
+The `Secure` flag on session cookies is derived automatically from the scheme of `FRONTEND_ORIGIN`: HTTPS origins get `Secure` cookies; plain-HTTP origins (LAN / private-network self-host) get non-secure cookies so the browser can actually store them.
 
 ### Server
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
+| `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
 | `FRONTEND_PORT` | `3000` | Frontend port |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -74,6 +106,8 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
+| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
@@ -218,7 +252,7 @@ When using separate domains for frontend and backend, set these environment vari
 FRONTEND_ORIGIN=https://app.example.com
 CORS_ALLOWED_ORIGINS=https://app.example.com
 
-# Frontend (set before building the frontend image)
+# Frontend (only if you are building the web image from source via docker-compose.selfhost.build.yml)
 REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
@@ -234,32 +268,80 @@ FRONTEND_ORIGIN=http://192.168.1.100:3000
 CORS_ALLOWED_ORIGINS=http://192.168.1.100:3000
 ```
 
-Then rebuild:
+Then restart the stack:
 
 ```bash
-docker compose -f docker-compose.selfhost.yml up -d --build
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-The frontend automatically derives the WebSocket URL from the page address, so real-time features (chat streaming, live issue updates, notifications) work over LAN without extra configuration.
+### WebSocket for LAN / Non-localhost Access
 
-> **Note:** If you need to override the WebSocket URL explicitly (e.g. when using a separate backend domain), set `NEXT_PUBLIC_WS_URL` in `.env` and rebuild the frontend image.
+HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
+
+1. **Put a reverse proxy in front of the stack (recommended).** Nginx or Caddy terminates the WebSocket upgrade and forwards it to the backend on port 8080. See the [Reverse Proxy](#reverse-proxy) section above — the Nginx example already includes a `location /ws { ... }` block with the correct `Upgrade` / `Connection` headers. Once a proxy is in place the browser connects directly through it, so no frontend rebuild is needed.
+
+2. **Bake a WebSocket URL into the web image.** If you are not running a reverse proxy, rebuild the web image with `NEXT_PUBLIC_WS_URL` pointing straight at the backend (port 8080 must be reachable from the browser):
+
+   ```bash
+   # In .env
+   NEXT_PUBLIC_WS_URL=ws://<lan-ip>:8080/ws
+
+   # Rebuild the web image so the build-time value is baked in
+   docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+   ```
+
+   `NEXT_PUBLIC_WS_URL` is a build-time variable (see `Dockerfile.web`), so setting it only in `environment:` on the pre-built image has no effect — you must use the `selfhost.build.yml` override that rebuilds the image.
+
+> **Note:** If you need to hard-code a different public API / WebSocket endpoint into the web image for any other reason, use the same source-build override: `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 ## Health Check
 
-The backend exposes a health check endpoint:
+The backend exposes public health endpoints:
 
-```
+```text
 GET /health
 → {"status":"ok"}
+
+GET /readyz
+→ {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+
+GET /healthz
+→ same response as /readyz
 ```
 
-Use this for load balancer health checks or monitoring.
+Use `/health` for basic liveness / reachability checks. Use `/readyz` for
+dependency-aware readiness probes and external monitoring that should fail when
+the database is unavailable or migrations are not fully applied. `/healthz` is
+kept as an alias for operator familiarity.
+
+## Prometheus Metrics
+
+The backend can expose Prometheus metrics on a separate management listener:
+
+```bash
+METRICS_ADDR=127.0.0.1:9090 ./server/bin/server
+curl http://127.0.0.1:9090/metrics
+```
+
+`METRICS_ADDR` is empty by default, so no metrics listener is started. The
+public API port does not serve `/metrics`; keep it that way for internet-facing
+deployments. HTTP request metrics start accumulating only after the metrics
+listener is enabled. Metrics can reveal internal routes, traffic volume,
+dependency state, and runtime health.
+
+For Docker or Kubernetes deployments, prefer a private scrape path: bind the
+metrics listener to an internal interface and protect it with private
+networking, allowlists, NetworkPolicy, or proxy authentication. If you bind
+`METRICS_ADDR=0.0.0.0:9090` inside a container, only publish that port to a
+trusted network, for example a host-local mapping such as
+`127.0.0.1:9090:9090`.
 
 ## Upgrading
 
 ```bash
-git pull
-docker compose -f docker-compose.selfhost.yml up -d --build
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
+Pin `MULTICA_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
+If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.

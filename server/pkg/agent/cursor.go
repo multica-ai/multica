@@ -1,5 +1,7 @@
 package agent
 
+// CEREBRO-PATCH(agent-cursor-cerebro): cerebro modification of upstream file
+
 import (
 	"bufio"
 	"context"
@@ -21,12 +23,13 @@ type cursorBackend struct {
 }
 
 func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "cursor-agent"
+	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = "cursor-agent"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("cursor-agent executable not found at %q: %w", execPath, err)
+	lookedUp, err := exec.LookPath(execName)
+	if err != nil {
+		return nil, fmt.Errorf("cursor-agent executable not found at %q: %w", execName, err)
 	}
 
 	timeout := opts.Timeout
@@ -36,8 +39,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
+	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
-	cmd, sandboxCleanup, err := prepareCommand(runCtx, execPath, args, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
+	// CEREBRO-PATCH(agent-cursor-sandbox): prepareCommand wraps the agent in
+	// the daemon sandbox when enabled; falls back to plain exec.CommandContext.
+	cmd, sandboxCleanup, err := prepareCommand(runCtx, argv0, cmdArgs, b.cfg.Sandbox, opts.Cwd, b.cfg.Logger)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("prepare cursor command: %w", err)
@@ -48,7 +54,8 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			sandboxCleanup()
 		}
 	}()
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	hideAgentWindow(cmd)
+	b.cfg.Logger.Debug("agent command", "exec", argv0, "args", cmdArgs)
 	cmd.WaitDelay = 20 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -291,10 +298,10 @@ func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *
 // ── Cursor stream-json types ──
 
 type cursorStreamEvent struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Model     string `json:"model,omitempty"`
 
 	// assistant fields
 	Message json.RawMessage `json:"message,omitempty"`
@@ -308,10 +315,10 @@ type cursorStreamEvent struct {
 	Output string `json:"output,omitempty"`
 
 	// result fields
-	ResultText string          `json:"result,omitempty"`
-	IsError    bool            `json:"is_error,omitempty"`
-	Usage      *cursorUsage    `json:"usage,omitempty"`
-	TotalCost  float64         `json:"total_cost_usd,omitempty"`
+	ResultText string       `json:"result,omitempty"`
+	IsError    bool         `json:"is_error,omitempty"`
+	Usage      *cursorUsage `json:"usage,omitempty"`
+	TotalCost  float64      `json:"total_cost_usd,omitempty"`
 
 	// error fields
 	ErrorMsg string `json:"error,omitempty"`

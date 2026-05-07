@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-005-daemon-pairing): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS daemon_pairing_session (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token TEXT NOT NULL UNIQUE,

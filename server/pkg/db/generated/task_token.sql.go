@@ -26,6 +26,7 @@ type CreateTaskTokenParams struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 }
 
+// CEREBRO-PATCH(sqlc-task-token): cerebro modification of upstream file
 func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams) error {
 	_, err := q.db.Exec(ctx, createTaskToken,
 		arg.TokenHash,

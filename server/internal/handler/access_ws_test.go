@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(access-handler): cerebro modification of upstream file
+
 import (
 	"context"
 	"testing"
@@ -16,7 +18,7 @@ func TestAudienceForIssue_RestrictedProject(t *testing.T) {
 	f := setupFilterFixture(t)
 	ctx := context.Background()
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(f.restrictIssID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(f.restrictIssID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
@@ -60,7 +62,7 @@ func TestAudienceForIssue_OpenProjectNoFilter(t *testing.T) {
 	f := setupFilterFixture(t)
 	ctx := context.Background()
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(f.openIssueID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(f.openIssueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
@@ -85,7 +87,7 @@ func TestAudienceForIssue_StandalonePrivate(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(issueID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
@@ -123,7 +125,7 @@ func TestAudienceForIssue_StandalonePublicNoFilter(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
-	issue, err := testHandler.Queries.GetIssue(ctx, util.ParseUUID(issueID))
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WSClient } from "./ws-client";
 
+// Shared FakeWebSocket — combines main's liveness-monitor needs (instances
+// array, fake timers, close/send mocks) with HEAD's identity-URL inspection
+// (every constructed instance captures its url so we can assert query params).
 class FakeWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -24,24 +27,76 @@ class FakeWebSocket {
 
 let instances: FakeWebSocket[] = [];
 
-beforeEach(() => {
-  instances = [];
-  vi.stubGlobal("WebSocket", FakeWebSocket);
-  vi.useFakeTimers();
-});
+describe("WSClient identity URL", () => {
+  beforeEach(() => {
+    instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+  });
 
-afterEach(() => {
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-});
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-function makeClient() {
-  const client = new WSClient("ws://test/ws", { cookieAuth: true });
-  client.setAuth(null, "ws-slug");
-  return client;
-}
+  it("includes client identity in the upgrade URL when configured", () => {
+    const ws = new WSClient("ws://example.test/ws", {
+      identity: { platform: "desktop", version: "1.2.3", os: "macos" },
+    });
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const url = new URL(instances[0]!.url);
+    expect(url.searchParams.get("workspace_slug")).toBe("acme");
+    expect(url.searchParams.get("client_platform")).toBe("desktop");
+    expect(url.searchParams.get("client_version")).toBe("1.2.3");
+    expect(url.searchParams.get("client_os")).toBe("macos");
+    // Token must never appear in the URL — it is delivered as the first
+    // WS message in token mode.
+    expect(url.searchParams.has("token")).toBe(false);
+  });
+
+  it("omits client_* params when identity is not configured", () => {
+    const ws = new WSClient("ws://example.test/ws");
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const url = new URL(instances[0]!.url);
+    expect(url.searchParams.has("client_platform")).toBe(false);
+    expect(url.searchParams.has("client_version")).toBe(false);
+    expect(url.searchParams.has("client_os")).toBe(false);
+  });
+
+  it("only includes the identity fields that are set", () => {
+    const ws = new WSClient("ws://example.test/ws", {
+      identity: { platform: "cli" },
+    });
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const url = new URL(instances[0]!.url);
+    expect(url.searchParams.get("client_platform")).toBe("cli");
+    expect(url.searchParams.has("client_version")).toBe(false);
+    expect(url.searchParams.has("client_os")).toBe(false);
+  });
+});
 
 describe("WSClient liveness monitor", () => {
+  beforeEach(() => {
+    instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function makeClient() {
+    const client = new WSClient("ws://test/ws", { cookieAuth: true });
+    client.setAuth(null, "ws-slug");
+    return client;
+  }
+
   it("force-reconnects when no messages arrive within the stale threshold", () => {
     const client = makeClient();
     client.connect();

@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -132,12 +130,6 @@ func (s *PingStore) Fail(id string, errMsg string, durationMs int64) {
 		p.DurationMs = durationMs
 		p.UpdatedAt = time.Now()
 	}
-}
-
-func randomID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 // ---------------------------------------------------------------------------

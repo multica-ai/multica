@@ -1,3 +1,4 @@
+-- CEREBRO-PATCH(migration-idempotent-029-daemon-token): cerebro modification of upstream file
 CREATE TABLE IF NOT EXISTS daemon_token (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token_hash TEXT NOT NULL,

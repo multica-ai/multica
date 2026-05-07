@@ -1,4 +1,4 @@
-import { MemberDetailPage } from "@multica/views/members";
+import { MemberDetailPage } from "@multica/cerebro-users/views";
 
 export default async function Page({
   params,

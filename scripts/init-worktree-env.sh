@@ -32,6 +32,7 @@ POSTGRES_PORT=${postgres_port}
 DATABASE_URL=postgres://multica:multica@localhost:${postgres_port}/${postgres_db}?sslmode=disable
 
 PORT=${backend_port}
+# CEREBRO-PATCH(jwt-secret-random): cerebro generates a random JWT secret per worktree and dropped the 888888 master code.
 JWT_SECRET=${jwt_secret}
 MULTICA_SERVER_URL=ws://localhost:${backend_port}/ws
 MULTICA_APP_URL=${frontend_origin}
