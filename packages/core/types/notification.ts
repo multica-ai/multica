@@ -41,6 +41,8 @@ export interface NotificationWebhook {
   masked_url: string;
   enabled: boolean;
   workspace_id: string | null;
+  payload_template: string;
+  content_prefix: string;
   created_at: string;
   updated_at: string;
 }
@@ -52,14 +54,16 @@ export interface ListNotificationWebhooksResponse {
 export interface CreateNotificationWebhookRequest {
   name: string;
   url: string;
-  secret?: string;
+  payload_template?: string;
+  content_prefix?: string;
   enabled?: boolean;
 }
 
 export interface UpdateNotificationWebhookRequest {
   name?: string;
   url?: string;
-  secret?: string;
+  payload_template?: string;
+  content_prefix?: string;
   enabled?: boolean;
 }
 

@@ -25,6 +25,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 
 const channelLabels: Record<NotificationChannel, string> = {
   inbox: "Inbox",
@@ -46,6 +47,13 @@ const customWebhookEvents: NotificationEventType[] = [
   "subscribed_issue_updated",
 ];
 
+const webhookTemplatePlaceholder = `{
+  "msgtype": "text",
+  "text": {
+    "content": "{{content}}"
+  }
+}`;
+
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
 }
@@ -59,7 +67,8 @@ export function NotificationsTab() {
   const [busyWebhookId, setBusyWebhookId] = useState<string | null>(null);
   const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookContentPrefix, setWebhookContentPrefix] = useState("");
+  const [webhookPayloadTemplate, setWebhookPayloadTemplate] = useState("");
   const [creatingWebhook, setCreatingWebhook] = useState(false);
 
   const loadSettings = useCallback(async () => {
@@ -172,12 +181,14 @@ export function NotificationsTab() {
       const created = await api.createNotificationWebhook({
         name: webhookName.trim() || "Custom webhook",
         url: webhookUrl.trim(),
-        secret: webhookSecret.trim() || undefined,
+        content_prefix: webhookContentPrefix,
+        payload_template: webhookPayloadTemplate.trim() || undefined,
       });
       setWebhooks((current) => [...current, created]);
       setWebhookName("");
       setWebhookUrl("");
-      setWebhookSecret("");
+      setWebhookContentPrefix("");
+      setWebhookPayloadTemplate("");
       toast.success("Webhook saved");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save webhook");
@@ -246,11 +257,11 @@ export function NotificationsTab() {
           <CardHeader>
             <CardTitle className="text-base">Webhook endpoints</CardTitle>
             <CardDescription>
-              Multica sends JSON with a stable event id and delivery id.
+              Multica can send its default JSON or render notification text into your JSON template.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(120px,180px)_1fr_minmax(120px,180px)_auto]">
+            <div className="grid gap-3 md:grid-cols-[minmax(120px,180px)_1fr_auto]">
               <div className="space-y-2">
                 <Label htmlFor="webhook-name">Name</Label>
                 <Input
@@ -269,15 +280,6 @@ export function NotificationsTab() {
                   placeholder="https://example.com/multica/webhook"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="webhook-secret">Secret</Label>
-                <Input
-                  id="webhook-secret"
-                  value={webhookSecret}
-                  onChange={(event) => setWebhookSecret(event.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
               <Button
                 className="self-end"
                 disabled={!webhookUrl.trim() || creatingWebhook}
@@ -285,6 +287,31 @@ export function NotificationsTab() {
               >
                 {creatingWebhook ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
               </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[minmax(160px,240px)_1fr]">
+              <div className="space-y-2">
+                <Label htmlFor="webhook-content-prefix">Content prefix</Label>
+                <Input
+                  id="webhook-content-prefix"
+                  value={webhookContentPrefix}
+                  onChange={(event) => setWebhookContentPrefix(event.target.value)}
+                  placeholder="[Multica] "
+                  maxLength={512}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="webhook-payload-template">Payload JSON template</Label>
+                <Textarea
+                  id="webhook-payload-template"
+                  value={webhookPayloadTemplate}
+                  onChange={(event) => setWebhookPayloadTemplate(event.target.value)}
+                  placeholder={webhookTemplatePlaceholder}
+                  className="min-h-28 font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional. Include <span className="font-mono">{"{{content}}"}</span> where Multica should place the formatted notification text.
+                </p>
+              </div>
             </div>
 
             {webhooks.length === 0 ? (
@@ -303,6 +330,11 @@ export function NotificationsTab() {
                         </Badge>
                       </div>
                       <p className="truncate text-sm text-muted-foreground">{webhook.masked_url}</p>
+                      {webhook.content_prefix ? (
+                        <p className="truncate text-xs text-muted-foreground">
+                          Prefix: {webhook.content_prefix}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-2">
                       {busyWebhookId === webhook.id ? (

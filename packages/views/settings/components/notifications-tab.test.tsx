@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const apiMock = vi.hoisted(() => ({
@@ -117,6 +117,8 @@ describe("NotificationsTab", () => {
           masked_url: "https://example.com/***",
           enabled: true,
           workspace_id: null,
+          payload_template: "",
+          content_prefix: "",
           created_at: "2026-05-07T00:00:00Z",
           updated_at: "2026-05-07T00:00:00Z",
         },
@@ -151,6 +153,44 @@ describe("NotificationsTab", () => {
       channel: "custom_webhook",
       event_type: "subscribed_issue_updated",
       enabled: true,
+    });
+  });
+
+  it("creates a webhook with custom payload template and no secret field", async () => {
+    const user = userEvent.setup();
+    apiMock.createNotificationWebhook.mockResolvedValue({
+      id: "webhook-2",
+      name: "DingTalk",
+      masked_url: "https://oapi.dingtalk.com/***",
+      enabled: true,
+      workspace_id: null,
+      payload_template: '{"msgtype":"text","text":{"content":"{{content}}"}}',
+      content_prefix: "[Multica] ",
+      created_at: "2026-05-07T00:00:00Z",
+      updated_at: "2026-05-07T00:00:00Z",
+    });
+
+    render(<NotificationsTab />);
+
+    await user.type(await screen.findByLabelText("Name"), "DingTalk");
+    await user.type(screen.getByLabelText("URL"), "https://oapi.dingtalk.com/robot/send");
+    fireEvent.change(screen.getByLabelText("Content prefix"), {
+      target: { value: "[Multica] " },
+    });
+    fireEvent.change(screen.getByLabelText("Payload JSON template"), {
+      target: { value: '{"msgtype":"text","text":{"content":"{{content}}"}}' },
+    });
+
+    expect(screen.queryByLabelText("Secret")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(apiMock.createNotificationWebhook).toHaveBeenCalledWith({
+        name: "DingTalk",
+        url: "https://oapi.dingtalk.com/robot/send",
+        content_prefix: "[Multica] ",
+        payload_template: '{"msgtype":"text","text":{"content":"{{content}}"}}',
+      });
     });
   });
 });

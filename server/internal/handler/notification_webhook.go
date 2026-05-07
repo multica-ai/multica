@@ -16,13 +16,15 @@ import (
 )
 
 type NotificationWebhookResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	MaskedURL   string  `json:"masked_url"`
-	Enabled     bool    `json:"enabled"`
-	WorkspaceID *string `json:"workspace_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	MaskedURL       string  `json:"masked_url"`
+	Enabled         bool    `json:"enabled"`
+	WorkspaceID     *string `json:"workspace_id"`
+	PayloadTemplate string  `json:"payload_template"`
+	ContentPrefix   string  `json:"content_prefix"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 type ListNotificationWebhooksResponse struct {
@@ -30,18 +32,20 @@ type ListNotificationWebhooksResponse struct {
 }
 
 type CreateNotificationWebhookRequest struct {
-	Name      string  `json:"name"`
-	URL       string  `json:"url"`
-	Secret    *string `json:"secret"`
-	Enabled   *bool   `json:"enabled"`
-	Workspace string  `json:"workspace_id"`
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	PayloadTemplate string `json:"payload_template"`
+	ContentPrefix   string `json:"content_prefix"`
+	Enabled         *bool  `json:"enabled"`
+	Workspace       string `json:"workspace_id"`
 }
 
 type UpdateNotificationWebhookRequest struct {
-	Name    string  `json:"name"`
-	URL     string  `json:"url"`
-	Secret  *string `json:"secret"`
-	Enabled *bool   `json:"enabled"`
+	Name            string  `json:"name"`
+	URL             string  `json:"url"`
+	PayloadTemplate *string `json:"payload_template"`
+	ContentPrefix   *string `json:"content_prefix"`
+	Enabled         *bool   `json:"enabled"`
 }
 
 type TestNotificationWebhookResponse struct {
@@ -51,13 +55,15 @@ type TestNotificationWebhookResponse struct {
 func notificationWebhookToResponse(endpoint db.NotificationWebhookEndpoint) NotificationWebhookResponse {
 	rawURL, _ := notifyutil.DecryptToken(endpoint.UrlEncrypted)
 	return NotificationWebhookResponse{
-		ID:          uuidToString(endpoint.ID),
-		Name:        endpoint.Name,
-		MaskedURL:   maskWebhookURL(rawURL),
-		Enabled:     endpoint.Enabled,
-		WorkspaceID: uuidToPtr(endpoint.WorkspaceID),
-		CreatedAt:   timestampToString(endpoint.CreatedAt),
-		UpdatedAt:   timestampToString(endpoint.UpdatedAt),
+		ID:              uuidToString(endpoint.ID),
+		Name:            endpoint.Name,
+		MaskedURL:       maskWebhookURL(rawURL),
+		Enabled:         endpoint.Enabled,
+		WorkspaceID:     uuidToPtr(endpoint.WorkspaceID),
+		PayloadTemplate: endpoint.PayloadTemplate,
+		ContentPrefix:   endpoint.ContentPrefix,
+		CreatedAt:       timestampToString(endpoint.CreatedAt),
+		UpdatedAt:       timestampToString(endpoint.UpdatedAt),
 	}
 }
 
@@ -95,7 +101,15 @@ func (h *Handler) CreateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	name, endpointURL, secret, enabled, valid := normalizeWebhookRequest(w, r.Context(), req.Name, req.URL, req.Secret, req.Enabled)
+	name, endpointURL, payloadTemplate, contentPrefix, enabled, valid := normalizeWebhookRequest(
+		w,
+		r.Context(),
+		req.Name,
+		req.URL,
+		req.PayloadTemplate,
+		req.ContentPrefix,
+		req.Enabled,
+	)
 	if !valid {
 		return
 	}
@@ -105,18 +119,14 @@ func (h *Handler) CreateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook url")
 		return
 	}
-	secretEncrypted, err := encryptedOptionalText(secret)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook secret")
-		return
-	}
-
 	endpoint, err := h.Queries.CreateNotificationWebhookEndpoint(r.Context(), db.CreateNotificationWebhookEndpointParams{
 		UserID:          parseUUID(userID),
 		WorkspaceID:     parseUUID(strings.TrimSpace(req.Workspace)),
 		Name:            name,
 		UrlEncrypted:    urlEncrypted,
-		SecretEncrypted: secretEncrypted,
+		SecretEncrypted: pgtype.Text{},
+		PayloadTemplate: payloadTemplate,
+		ContentPrefix:   contentPrefix,
 		Enabled:         enabled,
 	})
 	if err != nil {
@@ -178,19 +188,27 @@ func (h *Handler) UpdateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	payloadTemplate := existing.PayloadTemplate
+	if req.PayloadTemplate != nil {
+		payloadTemplate = strings.TrimSpace(*req.PayloadTemplate)
+	}
+	if err := notifyutil.ValidateWebhookPayloadTemplate(payloadTemplate); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	contentPrefix := existing.ContentPrefix
+	if req.ContentPrefix != nil {
+		contentPrefix = *req.ContentPrefix
+	}
+	if len(contentPrefix) > 512 {
+		writeError(w, http.StatusBadRequest, "webhook content prefix is too long")
+		return
+	}
 
 	urlEncrypted, err := notifyutil.EncryptToken(endpointURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook url")
 		return
-	}
-	secretEncrypted := existing.SecretEncrypted
-	if req.Secret != nil {
-		secretEncrypted, err = encryptedOptionalText(strings.TrimSpace(*req.Secret))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to encrypt webhook secret")
-			return
-		}
 	}
 
 	endpoint, err := h.Queries.UpdateNotificationWebhookEndpoint(r.Context(), db.UpdateNotificationWebhookEndpointParams{
@@ -198,7 +216,9 @@ func (h *Handler) UpdateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 		UserID:          parseUUID(userID),
 		Name:            name,
 		UrlEncrypted:    urlEncrypted,
-		SecretEncrypted: secretEncrypted,
+		SecretEncrypted: pgtype.Text{},
+		PayloadTemplate: payloadTemplate,
+		ContentPrefix:   contentPrefix,
 		Enabled:         enabled,
 	})
 	if err != nil {
@@ -260,16 +280,18 @@ func (h *Handler) TestMyNotificationWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	endpointURL, secret, err := decryptWebhookEndpoint(endpoint)
+	endpointURL, err := decryptWebhookEndpointURL(endpoint)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to decrypt notification webhook")
 		return
 	}
 
-	payload, err := json.Marshal(map[string]any{
+	title := "Multica webhook test"
+	body := "This is a test notification from Multica."
+	payload, err := notifyutil.RenderWebhookPayload(endpoint.PayloadTemplate, notifyutil.BuildWebhookContent(title, body, "", endpoint.ContentPrefix), map[string]any{
 		"event_type":        "test",
-		"title":             "Multica webhook test",
-		"body":              "This is a test notification from Multica.",
+		"title":             title,
+		"body":              body,
 		"recipient_user_id": userID,
 		"occurred_at":       time.Now().UTC().Format(time.RFC3339),
 	})
@@ -277,14 +299,22 @@ func (h *Handler) TestMyNotificationWebhook(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "failed to build test payload")
 		return
 	}
-	if err := (notifyutil.WebhookSender{}).SendJSON(r.Context(), endpointURL, secret, payload); err != nil {
+	if err := (notifyutil.WebhookSender{}).SendJSON(r.Context(), endpointURL, "", payload); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, TestNotificationWebhookResponse{Message: "Webhook test sent"})
 }
 
-func normalizeWebhookRequest(w http.ResponseWriter, ctx context.Context, name, endpointURL string, secret *string, enabled *bool) (string, string, string, bool, bool) {
+func normalizeWebhookRequest(
+	w http.ResponseWriter,
+	ctx context.Context,
+	name string,
+	endpointURL string,
+	payloadTemplate string,
+	contentPrefix string,
+	enabled *bool,
+) (string, string, string, string, bool, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Custom webhook"
@@ -292,48 +322,34 @@ func normalizeWebhookRequest(w http.ResponseWriter, ctx context.Context, name, e
 	endpointURL = strings.TrimSpace(endpointURL)
 	if endpointURL == "" {
 		writeError(w, http.StatusBadRequest, "webhook url is required")
-		return "", "", "", false, false
+		return "", "", "", "", false, false
 	}
 	if err := notifyutil.ValidateWebhookURL(ctx, endpointURL, false); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", "", false, false
+		return "", "", "", "", false, false
 	}
-	secretValue := ""
-	if secret != nil {
-		secretValue = strings.TrimSpace(*secret)
+	payloadTemplate = strings.TrimSpace(payloadTemplate)
+	if err := notifyutil.ValidateWebhookPayloadTemplate(payloadTemplate); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", "", "", "", false, false
+	}
+	if len(contentPrefix) > 512 {
+		writeError(w, http.StatusBadRequest, "webhook content prefix is too long")
+		return "", "", "", "", false, false
 	}
 	enabledValue := true
 	if enabled != nil {
 		enabledValue = *enabled
 	}
-	return name, endpointURL, secretValue, enabledValue, true
+	return name, endpointURL, payloadTemplate, contentPrefix, enabledValue, true
 }
 
-func encryptedOptionalText(value string) (pgtype.Text, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return pgtype.Text{}, nil
-	}
-	encrypted, err := notifyutil.EncryptToken(value)
-	if err != nil {
-		return pgtype.Text{}, err
-	}
-	return strToText(encrypted), nil
-}
-
-func decryptWebhookEndpoint(endpoint db.NotificationWebhookEndpoint) (string, string, error) {
+func decryptWebhookEndpointURL(endpoint db.NotificationWebhookEndpoint) (string, error) {
 	endpointURL, err := notifyutil.DecryptToken(endpoint.UrlEncrypted)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	secret := ""
-	if endpoint.SecretEncrypted.Valid && strings.TrimSpace(endpoint.SecretEncrypted.String) != "" {
-		secret, err = notifyutil.DecryptToken(endpoint.SecretEncrypted.String)
-		if err != nil {
-			return "", "", err
-		}
-	}
-	return endpointURL, secret, nil
+	return endpointURL, nil
 }
 
 func maskWebhookURL(raw string) string {

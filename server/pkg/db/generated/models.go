@@ -394,6 +394,8 @@ type NotificationWebhookEndpoint struct {
 	Enabled         bool               `json:"enabled"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	PayloadTemplate string             `json:"payload_template"`
+	ContentPrefix   string             `json:"content_prefix"`
 }
 
 type PersonalAccessToken struct {

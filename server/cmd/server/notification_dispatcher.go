@@ -303,15 +303,6 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("failed to decrypt custom webhook url"))
 		return
 	}
-	secret := ""
-	if endpoint.SecretEncrypted.Valid && strings.TrimSpace(endpoint.SecretEncrypted.String) != "" {
-		secret, err = notifyutil.DecryptToken(endpoint.SecretEncrypted.String)
-		if err != nil {
-			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("failed to decrypt custom webhook secret"))
-			return
-		}
-	}
-
 	var eventPayload notificationEventPayload
 	if len(payload.NotificationEvent) > 0 {
 		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
@@ -325,12 +316,12 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 		return
 	}
 
-	outbound, err := buildCustomWebhookPayload(claimed, event, eventPayload)
+	outbound, err := buildCustomWebhookPayload(claimed, event, eventPayload, endpoint.PayloadTemplate, endpoint.ContentPrefix)
 	if err != nil {
 		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
 		return
 	}
-	if err := customWebhookSender.SendJSON(ctx, endpointURL, secret, outbound); err != nil {
+	if err := customWebhookSender.SendJSON(ctx, endpointURL, "", outbound); err != nil {
 		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
 		return
 	}
@@ -348,21 +339,30 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 	}
 }
 
-func buildCustomWebhookPayload(delivery db.NotificationDelivery, event db.NotificationEvent, eventPayload notificationEventPayload) ([]byte, error) {
+func buildCustomWebhookPayload(
+	delivery db.NotificationDelivery,
+	event db.NotificationEvent,
+	eventPayload notificationEventPayload,
+	payloadTemplate string,
+	contentPrefix string,
+) ([]byte, error) {
 	eventID := util.UUIDToString(delivery.NotificationEventID)
 	details := json.RawMessage(event.Details)
 	if len(details) == 0 {
 		details = json.RawMessage(`{}`)
 	}
-	return json.Marshal(map[string]any{
+	title := firstValue(event.Title, eventPayload.Title)
+	body := firstValue(pgTextToString(event.Body), eventPayload.Body)
+	link := firstValue(pgTextToString(event.Link), eventPayload.Link)
+	defaultPayload := map[string]any{
 		"event_id":          eventID,
 		"delivery_id":       util.UUIDToString(delivery.ID),
 		"event_type":        firstValue(event.Type, eventPayload.Type),
 		"workspace_id":      util.UUIDToString(event.WorkspaceID),
 		"recipient_user_id": util.UUIDToString(event.RecipientUserID),
-		"title":             firstValue(event.Title, eventPayload.Title),
-		"body":              firstValue(pgTextToString(event.Body), eventPayload.Body),
-		"link":              firstValue(pgTextToString(event.Link), eventPayload.Link),
+		"title":             title,
+		"body":              body,
+		"link":              link,
 		"issue": map[string]any{
 			"id":         util.UUIDToPtr(event.IssueID),
 			"identifier": eventPayload.IssueIdentifier,
@@ -376,7 +376,12 @@ func buildCustomWebhookPayload(delivery db.NotificationDelivery, event db.Notifi
 		},
 		"details":     details,
 		"occurred_at": delivery.CreatedAt.Time.UTC().Format(time.RFC3339),
-	})
+	}
+	return notifyutil.RenderWebhookPayload(
+		payloadTemplate,
+		notifyutil.BuildWebhookContent(title, body, link, contentPrefix),
+		defaultPayload,
+	)
 }
 
 func finalizeFailedCustomWebhookDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
