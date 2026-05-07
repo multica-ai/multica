@@ -8,5 +8,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./test/setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
+    // CI's GitHub-hosted runner is meaningfully slower than dev machines —
+    // userEvent.type() with 40+ characters has tipped past the 5s default
+    // (modals/create-issue). 15s gives headroom without hiding genuine hangs.
+    testTimeout: 15000,
   },
 });
