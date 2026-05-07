@@ -292,6 +292,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			// delivery on process shutdown; CommandContext cancellation below
 			// remains responsible for cleanup.
 		}
+		// The stdout reader may still run after the grace timer; forbid further
+		// forwarding to msgCh before this goroutine's defer closes it (panic on send).
+		streamingCurrentTurn.Store(false)
 
 		outputMu.Lock()
 		finalOutput := output.String()
