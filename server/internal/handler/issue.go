@@ -1085,6 +1085,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Determine creator identity before any write-side effects so agent command
+	// policy can fail closed without incrementing issue counters.
+	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+	if h.denyAgentCommandsIfNeeded(w, r, workspaceID, creatorType, actualCreatorID, agentCommandIssueCreate) {
+		return
+	}
 
 	status := req.Status
 	if status == "" {
@@ -1174,8 +1180,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine creator identity: agent (via X-Agent-ID header) or member.
-	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+	// Creator identity was resolved before opening the transaction so policy
+	// checks cannot leave behind write-side effects.
 
 	// Optional origin stamping (quick-create / autopilot). Only the
 	// allowed origin types are accepted; anything else is rejected so a
@@ -1326,6 +1332,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	// Determine actor identity before mutation so agent command policy can block
+	// operator-controlled agents before status/assignee side effects happen.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	_, touchesStatus := rawFields["status"]
+	_, touchesAssigneeType := rawFields["assignee_type"]
+	_, touchesAssigneeID := rawFields["assignee_id"]
+	if touchesStatus && h.denyAgentCommandsIfNeeded(w, r, workspaceID, actorType, actorID, agentCommandIssueUpdateStatus, agentCommandIssueStatus) {
+		return
+	}
+	if (touchesAssigneeType || touchesAssigneeID) && h.denyAgentCommandsIfNeeded(w, r, workspaceID, actorType, actorID, agentCommandIssueUpdateAssignee, agentCommandIssueAssign) {
+		return
+	}
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -1437,9 +1456,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
 	// caller is not changing it.
-	_, touchedType := rawFields["assignee_type"]
-	_, touchedID := rawFields["assignee_id"]
-	if touchedType || touchedID {
+	if touchesAssigneeType || touchesAssigneeID {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
 			return
@@ -1467,8 +1484,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// Actor identity was resolved before mutation so policy and publish metadata
+	// use the same request actor.
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -1725,6 +1742,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	_, touchesStatus := rawUpdates["status"]
+	_, touchesAssigneeType := rawUpdates["assignee_type"]
+	_, touchesAssigneeID := rawUpdates["assignee_id"]
+	if touchesStatus && h.denyAgentCommandsIfNeeded(w, r, workspaceID, actorType, actorID, agentCommandIssueUpdateStatus, agentCommandIssueStatus) {
+		return
+	}
+	if (touchesAssigneeType || touchesAssigneeID) && h.denyAgentCommandsIfNeeded(w, r, workspaceID, actorType, actorID, agentCommandIssueUpdateAssignee, agentCommandIssueAssign) {
+		return
+	}
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -1862,7 +1889,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
