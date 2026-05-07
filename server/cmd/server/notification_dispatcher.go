@@ -284,7 +284,12 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 		return
 	}
 
-	endpoint, err := queries.GetNotificationWebhookEndpoint(ctx, util.ParseUUID(endpointID))
+	parsedEndpointID, err := util.ParseUUID(endpointID)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, fmt.Errorf("invalid endpoint id: %w", err))
+		return
+	}
+	endpoint, err := queries.GetNotificationWebhookEndpoint(ctx, parsedEndpointID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("custom webhook endpoint not found"))

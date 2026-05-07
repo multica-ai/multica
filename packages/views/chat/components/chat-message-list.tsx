@@ -1,89 +1,55 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useState, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import {
-  Loader2,
-  ChevronRight,
-  ChevronDown,
-  Brain,
-  AlertCircle,
-  Trash2,
-  RotateCw,
-  MoreHorizontal,
-  Copy,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { taskMessagesOptions, chatKeys } from "@multica/core/chat/queries";
-import { api } from "@multica/core/api";
-import { copyMarkdown } from "../../editor";
+import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
-import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
+import type { AgentAvailability } from "@multica/core/agents";
+import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { TaskStatusPill } from "./task-status-pill";
+import { formatElapsedMs } from "../lib/format";
+import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
-  /** When set, streams the live timeline for this task from task-messages cache. */
-  pendingTaskId: string | null;
-  isWaiting: boolean;
-  /** Active session — required for delete/retry actions. */
-  sessionId: string | null;
-  sessionCreatorId: string | null;
-  /** Owner of the agent for this session (for assistant-message delete). */
-  agentOwnerId: string | null;
-  userId: string | undefined;
-  isSessionArchived: boolean;
-  wsId: string;
+  /**
+   * Server-authoritative pending-task snapshot. `null` / undefined means
+   * no in-flight task — list renders without StatusPill.
+   */
+  pendingTask: ChatPendingTask | null | undefined;
+  /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
+  availability: AgentAvailability | undefined;
 }
 
 export function ChatMessageList({
   messages,
-  pendingTaskId,
-  isWaiting,
-  sessionId,
-  sessionCreatorId,
-  agentOwnerId,
-  userId,
-  isSessionArchived,
-  wsId,
+  pendingTask,
+  availability,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
 
+  const pendingTaskId = pendingTask?.task_id ?? null;
+
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
-  // timeline to avoid rendering the same content in two places during the
-  // invalidate → refetch window.
+  // timeline (and pill) to avoid rendering the same content in two places
+  // during the invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
@@ -97,6 +63,7 @@ export function ChatMessageList({
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
   return (
     <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
@@ -106,24 +73,19 @@ export function ChatMessageList({
        *  than issue-detail's px-8 because the chat window can be narrow. */}
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
         {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            sessionId={sessionId}
-            sessionCreatorId={sessionCreatorId}
-            agentOwnerId={agentOwnerId}
-            userId={userId}
-            isSessionArchived={isSessionArchived}
-            wsId={wsId}
-          />
+          <MessageBubble key={msg.id} message={msg} />
         ))}
         {hasLive && (
           <div className="w-full space-y-1.5">
             <TimelineView items={liveTimeline} />
           </div>
         )}
-        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        {showStatusPill && pendingTask && (
+          <TaskStatusPill
+            pendingTask={pendingTask}
+            taskMessages={liveTaskMessages ?? []}
+            availability={availability}
+          />
         )}
       </div>
     </div>
@@ -170,196 +132,31 @@ function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
 
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-interface MessageBubbleContext {
-  sessionId: string | null;
-  sessionCreatorId: string | null;
-  agentOwnerId: string | null;
-  userId: string | undefined;
-  isSessionArchived: boolean;
-  wsId: string;
-}
-
-function MessageBubble({ message, ...ctx }: { message: ChatMessage } & MessageBubbleContext) {
+function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="flex max-w-[80%] items-start gap-1">
-          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words min-w-0">
-            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-              <Markdown>{message.content}</Markdown>
-            </div>
+        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
+          {/* User messages are authored as markdown in ContentEditor, so
+           * render them through the same pipeline as assistant replies.
+           * Neutralise prose's leading/trailing margin so single-line
+           * bubbles stay as compact as the plain-text version used to. */}
+          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            <Markdown>{message.content}</Markdown>
           </div>
-          <MessageActionsMenu message={message} copyText={message.content} menuAlign="end" {...ctx} />
         </div>
       </div>
     );
   }
 
-  return <AssistantMessage message={message} {...ctx} />;
-}
-
-function MessageActionsMenu({
-  message,
-  copyText,
-  menuAlign,
-  sessionId,
-  sessionCreatorId,
-  agentOwnerId,
-  userId,
-  isSessionArchived,
-  wsId,
-}: { message: ChatMessage; copyText: string; menuAlign: "end" | "start" } & MessageBubbleContext) {
-  const qc = useQueryClient();
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const optimistic = message.id.startsWith("optimistic-");
-  const canDelete =
-    !optimistic &&
-    !!sessionId &&
-    !!userId &&
-    ((message.role === "user" && userId === sessionCreatorId) ||
-      (message.role === "assistant" && userId === agentOwnerId));
-  const canRetry =
-    !optimistic &&
-    !isSessionArchived &&
-    !!sessionId &&
-    userId === sessionCreatorId &&
-    message.role === "user";
-
-  const deleteMut = useMutation({
-    mutationFn: async () => {
-      if (!sessionId) throw new Error("no session");
-      await api.deleteChatMessage(sessionId, message.id);
-    },
-    onMutate: async () => {
-      if (!sessionId) return {};
-      await qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) });
-      const prev = qc.getQueryData<ChatMessage[]>(chatKeys.messages(sessionId));
-      qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-        (old ?? []).filter((m) => m.id !== message.id),
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, context) => {
-      if (!sessionId) return;
-      if (context?.prev) {
-        qc.setQueryData(chatKeys.messages(sessionId), context.prev);
-      }
-      toast.error("Failed to delete message");
-    },
-    onSuccess: () => {
-      toast.success("Message deleted");
-      setConfirmDeleteOpen(false);
-    },
-    onSettled: () => {
-      if (!sessionId) return;
-      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
-    },
-  });
-
-  const retryMut = useMutation({
-    mutationFn: async () => {
-      if (!sessionId) throw new Error("no session");
-      return api.retryChatMessage(sessionId, message.id);
-    },
-    onSuccess: (res) => {
-      if (!sessionId) return;
-      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {
-        task_id: res.task_id,
-        status: "queued",
-      });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
-      toast.success("Retrying…");
-    },
-    onError: () => {
-      toast.error("Failed to retry message");
-    },
-  });
-
-  const handleCopy = () => {
-    void copyMarkdown(copyText).then(
-      () => toast.success("Copied"),
-      () => toast.error("Failed to copy"),
-    );
-  };
-
-  const showActionsFooter = canRetry || canDelete;
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-7 shrink-0 text-muted-foreground"
-              aria-label="Message actions"
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
-          }
-        />
-        <DropdownMenuContent align={menuAlign === "end" ? "end" : "start"} className="w-44">
-          <DropdownMenuItem onClick={handleCopy}>
-            <Copy className="size-3.5" />
-            Copy
-          </DropdownMenuItem>
-          {showActionsFooter && <DropdownMenuSeparator />}
-          {canRetry && (
-            <DropdownMenuItem
-              disabled={retryMut.isPending || deleteMut.isPending}
-              onClick={() => retryMut.mutate()}
-            >
-              <RotateCw className="size-3.5" />
-              Retry
-            </DropdownMenuItem>
-          )}
-          {canDelete && (
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={deleteMut.isPending || retryMut.isPending}
-              onClick={() => setConfirmDeleteOpen(true)}
-            >
-              <Trash2 className="size-3.5" />
-              Delete
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this message?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This cannot be undone. Related task logs may also be removed depending on server
-              configuration.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteMut.mutate()}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
+  return <AssistantMessage message={message} />;
 }
 
 function AssistantMessage({
   message,
-  ...ctx
 }: {
   message: ChatMessage;
-} & MessageBubbleContext) {
+}) {
   const taskId = message.task_id;
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
@@ -372,34 +169,117 @@ function AssistantMessage({
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
 
-  const copyText = useMemo(() => {
-    const base = message.content?.trim() ?? "";
-    if (base) return message.content;
-    return timeline
-      .filter((t) => t.type === "text" && (t.content ?? "").trim())
-      .map((t) => t.content ?? "")
-      .join("\n\n");
-  }, [message.content, timeline]);
+  // Failure bubble path: when the server's FailTask wrote a failure
+  // chat_message (failure_reason set), render a destructive bubble with the
+  // human-readable reason label + collapsible raw errMsg + the same timeline
+  // so the user can see exactly where the run broke.
+  if (message.failure_reason) {
+    return (
+      <FailureBubble
+        reason={message.failure_reason}
+        rawError={message.content}
+        timeline={timeline}
+        elapsedMs={message.elapsed_ms}
+      />
+    );
+  }
 
   return (
     <div className="w-full space-y-1.5">
-      <div className="flex items-start gap-1">
-        <MessageActionsMenu
-          message={message}
-          copyText={copyText}
-          menuAlign="start"
-          {...ctx}
-        />
-        <div className="min-w-0 flex-1 space-y-1.5">
-          {timeline.length > 0 ? (
-            <TimelineView items={timeline} />
-          ) : (
-            <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-              <Markdown>{message.content}</Markdown>
-            </div>
+      {timeline.length > 0 ? (
+        <TimelineView items={timeline} />
+      ) : (
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          <Markdown>{message.content}</Markdown>
+        </div>
+      )}
+      {message.elapsed_ms != null && (
+        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+      )}
+    </div>
+  );
+}
+
+// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
+// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
+// it once at task completion, so this caption is identical across reloads
+// and devices. Skipped silently when null (legacy messages predating
+// migration 063 + user messages).
+function ElapsedCaption({
+  variant,
+  elapsedMs,
+  className,
+}: {
+  variant: "replied" | "failed";
+  elapsedMs: number;
+  className?: string;
+}) {
+  const { t } = useT("chat");
+  const text =
+    variant === "replied"
+      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
+      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
+  return (
+    <div className={cn("text-[11px] text-muted-foreground/80", className)}>
+      {text}
+    </div>
+  );
+}
+
+function FailureBubble({
+  reason,
+  rawError,
+  timeline,
+  elapsedMs,
+}: {
+  reason: string;
+  rawError: string;
+  timeline: ChatTimelineItem[];
+  elapsedMs?: number | null;
+}) {
+  const { t } = useT("chat");
+  const [open, setOpen] = useState(false);
+  // Map the back-end enum to copy via the shared label table; an unknown
+  // reason (e.g. a future enum value the front-end doesn't ship yet)
+  // falls back to a generic translated label.
+  const label =
+    failureReasonLabel[reason as TaskFailureReason] ??
+    t(($) => $.message_list.task_failed_fallback);
+
+  return (
+    <div className="w-full space-y-1.5">
+      {/* Failure read as an inline, low-key note — not a destructive
+       *  alert. Intentionally borderless / no background tint: a chat
+       *  failure is informational ("this didn't work"), not a system
+       *  error. The icon + muted destructive text are signal enough,
+       *  the rest stays in the normal reply rhythm. */}
+      <div className="flex items-start gap-1.5 text-sm">
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive/80 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-destructive/90">{label}</div>
+          {rawError.trim() && (
+            <Collapsible open={open} onOpenChange={setOpen}>
+              <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+                {open ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                <span>{t(($) => $.message_list.show_details)}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                  {rawError}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </div>
       </div>
+      {timeline.length > 0 && <TimelineView items={timeline} />}
+      {elapsedMs != null && (
+        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
+      )}
     </div>
   );
 }
@@ -474,9 +354,10 @@ function ToolGroupCollapsible({
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
 }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(defaultOpen ?? false);
   const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const label = `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  const label = t(($) => $.message_list.tools, { count: toolCount });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -571,11 +452,15 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
 
   const preview = output.length > 120 ? output.slice(0, 120) + "..." : output;
+  const labelPrefix = item.tool
+    ? t(($) => $.message_list.tool_result_named, { tool: item.tool })
+    : t(($) => $.message_list.tool_result_unnamed);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -584,7 +469,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {labelPrefix}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -628,3 +513,4 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
+

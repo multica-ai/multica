@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Conventions reference
+
+The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
+
+- **`apps/docs/content/docs/developers/conventions.mdx`** (English)
+- **`apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
+
+Read that page before:
+
+- Writing or editing translations (`packages/views/locales/`)
+- Naming a new route, package, file, DB column, or TS type
+- Writing Chinese product copy (UI strings, error messages, docs)
+
+The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
+
 ## Project Context
 
 Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.
@@ -136,6 +151,17 @@ make start-worktree     # Start using .env.worktree
 - Avoid broad refactors unless required by the task.
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
 
+### Backend Handler UUID Parsing Convention
+
+Every Go handler in `server/internal/handler/` follows these rules. The convention exists because `util.ParseUUID` used to silently return a zero UUID on invalid input, which caused #1661 — a `DELETE` returning 204 success while the SQL `DELETE` matched zero rows.
+
+- **Resource path params that accept either a UUID or a human-readable identifier** (e.g. `chi.URLParam(r, "id")` for an issue, which accepts both `MUL-123` and a UUID) MUST be resolved through the dedicated loader (`loadIssueForUser` / `loadSkillForUser` / `loadAgentForUser` / `requireDaemonRuntimeAccess`). After resolution, all subsequent DB calls — especially `Queries.Delete*` / `Queries.Update*` — MUST use `entity.ID` from the resolved object. Never round-trip the raw URL string through `parseUUID` for a write query.
+- **Pure-UUID inputs from request boundaries** (URL params that are always UUIDs, request body fields, query params, headers) MUST be validated with `parseUUIDOrBadRequest(w, s, fieldName)`. On invalid input it writes a 400 and returns `ok=false` — return immediately.
+- **Trusted UUID round-trips** (sqlc-returned UUIDs being passed back into queries, test fixtures) use `parseUUID(s)` which calls `util.MustParseUUID` and panics on invalid input. A panic here means an unguarded user-input string slipped in — that is a real bug. `chi`'s `middleware.Recoverer` translates the panic into a 500 so the process keeps running.
+- **`util.ParseUUID(s) (pgtype.UUID, error)`** is the only safe variant outside the handler package. Always check the error.
+
+When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
+
 ### Package Boundary Rules
 
 These are hard constraints. Violating them breaks the cross-platform architecture:
@@ -191,26 +217,18 @@ Every path in the desktop app falls into exactly one category. Choosing the wron
 
 **Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
 
-### Workspace identity singleton
+### Workspace context
 
-`setCurrentWorkspace(slug, uuid)` in `@multica/core/platform` is the single source of truth for "which workspace is active right now". Three consumers depend on it:
-
-1. API client's `X-Workspace-Slug` header.
-2. Zustand per-workspace storage namespace.
-3. Chrome gating (`{slug && <AppSidebar />}` on desktop, similar on web).
-
-Normally set by `WorkspaceRouteLayout` when its route mounts. Critically: **unmount does NOT clear it.** Any code that leaves workspace context (leave workspace, delete workspace, force navigation to overlay) must call `setCurrentWorkspace(null, null)` explicitly — otherwise the realtime `workspace:deleted` handler races the mutation, chrome gating stays truthy while the workspace is gone from cache, and `useWorkspaceId` throws.
+`setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the single source of truth for the active workspace. `WorkspaceRouteLayout` sets it on mount; unmount does NOT clear it. Code that leaves workspace context (leave/delete workspace, force-navigate to overlay) must call `setCurrentWorkspace(null, null)` explicitly.
 
 ### Workspace destructive operations
 
-Leave / Delete workspace flows must follow this order:
+Leave / Delete workspace flows must follow this order, otherwise concurrent refetches race and the renderer hard-reloads:
 
-1. Read destination from cached workspace list (no extra fetch).
+1. Read destination from cached workspace list.
 2. `setCurrentWorkspace(null, null)`.
-3. `navigation.push(destination)` — switch to next workspace or open new-workspace overlay.
+3. `navigation.push(destination)`.
 4. THEN `await mutation.mutateAsync(workspaceId)`.
-
-Reversing step 4 with steps 1–3 (mutate first, navigate after) causes a three-way race between the mutation's `onSettled` invalidate, the explicit `navigateAway`, and the realtime handler's `relocateAfterWorkspaceLoss` — all refetching the same `workspaces` query concurrently. One gets cancelled, bubbles as `CancelledError`, and triggers `window.location.assign` → full renderer reload / white screen.
 
 ### Tab isolation
 
@@ -218,37 +236,9 @@ Tabs are grouped per workspace in `stores/tab-store.ts`. The TabBar shows only t
 
 Cross-workspace `push(path)` is detected by the navigation adapter (`platform/navigation.tsx`) and translated into `switchWorkspace(slug, targetPath)` — NOT a navigation within the current tab's router. Don't bypass the adapter; always go through `useNavigation()` from shared code.
 
-### Drag region (macOS window-move)
+### Drag region (macOS)
 
-Every full-window desktop view (login, onboarding, new-workspace, invite, no-access, create-workspace modal) — i.e. anything that isn't inside the dashboard shell — needs a top drag strip so users can move the window. The native macOS traffic lights are **kept visible** for every such surface (Linear/Notion/Arc pattern); no `useImmersiveMode` by default.
-
-**Pattern**: use the shared `<DragStrip />` from `@multica/views/platform` as the first flex child of the page root. It's a 48px transparent row with `-webkit-app-region: drag` — the parent's bg fills through it so the page reads edge-to-edge while the top 48px stays draggable under the traffic lights.
-
-```tsx
-import { DragStrip } from "@multica/views/platform";
-
-return (
-  <div className="flex min-h-svh flex-col bg-background">
-    <DragStrip />
-    <div className="flex flex-1 flex-col px-6 pb-12">
-      {/* page content — interactive elements placed at y ≥ 48 clear the strip;
-          any element at y < 48 needs WebkitAppRegion: "no-drag" */}
-    </div>
-  </div>
-);
-```
-
-Why flex, not absolute: the absolute-strip + `z-index` approach relies on stacking-context hit-testing, which isn't reliable for `-webkit-app-region`. A real flex row with no siblings at that pixel is unambiguous. Web browsers silently ignore `-webkit-app-region`, so shared views render the strip as a plain 48px spacer on web — safe cross-platform.
-
-**Horizontal clearance**: traffic lights occupy roughly x ∈ [16, 76] on macOS. Interactive UI (Back buttons, menus) should start at x ≥ 80 on desktop-sized viewports. The shared views default to sufficient `lg:px-20` padding; re-examine when laying out anything in the top-left corner.
-
-Canonical example: `packages/views/platform/drag-strip.tsx`. Used by `onboarding/steps/step-welcome.tsx` (per-column), `onboarding/onboarding-flow.tsx`, `workspace/new-workspace-page.tsx`, `invite/invite-page.tsx`, `workspace/no-access-page.tsx`, `modals/create-workspace.tsx`, and desktop's `pages/login.tsx`.
-
-**When to use `useImmersiveMode`**: only when a view must place interactive UI in the traffic-light hit-zone (y < 28 AND x < 80). For every current non-dashboard surface, buttons sit at y ≥ 48, so immersive mode is unnecessary. Hook is preserved as an escape hatch but has no callers.
-
-### UX vs platform chrome
-
-UX affordances (Back button, Log out button, welcome copy, invite card) belong in `packages/views/` so web and desktop render identical content. Platform chrome (tab system interaction, native-window IPC, `useImmersiveMode`) lives in desktop-only code. The `DragStrip` + `useImmersiveMode` primitives live in `packages/views/platform/` because they're cross-platform safe (web no-op) and need to be callable from shared views that own the page layout — keeping them in desktop-only would force every shared page to leave top-padding decisions to the platform shell, fragmenting the design.
+Every full-window desktop view (anything outside the dashboard shell) must mount `<DragStrip />` from `@multica/views/platform` as the first flex child of the page root, otherwise users can't drag the window. Interactive UI inside the top 48px needs `WebkitAppRegion: "no-drag"` to stay clickable.
 
 ## UI/UX Rules
 

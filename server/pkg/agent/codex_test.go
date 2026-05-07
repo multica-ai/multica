@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -166,6 +165,68 @@ func TestCodexHandleServerRequestFileChangeApproval(t *testing.T) {
 	result := resp["result"].(map[string]any)
 	if result["decision"] != "accept" {
 		t.Fatalf("expected decision=accept, got %v", result["decision"])
+	}
+}
+
+func TestCodexHandleServerRequestMCPElicitation(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":12,"method":"mcpServer/elicitation/request","params":{}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(12) {
+		t.Fatalf("expected id=12, got %v", resp["id"])
+	}
+	result := resp["result"].(map[string]any)
+	if result["action"] != "accept" {
+		t.Fatalf("expected action=accept, got %v", result["action"])
+	}
+	if _, ok := result["content"]; !ok {
+		t.Fatal("expected content key in response")
+	}
+	if _, ok := result["_meta"]; !ok {
+		t.Fatal("expected _meta key in response")
+	}
+}
+
+func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":13,"method":"some/unknown/method","params":{}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(13) {
+		t.Fatalf("expected id=13, got %v", resp["id"])
+	}
+	if resp["result"] != nil {
+		t.Fatalf("expected no result for error response, got %v", resp["result"])
+	}
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object in response")
+	}
+	if errObj["code"] != float64(-32601) {
+		t.Fatalf("expected error code -32601, got %v", errObj["code"])
 	}
 }
 
@@ -974,9 +1035,7 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"echo \"error: unexpected argument '-m' found\" >&2\n" +
 		"exit 2\n"
-	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(script))
 
 	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
@@ -1014,15 +1073,207 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
-func TestWithCodexStderrAppendsHint(t *testing.T) {
+func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stale"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stale","turn":{"id":"turn-stale"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-stale","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'`+"\n"+
+		`sleep 5`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "semantic inactivity") {
+		t.Fatalf("expected semantic inactivity error, got %q", result.Error)
+	}
+	if result.SessionID != "thr-stale" {
+		t.Fatalf("expected session id to be preserved, got %q", result.SessionID)
+	}
+}
+
+func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-progress"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-progress","turn":{"id":"turn-progress"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-1","text":"still working"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"ok"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-progress","turn":{"id":"turn-progress","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 90 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "still working") {
+		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-delta"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-delta","turn":{"id":"turn-delta"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1\n"}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","item":{"type":"agentMessage","id":"msg-1"},"delta":"thinking"}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/fileChange/outputDelta","params":{"threadId":"thr-delta","item":{"type":"fileChange","id":"patch-1"},"delta":"patched"}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/mcpToolCall/progress","params":{"threadId":"thr-delta","item":{"type":"mcpToolCall","id":"mcp-1"},"progress":{"message":"still running"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-delta","turn":{"id":"turn-delta","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 150 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+}
+
+func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-normal"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-normal","turn":{"id":"turn-normal"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-normal","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-normal","turn":{"id":"turn-normal","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Done" {
+		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func writeFakeCodexAppServer(t *testing.T, body string) string {
+	t.Helper()
+	fakePath := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\n" + body
+	writeTestExecutable(t, fakePath, []byte(script))
+	return fakePath
+}
+
+func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
+	t.Helper()
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+func TestWithAgentStderrAppendsHint(t *testing.T) {
 	t.Parallel()
 
-	if got := withCodexStderr("codex initialize failed: process exited", ""); got != "codex initialize failed: process exited" {
+	if got := withAgentStderr("codex initialize failed: process exited", "codex", ""); got != "codex initialize failed: process exited" {
 		t.Errorf("empty tail should not modify msg, got %q", got)
 	}
-	msg := withCodexStderr("codex initialize failed: process exited", "unexpected argument '-m' found")
+	msg := withAgentStderr("codex initialize failed: process exited", "codex", "unexpected argument '-m' found")
 	want := "codex initialize failed: process exited; codex stderr: unexpected argument '-m' found"
 	if msg != want {
 		t.Errorf("got %q, want %q", msg, want)
+	}
+}
+
+func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		ExtraArgs:  []string{"--listen", "tcp://evil", "--sandbox", "read-only"},
+		CustomArgs: []string{"--sandbox", "workspace-write", "--listen=bad"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "tcp://evil") || strings.Contains(joined, "--listen=bad") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--sandbox" && args[i+1] == "read-only" {
+			extraIdx = i
+		}
+		if args[i] == "--sandbox" && args[i+1] == "workspace-write" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
 }

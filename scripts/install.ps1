@@ -42,6 +42,142 @@ function Get-UpdateManifest {
     }
 }
 
+function Get-SelfHostRef {
+    if ($env:MULTICA_SELFHOST_REF) {
+        return $env:MULTICA_SELFHOST_REF
+    }
+
+    $latest = Get-LatestVersion
+    if ($latest) {
+        return $latest
+    }
+
+    return "main"
+}
+
+function Checkout-ServerRef {
+    param([string]$Ref)
+
+    if ($Ref -eq "main") {
+        git fetch origin main --depth 1 2>$null
+        git checkout --force main 2>$null
+        git reset --hard origin/main 2>$null
+        return
+    }
+
+    git fetch origin --tags --force 2>$null
+    $tagRef = "refs/tags/$Ref"
+    git show-ref --verify --quiet $tagRef 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        git checkout --force $Ref 2>$null
+        return
+    }
+
+    git fetch origin $Ref --depth 1 2>$null
+    git checkout --force $Ref 2>$null
+}
+
+function Pull-OfficialSelfHostImages {
+    docker compose -f docker-compose.selfhost.yml pull
+    if ($LASTEXITCODE -eq 0) {
+        return
+    }
+
+    Write-Host ""
+    Write-Warn "Official images for the selected self-host channel are not published yet."
+    Write-Host "This can happen before the first GHCR release is available."
+    Write-Host "From $InstallDir, build from source instead:"
+    Write-Host "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
+    exit 1
+}
+
+function Convert-ToCliArch {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    $normalized = "$Value".Trim().ToUpperInvariant()
+    switch ($normalized) {
+        "9"      { return "amd64" }
+        "AMD64"  { return "amd64" }
+        "X64"    { return "amd64" }
+        "X86_64" { return "amd64" }
+        "12"     { return "arm64" }
+        "ARM64"  { return "arm64" }
+        "AARCH64" { return "arm64" }
+        default  { return $null }
+    }
+}
+
+function Get-WindowsCliArch {
+    $signals = @()
+    $nativeArchSignalFound = $false
+
+    # Prefer the native processor architecture over the current PowerShell
+    # process architecture. This keeps Windows on ARM from being misdetected
+    # when PowerShell is running through x64/x86 emulation.
+    try {
+        if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
+            $processorArch = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop |
+                Select-Object -First 1 -ExpandProperty Architecture
+            $signals += [pscustomobject]@{ Source = "Win32_Processor.Architecture"; Value = $processorArch }
+            $nativeArchSignalFound = $true
+        }
+    } catch {}
+
+    try {
+        if (-not $nativeArchSignalFound -and (Get-Command Get-WmiObject -ErrorAction SilentlyContinue)) {
+            $processorArch = Get-WmiObject -Class Win32_Processor -ErrorAction Stop |
+                Select-Object -First 1 -ExpandProperty Architecture
+            $signals += [pscustomobject]@{ Source = "Win32_Processor.Architecture"; Value = $processorArch }
+            $nativeArchSignalFound = $true
+        }
+    } catch {}
+
+    try {
+        $signals += [pscustomobject]@{
+            Source = "RuntimeInformation.OSArchitecture"
+            Value = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        }
+    } catch {}
+
+    $signals += [pscustomobject]@{ Source = "PROCESSOR_ARCHITEW6432"; Value = $env:PROCESSOR_ARCHITEW6432 }
+    $signals += [pscustomobject]@{ Source = "PROCESSOR_ARCHITECTURE"; Value = $env:PROCESSOR_ARCHITECTURE }
+
+    foreach ($signal in $signals) {
+        $arch = Convert-ToCliArch $signal.Value
+        if ($arch) {
+            return $arch
+        }
+    }
+
+    $details = ($signals |
+        Where-Object { $null -ne $_.Value -and "$($_.Value)".Trim() -ne "" } |
+        ForEach-Object { "$($_.Source)=$($_.Value)" }) -join ", "
+    if (-not $details) {
+        $details = "no architecture signals available"
+    }
+
+    Write-Fail "Unsupported Windows architecture ($details). Only x64 and ARM64 are supported."
+}
+
+function Get-InstalledCliVersion {
+    try {
+        $firstLine = multica version 2>$null | Select-Object -First 1
+        if ("$firstLine" -match '\b(v?\d+(?:\.\d+)+)\b') {
+            $version = $Matches[1]
+            if ($version -notlike 'v*') {
+                $version = "v$version"
+            }
+            return $version
+        }
+    } catch {}
+
+    return $null
+}
+
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
@@ -101,13 +237,7 @@ function Install-CliBinary {
         Write-Fail "Multica requires a 64-bit Windows installation."
     }
 
-    # Distinguish amd64 vs arm64 — Is64BitOperatingSystem is true for both.
-    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    switch ($osArch) {
-        'X64'   { $arch = "amd64" }
-        'Arm64' { $arch = "arm64" }
-        default { Write-Fail "Unsupported Windows architecture: $osArch (only X64 and Arm64 are supported)." }
-    }
+    $arch = Get-WindowsCliArch
 
     $manifest = Get-UpdateManifest
     if (-not $manifest) {
@@ -237,15 +367,15 @@ function Install-Cli {
         $manifest = Get-UpdateManifest
         $latestVer = if ($manifest) { $manifest.version } else { $null }
 
-        $currentCmp = $currentVer -replace '^v',''
+        $currentCmp = if ($currentVer) { $currentVer -replace '^v','' } else { $null }
         $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
 
-        $isUpToDate = -not $latestCmp
+        $isUpToDate = $currentCmp -and -not $latestCmp
         if (-not $isUpToDate) {
             try {
-                $isUpToDate = [System.Version]$currentCmp -ge [System.Version]$latestCmp
+                $isUpToDate = $currentCmp -and $latestCmp -and ([System.Version]$currentCmp -ge [System.Version]$latestCmp)
             } catch {
-                $isUpToDate = $currentCmp -eq $latestCmp
+                $isUpToDate = $currentCmp -and $latestCmp -and ($currentCmp -eq $latestCmp)
             }
         }
 
@@ -352,14 +482,12 @@ After installing Docker, re-run this script with `$env:MULTICA_MODE="local"`.
 # ---------------------------------------------------------------------------
 function Install-Server {
     Write-Info "Setting up Multica server..."
+    $serverRef = Get-SelfHostRef
+    Write-Info "Using self-host assets from $serverRef..."
 
     if (Test-Path (Join-Path $InstallDir ".git")) {
         Write-Info "Updating existing installation at $InstallDir..."
         Write-Warn "Any local changes in $InstallDir will be overwritten."
-        Push-Location $InstallDir
-        git fetch origin main --depth 1 2>$null
-        git reset --hard origin/main 2>$null
-        Pop-Location
     } else {
         Write-Info "Cloning Multica repository..."
         if (-not (Test-CommandExists "git")) {
@@ -376,9 +504,9 @@ function Install-Server {
         git clone --depth 1 $RepoUrl $InstallDir
     }
 
-    Write-Ok "Repository ready at $InstallDir"
-
     Push-Location $InstallDir
+    Checkout-ServerRef $serverRef
+    Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
         Write-Info "Creating .env with random JWT_SECRET..."
@@ -390,8 +518,10 @@ function Install-Server {
         Write-Ok "Using existing .env"
     }
 
+    Write-Info "Pulling official Multica images..."
+    Pull-OfficialSelfHostImages
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
-    docker compose -f docker-compose.selfhost.yml up -d --build
+    docker compose -f docker-compose.selfhost.yml up -d
 
     Write-Info "Waiting for backend to be ready..."
     $ready = $false
@@ -472,7 +602,7 @@ function Start-LocalInstall {
     Write-Host "     multica setup self-host  " -NoNewline; Write-Host "# Configure + authenticate + start daemon" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  Login: configure RESEND_API_KEY in .env for email codes,"
-    Write-Host "  or set APP_ENV=development in .env to enable the dev master code 888888."
+    Write-Host "  or read the generated code from backend logs when Resend is unset."
     Write-Host ""
     Write-Host "  To stop all services:"
     Write-Host '     $env:MULTICA_MODE="stop"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex'

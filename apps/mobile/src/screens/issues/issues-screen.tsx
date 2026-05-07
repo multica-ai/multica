@@ -73,6 +73,7 @@ export function IssuesScreen() {
         creatorFilters,
         projectFilters,
         includeNoProject,
+        labelFilters: [],
       }),
     [
       issues,

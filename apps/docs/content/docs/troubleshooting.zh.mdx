@@ -1,0 +1,168 @@
+---
+title: 故障排查
+description: self-host Multica 遇到的 Top 7 常见问题——症状、原因、怎么查、怎么修。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+按症状查问题。每条问题都给**症状 / 可能原因 / 怎么查 / 怎么修**四段。如果你的情况不在下面，到 [GitHub](https://github.com/multica-ai/multica/issues) 提 issue。
+
+## 守护进程连不上服务器
+
+**症状**：[`multica daemon`](/cli) 的 `status` 命令显示 `offline` 或 `connection refused`；服务器日志里没有 `/api/daemon/register` 或 `/api/daemon/heartbeat` 的请求。守护进程机制详见 [守护进程与运行时](/daemon-runtimes)。
+
+**可能原因**：
+
+1. **`MULTICA_SERVER_URL` 指错地址** —— 默认是 `ws://localhost:8080/ws`，self-host 要改成你自己的 server 地址
+2. **网络 / 防火墙阻挡** —— daemon 和 server 不在同一网络，或出站被 block
+3. **Token 过期或无效** —— 你从来没跑过 `multica login`，或 PAT 被撤销
+4. **服务器拒绝注册** —— 你登录的账号不在目标工作区（register 返 403）
+5. **DNS 解析失败** —— hostname 在 daemon 机器上解不出来
+
+**怎么查**：
+
+```bash
+multica daemon logs --lines 100    # 看 daemon 侧错误
+echo $MULTICA_SERVER_URL          # 确认地址配对
+curl -i http://<server-host>:8080/health   # 直接戳 server
+curl -i http://<server-host>:8080/readyz  # 连同 DB + migration readiness 一起检查
+cat ~/.multica/config.json        # 看 api_token 是否存在
+multica workspace list            # 确认你是目标工作区成员
+```
+
+**怎么修**：按上面原因对症处理。最常见的两个是**改 `MULTICA_SERVER_URL` 重启 daemon**（`multica daemon restart`）和**重新登录**（`multica logout && multica login`）。
+
+## 任务一直卡在 queued
+
+**症状**：把 issue 分给 agent 后，issue 状态立刻变 `in_progress`，但过了很久页面没有 agent 执行的迹象；`multica daemon status` 显示 daemon `online`。
+
+**可能原因**（按触发概率排）：
+
+1. **智能体并发上限已满** —— 该 agent 的 `max_concurrent_tasks`（默认 6）已经被其他正在跑的任务占满
+2. **同一 issue 上有另一个同 agent 的任务还没结束** —— 同 agent × 同 issue 强制串行（防止重复执行）
+3. **智能体已经被 archive** —— 被归档后新任务仍能入队，但无法被 claim，会卡到 5 分钟超时（code-issue G-01）
+4. **Daemon 没在当前工作区注册该 runtime** —— 重启 daemon 或在 UI 重新选一次 runtime
+5. **守护进程失联** —— 最近 45 秒没心跳。`daemon status` 看起来 `online` 也可能是刚失联
+
+**怎么查**：
+
+```bash
+multica daemon status --output json       # runtime 列表 + last_seen_at
+multica agent list                         # 查 agent 的 archived 状态
+multica issue show <issue-id>             # 看 task 历史
+```
+
+服务器侧（self-host）可以 grep `"no_tasks"` / `"no_capacity"` 看 claim 的结果。
+
+**怎么修**：
+
+- 并发打满 → 等现有任务跑完，或 `multica agent update <id> --max-concurrent-tasks 10` 提升上限
+- 同 issue 串行 → 等前一个任务结束，或改分给不同 agent
+- Agent 被 archive → `multica agent restore <id>`
+- Runtime 未注册 → `multica daemon restart`，daemon 会重新注册
+
+## WebSocket 连不上
+
+**症状**：浏览器控制台报 `WebSocket is closed`；页面不显示实时更新（任务进度、评论、inbox），刷新才能看到；但后台任务仍在执行。
+
+**可能原因**：
+
+1. **Origin 校验失败** —— 你的前端域名不在 server 的 CORS 白名单里。默认白名单只包含 `localhost:3000/5173/5174`，self-host 到公网必须配 `FRONTEND_ORIGIN`
+2. **协议不匹配** —— 前端用 `https://` 需要 `wss://`，HTTP 用 `ws://`
+3. **反向代理没开 WebSocket upgrade** —— Nginx / Envoy / HAProxy 默认不转发 `Upgrade` header
+4. **JWT cookie 过期或丢失** —— 30 天过期后没重登
+
+**怎么查**：
+
+- 浏览器 DevTools → Network → 筛选 "WS"，看连接状态和状态码
+- Server 日志里 grep `"rejected origin"` / `"websocket"` —— 如果是 origin 问题会明确写出来
+- `curl -i http://<server-host>:8080/ws` 应该返回 `101 Switching Protocols`（需要带 `Upgrade` header）
+
+**怎么修**：
+
+- Origin 错 → 在 server 的 `.env` 设 `FRONTEND_ORIGIN=https://multica.yourdomain.com`（或逗号分隔的 `CORS_ALLOWED_ORIGINS`），重启 server
+- 协议不匹配 → 确保 `FRONTEND_ORIGIN` 的协议和前端一致
+- 反向代理 → 在 Nginx 加 `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`
+- Cookie 过期 → 刷新页面重新登录
+
+## 邮件没收到
+
+**症状**：登录或邀请时提交邮箱后，收件箱（和垃圾邮件）里都没有验证码邮件。
+
+**可能原因**：
+
+1. **`RESEND_API_KEY` 没配** —— server 会静默回落，**把验证码打到自己的 stdout 里**，不报错。生产部署很容易踩
+2. **Resend API key 无效 / 余额不足** —— server 日志会有 `"failed to send verification code"`
+3. **`RESEND_FROM_EMAIL` 的域名没在 Resend 验证** —— Resend 会拒发
+4. **邮件发出去了但被收件人 ISP 判垃圾** —— 查 Resend dashboard 和 spam 目录
+
+**怎么查**：
+
+- Server 日志里搜 `"[DEV] Verification code for"` —— 如果有，说明 Resend 没配，验证码被打到 stdout
+- [Resend dashboard](https://resend.com/) → Emails 看发送记录
+- 确认 `RESEND_FROM_EMAIL` 的域名在 Resend console 的 "Verified Domains" 列表里
+
+**怎么修**：
+
+- 没配 API key → 照 [登录与注册配置 → 怎么配 Email](/auth-setup#email--验证码登录怎么工作) 的步骤配完重启 server
+- 域名没验证 → Resend console 里走 DNS 验证流程（加 SPF / DKIM 记录）
+- 紧急情况下（如内部测试）→ 从 server 日志里抄 `[DEV]` 打印出的验证码
+
+## 固定本地测试验证码登不进去
+
+**症状**：自部署实例，想用 `888888` 这类固定本地测试验证码登录，但被拒 `invalid or expired code`。
+
+**可能原因**（互斥）：
+
+1. **`MULTICA_DEV_VERIFICATION_CODE` 为空** —— 固定验证码默认关闭
+2. **`APP_ENV=production`** —— 这是正确的生产配置；固定本地测试验证码在 production 中会被忽略
+3. **配置的验证码不是 6 位数字** —— 这个快捷码只接受 6 位数字
+
+**怎么查**：
+
+```bash
+cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+```
+
+检查邮箱（含 spam）看有没有收到真实验证码。
+
+**怎么修**：
+
+- 生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空，配好 Resend 后使用真实验证码
+- 本地开发或内网测试可以从 server 日志抄生成的验证码；如果需要 `888888`，设置 `APP_ENV=development` 和 `MULTICA_DEV_VERIFICATION_CODE=888888`。不要在公网实例启用固定验证码（详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)）
+
+## 端口冲突
+
+**症状**：`multica server` 或 `multica daemon start` 启动失败，报 `address already in use`。
+
+**可能原因**：
+
+1. **Server 端口被占用**（默认 `8080`）
+2. **Daemon health 端口被占用**（默认 `19514`，每个 profile 偏移一个 hash 值）
+3. **Web dev server 端口冲突**（`3000` / `5173`）
+4. **端口权限不足**（绑 `< 1024` 的 privileged port 需要 sudo）
+
+**怎么查**：
+
+```bash
+lsof -i :8080        # macOS / Linux
+netstat -ano | findstr :8080    # Windows
+```
+
+**怎么修**：
+
+- 杀占用进程（`kill -9 <PID>`），或改环境变量 `PORT=9000` 换端口
+- 要用 80 / 443 → 别直接绑，用反向代理（Nginx / Caddy）转发到高位端口
+
+## 在哪看日志
+
+| 组件 | 位置 | 命令 |
+|---|---|---|
+| **守护进程** | `~/.multica/daemon.log`（后台模式）或前台 stdout | `multica daemon logs -f --lines 100` |
+| **服务器（Docker）** | container stdout | `docker logs -f <container>` |
+| **服务器（systemd）** | journal | `journalctl -u multica-server -f` |
+| **前端（dev）** | `pnpm dev` 所在终端 | 直接看 |
+| **前端（browser）** | DevTools → Console | 按 `F12` |
+
+需要更详细的 daemon 日志，把它从后台挪到前台跑：`multica daemon stop && multica daemon start --foreground`。

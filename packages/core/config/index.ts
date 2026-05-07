@@ -3,12 +3,19 @@ import { useStore } from "zustand";
 
 interface ConfigState {
   cdnDomain: string;
+  allowSignup: boolean;
+  googleClientId: string;
   setCdnDomain: (domain: string) => void;
+  setAuthConfig: (config: { allowSignup: boolean; googleClientId?: string }) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
+  allowSignup: true,
+  googleClientId: "",
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
+  setAuthConfig: ({ allowSignup, googleClientId = "" }) =>
+    set({ allowSignup, googleClientId }),
 }));
 
 export function useConfigStore(): ConfigState;

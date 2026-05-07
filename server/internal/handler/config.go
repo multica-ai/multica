@@ -8,21 +8,25 @@ import (
 
 type AppConfig struct {
 	CdnDomain          string `json:"cdn_domain"`
-	GoogleClientID     string `json:"google_client_id"`
+	// Public auth config consumed by the web app at runtime so self-hosted
+	// deployments do not need to rebuild the frontend image when operators
+	// toggle signup or wire Google OAuth.
+	AllowSignup        bool   `json:"allow_signup"`
+	GoogleClientID     string `json:"google_client_id,omitempty"`
 	GoogleIOSClientID  string `json:"google_ios_client_id"`
 	DingTalkClientID   string `json:"dingtalk_client_id"`
 	DingTalkOAuthScope string `json:"dingtalk_oauth_scope"`
 	HideEmailLogin     bool   `json:"hide_email_login"`
 
-	// PostHog public config for the frontend. The key is the same Project
-	// API Key the backend uses; returning it here (instead of baking it
-	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
-	// instances — whose server returns an empty key — automatically
-	// disable frontend event shipping too.
+	// PostHog public config for the frontend.
 	PosthogKey  string `json:"posthog_key"`
 	PosthogHost string `json:"posthog_host"`
 }
 
+// GetConfig is mounted on the public (unauthenticated) route group because
+// the web app calls it before login to decide whether to render the Google
+// sign-in button and signup UI. Only add fields here that are safe to expose
+// to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
 		GoogleClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
@@ -30,6 +34,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		DingTalkClientID:   strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
 		DingTalkOAuthScope: strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
 		HideEmailLogin:     os.Getenv("NEXT_PUBLIC_HIDE_EMAIL_LOGIN") == "true",
+		AllowSignup:        os.Getenv("ALLOW_SIGNUP") != "false",
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

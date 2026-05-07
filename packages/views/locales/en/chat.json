@@ -1,0 +1,113 @@
+{
+  "fab": {
+    "running": "Multica is working...",
+    "unread_one": "{{count}} unread chat",
+    "unread_other": "{{count}} unread chats",
+    "default": "Ask Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Create an agent to start chatting",
+    "placeholder_archived": "This session is archived",
+    "placeholder_named": "Tell {{name}} what to do…",
+    "placeholder_default": "Tell me what to do…"
+  },
+  "message_list": {
+    "show_details": "Show details",
+    "replied_in": "Replied in {{elapsed}}",
+    "failed_after": "Failed after {{elapsed}}",
+    "task_failed_fallback": "Task failed",
+    "tools_one": "{{count}} tool",
+    "tools_other": "{{count}} tools",
+    "tool_result_named": "{{tool}} result: ",
+    "tool_result_unnamed": "result: "
+  },
+  "session_history": {
+    "back_tooltip": "Back",
+    "header": "Chat History",
+    "empty": "No chat sessions yet",
+    "untitled": "Untitled",
+    "time": {
+      "just_now": "just now",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago",
+      "days": "{{count}}d ago"
+    },
+    "row_delete_aria": "Delete chat session",
+    "row_delete_tooltip": "Delete",
+    "delete_dialog": {
+      "title": "Delete chat session",
+      "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
+      "description_default": "This chat session and its messages will be permanently removed. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "confirming": "Deleting..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "New chat",
+    "restore_tooltip": "Restore",
+    "expand_tooltip": "Expand",
+    "minimize_tooltip": "Minimize",
+    "another_running": "Another chat is running",
+    "another_unread": "Another chat has unread replies",
+    "running": "Running",
+    "unread": "Unread",
+    "no_previous": "No previous chats",
+    "untitled": "New chat",
+    "my_agents": "My agents",
+    "others": "Others",
+    "no_agents": "No agents",
+    "history_show_tooltip": "Chat history",
+    "history_back_tooltip": "Back to chat"
+  },
+  "empty_state": {
+    "first_time_title": "Chat with your agents",
+    "first_time_intro": "✨ They know your workspace —",
+    "first_time_pillars": "issues, projects, skills",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
+    "returning_title_named": "Hi, I'm {{name}}",
+    "returning_title_default": "Welcome to Multica",
+    "returning_subtitle": "Try asking"
+  },
+  "starter_prompts": {
+    "list_open": "List my open tasks by priority",
+    "summarize_today": "Summarize what I did today",
+    "plan_next": "Plan what to work on next"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "Nothing to share with Multica on this page",
+    "tooltip_off": "Let Multica know what you're viewing",
+    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
+    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
+    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
+    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
+    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
+    "aria_stop": "Stop sharing current page",
+    "aria_start": "Share current page with Multica"
+  },
+  "no_agent_banner": "You need an agent to start chatting.",
+  "offline_banner": {
+    "fallback_name": "the agent",
+    "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
+    "offline": "{{name}} is offline — your message will be delivered when they're back."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Offline",
+      "reconnecting": "Reconnecting",
+      "queued": "Queued",
+      "starting_up": "Starting up",
+      "thinking": "Thinking",
+      "typing": "Typing"
+    },
+    "tools": {
+      "running_command": "Running a command",
+      "reading_files": "Reading files",
+      "searching_code": "Searching the code",
+      "making_edits": "Making edits",
+      "searching_web": "Searching the web",
+      "fallback": "Working"
+    }
+  }
+}

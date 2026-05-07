@@ -154,7 +154,9 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Default: true},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
+		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
@@ -163,11 +165,28 @@ func codexStaticModels() []Model {
 	}
 }
 
+// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
+// CLI has no `models list` subcommand, so dynamic discovery isn't
+// possible; the next best thing is to expose the CLI's own aliases
+// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
+// alongside a few explicit version pins. Aliases track whatever the
+// installed CLI considers current (see `resolveModel` in the CLI's
+// packages/core/src/config/models.ts), so new Gemini releases light
+// up without a Multica redeploy. Default is `auto` to match Google's
+// recommendation — the CLI picks Pro vs Flash per task and falls back
+// when quota is exhausted.
 func geminiStaticModels() []Model {
 	return []Model{
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google", Default: true},
+		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
+		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
+		{ID: "pro", Label: "Pro", Provider: "google"},
+		{ID: "flash", Label: "Flash", Provider: "google"},
+		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
+		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
+		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
+		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
 		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Provider: "google"},
+		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
 	}
 }
 
@@ -211,6 +230,7 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil
@@ -269,6 +289,7 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
@@ -330,10 +351,10 @@ func parsePiModels(output string) []Model {
 // creatable manual-entry input instead of blocking the form.
 func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:      "hermes",
-		clientName:      "multica-model-discovery",
-		extraEnv:        []string{"HERMES_YOLO_MODE=1"},
-		tmpdirPrefix:    "multica-hermes-discovery-",
+		defaultBin:   "hermes",
+		clientName:   "multica-model-discovery",
+		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix: "multica-hermes-discovery-",
 	})
 }
 
@@ -433,6 +454,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		cmdArgs = []string{"acp"}
 	}
 	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
+	hideAgentWindow(cmd)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
 	}
@@ -611,6 +633,7 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return cursorStaticModels(), nil
@@ -696,7 +719,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Try JSON modes first. Different openclaw builds expose the
@@ -707,6 +730,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		{"agents", "list", "-o", "json"},
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
+		hideAgentWindow(cmd)
 		out, err := cmd.Output()
 		if err != nil {
 			continue
@@ -720,6 +744,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// banner with box-drawing and section headers, and picking up
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil

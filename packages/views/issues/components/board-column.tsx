@@ -16,9 +16,10 @@ import {
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import { StatusIcon } from "./status-icon";
+import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
+import { useT } from "../../i18n";
 
 export function BoardColumn({
   status,
@@ -41,6 +42,7 @@ export function BoardColumn({
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
+  const { t } = useT("issues");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -55,16 +57,7 @@ export function BoardColumn({
   return (
     <div className={`flex w-[280px] shrink-0 flex-col rounded-xl ${cfg.columnBg} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
-        {/* Left: status badge + count */}
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
-            <StatusIcon status={status} className="h-3 w-3" inheritColor />
-            {cfg.label}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {totalCount ?? issueIds.length}
-          </span>
-        </div>
+        <StatusHeading status={status} count={totalCount ?? issueIds.length} />
 
         {/* Right: add + menu */}
         <div className="flex items-center gap-1">
@@ -79,7 +72,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                {t(($) => $.board.hide_column)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -101,7 +94,7 @@ export function BoardColumn({
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -118,7 +111,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.board.empty_column)}
           </p>
         )}
         {footer}

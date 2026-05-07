@@ -12,6 +12,8 @@ const {
   mockDingtalkLogin,
   mockCompleteDingTalkBinding,
   mockCompleteGoogleBinding,
+  mockListMyInvitations,
+  mockSetQueryData,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
@@ -22,6 +24,8 @@ const {
   mockDingtalkLogin: vi.fn(),
   mockCompleteDingTalkBinding: vi.fn(),
   mockCompleteGoogleBinding: vi.fn(),
+  mockListMyInvitations: vi.fn(),
+  mockSetQueryData: vi.fn(),
 }));
 
 const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
@@ -42,7 +46,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+  useQueryClient: () => ({ setQueryData: mockSetQueryData }),
 }));
 
 // Preserve the real sanitizeNextUrl so the "drop unsafe ?next=" behavior is
@@ -60,7 +64,10 @@ vi.mock("@multica/core/auth", async () => {
 });
 
 vi.mock("@multica/core/workspace/queries", () => ({
-  workspaceKeys: { list: () => ["workspaces"] },
+  workspaceKeys: {
+    list: () => ["workspaces"],
+    myInvitations: () => ["invitations", "mine"],
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -70,6 +77,7 @@ vi.mock("@multica/core/api", () => ({
     dingtalkLogin: mockDingtalkLogin,
     completeDingTalkBinding: mockCompleteDingTalkBinding,
     completeGoogleBinding: mockCompleteGoogleBinding,
+    listMyInvitations: mockListMyInvitations,
   },
 }));
 
@@ -78,7 +86,11 @@ import CallbackPage from "./page";
 describe("CallbackPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchParams.forEach((_v, k) => mockSearchParams.delete(k));
+    // Snapshot keys before deleting — forEach + delete skips entries because
+    // the iteration index advances while the underlying list shrinks.
+    Array.from(mockSearchParams.keys()).forEach((k) =>
+      mockSearchParams.delete(k),
+    );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockLoginWithDingTalk.mockResolvedValue(makeUser());
@@ -109,22 +121,70 @@ describe("CallbackPage", () => {
       },
       next_path: "/acme/settings",
     });
+    mockListMyInvitations.mockResolvedValue([]);
   });
 
-  it("unonboarded user lands on /onboarding regardless of next=", async () => {
+  it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
     mockSearchParams.set("state", "next:/invite/abc123");
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith("/invite/abc123");
+    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    // nextUrl is a fast path — listMyInvitations should not be queried.
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with no next= also lands on /onboarding", async () => {
+  it("unonboarded user with no next= and no pending invitations lands on /onboarding", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
+    expect(mockListMyInvitations).toHaveBeenCalled();
+  });
+
+  it("unonboarded user with pending invitations lands on /invitations", async () => {
+    mockListMyInvitations.mockResolvedValue([
+      {
+        id: "inv-1",
+        workspace_id: "ws-1",
+        workspace_name: "Acme",
+        role: "member",
+        status: "pending",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.invitations());
+    });
+    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+  });
+
+  it("onboarded user with workspace lands in that workspace", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
+    });
+    // Already-onboarded users skip the listMyInvitations check; new invites
+    // surface in the sidebar instead of the wall.
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
   it("onboarded user ignores unsafe next= targets and lands on the default destination", async () => {
@@ -277,6 +337,13 @@ describe("CallbackPage", () => {
     });
   });
 
+  it("falls through to /onboarding when listMyInvitations errors", async () => {
+    mockListMyInvitations.mockRejectedValue(new Error("network"));
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
   it("onboarded DingTalk user honors safe next= from state", async () => {
     mockLoginWithDingTalk.mockResolvedValue(
       makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),

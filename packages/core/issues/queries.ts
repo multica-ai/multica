@@ -1,6 +1,12 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { IssueStatus, ListIssuesParams, ListIssuesCache } from "../types";
+import type {
+  IssueStatus,
+  ListIssuesParams,
+  ListIssuesCache,
+  TimelinePage,
+  TimelinePageParam,
+} from "../types";
 import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
@@ -17,20 +23,28 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  timeline: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "timeline", issueId] as const,
-  reactions: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "reactions", issueId] as const,
-  subscribers: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "subscribers", issueId] as const,
-  usage: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "usage", issueId] as const,
-  attachments: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "attachments", issueId] as const,
-  taskRuns: (wsId: string, issueId: string) =>
-    [...issueKeys.all(wsId), "task-runs", issueId] as const,
-  taskMessages: (wsId: string, taskId: string) =>
-    [...issueKeys.all(wsId), "task-messages", taskId] as const,
+  /**
+   * Cursor-paginated timeline cache. Around-mode lookups use a separate cache
+   * (keyed by the anchor id) so an Inbox-jump fetch does not pollute the
+   * default latest-page cache that the regular issue list path consumes.
+   */
+  timeline: (issueId: string, around?: string | null) =>
+    around
+      ? (["issues", "timeline", issueId, "around", around] as const)
+      : (["issues", "timeline", issueId] as const),
+  reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
+  subscribers: (issueId: string) =>
+    ["issues", "subscribers", issueId] as const,
+  usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Per-issue task list (issue-detail Execution log section). */
+  tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
+  /** Prefix-match key for invalidating tasks across all issues — used by
+   *  the global WS task: prefix path so any task lifecycle event refreshes
+   *  every per-issue list, regardless of which issue is currently mounted. */
+  tasksAll: () => ["issues", "tasks"] as const,
+  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
+  taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
+  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
@@ -129,16 +143,46 @@ export function childIssuesOptions(wsId: string, id: string) {
   });
 }
 
-export function issueTimelineOptions(wsId: string, issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.timeline(wsId, issueId),
-    queryFn: () => api.listTimeline(issueId),
+/**
+ * Infinite-query options for the cursor-paginated timeline. The first page is
+ * either the latest 50 entries (no `around`) or a 50-wide window centered on
+ * the given comment/activity id (Inbox jump path). `getNextPageParam` walks
+ * older; `getPreviousPageParam` walks newer.
+ */
+export function issueTimelineInfiniteOptions(
+  issueId: string,
+  around?: string | null,
+) {
+  return infiniteQueryOptions<
+    TimelinePage,
+    Error,
+    { pages: TimelinePage[]; pageParams: TimelinePageParam[] },
+    readonly unknown[],
+    TimelinePageParam
+  >({
+    queryKey: issueKeys.timeline(issueId, around ?? null),
+    initialPageParam: around
+      ? ({ mode: "around", id: around } as TimelinePageParam)
+      : ({ mode: "latest" } as TimelinePageParam),
+    queryFn: ({ pageParam }) => api.listTimeline(issueId, pageParam),
+    // Walk older: append a page below the current oldest (last entry of the
+    // last loaded page). undefined = no more older entries.
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more_before && lastPage.next_cursor
+        ? ({ mode: "before", cursor: lastPage.next_cursor } as TimelinePageParam)
+        : undefined,
+    // Walk newer: prepend a page above the current newest (first entry of the
+    // first loaded page). undefined = at the latest, no newer to fetch.
+    getPreviousPageParam: (firstPage) =>
+      firstPage.has_more_after && firstPage.prev_cursor
+        ? ({ mode: "after", cursor: firstPage.prev_cursor } as TimelinePageParam)
+        : undefined,
   });
 }
 
-export function issueReactionsOptions(wsId: string, issueId: string) {
+export function issueReactionsOptions(issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.reactions(wsId, issueId),
+    queryKey: issueKeys.reactions(issueId),
     queryFn: async () => {
       const issue = await api.getIssue(issueId);
       return issue.reactions ?? [];
@@ -146,39 +190,39 @@ export function issueReactionsOptions(wsId: string, issueId: string) {
   });
 }
 
-export function issueSubscribersOptions(wsId: string, issueId: string) {
+export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.subscribers(wsId, issueId),
+    queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
   });
 }
 
-export function issueUsageOptions(wsId: string, issueId: string) {
+export function issueUsageOptions(issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.usage(wsId, issueId),
+    queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
   });
 }
 
-export function issueAttachmentsOptions(wsId: string, issueId: string) {
+export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.attachments(wsId, issueId),
+    queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
     enabled: !!issueId,
   });
 }
 
-export function issueTaskRunsOptions(wsId: string, issueId: string) {
+export function issueTaskRunsOptions(issueId: string) {
   return queryOptions({
-    queryKey: issueKeys.taskRuns(wsId, issueId),
+    queryKey: issueKeys.taskRuns(issueId),
     queryFn: () => api.listTasksByIssue(issueId),
     enabled: !!issueId,
   });
 }
 
-export function taskMessagesOptions(wsId: string, taskId: string) {
+export function taskMessagesOptions(taskId: string) {
   return queryOptions({
-    queryKey: issueKeys.taskMessages(wsId, taskId),
+    queryKey: issueKeys.taskMessages(taskId),
     queryFn: () => api.listTaskMessages(taskId),
     enabled: !!taskId,
   });

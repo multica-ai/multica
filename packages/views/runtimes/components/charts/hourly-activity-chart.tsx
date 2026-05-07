@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
-import { BarChart3 } from "lucide-react";
+import { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -13,73 +12,66 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
-import { api } from "@multica/core/api";
-import type { RuntimeHourlyActivity } from "@multica/core/types";
 
+// Hour-of-day cost. The "WHEN" tab in the runtime detail uses this to show
+// "during what hours of the day did this runtime spend money", which is
+// fundamentally different from "how much per calendar day". Data is fed in
+// by the parent (single orchestrator pattern) — this component is dumb.
 const hourlyChartConfig = {
-  count: { label: "Tasks", color: "hsl(var(--chart-2))" },
+  cost: { label: "Cost", color: "var(--color-chart-1)" },
 } satisfies ChartConfig;
 
-export function HourlyActivityChart({ runtimeId }: { runtimeId: string }) {
-  const [data, setData] = useState<RuntimeHourlyActivity[]>([]);
-  const [loading, setLoading] = useState(true);
+export interface HourlyCostPoint {
+  hour: number;
+  cost: number;
+}
 
-  useEffect(() => {
-    setLoading(true);
-    api
-      .getRuntimeTaskActivity(runtimeId)
-      .then(setData)
-      .catch(() => setData([]))
-      .finally(() => setLoading(false));
-  }, [runtimeId]);
-
+export function HourlyActivityChart({ data }: { data: HourlyCostPoint[] }) {
+  // Always render 24 buckets so the X axis is continuous. The parent passes
+  // pre-aggregated server data which may omit hours with zero activity;
+  // we fill those in with $0 here so visual gaps are intentional ("nothing
+  // ran at 03:00") rather than missing data.
   const chartData = useMemo(() => {
-    const map = new Map(data.map((d) => [d.hour, d.count]));
+    const map = new Map(data.map((d) => [d.hour, d.cost]));
     return Array.from({ length: 24 }, (_, i) => ({
       hour: i,
       label: `${i.toString().padStart(2, "0")}:00`,
-      count: map.get(i) ?? 0,
+      cost: map.get(i) ?? 0,
     }));
   }, [data]);
 
-  const hasData = chartData.some((d) => d.count > 0);
-
   return (
-    <div className="rounded-lg border p-4">
-      <h4 className="text-xs font-medium text-muted-foreground mb-3">Hourly Distribution</h4>
-      {loading ? (
-        <div className="flex h-[140px] items-center justify-center text-xs text-muted-foreground">
-          Loading...
-        </div>
-      ) : !hasData ? (
-        <div className="flex h-[140px] flex-col items-center justify-center">
-          <BarChart3 className="h-5 w-5 text-muted-foreground/40" />
-          <p className="mt-2 text-xs text-muted-foreground">No task data yet</p>
-        </div>
-      ) : (
-        <ChartContainer config={hourlyChartConfig} className="aspect-[2.5/1] w-full">
-          <BarChart data={chartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
-            <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="label"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              interval={2}
-              fontSize={10}
+    <ChartContainer config={hourlyChartConfig} className="aspect-[3/1] w-full">
+      <BarChart data={chartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          interval={2}
+          fontSize={10}
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          tickFormatter={(v: number) => `$${v}`}
+          width={40}
+        />
+        <ChartTooltip
+          content={
+            <ChartTooltipContent
+              formatter={(value) =>
+                typeof value === "number"
+                  ? `$${value.toFixed(2)}`
+                  : String(value)
+              }
             />
-            <YAxis
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              width={30}
-              allowDecimals={false}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            <Bar dataKey="count" fill="var(--color-count)" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ChartContainer>
-      )}
-    </div>
+          }
+        />
+        <Bar dataKey="cost" fill="var(--color-cost)" radius={[2, 2, 0, 0]} />
+      </BarChart>
+    </ChartContainer>
   );
 }

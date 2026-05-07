@@ -1,0 +1,127 @@
+---
+title: 创建和配置智能体
+description: 创建一个智能体的最小字段，以及所有可选配置项——系统指令、环境变量、可见性、并发上限，和归档机制。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+创建一个 [智能体](/agents) 只要两件事：**名字** 和 **选一款 [AI 编程工具](/providers)**。其他全部可选——系统指令、模型、环境变量、命令行参数、可见性、并发上限——默认值都能用，先跑起来再慢慢调，所有字段随时能改。
+
+## 创建一个智能体
+
+前置条件：你本机已经装好至少一款受支持的 [AI 编程工具](/providers)（Claude Code、Codex 等），并跑着 [守护进程](/daemon-runtimes)。如果还没走到这一步，先看 [Cloud 快速开始](/cloud-quickstart) 或 [自部署快速开始](/self-host-quickstart)。
+
+满足之后，在工作区的**智能体**页点 **+ 新建**，或者用命令行：
+
+```bash
+multica agent create
+```
+
+表单里只有两项必填：**名字**（工作区内唯一）和 **运行时**（= 选一款 AI 编程工具）。其他字段下面一节一节讲。
+
+## 选一款 AI 编程工具
+
+运行时背后是一款具体的 AI 编程工具。Multica 支持 11 款，最常用的几款：
+
+| 工具 | 适合 |
+|---|---|
+| **Claude Code** | Anthropic 官方，功能最完整；**新手首选** |
+| **Codex** | OpenAI，主流替代 |
+| **Cursor** | Cursor 编辑器生态用户 |
+| **Copilot** | 用 GitHub 账号权益的团队 |
+| **Gemini** | Google 生态用户 |
+
+另外 6 款（Hermes、Kimi、Kiro CLI、OpenCode、Pi、OpenClaw）以及每款工具的完整能力差别（会话恢复、MCP、skill 注入路径、模型选择）见 [AI 编程工具对照](/providers)。
+
+## 写系统指令
+
+**系统指令**（`instructions`）会被拼在每次任务最前面，告诉这个智能体它扮演什么角色、遵守什么规则：
+
+```text
+你是一个前端代码审查智能体。拿到 issue 先读 diff，只关注：
+- 样式问题（tailwind 类名、盒模型）
+- 可访问性（a11y）
+不改代码，只在评论里给建议。
+```
+
+留空时（默认），智能体用它背后 AI 编程工具的原生行为，没有额外约束。
+
+## 选模型
+
+大多数 AI 编程工具支持选模型（例如 Claude Code 能在 Sonnet / Opus 里选）。留空 → 用工具自己的默认；明确选了 → 用选的。每款工具支持的模型见 [AI 编程工具对照](/providers)。
+
+改模型**只对新任务生效**。已经派发出去的任务继续用派发时固化下来的模型。
+
+## 自定义环境变量（custom_env）
+
+**自定义环境变量**（`custom_env`）让你在任务执行时注入额外的 env var——典型用途是 API key 或切换上游 endpoint：
+
+```
+ANTHROPIC_API_KEY = sk-...
+ANTHROPIC_BASE_URL = https://my-proxy.example.com
+```
+
+系统关键变量不能被覆盖：`PATH`、`HOME`、`USER`、`SHELL`、`TERM`、`CODEX_HOME`，以及任何 `MULTICA_*` 开头的 key 都会被守护进程静默忽略（日志里有 warn，不会报错）。
+
+<Callout type="warning">
+**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** 非智能体创建者 / 非 workspace admin 看不到值（API 返回 `****`），但数据库备份、DB 审计里仍然能看到。
+
+**不要把高价值 secret 放进 `custom_env`**（生产数据库密码、root 级 token 等）。给智能体用**独立的、有限权限的凭证**（只读 API key、单 scope 的 PAT），定期轮换。
+</Callout>
+
+## 自定义命令行参数（custom_args）
+
+**自定义命令行参数**（`custom_args`）是一串字符串数组，会被逐个追加到 AI 编程工具的命令行尾部：
+
+```json
+["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
+```
+
+拼完会是：
+
+```bash
+claude --model <model> --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
+```
+
+参数按原样传，不走 shell 解析（没有注入风险），但传什么 flag 能不能被识别看 AI 编程工具本身——不同工具差异很大。
+
+<Callout type="tip">
+`custom_env` 和 `custom_args` 没有硬限制，但**实际使用建议控制在 10 条以内**。太多会让命令行变长、启动变慢，也更难维护。
+</Callout>
+
+## 可见性
+
+- **工作区可见**（`workspace`）—— 工作区里任何成员都能分配
+- **私有**（`private`）—— 只有工作区的 owner、admin，或智能体的创建者能分配
+
+新建默认 `private`。
+
+**私有不等于隐藏**——列表里所有成员都能看到私有智能体的名字和描述，只是看不到敏感配置字段（`custom_env`、MCP 配置的值被打码）。完整含义见 [智能体 → 谁能把智能体分配出去](/agents#谁能把智能体分配出去)。
+
+## 并发上限
+
+**并发上限**（`max_concurrent_tasks`）决定这个智能体同一时间最多同时跑几个任务，默认 **6**。达到上限的新任务留在队列排队，不会被拒绝。
+
+这只是两层限额里的"智能体层"——守护进程本身还有一层更粗的限额（默认 20），两层中更紧的那层生效。详见 [守护进程与运行时 → 一次能并发跑多少任务](/daemon-runtimes#一次能并发跑多少任务)。
+
+修改这个值**不会取消已经在跑的任务**——只对下一个要被领走的任务生效。
+
+## 挂专业知识：Skill
+
+创建好的智能体可以挂 **Skill**——一种**专业知识包**（`SKILL.md` + 支持文件），任务执行时自动送到对应的 AI 编程工具。可以新建、从 GitHub / ClawHub 导入、或从你本机已有的 skill 目录扫入。详见 [Skills](/skills)。
+
+## 归档和恢复
+
+不再用的智能体可以**归档**——它从日常视图里消失，但历史数据（跑过的任务、发过的评论）全部保留。想重新用时**恢复**即可。
+
+<Callout type="warning">
+**归档会立刻取消这个智能体所有未结束的任务**——正在跑的、已派发的、还在排队的都会被标为 `cancelled`，不会继续执行。如果有重要任务在跑，先让它完成再归档。
+</Callout>
+
+已归档的智能体无法被分配新任务。
+
+## 下一步
+
+- [Skills](/skills) —— 给智能体挂专业知识包
+- [AI 编程工具对照](/providers) —— 11 款工具的完整能力差别
+- [把 issue 分配给智能体](/assigning-issues) —— 创建完之后怎么用起来

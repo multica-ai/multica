@@ -52,7 +52,7 @@ export function useLiveIssueTasks(workspaceId: string, issueId: string) {
           seenSeqs.current.add(`${message.task_id}:${message.seq}`);
         }
         const sorted = sortMessages(messages);
-        queryClient.setQueryData(issueKeys.taskMessages(workspaceId, task.id), sorted);
+        queryClient.setQueryData(issueKeys.taskMessages(task.id), sorted);
         setTaskStates((prev) => {
           const existing = prev.get(task.id);
           if (!existing) return prev;
@@ -96,7 +96,7 @@ export function useLiveIssueTasks(workspaceId: string, issueId: string) {
       seenSeqs.current.add(key);
 
       queryClient.setQueryData<TaskMessagePayload[]>(
-        issueKeys.taskMessages(workspaceId, message.task_id),
+        issueKeys.taskMessages(message.task_id),
         (old = []) => {
           if (old.some((existing) => existing.seq === message.seq)) return old;
           return sortMessages([...old, message]);
@@ -139,8 +139,8 @@ export function useLiveIssueTasks(workspaceId: string, issueId: string) {
       next.delete(event.task_id);
       return next;
     });
-    void queryClient.invalidateQueries({ queryKey: issueKeys.taskRuns(workspaceId, issueId) });
-    void queryClient.invalidateQueries({ queryKey: issueKeys.timeline(workspaceId, issueId) });
+    void queryClient.invalidateQueries({ queryKey: issueKeys.taskRuns(issueId) });
+    void queryClient.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
   }, [issueId, queryClient, workspaceId]);
 
   useWSEvent("task:completed", handleTaskEnd);

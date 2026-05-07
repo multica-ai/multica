@@ -34,6 +34,8 @@ export function MobileProviders() {
       wsUrl={MOBILE_ENV.wsUrl}
       storage={mobileStorage}
       fetchConfig={false}
+      locale="en"
+      resources={{}}
     >
       <RootNavigator />
     </CoreProvider>

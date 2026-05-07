@@ -22,14 +22,16 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd             string
-	Model           string
-	SystemPrompt    string
-	MaxTurns        int
-	Timeout         time.Duration
-	ResumeSessionID string          // if non-empty, resume a previous agent session
-	CustomArgs      []string        // additional CLI arguments appended to the agent command
-	McpConfig       json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	Cwd                       string
+	Model                     string
+	SystemPrompt              string
+	MaxTurns                  int
+	Timeout                   time.Duration
+	SemanticInactivityTimeout time.Duration
+	ResumeSessionID           string          // if non-empty, resume a previous agent session
+	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
+	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 
 // Session represents a running agent execution.
@@ -56,14 +58,15 @@ const (
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {
-	Type    MessageType
-	Content string         // text content (Text, Error, Log)
-	Tool    string         // tool name (ToolUse, ToolResult)
-	CallID  string         // tool call ID (ToolUse, ToolResult)
-	Input   map[string]any // tool input (ToolUse)
-	Output  string         // tool output (ToolResult)
-	Status  string         // agent status string (Status)
-	Level   string         // log level (Log)
+	Type      MessageType
+	Content   string         // text content (Text, Error, Log)
+	Tool      string         // tool name (ToolUse, ToolResult)
+	CallID    string         // tool call ID (ToolUse, ToolResult)
+	Input     map[string]any // tool input (ToolUse)
+	Output    string         // tool output (ToolResult)
+	Status    string         // agent status string (Status)
+	Level     string         // log level (Log)
+	SessionID string         // backend session id (Status), for early resume-pointer pinning
 }
 
 // TokenUsage tracks token consumption for a single model.
@@ -76,7 +79,7 @@ type TokenUsage struct {
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout"
+	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
 	Output     string // accumulated text output
 	Error      string // error message if failed
 	DurationMs int64

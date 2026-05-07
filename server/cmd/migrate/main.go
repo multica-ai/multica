@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
 func main() {
@@ -57,28 +55,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Find migration files
-	migrationsDir := "migrations"
-	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
-		// Try from server/ directory
-		migrationsDir = "server/migrations"
-	}
-
-	suffix := "." + direction + ".sql"
-	files, err := filepath.Glob(filepath.Join(migrationsDir, "*"+suffix))
+	files, err := migrations.Files(direction)
 	if err != nil {
 		slog.Error("failed to find migration files", "error", err)
 		os.Exit(1)
 	}
 
-	if direction == "up" {
-		sort.Strings(files)
-	} else {
-		sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	}
-
 	for _, file := range files {
-		version := extractVersion(file)
+		version := migrations.ExtractVersion(file)
 
 		if direction == "up" {
 			// Check if already applied
@@ -132,12 +116,4 @@ func main() {
 	}
 
 	fmt.Println("Done.")
-}
-
-func extractVersion(filename string) string {
-	base := filepath.Base(filename)
-	// Remove .up.sql or .down.sql
-	base = strings.TrimSuffix(base, ".up.sql")
-	base = strings.TrimSuffix(base, ".down.sql")
-	return base
 }

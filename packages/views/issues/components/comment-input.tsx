@@ -19,6 +19,7 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay 
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
 
 interface CommentInputProps {
@@ -118,6 +119,7 @@ function removeDraft(key: string, expectedUpdatedAt?: number) {
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+  const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -300,7 +302,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             ref={editorRef}
-            placeholder="Leave a comment..."
+            placeholder={t(($) => $.comment.leave_comment_placeholder)}
             onUpdate={handleEditorUpdate}
             onSubmit={handleSubmit}
             onUploadFile={handleUpload}
@@ -324,7 +326,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
                 </button>
               }
             />
-            <TooltipContent side="top">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+            <TooltipContent side="top">{isExpanded ? t(($) => $.comment.collapse_tooltip) : t(($) => $.comment.expand_tooltip)}</TooltipContent>
           </Tooltip>
           <FileUploadButton
             size="sm"
