@@ -18,9 +18,11 @@ INSERT INTO notification_webhook_endpoint (
     name,
     url_encrypted,
     secret_encrypted,
+    payload_template,
+    content_prefix,
     enabled
-) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix
 `
 
 type CreateNotificationWebhookEndpointParams struct {
@@ -29,6 +31,8 @@ type CreateNotificationWebhookEndpointParams struct {
 	Name            string      `json:"name"`
 	UrlEncrypted    string      `json:"url_encrypted"`
 	SecretEncrypted pgtype.Text `json:"secret_encrypted"`
+	PayloadTemplate string      `json:"payload_template"`
+	ContentPrefix   string      `json:"content_prefix"`
 	Enabled         bool        `json:"enabled"`
 }
 
@@ -39,6 +43,8 @@ func (q *Queries) CreateNotificationWebhookEndpoint(ctx context.Context, arg Cre
 		arg.Name,
 		arg.UrlEncrypted,
 		arg.SecretEncrypted,
+		arg.PayloadTemplate,
+		arg.ContentPrefix,
 		arg.Enabled,
 	)
 	var i NotificationWebhookEndpoint
@@ -52,6 +58,8 @@ func (q *Queries) CreateNotificationWebhookEndpoint(ctx context.Context, arg Cre
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PayloadTemplate,
+		&i.ContentPrefix,
 	)
 	return i, err
 }
@@ -72,7 +80,7 @@ func (q *Queries) DeleteNotificationWebhookEndpoint(ctx context.Context, arg Del
 }
 
 const getNotificationWebhookEndpoint = `-- name: GetNotificationWebhookEndpoint :one
-SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at FROM notification_webhook_endpoint
+SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix FROM notification_webhook_endpoint
 WHERE id = $1
 `
 
@@ -89,12 +97,14 @@ func (q *Queries) GetNotificationWebhookEndpoint(ctx context.Context, id pgtype.
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PayloadTemplate,
+		&i.ContentPrefix,
 	)
 	return i, err
 }
 
 const getNotificationWebhookEndpointForUser = `-- name: GetNotificationWebhookEndpointForUser :one
-SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at FROM notification_webhook_endpoint
+SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix FROM notification_webhook_endpoint
 WHERE id = $1 AND user_id = $2
 `
 
@@ -116,12 +126,14 @@ func (q *Queries) GetNotificationWebhookEndpointForUser(ctx context.Context, arg
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PayloadTemplate,
+		&i.ContentPrefix,
 	)
 	return i, err
 }
 
 const listEnabledNotificationWebhookEndpointsByUser = `-- name: ListEnabledNotificationWebhookEndpointsByUser :many
-SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at FROM notification_webhook_endpoint
+SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix FROM notification_webhook_endpoint
 WHERE user_id = $1 AND enabled = true
 ORDER BY created_at ASC
 `
@@ -145,6 +157,8 @@ func (q *Queries) ListEnabledNotificationWebhookEndpointsByUser(ctx context.Cont
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PayloadTemplate,
+			&i.ContentPrefix,
 		); err != nil {
 			return nil, err
 		}
@@ -157,7 +171,7 @@ func (q *Queries) ListEnabledNotificationWebhookEndpointsByUser(ctx context.Cont
 }
 
 const listNotificationWebhookEndpointsByUser = `-- name: ListNotificationWebhookEndpointsByUser :many
-SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at FROM notification_webhook_endpoint
+SELECT id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix FROM notification_webhook_endpoint
 WHERE user_id = $1
 ORDER BY created_at ASC
 `
@@ -181,6 +195,8 @@ func (q *Queries) ListNotificationWebhookEndpointsByUser(ctx context.Context, us
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PayloadTemplate,
+			&i.ContentPrefix,
 		); err != nil {
 			return nil, err
 		}
@@ -197,10 +213,12 @@ UPDATE notification_webhook_endpoint
 SET name = $3,
     url_encrypted = $4,
     secret_encrypted = $5,
-    enabled = $6,
+    payload_template = $6,
+    content_prefix = $7,
+    enabled = $8,
     updated_at = now()
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at
+RETURNING id, user_id, workspace_id, name, url_encrypted, secret_encrypted, enabled, created_at, updated_at, payload_template, content_prefix
 `
 
 type UpdateNotificationWebhookEndpointParams struct {
@@ -209,6 +227,8 @@ type UpdateNotificationWebhookEndpointParams struct {
 	Name            string      `json:"name"`
 	UrlEncrypted    string      `json:"url_encrypted"`
 	SecretEncrypted pgtype.Text `json:"secret_encrypted"`
+	PayloadTemplate string      `json:"payload_template"`
+	ContentPrefix   string      `json:"content_prefix"`
 	Enabled         bool        `json:"enabled"`
 }
 
@@ -219,6 +239,8 @@ func (q *Queries) UpdateNotificationWebhookEndpoint(ctx context.Context, arg Upd
 		arg.Name,
 		arg.UrlEncrypted,
 		arg.SecretEncrypted,
+		arg.PayloadTemplate,
+		arg.ContentPrefix,
 		arg.Enabled,
 	)
 	var i NotificationWebhookEndpoint
@@ -232,6 +254,8 @@ func (q *Queries) UpdateNotificationWebhookEndpoint(ctx context.Context, arg Upd
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PayloadTemplate,
+		&i.ContentPrefix,
 	)
 	return i, err
 }

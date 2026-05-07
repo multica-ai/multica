@@ -5,8 +5,10 @@ INSERT INTO notification_webhook_endpoint (
     name,
     url_encrypted,
     secret_encrypted,
+    payload_template,
+    content_prefix,
     enabled
-) VALUES ($1, $2, $3, $4, $5, $6)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListNotificationWebhookEndpointsByUser :many
@@ -32,7 +34,9 @@ UPDATE notification_webhook_endpoint
 SET name = $3,
     url_encrypted = $4,
     secret_encrypted = $5,
-    enabled = $6,
+    payload_template = $6,
+    content_prefix = $7,
+    enabled = $8,
     updated_at = now()
 WHERE id = $1 AND user_id = $2
 RETURNING *;
