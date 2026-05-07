@@ -176,8 +176,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
 		}
 	}
+	deepseekPath := envOrDefault("MULTICA_DEEPSEEK_PATH", "deepseek")
+	if _, err := exec.LookPath(deepseekPath); err == nil {
+		agents["deepseek"] = AgentEntry{
+			Path:  deepseekPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_DEEPSEEK_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or deepseek and ensure it is on PATH")
 	}
 
 	// Host info

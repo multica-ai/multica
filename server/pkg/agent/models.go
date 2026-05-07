@@ -79,6 +79,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "deepseek":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverDeepseekModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -363,6 +367,36 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverDeepseekModels spins up a throwaway `deepseek app-server
+// --stdio` process and drives the same minimal ACP handshake to
+// surface the model catalog. DeepSeek-TUI uses `app-server --stdio`
+// instead of the `acp` subcommand used by Hermes/Kimi/Kiro, but
+// speaks the same JSON-RPC 2.0 protocol underneath.
+//
+// If ACP discovery fails (e.g. the binary is too old for app-server),
+// we fall back to a static catalog of DeepSeek's flagship models.
+func discoverDeepseekModels(ctx context.Context, executablePath string) ([]Model, error) {
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "deepseek",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-deepseek-discovery-",
+		args:         []string{"app-server", "--stdio"},
+	})
+	if err != nil || len(models) == 0 {
+		return deepseekStaticModels(), nil
+	}
+	return models, nil
+}
+
+// deepseekStaticModels is a fallback catalog for DeepSeek models when
+// ACP discovery fails. The list covers DeepSeek's two flagship models.
+func deepseekStaticModels() []Model {
+	return []Model{
+		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "deepseek", Default: true},
+		{ID: "deepseek-v4-flash", Label: "DeepSeek V4 Flash", Provider: "deepseek"},
+	}
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
@@ -374,14 +408,16 @@ type acpDiscoveryProvider struct {
 	clientName   string
 	extraEnv     []string
 	tmpdirPrefix string
+	args         []string // subcommand args; defaults to ["acp"] when empty
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
 // `models.availableModels` / `models.currentModelId`. This covers
-// Hermes, Kimi, and Kiro today; future ACP backends can plug in by
-// adding an acpDiscoveryProvider entry instead of duplicating the loop.
+// Hermes, Kimi, Kiro, and DeepSeek today; future ACP backends can
+// plug in by adding an acpDiscoveryProvider entry instead of
+// duplicating the loop.
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin
@@ -392,7 +428,11 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, executablePath, "acp")
+	cmdArgs := p.args
+	if len(cmdArgs) == 0 {
+		cmdArgs = []string{"acp"}
+	}
+	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
 	}
