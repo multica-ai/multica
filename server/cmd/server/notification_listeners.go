@@ -189,7 +189,7 @@ func recordMentionNotification(
 	actorName string,
 	details []byte,
 ) {
-	recordNotification(ctx, queries, e, recipientID, "mentioned", "info", issueID, commentID, title, body, link, issueIdentifier, details)
+	recordNotification(ctx, queries, e, recipientID, "mentioned", "info", issueID, commentID, title, body, link, issueIdentifier, actorName, details)
 }
 
 func recordNotification(
@@ -205,6 +205,7 @@ func recordNotification(
 	body string,
 	link string,
 	issueIdentifier string,
+	actorName string,
 	details []byte,
 ) {
 	if len(details) == 0 {
@@ -653,7 +654,7 @@ func notifyIssueSubscribers(
 
 		notified[subID] = true
 		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, "", "")
-		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
+		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
 
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
@@ -713,7 +714,7 @@ func notifyDirect(
 
 	notificationCtx := buildNotificationContext(ctx, queries, workspaceID, issueID, "", "")
 	if recipientType == "member" {
-		recordNotification(ctx, queries, e, recipientID, notifType, severity, issueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, details)
+		recordNotification(ctx, queries, e, recipientID, notifType, severity, issueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
 	}
 
 	resp := inboxItemToResponse(item)
