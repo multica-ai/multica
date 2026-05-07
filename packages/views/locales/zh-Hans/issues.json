@@ -168,6 +168,7 @@
     "copy_action": "复制",
     "copied_toast": "已复制",
     "edit_action": "编辑",
+    "download_attachment": "下载 {{filename}}",
     "update_failed": "更新评论失败",
     "send_failed": "发送评论失败",
     "send_reply_failed": "发送回复失败",

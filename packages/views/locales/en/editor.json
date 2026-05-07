@@ -50,7 +50,11 @@
     "copy_code": "Copy code"
   },
   "file_card": {
-    "uploading": "Uploading {{filename}}"
+    "uploading": "Uploading {{filename}}",
+    "preview": "Preview {{filename}}",
+    "download": "Download {{filename}}",
+    "preview_loading": "Loading preview...",
+    "preview_failed": "Failed to load preview"
   },
   "title_editor": {
     "title_aria_label": "Title"

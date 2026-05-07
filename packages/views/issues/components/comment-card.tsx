@@ -31,6 +31,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
 import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { MarkdownFilePreviewButton } from "../../editor/markdown-file-preview";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -106,6 +107,50 @@ function DeleteCommentDialog({
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
+function isMarkdownAttachment(attachment: Attachment): boolean {
+  const contentType = attachment.content_type.toLowerCase();
+  const filename = attachment.filename.toLowerCase();
+
+  return (
+    contentType === "text/markdown" ||
+    contentType === "text/x-markdown" ||
+    filename.endsWith(".md") ||
+    filename.endsWith(".markdown")
+  );
+}
+
+function AttachmentRow({ attachment }: { attachment: Attachment }) {
+  const { t } = useT("issues");
+  const canPreview = Boolean(attachment.download_url) && isMarkdownAttachment(attachment);
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+      <FileText className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">{attachment.filename}</p>
+      </div>
+      {canPreview && (
+        <MarkdownFilePreviewButton
+          href={attachment.download_url}
+          filename={attachment.filename}
+          renderContent={(content) => <ReadonlyContent content={content} />}
+        />
+      )}
+      {attachment.download_url && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          aria-label={t(($) => $.comment.download_attachment, { filename: attachment.filename })}
+          title={t(($) => $.comment.download_attachment, { filename: attachment.filename })}
+          onClick={() => window.open(attachment.download_url, "_blank", "noopener,noreferrer")}
+        >
+          <Download className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
@@ -132,24 +177,7 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => (
-        <div
-          key={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{a.filename}</p>
-          </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
-        </div>
+        <AttachmentRow key={a.id} attachment={a} />
       ))}
     </div>
   );

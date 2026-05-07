@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -50,10 +50,17 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 });
 
 import mermaid from "mermaid";
+import { configStore } from "@multica/core/config";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enEditor from "../locales/en/editor.json";
 import { ReadonlyContent } from "./readonly-content";
+
+const TEST_RESOURCES = { en: { common: enCommon, editor: enEditor } };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.getState().setCdnDomain("cdn.example.com");
 });
 
 afterEach(() => {
@@ -110,6 +117,41 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent file cards", () => {
+  it("previews markdown file cards before the download action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("# Preview title\n\nGenerated markdown body"),
+      }),
+    );
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[permission-config-design.md](https://cdn.example.com/permission-config-design.md)" />
+      </I18nProvider>,
+    );
+
+    const previewButton = screen.getByRole("button", {
+      name: "Preview permission-config-design.md",
+    });
+    const downloadButton = screen.getByRole("button", {
+      name: "Download permission-config-design.md",
+    });
+    expect(previewButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(previewButton);
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/permission-config-design.md"),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Generated markdown body");
+    expect(screen.getByTestId("markdown-preview-scroll")).toHaveClass("overflow-y-auto");
   });
 });
 
