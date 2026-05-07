@@ -30,6 +30,7 @@ export interface UseIssueActionsResult {
   members: MemberWithUser[];
   agents: Agent[];
   isPinned: boolean;
+  canDelete: boolean;
   // Handlers
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
@@ -76,6 +77,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     pinnedItems.some(
       (p) => p.item_type === "issue" && p.item_id === issue.id,
     );
+
+  const isCreator =
+    !!user && !!issue && issue.creator_type === "member" && issue.creator_id === user.id;
+  const isAdmin =
+    currentMemberRole === "owner" || currentMemberRole === "admin";
+  const canDelete = isAdmin || isCreator;
 
   const updateIssue = useUpdateIssue();
   const createPin = useCreatePin();
@@ -167,6 +174,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     members,
     agents: filteredAgents,
     isPinned,
+    canDelete,
     updateField,
     togglePin,
     copyLink,

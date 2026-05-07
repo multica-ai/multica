@@ -170,7 +170,7 @@ export function IssuesPage() {
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {viewMode === "list" && <BatchActionToolbar issues={scopedIssues} />}
       </ViewStoreProvider>
     </div>
   );

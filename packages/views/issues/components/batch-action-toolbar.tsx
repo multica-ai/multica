@@ -14,16 +14,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { UpdateIssueRequest, Issue } from "@multica/core/types";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
+import { useAuthStore } from "@multica/core/auth";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
 
-export function BatchActionToolbar() {
+interface BatchActionToolbarProps {
+  issues?: Issue[];
+}
+
+export function BatchActionToolbar({ issues }: BatchActionToolbarProps) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
+  const user = useAuthStore((s) => s.user);
   const count = selectedIds.size;
 
   const [statusOpen, setStatusOpen] = useState(false);
@@ -33,6 +39,16 @@ export function BatchActionToolbar() {
   const batchUpdate = useBatchUpdateIssues();
   const batchDelete = useBatchDeleteIssues();
   const loading = batchUpdate.isPending || batchDelete.isPending;
+
+  // Can batch-delete only if the user owns all selected issues or is not provided issue data.
+  const canBatchDelete = (() => {
+    if (!issues || !user) return true;
+    const ids = Array.from(selectedIds);
+    return ids.every((id) => {
+      const issue = issues.find((i) => i.id === id);
+      return !issue || (issue.creator_type === "member" && issue.creator_id === user.id);
+    });
+  })();
 
   if (count === 0) return null;
 
@@ -108,6 +124,7 @@ export function BatchActionToolbar() {
         />
 
         {/* Delete */}
+        {canBatchDelete && (
         <Button
           variant="ghost"
           size="sm"
@@ -118,6 +135,7 @@ export function BatchActionToolbar() {
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.batch.delete)}
         </Button>
+        )}
       </div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
