@@ -1458,6 +1458,69 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHomeWritesRuntimeConfiguredReasoningEffort(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model = "gpt-5-codex"`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed shared config.toml: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+		GOOS: "linux",
+		RuntimeConfig: json.RawMessage(`{
+			"model_reasoning_effort": "high",
+			"unsupported_codex_key": "must-not-leak"
+		}`),
+	}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHomeWithOpts failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `model_reasoning_effort = "high"`) {
+		t.Fatalf("expected runtime-configured model_reasoning_effort, got:\n%s", s)
+	}
+	if strings.Contains(s, "unsupported_codex_key") || strings.Contains(s, "must-not-leak") {
+		t.Fatalf("unsupported runtime_config keys must not be written to Codex config.toml, got:\n%s", s)
+	}
+}
+
+func TestPrepareCodexHomeRuntimeReasoningEffortOverridesCopiedRootValue(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_reasoning_effort = "medium"`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed shared config.toml: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+		GOOS:          "linux",
+		RuntimeConfig: json.RawMessage(`{"model_reasoning_effort":"high"}`),
+	}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHomeWithOpts failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	s := string(data)
+	if strings.Count(s, "model_reasoning_effort") != 1 {
+		t.Fatalf("expected one model_reasoning_effort entry so TOML stays valid, got:\n%s", s)
+	}
+	if !strings.Contains(s, `model_reasoning_effort = "high"`) {
+		t.Fatalf("expected runtime_config to override copied root value, got:\n%s", s)
+	}
+}
+
 func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
