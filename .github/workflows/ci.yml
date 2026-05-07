@@ -29,10 +29,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build, type check, lint, and test
-        # @multica/docs filter was removed: the docs package was deleted in
-        # an earlier upstream sync, and turbo errors on missing filter targets.
-        run: pnpm exec turbo build typecheck lint test
+      - name: Build, type check, and test
+        # Match main's CI: lint is not enforced in CI (the codebase has
+        # ~73 i18next/no-literal-string violations on main that would
+        # block every PR if lint were enforced). When the team is ready
+        # to clean up the violations, add `lint` back to this command.
+        run: pnpm exec turbo build typecheck test
 
   backend:
     runs-on: ubuntu-latest

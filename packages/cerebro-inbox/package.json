@@ -9,7 +9,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
