@@ -286,24 +286,18 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.2.27",
         date: "2026-05-07",
-        title: "Cleaner Chat, GitHub Skill Imports & Workflow Polish",
+        title: "Smoother Chat, GitHub Skill Import & Stability Fixes",
         changes: [],
         features: [
-          "Import skills directly from GitHub URLs",
-          "Copy an issue's local workdir path from the issue menu",
-          "`multica workspace update` lets CLI users edit workspace details",
+          "Import reusable skills directly from GitHub links",
         ],
         improvements: [
-          "Chat history is now grouped into one Active / Archived menu, with easier reply copying and cleaner process details",
-          "Inbox automatically selects the next item after you archive the current one",
-          "New sub-issues now inherit the parent issue's project and status",
-          "Autopilots pause themselves after repeated failures, making noisy automations easier to fix",
+          "Chat and Inbox feel smoother, with clearer history, easier reply copying, and faster triage after archiving",
+          "Issue actions keep more context, from easier access to the local folder to sub-issues inheriting the right project and status",
+          "Autopilots pause themselves after repeated failures, so noisy automations are easier to catch and fix",
         ],
         fixes: [
-          "Chinese input no longer submits too early while you are choosing characters",
-          "GitHub skill imports and older OpenClaw setups now fail with clearer guidance",
-          "Issue timelines and live agent status cards stay accurate in more edge cases",
-          "The desktop app is less likely to blank or break after updates",
+          "Chinese input, desktop updates, long issue timelines, and live status updates are more reliable",
         ],
       },
       {
