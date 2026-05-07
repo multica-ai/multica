@@ -211,7 +211,19 @@ func (h *Handler) DuplicateAgentDefaults(w http.ResponseWriter, r *http.Request)
 			mine.Instructions = source.Instructions
 		}
 	}
-	// NOTE: custom_env is intentionally NOT merged for security reasons.
+	// Copy env keys with empty values as a template — values are secrets and
+	// must be filled in by the user, but knowing which keys exist is safe
+	// (ListAllAgentDefaults already exposes keys with "***" values).
+	if len(source.CustomEnv) > 0 {
+		if mine.CustomEnv == nil {
+			mine.CustomEnv = make(map[string]string)
+		}
+		for k := range source.CustomEnv {
+			if _, exists := mine.CustomEnv[k]; !exists {
+				mine.CustomEnv[k] = "" // key only, user fills in value
+			}
+		}
+	}
 	if len(source.CustomArgs) > 0 {
 		mine.CustomArgs = append(mine.CustomArgs, source.CustomArgs...)
 	}
