@@ -63,6 +63,7 @@ apps/mobile/**/*.mobileprovision
 # local settings
 .claude/
 .tool-versions
+.deepseek/
 
 # feature tracking
 _features/
