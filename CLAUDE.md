@@ -205,6 +205,18 @@ Both apps share the same CSS foundation from `packages/ui/styles/`.
 
 ## Cerebro Extension Discipline
 
+> **STOP rule for AI agents.** Before editing any file in the upstream zone (paths matching `scripts/cerebro-zones.txt` — currently `packages/views/**`, `packages/core/**`, `packages/ui/**`, `server/**`), STOP and propose a path to the user. Do not silently edit upstream-zone files — every unmarked edit is silently overwritten by the next upstream merge.
+>
+> **Three protection paths exist:**
+>
+> 1. **CEREBRO-PATCH marker** — small inline change (≤5 lines), add `// CEREBRO-PATCH(<name>):` and document in `docs/cerebro-patches.md`.
+> 2. **Move to cerebro zone** — extract larger changes to `packages/cerebro-*/`, `server/internal/cerebro/`, or a new sibling file with `cerebro-` prefix that the upstream file imports via a small marked import.
+> 3. **Land the fix upstream first** at `multica-ai/multica`, then sync down — for genuine bugs that aren't cerebro-specific.
+>
+> **The agent picks the recommended path and explains the trade-off in plain language**, then asks the user yes/no. Example: *"This is a 1-line tweak to upstream behavior. I recommend path 1 (mark inline). Alternative: path 3 if you want this fixed for everyone. OK with path 1?"* Never present the user with raw "1/2/3 — pick one" without a recommendation. The user is not expected to know which is right; the agent's job is to recommend.
+>
+> Files OUTSIDE the upstream zones (e.g. `apps/web/**`, `apps/desktop/**` today) can be edited freely. But if you add a substantial cerebro-only feature in those folders, prefer a `cerebro-` filename prefix so a future zone expansion catches it automatically.
+
 This fork keeps cerebro-specific code separate from upstream multica so we can pull upstream syncs cleanly. Every contributor (human or AI) is bound by these four rules:
 
 1. **All new cerebro features land in `packages/cerebro-*/` or `server/internal/cerebro/*`.** Never modify upstream-files unless the modification is irreducible. The cerebro zone is excluded from the upstream-zone-guard CI check; landing in the right zone removes review friction.
