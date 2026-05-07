@@ -109,6 +109,15 @@ WHERE cs.workspace_id = $1
   AND atq.status IN ('queued', 'dispatched', 'running')
 ORDER BY atq.created_at DESC;
 
+-- name: TruncateChatMessagesFrom :exec
+-- Deletes the message with the given id and all messages created at or after
+-- it in the same session. Used by the "retry from here" feature.
+DELETE FROM chat_message AS cm
+WHERE cm.chat_session_id = $1
+  AND cm.created_at >= (
+    SELECT m.created_at FROM chat_message AS m WHERE m.id = $2
+  );
+
 -- name: MarkChatSessionRead :exec
 -- Clears unread_since, dropping the session's unread count to 0.
 UPDATE chat_session SET unread_since = NULL

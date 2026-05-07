@@ -257,6 +257,25 @@ export function ChatWindow() {
     ],
   );
 
+  // Retry from a specific message: truncate that message and everything after
+  // it, then fill the input with the message content for the user to edit.
+  const [retryFill, setRetryFill] = React.useState<{ text: string; seq: number } | null>(null);
+
+  const handleRetryFrom = useCallback(
+    async (messageId: string, content: string) => {
+      if (!activeSessionId) return;
+      try {
+        await api.truncateChatMessages(activeSessionId, messageId);
+        qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
+      } catch (e) {
+        apiLogger.error("truncateChatMessages failed", e);
+        return;
+      }
+      setRetryFill({ text: content, seq: Date.now() });
+    },
+    [activeSessionId, qc],
+  );
+
   const handleStop = useCallback(() => {
     if (!pendingTaskId || !activeSessionId) {
       apiLogger.debug("cancelTask skipped: no pending task");
@@ -446,6 +465,7 @@ export function ChatWindow() {
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
+          onRetryFrom={handleRetryFrom}
         />
       ) : (
         <EmptyState
@@ -480,6 +500,7 @@ export function ChatWindow() {
         noAgent={noAgent}
         agentName={activeAgent?.name}
         topSlot={<ContextAnchorCard />}
+        fillContent={retryFill}
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}

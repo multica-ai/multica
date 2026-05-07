@@ -1036,6 +1036,10 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
   }
 
+  async truncateChatMessages(sessionId: string, messageId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE" });
+  }
+
   async cancelTaskById(taskId: string): Promise<void> {
     await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }

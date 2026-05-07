@@ -324,6 +324,43 @@ type PendingChatTaskResponse struct {
 // MarkChatSessionRead clears the session's unread_since (→ has_unread=false)
 // and broadcasts chat:session_read so other devices of the same user drop
 // their badges.
+// TruncateChatMessages deletes the specified message and all messages after it
+// in the session. Used by "retry from here" — the client calls this before
+// re-sending the message content.
+func (h *Handler) TruncateChatMessages(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+	messageID := chi.URLParam(r, "messageId")
+
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	msgUUID, ok2 := parseUUIDOrBadRequest(w, messageID, "message_id")
+	if !ok2 {
+		return
+	}
+
+	if err := h.Queries.TruncateChatMessagesFrom(r.Context(), db.TruncateChatMessagesFromParams{
+		ChatSessionID: session.ID,
+		ID:            msgUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to truncate messages")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

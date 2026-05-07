@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
@@ -28,6 +28,9 @@ interface ChatInputProps {
   /** Rendered inside the rounded container, above the editor — attached
    *  context cards, drafts, etc. */
   topSlot?: ReactNode;
+  /** When set, fills the editor with this content (e.g. after a retry-from).
+   *  Pass a new object reference each time to trigger the fill. */
+  fillContent?: { text: string; seq: number } | null;
 }
 
 export function ChatInput({
@@ -40,23 +43,27 @@ export function ChatInput({
   leftAdornment,
   rightAdornment,
   topSlot,
+  fillContent,
 }: ChatInputProps) {
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
-  // Scope the new-chat draft by agent:
-  //   1. Switching agents while composing a brand-new chat gives each
-  //      agent its own draft (no cross-agent leakage).
-  //   2. Tiptap's Placeholder extension is only applied at mount; this
-  //      key changes on agent switch so the editor remounts and the
-  //      `Tell {agent} what to do…` placeholder refreshes.
   const draftKey =
     activeSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
-  // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
+
+  // Fill the editor when a retry-from is triggered.
+  useEffect(() => {
+    if (!fillContent) return;
+    editorRef.current?.setContent(fillContent.text);
+    setInputDraft(draftKey, fillContent.text);
+    setIsEmpty(!fillContent.text.trim());
+    editorRef.current?.focus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fillContent]);
 
   const handleSend = () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
