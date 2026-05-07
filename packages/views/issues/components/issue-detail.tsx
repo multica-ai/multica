@@ -104,7 +104,6 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -1024,12 +1023,7 @@ export function IssueDetail({
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() =>
-                  useModalStore.getState().open("create-issue", {
-                    parent_issue_id: issue.id,
-                    parent_issue_identifier: issue.identifier,
-                  })
-                }
+                onClick={() => actions.openCreateSubIssue()}
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>{t(($) => $.detail.add_sub_issues)}</span>
@@ -1074,12 +1068,7 @@ export function IssueDetail({
                           <button
                             type="button"
                             className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                            onClick={() =>
-                              useModalStore.getState().open("create-issue", {
-                                parent_issue_id: issue.id,
-                                parent_issue_identifier: issue.identifier,
-                              })
-                            }
+                            onClick={() => actions.openCreateSubIssue()}
                             aria-label={t(($) => $.detail.add_sub_issue_aria)}
                           >
                             <Plus className="h-4 w-4" />
@@ -1403,6 +1392,18 @@ export function IssueDetail({
                                 <span className="truncate">
                                   {formatActivity(entry, t, getActorName)}
                                 </span>
+                                {/* Coalesce badge for non-task actions: task_completed / task_failed already
+                                bake the count into their translation, so suppress the badge there to
+                                avoid showing "×N" twice. */}
+                                {(entry.coalesced_count ?? 1) > 1 &&
+                                  entry.action !== "task_completed" &&
+                                  entry.action !== "task_failed" && (
+                                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                                      {t(($) => $.activity.coalesced_badge, {
+                                        count: entry.coalesced_count ?? 1,
+                                      })}
+                                    </span>
+                                  )}
                                 <Tooltip>
                                   <TooltipTrigger
                                     render={

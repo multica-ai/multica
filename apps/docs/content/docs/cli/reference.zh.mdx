@@ -213,6 +213,28 @@ multica workspace get <workspace-id> --output json
 multica workspace members <workspace-id>
 ```
 
+### Update Workspace
+
+需要 admin 或 owner 权限。所有字段都是部分更新（PATCH 语义）：未传的字段保持不变。
+
+```bash
+multica workspace update <workspace-id> --name "Acme Eng"
+multica workspace update <workspace-id> \
+  --description "Engineering team workspace" \
+  --issue-prefix ENG
+```
+
+长文本走 stdin（保留换行/反斜杠）：
+
+```bash
+cat <<'CTX' | multica workspace update <workspace-id> --context-stdin
+我们是一支 5 人 AI-native 团队。
+工作语言：中文 + 英文混合。
+CTX
+```
+
+可编辑字段：`--name`、`--description` / `--description-stdin`、`--context` / `--context-stdin`、`--issue-prefix`。`slug` 创建后只读，不暴露在 CLI。`--description` 与 `--description-stdin`（以及 `context` 同名对）互斥。未传任何字段 flag 时命令拒绝执行，避免空 PATCH 触发无意义的 workspace 更新事件。`--issue-prefix ""` 也会被拒绝：当前后端在 prefix 为空时静默跳过该字段，CLI 在本地拦下避免“看似成功的 no-op”。
+
 ## Issues
 
 ### List Issues

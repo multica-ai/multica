@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { ApiClient } from "../api/client";
-import { setApiInstance } from "../api";
+import { setApiInstance, setSchemaLogger } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
 import { createChatStore, registerChatStore } from "../chat";
 import {
@@ -41,6 +41,7 @@ function initCore(
     identity,
   });
   setApiInstance(api);
+  setSchemaLogger(createLogger("api-schema"));
 
   // In token mode, hydrate token from storage.
   if (!cookieAuth) {

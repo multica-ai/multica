@@ -199,7 +199,9 @@ function OriginSidebarCard({
       ? t(($) => $.detail.origin_card.imported_runtime)
       : origin.type === "clawhub"
         ? t(($) => $.detail.origin_card.imported_clawhub)
-        : t(($) => $.detail.origin_card.imported_skills_sh);
+        : origin.type === "github"
+          ? t(($) => $.detail.origin_card.imported_github)
+          : t(($) => $.detail.origin_card.imported_skills_sh);
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
@@ -542,6 +544,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
     if (origin.type === "clawhub") return t(($) => $.detail.subline.origin_clawhub);
     if (origin.type === "skills_sh") return t(($) => $.detail.subline.origin_skills_sh);
+    if (origin.type === "github") return t(($) => $.detail.subline.origin_github);
     return t(($) => $.detail.subline.origin_workspace);
   })();
 
