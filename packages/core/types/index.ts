@@ -37,6 +37,9 @@ export type {
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
+  RuntimePingStatus,
+  RuntimePing,
+
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, InviteLink, CreateInviteLinkRequest } from "./workspace";
 export type {
@@ -62,7 +65,7 @@ export type {
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
-export type { TimelineEntry, AssigneeFrequencyEntry, MentionFrequencyEntry } from "./activity";
+export type { TimelineEntry, TimelinePage, TimelinePageParam, AssigneeFrequencyEntry, MentionFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
@@ -100,3 +103,4 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";

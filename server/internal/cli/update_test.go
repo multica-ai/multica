@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -62,75 +60,42 @@ func TestReleaseAssetCandidates(t *testing.T) {
 	}
 }
 
-func TestFindManifestAsset(t *testing.T) {
-	manifest := &UpdateManifest{
-		Version: "v1.2.3",
-		Assets: []UpdateManifestAsset{
-			{OS: "linux", Arch: "amd64", ArchiveName: "multica_linux_amd64.tar.gz", URL: "old"},
-			{OS: "linux", Arch: "amd64", ArchiveName: "multica-cli-1.2.3-linux-amd64.tar.gz", URL: "new"},
-			{OS: "darwin", Arch: "arm64", URL: "darwin"},
-		},
-	}
+func TestFindReleaseAsset(t *testing.T) {
+	t.Run("prefers versioned asset when both names exist", func(t *testing.T) {
+		assets := []GitHubReleaseAsset{
+			{Name: "multica_darwin_amd64.tar.gz", BrowserDownloadURL: "old"},
+			{Name: "multica-cli-1.2.3-darwin-amd64.tar.gz", BrowserDownloadURL: "new"},
+		}
 
-	got, err := findManifestAsset(manifest, "linux", "amd64")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.URL != "new" {
-		t.Fatalf("asset mismatch: got %q", got.URL)
-	}
+		got, err := findReleaseAsset(assets, "v1.2.3", "darwin", "amd64")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != "multica-cli-1.2.3-darwin-amd64.tar.gz" {
+			t.Fatalf("asset mismatch: got %q", got.Name)
+		}
+	})
 
-	got, err = findManifestAsset(manifest, "darwin", "arm64")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.URL != "darwin" {
-		t.Fatalf("asset mismatch: got %q", got.URL)
-	}
-}
+	t.Run("falls back to legacy asset when versioned is absent", func(t *testing.T) {
+		assets := []GitHubReleaseAsset{
+			{Name: "multica_linux_amd64.tar.gz", BrowserDownloadURL: "old"},
+		}
 
-func TestShouldUpdate(t *testing.T) {
-	manifest := &UpdateManifest{Version: "v1.3.0"}
+		got, err := findReleaseAsset(assets, "1.2.3", "linux", "amd64")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != "multica_linux_amd64.tar.gz" {
+			t.Fatalf("asset mismatch: got %q", got.Name)
+		}
+	})
 
-	should, err := ShouldUpdate("v1.2.9", manifest)
-	if err != nil {
-		t.Fatalf("ShouldUpdate returned error: %v", err)
-	}
-	if !should {
-		t.Fatal("expected update to be required")
-	}
-
-	should, err = ShouldUpdate("v1.3.0", manifest)
-	if err != nil {
-		t.Fatalf("ShouldUpdate returned error: %v", err)
-	}
-	if should {
-		t.Fatal("expected update to be skipped for equal version")
-	}
-}
-
-func TestResolveInstalledBinaryPathPrefersManagedInstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	managed, err := resolveManagedInstallPath()
-	if err != nil {
-		t.Fatalf("resolveManagedInstallPath() error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(managed), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(managed, []byte("bin"), 0o755); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	got, err := ResolveInstalledBinaryPath()
-	if err != nil {
-		t.Fatalf("ResolveInstalledBinaryPath() error = %v", err)
-	}
-	if got != managed {
-		t.Fatalf("ResolveInstalledBinaryPath() = %q, want %q", got, managed)
-	}
+	t.Run("returns error when no candidate matches", func(t *testing.T) {
+		_, err := findReleaseAsset([]GitHubReleaseAsset{{Name: "checksums.txt"}}, "1.2.3", "linux", "amd64")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
 }
 
 func TestUpdateDownloadTimeoutOrDefault(t *testing.T) {

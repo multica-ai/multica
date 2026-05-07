@@ -420,6 +420,7 @@ func recordMentionEmailDelivery(
 			"error", err,
 		)
 	}
+}
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
 // bubble up from a sub-issue to subscribers of its parent. Other event types
 // only notify subscribers of the sub-issue itself, to keep parent watchers'
@@ -779,12 +780,11 @@ func notifyMentionedMembers(
 		if id == e.ActorID && !explicitRecipientIDs[id] {
 			continue
 		}
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		// Skip if mentions/comments are muted by this user
 		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
 			continue
 		}
-		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),

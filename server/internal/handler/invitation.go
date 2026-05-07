@@ -269,7 +269,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	// stale row would otherwise block CreateInvitation below — see issue #2055.
 	if err := h.Queries.ExpireStalePendingInvitations(r.Context(), db.ExpireStalePendingInvitationsParams{
 		WorkspaceID:  requester.WorkspaceID,
-		InviteeEmail: email,
+		InviteeEmail: strToText(email),
 	}); err != nil {
 		slog.Warn("expire stale invitations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create invitation")

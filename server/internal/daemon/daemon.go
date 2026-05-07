@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
-	"path/filepath"
-	"regexp"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1404,7 +1402,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	if err := preflightPrivateAgentGate(task); err != nil {
 		taskLog.Warn("private agent gate rejected task", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", ""); failErr != nil {
 			taskLog.Error("fail task after private gate rejection failed", "error", failErr)
 		}
 		return
@@ -1599,7 +1597,6 @@ func preflightPrivateAgentGate(task Task) error {
 	return fmt.Errorf("private agent execution denied: only the agent owner can run this task")
 }
 
-func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -2427,6 +2424,8 @@ func (d *Daemon) executeWithRetry(
 		return result, tools, nil
 	}
 	return agent.Result{Status: "failed", Error: "rate limit: max retries exceeded"}, 0, errors.New("rate limit: max retries exceeded")
+}
+
 func defaultArgsForProvider(cfg Config, provider string) []string {
 	var args []string
 	switch provider {

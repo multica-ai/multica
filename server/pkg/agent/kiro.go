@@ -89,8 +89,6 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 
-	promptDone := make(chan hermesPromptResult, 1)
-
 	// Reuse the hermesClient ACP transport — Kiro speaks the same protocol.
 	var streamingCurrentTurn atomic.Bool
 

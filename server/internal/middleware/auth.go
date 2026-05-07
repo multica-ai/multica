@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"

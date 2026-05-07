@@ -273,6 +273,8 @@ func (c *Client) ReportChatRetryProgress(ctx context.Context, workspaceID, chatS
 		"max_retries":     maxRetries,
 		"wait_seconds":    waitSeconds,
 	}, nil)
+}
+
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.
 func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/%s/result", runtimeID, requestID), result, nil)

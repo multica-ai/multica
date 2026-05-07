@@ -259,6 +259,10 @@ func mirrorSharedCodexSkills(skillsDir string, managed map[string]struct{}, logg
 		if err := copyPathIfMissing(src, dst); err != nil {
 			return fmt.Errorf("copy shared skill %s: %w", name, err)
 		}
+	}
+	return nil
+}
+
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 	src := filepath.Join(sharedHome, "plugins", "cache")
 	dst := filepath.Join(codexHome, "plugins", "cache")

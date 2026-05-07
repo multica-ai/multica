@@ -117,9 +117,9 @@ export function onIssueDeleted(
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   removeIssueDetailQueries(qc, wsId, issueId);
-  qc.removeQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
-  qc.removeQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
-  qc.removeQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
+  qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
+  qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
   qc.removeQueries({ queryKey: issueKeys.children(wsId, issueId) });
   if (deleted?.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, deleted.parent_issue_id) });

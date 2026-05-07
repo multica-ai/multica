@@ -50,8 +50,6 @@ func (t TriggerActor) actorTypeText() pgtype.Text {
 	return pgtype.Text{String: t.ActorType, Valid: t.ActorType != ""}
 }
 
-func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
@@ -118,6 +116,19 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, trigger TriggerActor, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	var commentID pgtype.UUID
+	if len(triggerCommentID) > 0 {
+		commentID = triggerCommentID[0]
+	}
+	return s.enqueueIssueTask(ctx, issue, trigger, commentID, false)
+}
+
+// enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
+// and the manual rerun path. forceFreshSession=true marks the task so the
+// daemon claim handler skips the (agent_id, issue_id) resume lookup — the
+// user already judged the prior output bad, a fresh agent session is the
+// expected behavior.
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trigger TriggerActor, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -138,19 +149,14 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:          issue.AssigneeID,
-		RuntimeID:        agent.RuntimeID,
-		IssueID:          issue.ID,
-		Priority:         priorityToInt(issue.Priority),
-		TriggerCommentID: commentID,
-		TriggerSource:    trigger.sourceText(),
-		TriggerActorType: trigger.actorTypeText(),
-		TriggerActorID:   trigger.ActorID,
 		AgentID:           issue.AssigneeID,
 		RuntimeID:         agent.RuntimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
+		TriggerSource:     trigger.sourceText(),
+		TriggerActorType:  trigger.actorTypeText(),
+		TriggerActorID:    trigger.ActorID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
@@ -1007,7 +1013,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+	task, err := s.enqueueIssueTask(ctx, issue, TriggerActor{}, triggerCommentID, true)
 	if err != nil {
 		return nil, err
 	}

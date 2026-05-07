@@ -39,6 +39,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   RuntimeUpdate,
+  RuntimePing,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
@@ -801,6 +802,14 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
     return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+  }
+
+  async pingRuntime(runtimeId: string): Promise<RuntimePing> {
+    return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
+  }
+
+  async getPingResult(runtimeId: string, pingId: string): Promise<RuntimePing> {
+    return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
   }
 
   async initiateUpdate(

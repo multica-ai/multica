@@ -18,7 +18,6 @@ import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { WikiPage } from "@multica/views/wiki";
-import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";

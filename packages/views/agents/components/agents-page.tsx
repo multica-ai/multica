@@ -1,24 +1,24 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
-import { Bot, Plus, Archive, ChevronDown, Check } from "lucide-react";
-import type { CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
-import { Button } from "@multica/ui/components/ui/button";
+  AlertCircle,
+  ArrowLeft,
+  ArrowUpDown,
+  Bot,
+  Plus,
+  Search,
+} from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { toast } from "sonner";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
+  type AgentAvailability,
+  agentRunCounts30dOptions,
+  summarizeActivityWindow,
+  useWorkspaceActivityMap,
+  useWorkspacePresenceMap,
+} from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -44,78 +44,83 @@ import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
-import { AgentListItem } from "./agent-list-item";
-import { AgentDetail } from "./agent-detail";
-import { ActorAvatar } from "../../common/actor-avatar";
-import type { MemberWithUser } from "@multica/core/types";
+import { type AgentRow, createAgentColumns } from "./agent-columns";
+import { useT } from "../../i18n";
 
-type AgentScope = "mine" | "all";
+// Filter axes:
+//
+//   View         = active vs archived dataset. Archived is low-frequency,
+//                  accessed through a ghost link in the toolbar.
+//   Scope        = ownership lens (All vs Mine). Layer-1 segment.
+//   Availability = "Can the agent take work right now?" — 3-state chip
+//                  group (online / unstable / offline) sourced from
+//                  AgentAvailability. The only chip filter we keep —
+//                  the previous Workload axis was dropped because its
+//                  "queued / failed / cancelled" buckets became
+//                  meaningless once Failed left the workload model.
+type View = "active" | "archived";
+type Scope = "all" | "mine";
+type AvailabilityFilter = "all" | AgentAvailability;
+
+type SortKey = "recent" | "name" | "runs" | "created";
+const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
+const SORT_LABEL_KEY: Record<SortKey, "label_recent" | "label_name" | "label_runs" | "label_created"> = {
+  recent: "label_recent",
+  name: "label_name",
+  runs: "label_runs",
+  created: "label_created",
+};
 
 export function AgentsPage() {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
-  const [scope, setScope] = useState<AgentScope>("mine");
-  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
-  const { data: agents = [], isLoading } = useQuery(
-    agentListOptions(wsId, scope === "mine" ? "me" : undefined),
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  const qc = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
+
+  const {
+    data: agents = [],
+    isLoading,
+    error: listError,
+    refetch: refetchList,
+  } = useQuery(agentListOptions(wsId));
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+    runtimeListOptions(wsId),
   );
-  const [selectedId, setSelectedId] = useState<string>("");
-  const [showArchived, setShowArchived] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_agents_layout",
-  });
+  const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
 
-  const uniqueOwners = useMemo(() => {
-    if (scope !== "all") return [] as MemberWithUser[];
-    const ids = Array.from(
-      new Set(agents.map((a) => a.owner_id).filter(Boolean) as string[]),
-    );
-    return ids
-      .map((id) => members.find((m) => m.user_id === id))
-      .filter(Boolean) as MemberWithUser[];
-  }, [scope, agents, members]);
+  // Single source of truth for derived agent state. The hook owns the
+  // 30s tick + the runtime/null/task orchestration; the page only reads
+  // the resulting Maps. Replaces the 24-line useMemo presenceMap +
+  // 12-line activityMap that lived here previously.
+  const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
+  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
-  const ownerCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const a of agents) {
-      if (a.owner_id) m.set(a.owner_id, (m.get(a.owner_id) ?? 0) + 1);
-    }
+  const [view, setView] = useState<View>("active");
+  // Default to "mine" — matches runtimes page convention and the visual
+  // ordering (Mine first). All is one click away when users want the
+  // workspace-wide view.
+  const [scope, setScope] = useState<Scope>("mine");
+  const [availabilityFilter, setAvailabilityFilter] =
+    useState<AvailabilityFilter>("all");
+  const [sort, setSort] = useState<SortKey>("recent");
+  const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  // When set, the Create dialog opens pre-populated with this agent's
+  // config — driven by the row-level "Duplicate" action. We keep this
+  // separate from `showCreate` so a stray null-template doesn't open the
+  // dialog: the dialog opens iff `showCreate || duplicateTemplate`.
+  const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
+    null,
+  );
+
+  const runtimesById = useMemo(() => {
+    const m = new Map<string, AgentRuntime>();
+    for (const r of runtimes) m.set(r.id, r);
     return m;
-  }, [agents]);
-
-  const listAfterOwnerFilter = useMemo(() => {
-    if (scope === "all" && ownerFilter) {
-      return agents.filter((a) => a.owner_id === ownerFilter);
-    }
-    return agents;
-  }, [agents, scope, ownerFilter]);
-
-  const filteredAgents = useMemo(
-    () =>
-      showArchived
-        ? listAfterOwnerFilter.filter((a) => !!a.archived_at)
-        : listAfterOwnerFilter.filter((a) => !a.archived_at),
-    [listAfterOwnerFilter, showArchived],
-  );
-
-  const archivedCount = useMemo(
-    () => listAfterOwnerFilter.filter((a) => !!a.archived_at).length,
-    [listAfterOwnerFilter],
-  );
-
-  const getOwnerMember = (ownerId: string | null) => {
-    if (!ownerId) return null;
-    return members.find((m) => m.user_id === ownerId) ?? null;
-  };
-
-  const selectedOwner = ownerFilter ? getOwnerMember(ownerFilter) : null;
-
-  const invalidateAgentQueries = () => {
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-  };
+  }, [runtimes]);
 
   const runCountsById = useMemo(() => {
     const m = new Map<string, number>();
@@ -277,54 +282,90 @@ export function AgentsPage() {
 
   const handleCreate = async (data: CreateAgentRequest) => {
     const agent = await api.createAgent(data);
-    invalidateAgentQueries();
-    setSelectedId(agent.id);
-  };
-
-  const handleUpdate = async (id: string, data: Record<string, unknown>) => {
-    try {
-      await api.updateAgent(id, data as UpdateAgentRequest);
-      invalidateAgentQueries();
-      toast.success("Agent updated");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update agent");
-      throw e;
+    let cachedAgent = agent;
+    // When duplicating, carry the source agent's skill assignments over.
+    // Skills aren't part of CreateAgentRequest (they're managed via
+    // setAgentSkills) so the create endpoint can't take them inline; we
+    // do a follow-up call. Failure here doesn't abort the duplicate —
+    // the agent already exists and the user can re-attach skills from
+    // the detail page.
+    if (duplicateTemplate?.skills.length) {
+      try {
+        await api.setAgentSkills(agent.id, {
+          skill_ids: duplicateTemplate.skills.map((s) => s.id),
+        });
+        cachedAgent = { ...agent, skills: duplicateTemplate.skills };
+      } catch {
+        // Surfaced softly; the agent itself is fine.
+      }
     }
+    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === cachedAgent.id);
+      return exists
+        ? current.map((a) => (a.id === cachedAgent.id ? cachedAgent : a))
+        : [...current, cachedAgent];
+    });
+    setShowCreate(false);
+    setDuplicateTemplate(null);
+    navigation.push(paths.agentDetail(agent.id));
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
   };
 
-  const handleArchive = async (id: string) => {
-    try {
-      await api.archiveAgent(id);
-      invalidateAgentQueries();
-      toast.success("Agent archived");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to archive agent");
-    }
-  };
+  const handleDuplicate = useCallback((agent: Agent) => {
+    setDuplicateTemplate(agent);
+    setShowCreate(true);
+  }, []);
 
-  const handleRestore = async (id: string) => {
-    try {
-      await api.restoreAgent(id);
-      invalidateAgentQueries();
-      toast.success("Agent restored");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to restore agent");
-    }
-  };
+  // Assemble per-row data once per render — agent + runtime + presence +
+  // activity + role flags. The columns reach into `row.original` and never
+  // pull their own queries, which keeps each cell a pure function.
+  const agentRows = useMemo<AgentRow[]>(() => {
+    return sortedAgents.map((agent) => {
+      const isOwner =
+        !!currentUser?.id && agent.owner_id === currentUser.id;
+      const canManage = isWorkspaceAdmin || isOwner;
+      const ownerIdToShow =
+        scope === "all" &&
+        agent.owner_id &&
+        agent.owner_id !== currentUser?.id
+          ? agent.owner_id
+          : null;
+      return {
+        agent,
+        runtime: runtimesById.get(agent.runtime_id) ?? null,
+        presence: presenceMap.get(agent.id) ?? null,
+        activity: activityMap.get(agent.id) ?? null,
+        runCount: runCountsById.get(agent.id) ?? 0,
+        ownerIdToShow,
+        isOwnedByMe: isOwner,
+        canManage,
+      };
+    });
+  }, [
+    sortedAgents,
+    currentUser,
+    isWorkspaceAdmin,
+    scope,
+    runtimesById,
+    presenceMap,
+    activityMap,
+    runCountsById,
+  ]);
 
-  const handleDuplicate = async (id: string) => {
-    try {
-      const newAgent = await api.copyAgent(id);
-      invalidateAgentQueries();
-      setSelectedId(newAgent.id);
-      setShowArchived(false);
-      toast.success("Agent duplicated");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to duplicate agent");
-    }
-  };
+  const columns = useMemo(
+    () => createAgentColumns({ onDuplicate: handleDuplicate, t }),
+    [handleDuplicate, t],
+  );
 
-  const selected = agents.find((a) => a.id === selectedId) ?? null;
+  const table = useReactTable({
+    data: agentRows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
+    // Pin the kebab column right so it stays accessible during horizontal
+    // scroll — matches the pattern in Linear / Notion / GitHub.
+    initialState: { columnPinning: { right: ["actions"] } },
+  });
 
   // ---- Loading ----
   if (isLoading) {
@@ -361,182 +402,17 @@ export function AgentsPage() {
   const showEmpty = totalActiveCount === 0 && archivedCount === 0;
 
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — agent list */}
-        <div className="overflow-y-auto h-full border-r">
-          <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Agents</h1>
-            <div className="flex items-center gap-1">
-              {archivedCount > 0 && (
-                <Button
-                  variant={showArchived ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? "Show active agents" : "Show archived agents"}
-                >
-                  <Archive className="text-muted-foreground" />
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setShowCreate(true)}
-              >
-                <Plus className="text-muted-foreground" />
-              </Button>
-            </div>
-          </PageHeader>
+    <div className="flex flex-1 min-h-0 flex-col">
+      <PageHeaderBar
+        totalCount={totalActiveCount}
+        onCreate={() => setShowCreate(true)}
+      />
 
-          <div className="flex items-center justify-between border-b px-4 py-2">
-            <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setScope("mine");
-                  setOwnerFilter(null);
-                }}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  scope === "mine"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Mine
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setScope("all");
-                  setOwnerFilter(null);
-                }}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  scope === "all"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                All
-              </button>
-            </div>
-
-            {scope === "all" && uniqueOwners.length > 1 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    />
-                  }
-                >
-                  {selectedOwner ? (
-                    <>
-                      <ActorAvatar actorType="member" actorId={selectedOwner.user_id} size={16} />
-                      <span className="max-w-20 truncate">{selectedOwner.name}</span>
-                    </>
-                  ) : (
-                    <span>Owner</span>
-                  )}
-                  <ChevronDown className="h-3 w-3 opacity-50" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem
-                    onClick={() => setOwnerFilter(null)}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="text-xs">All owners</span>
-                    {!ownerFilter && <Check className="h-3.5 w-3.5 text-foreground" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {uniqueOwners.map((m) => (
-                    <DropdownMenuItem
-                      key={m.user_id}
-                      onClick={() => setOwnerFilter(ownerFilter === m.user_id ? null : m.user_id)}
-                      className="flex items-center justify-between"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
-                        <span className="truncate text-xs">{m.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {ownerCounts.get(m.user_id) ?? 0}
-                        </span>
-                      </div>
-                      {ownerFilter === m.user_id && (
-                        <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+        {showEmpty ? (
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState onCreate={() => setShowCreate(true)} />
           </div>
-
-          {filteredAgents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Bot className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">
-                {showArchived
-                  ? "No archived agents"
-                  : scope === "mine"
-                    ? archivedCount > 0
-                      ? "No active agents"
-                      : "No agents yet"
-                    : ownerFilter
-                      ? "No agents for this owner"
-                      : archivedCount > 0
-                        ? "No active agents"
-                        : "No agents yet"}
-              </p>
-              {!showArchived && (
-                <Button
-                  onClick={() => setShowCreate(true)}
-                  size="xs"
-                  className="mt-3"
-                >
-                  <Plus className="h-3 w-3" />
-                  Create Agent
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="divide-y">
-              {filteredAgents.map((agent) => (
-                <AgentListItem
-                  key={agent.id}
-                  agent={agent}
-                  isSelected={agent.id === selectedId}
-                  onClick={() => setSelectedId(agent.id)}
-                  ownerMember={scope === "all" ? getOwnerMember(agent.owner_id) : undefined}
-
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </ResizablePanel>
-
-      <ResizableHandle />
-
-      <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — agent detail */}
-        {selected ? (
-          <AgentDetail
-            key={selected.id}
-            agent={selected}
-            runtimes={runtimes}
-            members={members}
-            currentUserId={currentUser?.id ?? null}
-            onUpdate={handleUpdate}
-            onArchive={handleArchive}
-            onRestore={handleRestore}
-            onDuplicate={() => handleDuplicate(selected.id)}
-          />
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
             {view === "active" ? (

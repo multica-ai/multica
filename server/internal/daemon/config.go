@@ -76,6 +76,13 @@ type Config struct {
 	RateLimitConfig                RateLimitConfig
 }
 
+// RateLimitConfig holds configuration for automatic rate limit retries.
+type RateLimitConfig struct {
+	InitialDelay  time.Duration // initial delay before first retry (default: 5s)
+	MaxRetries    int           // maximum number of retries (default: 6)
+	BackoffFactor float64       // exponential backoff factor (default: 2.0)
+}
+
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
@@ -197,7 +204,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	codexArgs, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
 	if err != nil {
 		return Config{}, err
-	}
 	}
 
 	// Host info

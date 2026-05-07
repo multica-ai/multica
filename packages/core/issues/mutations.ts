@@ -364,14 +364,13 @@ export function useCreateComment(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.mentionFrequency(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     },
   });
 }
 
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ commentId, content }: { commentId: string; content: string }) =>
       api.updateComment(commentId, content),
@@ -399,14 +398,13 @@ export function useUpdateComment(issueId: string) {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     },
   });
 }
 
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
@@ -451,7 +449,7 @@ export function useDeleteComment(issueId: string) {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     },
   });
 }
@@ -473,7 +471,7 @@ export function useToggleCommentReaction(issueId: string) {
       return api.addReaction(commentId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     },
   });
 }
@@ -498,7 +496,7 @@ export function useToggleIssueReaction(issueId: string) {
       return api.addIssueReaction(issueId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
     },
   });
 }
@@ -509,7 +507,6 @@ export function useToggleIssueReaction(issueId: string) {
 
 export function useToggleIssueSubscriber(issueId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: async ({
       userId,
@@ -527,14 +524,14 @@ export function useToggleIssueSubscriber(issueId: string) {
       }
     },
     onMutate: async ({ userId, userType, subscribed }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
+      await qc.cancelQueries({ queryKey: issueKeys.subscribers(issueId) });
       const prev = qc.getQueryData<IssueSubscriber[]>(
-        issueKeys.subscribers(wsId, issueId),
+        issueKeys.subscribers(issueId),
       );
 
       if (subscribed) {
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(wsId, issueId),
+          issueKeys.subscribers(issueId),
           (old) =>
             old?.filter(
               (s) => !(s.user_id === userId && s.user_type === userType),
@@ -549,7 +546,7 @@ export function useToggleIssueSubscriber(issueId: string) {
           created_at: new Date().toISOString(),
         };
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(wsId, issueId),
+          issueKeys.subscribers(issueId),
           (old) => {
             if (
               old?.some(
@@ -565,10 +562,10 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev)
-        qc.setQueryData(issueKeys.subscribers(wsId, issueId), ctx.prev);
+        qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
     },
   });
 }
@@ -592,8 +589,8 @@ export function useClearIssueHistory() {
       }),
     onSuccess: (_data, { issueId }) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
-      qc.invalidateQueries({ queryKey: issueKeys.taskRuns(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.taskRuns(issueId) });
     },
   });
 }
