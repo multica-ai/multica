@@ -8,6 +8,7 @@
     "dev:docs": "turbo dev --filter=@multica/docs",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
     "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
+    "dev:mobile": "pnpm --filter @multica/mobile dev",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
