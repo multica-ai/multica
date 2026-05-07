@@ -1,10 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel } from "@multica/core/types";
 
 const mockArchive = vi.hoisted(() => vi.fn());
-const mockMarkRead = vi.hoisted(() => vi.fn());
+const mockMarkChannelRead = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
@@ -28,14 +28,10 @@ vi.mock("@multica/core/channels", () => ({
     queryKey: ["channels", "ws", "detail", "c1"],
     queryFn: () => Promise.resolve(undefined),
   }),
-  channelKeys: {
-    list: () => ["channels", "ws", "list"],
-    detail: () => ["channels", "ws", "detail", "c1"],
-  },
+  useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
 }));
 
 vi.mock("@multica/core/inbox/queries", () => ({
-  inboxKeys: { list: () => ["inbox", "ws", "list"] },
   inboxListOptions: () => ({
     queryKey: ["inbox", "ws", "list"],
     queryFn: () => Promise.resolve([]),
@@ -43,7 +39,6 @@ vi.mock("@multica/core/inbox/queries", () => ({
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useMarkInboxRead: () => ({ mutate: mockMarkRead }),
   useArchiveInbox: () => ({ mutate: mockArchive }),
 }));
 
@@ -58,10 +53,6 @@ vi.mock("@tanstack/react-query", async () => {
       if (last === "list") return { data: [] };
       return { data: undefined };
     },
-    useQueryClient: () => ({
-      setQueryData: vi.fn(),
-      invalidateQueries: vi.fn(),
-    }),
   };
 });
 
@@ -141,6 +132,11 @@ const baseChannel: Channel = {
 };
 
 describe("ChannelDetail thread header", () => {
+  beforeEach(() => {
+    mockMarkChannelRead.mockClear();
+    mockArchive.mockClear();
+  });
+
   it("renders channel title, description and participant stack (excluding self)", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     expect(screen.getByText("growth")).toBeInTheDocument();
@@ -173,5 +169,23 @@ describe("ChannelDetail thread header", () => {
     // No inbox row exists in this test, so archive is a no-op on the
     // mutation but the parent is still told to clear its selection.
     expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls mark-channel-read once on mount when unread_count > 0", () => {
+    const unread: Channel = { ...baseChannel, unread_count: 3 };
+    const { rerender } = render(
+      <ChannelDetail channelId="c1" initialChannel={unread} />,
+    );
+    expect(mockMarkChannelRead).toHaveBeenCalledTimes(1);
+    expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");
+
+    // Re-render the same channel — must not fire again (idempotent per mount).
+    rerender(<ChannelDetail channelId="c1" initialChannel={unread} />);
+    expect(mockMarkChannelRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call mark-channel-read when unread_count is 0", () => {
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
 });

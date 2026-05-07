@@ -484,6 +484,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, pushSvc *
 				r.Get("/", h.ListChannels)
 				r.Post("/", h.CreateChannel)
 				r.Get("/{id}", h.GetChannel)
+				r.Post("/{id}/read", h.MarkChannelRead)
 			})
 
 			r.Route("/api/chat/sessions", func(r chi.Router) {

@@ -726,3 +726,33 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 	)
 	return i, err
 }
+
+const markInboxReadByIssue = `-- name: MarkInboxReadByIssue :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND read = false AND archived = false
+`
+
+type MarkInboxReadByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// Marks every unread, non-archived inbox_item for (recipient, issue) as read,
+// regardless of route. Drives channel/DM auto-mark-read so notifications-routed
+// rows are cleared too — without this they keep the channel's unread badge lit
+// because CountUnreadInboxForChannel sums across both routes.
+func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInboxReadByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

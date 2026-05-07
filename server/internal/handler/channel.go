@@ -313,6 +313,64 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.channelToResponse(r.Context(), issue, userID))
 }
 
+// MarkChannelRead handles POST /api/channels/{id}/read. Marks every unread
+// inbox_item for this channel/DM and the calling user as read in one shot —
+// across BOTH inbox- and notifications-routed rows. CountUnreadInboxForChannel
+// sums across routes, so missing the notifications side leaves the channel
+// list stuck in "unread". Broadcasts inbox:batch-read so other tabs of the
+// same user clear their badge without a refetch.
+func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	id := chi.URLParam(r, "id")
+
+	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	subscribed, err := h.Queries.IsIssueSubscriber(r.Context(), db.IsIssueSubscriberParams{
+		IssueID:  issue.ID,
+		UserType: "member",
+		UserID:   parseUUID(userID),
+	})
+	if err != nil || !subscribed {
+		writeError(w, http.StatusForbidden, "not a participant of this channel")
+		return
+	}
+
+	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+		WorkspaceID:   parseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(userID),
+		IssueID:       issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark channel read")
+		return
+	}
+
+	slog.Info("channel: mark read", append(logger.RequestAttrs(r), "user_id", userID, "channel_id", id, "count", count)...)
+	h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+		"recipient_id": userID,
+		"issue_id":     id,
+		"count":        count,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
 // channelToResponse converts a full Issue row into a ChannelResponse.
 // Only safe to call once the caller has verified the issue's kind.
 func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserID string) ChannelResponse {

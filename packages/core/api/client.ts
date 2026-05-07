@@ -632,6 +632,10 @@ export class ApiClient {
     });
   }
 
+  async markChannelRead(id: string): Promise<{ count: number }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
   // Inbox
   async listInbox(params?: { archived?: boolean }): Promise<InboxItem[]> {
     const qs = new URLSearchParams();

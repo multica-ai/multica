@@ -84,6 +84,15 @@ RETURNING *;
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
+-- name: MarkInboxReadByIssue :execrows
+-- Marks every unread, non-archived inbox_item for (recipient, issue) as read,
+-- regardless of route. Drives channel/DM auto-mark-read so notifications-routed
+-- rows are cleared too — without this they keep the channel's unread badge lit
+-- because CountUnreadInboxForChannel sums across both routes.
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND read = false AND archived = false;
+
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3

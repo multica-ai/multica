@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Archive, Hash, MessageSquare, Pin } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { channelDetailOptions, channelKeys } from "@multica/core/channels";
-import { inboxKeys, inboxListOptions } from "@multica/core/inbox/queries";
-import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
+import { channelDetailOptions, useMarkChannelRead } from "@multica/core/channels";
+import { inboxListOptions } from "@multica/core/inbox/queries";
+import { useArchiveInbox } from "@multica/core/inbox/mutations";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentCard } from "../../issues/components/comment-card";
@@ -31,7 +31,6 @@ interface ChannelDetailProps {
 export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
-  const qc = useQueryClient();
 
   // Channels are issues, so we reuse the issue timeline hook — same comment
   // model, same WS event handlers, same optimistic reaction logic.
@@ -52,41 +51,24 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   );
   const display = useChannelDisplay(fallbackChannel);
 
-  // --- Auto-mark-read ----------------------------------------------------
-  // When the panel opens, mark every unread inbox item for this channel as
-  // read. Uses the existing per-item endpoint — no new backend needed —
-  // and the channel list refetch picks up the new unread_count.
-  const markRead = useMarkInboxRead();
-  const seenChannelRef = useRef<string | null>(null);
+  // Inbox query backs the archive button below — auto-mark-read goes through
+  // the channel-level endpoint so notifications-routed rows are cleared too.
   const { data: inboxItems = [] } = useQuery(inboxListOptions(wsId));
+
+  // --- Auto-mark-read ----------------------------------------------------
+  // When the panel opens, hit POST /api/channels/{id}/read once. The server
+  // marks every unread inbox_item for this channel — across both inbox- and
+  // notifications-routed rows — so CountUnreadInboxForChannel drops to zero
+  // and the badge in the inbox list clears.
+  const markChannelRead = useMarkChannelRead();
+  const seenChannelRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!channelId || !channel || channel.unread_count === 0) return;
     if (seenChannelRef.current === channelId) return;
     seenChannelRef.current = channelId;
-
-    const unread = inboxItems.filter(
-      (i: InboxItem) => i.issue_id === channelId && !i.read,
-    );
-    if (unread.length === 0) {
-      // Inbox doesn't carry the row yet — invalidate so the badge clears
-      // as soon as the next fetch lands.
-      qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
-      return;
-    }
-    for (const item of unread) {
-      markRead.mutate(item.id);
-    }
-    // Optimistically clear the badge in cached channel list/detail so the UI
-    // updates without waiting for a refetch.
-    qc.setQueryData<Channel[]>(channelKeys.list(wsId), (old) =>
-      old?.map((c) => (c.id === channelId ? { ...c, unread_count: 0 } : c)),
-    );
-    qc.setQueryData<Channel>(channelKeys.detail(wsId, channelId), (old) =>
-      old ? { ...old, unread_count: 0 } : old,
-    );
-    qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-  }, [channelId, channel, inboxItems, markRead, qc, wsId]);
+    markChannelRead.mutate(channelId);
+  }, [channelId, channel, markChannelRead]);
 
   const grouped = useMemo(() => groupTimeline(timeline), [timeline]);
 
