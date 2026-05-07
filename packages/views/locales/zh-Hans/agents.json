@@ -159,6 +159,7 @@
     "model_tooltip": "模型 · {{value}}",
     "model_managed_by_runtime": "由运行时管理",
     "model_search_placeholder": "搜索或输入模型 ID",
+    "model_custom_hint": "输入运行时支持的任意模型 ID",
     "model_discovering": "正在发现模型...",
     "model_default_badge": "默认",
     "model_empty": "暂无可用模型",
