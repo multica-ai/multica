@@ -1,0 +1,42 @@
+{
+  "name": "@multica/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for Multica — exposes Multica resources (issues, agents, channels, projects, autopilots) as MCP tools so any MCP-aware AI assistant can orchestrate Multica from chat.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "multica-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node ./dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "tsup": "^8.3.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
