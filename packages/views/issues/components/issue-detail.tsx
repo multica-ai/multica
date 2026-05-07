@@ -339,7 +339,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { repliesByParent, groups };
+    // Reverse top-level groups so the newest root comment / activity batch
+    // sits at the top of the Activity section. Threads (replies under a
+    // root comment) stay ASC — `repliesByParent` is untouched, and
+    // CommentCard.collectReplies walks it in insertion order.
+    const reversed = groups.slice().reverse();
+
+    return { repliesByParent, groups: reversed };
   }, [timeline]);
 
   const {
@@ -984,24 +990,46 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 card is just a header-style "agent is working" anchor. */}
             <AgentLiveCard key={id} issueId={id} />
 
-            {/* Timeline entries */}
+            {/* Comment input sits above the timeline so newest-first reads
+                naturally: type at the top, see your comment appear at the
+                top, no scroll-to-bottom required. */}
+            <div className="mt-4">
+              <CommentInput issueId={id} onSubmit={submitComment} />
+            </div>
+
+            {/* Timeline entries (newest-first; see timelineView memo).
+                Pagination buttons swap position from the original ASC layout:
+                "Show newer / Jump to latest" goes at the TOP (newest-side),
+                "Show older" at the BOTTOM (oldest-side). */}
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
             ) : (
             <>
-            {hasMoreOlder && (
-              <div className="my-4 flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <button
-                  onClick={fetchOlder}
-                  disabled={isFetchingOlder}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  {isFetchingOlder
-                    ? t(($) => $.timeline.loading)
-                    : t(($) => $.timeline.show_older)}
-                </button>
-                <div className="h-px flex-1 bg-border" />
+            {(hasMoreNewer || !isAtLatest) && (
+              <div className="mt-4 flex items-center justify-center gap-4">
+                {hasMoreNewer && (
+                  <button
+                    onClick={fetchNewer}
+                    disabled={isFetchingNewer}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {isFetchingNewer
+                      ? t(($) => $.timeline.loading)
+                      : t(($) => $.timeline.show_newer)}
+                  </button>
+                )}
+                {!isAtLatest && (
+                  <button
+                    onClick={jumpToLatest}
+                    className="text-xs font-medium text-foreground hover:text-foreground/80 transition-colors"
+                  >
+                    {newEntriesBelowCount > 0
+                      ? t(($) => $.timeline.jump_to_latest_with_count, {
+                          count: newEntriesBelowCount,
+                        })
+                      : t(($) => $.timeline.jump_to_latest)}
+                  </button>
+                )}
               </div>
             )}
             <div className="mt-4 flex flex-col gap-3">
@@ -1083,40 +1111,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
-            {(hasMoreNewer || !isAtLatest) && (
-              <div className="mt-4 flex items-center justify-center gap-4">
-                {hasMoreNewer && (
-                  <button
-                    onClick={fetchNewer}
-                    disabled={isFetchingNewer}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    {isFetchingNewer
-                      ? t(($) => $.timeline.loading)
-                      : t(($) => $.timeline.show_newer)}
-                  </button>
-                )}
-                {!isAtLatest && (
-                  <button
-                    onClick={jumpToLatest}
-                    className="text-xs font-medium text-foreground hover:text-foreground/80 transition-colors"
-                  >
-                    {newEntriesBelowCount > 0
-                      ? t(($) => $.timeline.jump_to_latest_with_count, {
-                          count: newEntriesBelowCount,
-                        })
-                      : t(($) => $.timeline.jump_to_latest)}
-                  </button>
-                )}
+            {hasMoreOlder && (
+              <div className="my-4 flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <button
+                  onClick={fetchOlder}
+                  disabled={isFetchingOlder}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {isFetchingOlder
+                    ? t(($) => $.timeline.loading)
+                    : t(($) => $.timeline.show_older)}
+                </button>
+                <div className="h-px flex-1 bg-border" />
               </div>
             )}
             </>
             )}
-
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
-            </div>
           </div>
         </div>
         </div>
