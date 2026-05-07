@@ -17,8 +17,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { canAssignAgent } from "@multica/views/issues/components";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import {
   chatSessionsOptions,
@@ -49,7 +48,6 @@ export function ChatWindow() {
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
@@ -87,10 +85,13 @@ export function ChatWindow() {
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
 
-  const currentMember = members.find((m) => m.user_id === user?.id);
-  const memberRole = currentMember?.role;
+  // Chat dialog uses strict visibility: only non-private agents and
+  // private agents owned by the current user. No admin/owner bypass —
+  // private agents are personal to their creator.
   const availableAgents = agents.filter(
-    (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
+    (a) =>
+      !a.archived_at &&
+      (a.visibility !== "private" || a.owner_id === user?.id),
   );
 
   // Resolve selected agent: stored preference → first available
