@@ -24,6 +24,8 @@ const (
 	notificationDispatchBatchSize = 20
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
+	dingTalkMarkdownTitleLimit    = 80
+	dingTalkMarkdownTextLimit     = 1800
 )
 
 var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
@@ -453,11 +455,9 @@ func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.Di
 	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
 		parts = append(parts, "**From**\n"+actorName)
 	}
-	if body != "" {
-		parts = append(parts, "**Message**\n"+body)
-	}
+	linkPart := ""
 	if link != "" {
-		parts = append(parts, "[Open In Multica]("+dingtalkExternalBrowserURL(link)+")")
+		linkPart = "[Open In Multica](" + dingtalkExternalBrowserURL(link) + ")"
 	}
 
 	cardTitle := title
@@ -466,9 +466,81 @@ func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.Di
 	}
 
 	return notifyutil.DingTalkMarkdownMessage{
-		Title: truncateDingTalkCardText(cardTitle, 80),
-		Text:  truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
+		Title: truncateDingTalkCardText(cardTitle, dingTalkMarkdownTitleLimit),
+		Text:  buildDingTalkMarkdownText(parts, body, linkPart, dingTalkMarkdownTextLimit),
 	}
+}
+
+func buildDingTalkMarkdownText(prefixParts []string, body, linkPart string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	body = strings.TrimSpace(body)
+	linkPart = strings.TrimSpace(linkPart)
+	text := joinDingTalkMarkdownParts(prefixParts, body, linkPart)
+	if dingTalkRuneLen(text) <= limit {
+		return text
+	}
+
+	if body != "" {
+		low, high := 0, dingTalkRuneLen(body)
+		best := ""
+		for low <= high {
+			mid := (low + high) / 2
+			candidateBody := truncateDingTalkMessageSection(body, mid)
+			candidate := joinDingTalkMarkdownParts(prefixParts, candidateBody, linkPart)
+			if dingTalkRuneLen(candidate) <= limit {
+				best = candidate
+				low = mid + 1
+			} else {
+				high = mid - 1
+			}
+		}
+		if best != "" {
+			return best
+		}
+	}
+
+	return buildDingTalkMarkdownTextWithoutBody(prefixParts, linkPart, limit)
+}
+
+func joinDingTalkMarkdownParts(prefixParts []string, body, linkPart string) string {
+	parts := make([]string, 0, len(prefixParts)+2)
+	for _, part := range prefixParts {
+		if part = strings.TrimSpace(part); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if body = strings.TrimSpace(body); body != "" {
+		parts = append(parts, "**Message**\n"+body)
+	}
+	if linkPart = strings.TrimSpace(linkPart); linkPart != "" {
+		parts = append(parts, linkPart)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func buildDingTalkMarkdownTextWithoutBody(prefixParts []string, linkPart string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	text := joinDingTalkMarkdownParts(prefixParts, "", linkPart)
+	if dingTalkRuneLen(text) <= limit || strings.TrimSpace(linkPart) == "" {
+		return truncateDingTalkCardText(text, limit)
+	}
+
+	for i := len(prefixParts); i >= 0; i-- {
+		candidate := joinDingTalkMarkdownParts(prefixParts[:i], "", linkPart)
+		if dingTalkRuneLen(candidate) <= limit {
+			return candidate
+		}
+	}
+
+	// Never truncate the generated action link. A too-long URL should fail
+	// explicitly instead of silently becoming a corrupted destination.
+	return strings.TrimSpace(linkPart)
 }
 
 func buildDingTalkIssueLabel(event notificationEventPayload) string {
@@ -499,6 +571,24 @@ func sanitizeDingTalkMessageText(raw string) string {
 	return strings.TrimSpace(dingtalkMentionLinkPattern.ReplaceAllString(text, "@$1"))
 }
 
+func truncateDingTalkMessageSection(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	if limit <= 3 {
+		return strings.Repeat(".", limit)
+	}
+	truncated := strings.TrimSpace(string(runes[:limit-4]))
+	if truncated == "" {
+		return "..."
+	}
+	return truncated + "\n..."
+}
+
 func truncateDingTalkCardText(text string, limit int) string {
 	if limit <= 0 {
 		return ""
@@ -511,6 +601,10 @@ func truncateDingTalkCardText(text string, limit int) string {
 		return string(runes[:limit])
 	}
 	return string(runes[:limit-3]) + "..."
+}
+
+func dingTalkRuneLen(text string) int {
+	return len([]rune(text))
 }
 
 func truncateError(err error) string {

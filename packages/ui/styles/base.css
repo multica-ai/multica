@@ -118,4 +118,11 @@
      * Progressive enhancement: browsers that don't support it simply ignore the rule. */
     text-autospace: ideograph-alpha ideograph-numeric;
   }
+  /* Enable momentum scrolling in WebViews (WeChat X5 / older iOS) */
+  [class*="overflow-y-auto"],
+  [class*="overflow-y-scroll"],
+  [style*="overflow-y: auto"],
+  [style*="overflow-y: scroll"] {
+    -webkit-overflow-scrolling: touch;
+  }
 }
