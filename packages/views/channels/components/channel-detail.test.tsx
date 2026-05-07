@@ -5,6 +5,9 @@ import type { Channel } from "@multica/core/types";
 
 const mockArchive = vi.hoisted(() => vi.fn());
 const mockMarkChannelRead = vi.hoisted(() => vi.fn());
+const mockCreatePin = vi.hoisted(() => vi.fn());
+const mockDeletePin = vi.hoisted(() => vi.fn());
+const pinListData = vi.hoisted(() => ({ items: [] as Array<{ item_type: string; item_id: string }> }));
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
@@ -42,6 +45,15 @@ vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveInbox: () => ({ mutate: mockArchive }),
 }));
 
+vi.mock("@multica/core/pins", () => ({
+  pinListOptions: () => ({
+    queryKey: ["pins", "ws", "me", "list"],
+    queryFn: () => Promise.resolve(pinListData.items),
+  }),
+  useCreatePin: () => ({ mutate: mockCreatePin }),
+  useDeletePin: () => ({ mutate: mockDeletePin }),
+}));
+
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
     "@tanstack/react-query",
@@ -49,7 +61,9 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (options: { queryKey: readonly unknown[] }) => {
+      const first = options.queryKey?.[0];
       const last = options.queryKey?.[options.queryKey.length - 1];
+      if (first === "pins" && last === "list") return { data: pinListData.items };
       if (last === "list") return { data: [] };
       return { data: undefined };
     },
@@ -150,10 +164,41 @@ describe("ChannelDetail thread header", () => {
     expect(screen.getByTestId("avatar-lando")).toBeInTheDocument();
   });
 
-  it("disables the Pin button until JEH-592 lands", () => {
+  it("pins the channel when not yet pinned", async () => {
+    pinListData.items = [];
+    mockCreatePin.mockClear();
+    mockDeletePin.mockClear();
+    const user = userEvent.setup();
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     const pin = screen.getByLabelText("Pin to sidebar");
-    expect(pin).toBeDisabled();
+    expect(pin).not.toBeDisabled();
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    await user.click(pin);
+    expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "channel", item_id: "c1" });
+    expect(mockDeletePin).not.toHaveBeenCalled();
+  });
+
+  it("unpins when already pinned", async () => {
+    pinListData.items = [{ item_type: "channel", item_id: "c1" }];
+    mockCreatePin.mockClear();
+    mockDeletePin.mockClear();
+    const user = userEvent.setup();
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    const pin = screen.getByLabelText("Unpin from sidebar");
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    await user.click(pin);
+    expect(mockDeletePin).toHaveBeenCalledWith({ itemType: "channel", itemId: "c1" });
+    expect(mockCreatePin).not.toHaveBeenCalled();
+  });
+
+  it("uses item_type 'dm' for direct-message channels", async () => {
+    pinListData.items = [];
+    mockCreatePin.mockClear();
+    const user = userEvent.setup();
+    const dm: Channel = { ...baseChannel, kind: "dm", title: "alice" };
+    render(<ChannelDetail channelId="c1" initialChannel={dm} />);
+    await user.click(screen.getByLabelText("Pin to sidebar"));
+    expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "dm", item_id: "c1" });
   });
 
   it("archives the conversation and notifies the parent", async () => {

@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Hash, MessageSquare, Pin } from "lucide-react";
+import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { channelDetailOptions, useMarkChannelRead } from "@multica/core/channels";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
+import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentCard } from "../../issues/components/comment-card";
@@ -72,6 +73,19 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
 
   const grouped = useMemo(() => groupTimeline(timeline), [timeline]);
 
+  // --- Pin to sidebar ----------------------------------------------------
+  // Pins are scoped per user; we look up whether this channel/dm is already
+  // pinned to flip the button into "unpin" mode.
+  const { data: pinnedItems = [] } = useQuery({
+    ...pinListOptions(wsId, userId ?? ""),
+    enabled: !!userId,
+  });
+  const isPinned = pinnedItems.some(
+    (p) => p.item_type === channel?.kind && p.item_id === channelId,
+  );
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
+
   const archiveInbox = useArchiveInbox();
   const handleArchive = () => {
     // Channels archive by archiving the inbox row pointing at them. If the
@@ -114,17 +128,28 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
                 render={
                   <button
                     type="button"
-                    disabled
-                    aria-label="Pin to sidebar"
-                    className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground opacity-60"
+                    onClick={() => {
+                      if (isPinned) {
+                        deletePin.mutate({ itemType: channel.kind, itemId: channelId });
+                      } else {
+                        createPin.mutate({ item_type: channel.kind, item_id: channelId });
+                      }
+                    }}
+                    aria-label={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+                    aria-pressed={isPinned}
+                    className={
+                      isPinned
+                        ? "inline-flex size-7 items-center justify-center rounded border text-foreground hover:bg-accent"
+                        : "inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
+                    }
                   />
                 }
               >
-                <Pin className="size-3.5" />
+                {isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
               </TooltipTrigger>
-              {/* Pin types still need extending — JEH-592. Disabled until
-                  pin.item_type accepts 'channel' / 'dm'. */}
-              <TooltipContent side="bottom">Pinning channels is coming soon</TooltipContent>
+              <TooltipContent side="bottom">
+                {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+              </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
