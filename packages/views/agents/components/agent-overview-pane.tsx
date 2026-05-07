@@ -24,6 +24,7 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { useT } from "../../i18n";
 
 type DetailTab =
   | "activity"
@@ -32,16 +33,23 @@ type DetailTab =
   | "env"
   | "custom_args";
 
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args"> = {
+  activity: "activity",
+  instructions: "instructions",
+  skills: "skills",
+  env: "environment",
+  custom_args: "custom_args",
+};
+
 const detailTabs: {
   id: DetailTab;
-  label: string;
   icon: typeof FileText;
 }[] = [
-  { id: "activity", label: "Activity", icon: Activity },
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "env", label: "Environment", icon: KeyRound },
-  { id: "custom_args", label: "Custom Args", icon: Terminal },
+  { id: "activity", icon: Activity },
+  { id: "instructions", icon: FileText },
+  { id: "skills", icon: BookOpenText },
+  { id: "env", icon: KeyRound },
+  { id: "custom_args", icon: Terminal },
 ];
 
 interface AgentOverviewPaneProps {
@@ -77,6 +85,7 @@ export function AgentOverviewPane({
   runtimes,
   onUpdate,
 }: AgentOverviewPaneProps) {
+  const { t } = useT("agents");
   const [activeTab, setActiveTab] = useState<DetailTab>("activity");
   const [activeDirty, setActiveDirty] = useState(false);
   // Holds the destination when a tab change is intercepted by the dirty
@@ -108,6 +117,10 @@ export function AgentOverviewPane({
   };
 
   return (
+    // On mobile the parent stacks the inspector and overview and scrolls the
+    // page itself, so this pane has no inherited height. `min-h-[60vh]` keeps
+    // the tab content area usably tall when content is short; `md:` restores
+    // the grid-driven full-height behavior on tablet and up.
     <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
       <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b px-2 md:px-4">
         {detailTabs.map((tab) => (
@@ -122,7 +135,7 @@ export function AgentOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
+            {t(($) => $.tabs[TAB_LABEL_KEY[tab.id]])}
           </button>
         ))}
       </div>
@@ -174,19 +187,18 @@ export function AgentOverviewPane({
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+              <AlertDialogTitle>{t(($) => $.tabs.discard_dialog_title)}</AlertDialogTitle>
               <AlertDialogDescription>
-                You have unsaved changes in this tab. Leaving now will discard
-                them.
+                {t(($) => $.tabs.discard_dialog_description)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogCancel>{t(($) => $.tabs.discard_keep)}</AlertDialogCancel>
               <AlertDialogAction
                 variant="destructive"
                 onClick={commitTabChange}
               >
-                Discard changes
+                {t(($) => $.tabs.discard_confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

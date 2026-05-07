@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "../../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
@@ -28,7 +29,7 @@ export function PropertyPicker({
   width = "w-48",
   align = "end",
   searchable = false,
-  searchPlaceholder = "Filter...",
+  searchPlaceholder,
   onSearchChange,
   header,
   tooltip,
@@ -42,7 +43,7 @@ export function PropertyPicker({
   width?: string;
   align?: "start" | "center" | "end";
   searchable?: boolean;
-  searchPlaceholder?: string;
+  searchPlaceholder?: string | undefined;
   onSearchChange?: (query: string) => void;
   /** Custom sticky header rendered above the scrollable list. Use for
    *  filter toggles, search inputs, or any UI that must stay visible while
@@ -62,6 +63,9 @@ export function PropertyPicker({
    */
   footer?: React.ReactNode;
 }) {
+  const { t } = useT("issues");
+  const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
+  const filterAria = t(($) => $.pickers.filter_options_aria);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [tooltipHover, setTooltipHover] = useState(false);
@@ -164,8 +168,8 @@ export function PropertyPicker({
                 onSearchChange?.(e.target.value);
               }}
               onKeyDown={handleKeyDown}
-              placeholder={searchPlaceholder}
-              aria-label="Filter options"
+              placeholder={placeholder}
+              aria-label={filterAria}
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
@@ -260,9 +264,10 @@ export function PickerSection({
 // ---------------------------------------------------------------------------
 
 export function PickerEmpty() {
+  const { t } = useT("issues");
   return (
     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-      No results
+      {t(($) => $.pickers.no_results)}
     </div>
   );
 }

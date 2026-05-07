@@ -1,0 +1,62 @@
+{
+  "bubble_menu": {
+    "bold": "Bold",
+    "italic": "Italic",
+    "strikethrough": "Strikethrough",
+    "code": "Code",
+    "link": "Link",
+    "list": "List",
+    "quote": "Quote",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Text",
+      "normal_text": "Normal Text",
+      "heading_1": "Heading 1",
+      "heading_2": "Heading 2",
+      "heading_3": "Heading 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Bullet List",
+      "ordered_list": "Ordered List"
+    },
+    "sub_issue": {
+      "tooltip": "Create sub-issue from selection",
+      "created": "Created {{identifier}}",
+      "create_failed": "Failed to create sub-issue"
+    }
+  },
+  "image": {
+    "view": "View image",
+    "download": "Download",
+    "copy_link": "Copy link",
+    "delete": "Delete",
+    "link_copied": "Link copied",
+    "copy_link_failed": "Failed to copy link"
+  },
+  "link_hover": {
+    "copy_link": "Copy link",
+    "open_link": "Open link",
+    "link_copied": "Link copied",
+    "copy_failed": "Failed to copy"
+  },
+  "mention": {
+    "group_users": "Users",
+    "group_issues": "Issues",
+    "all_members": "All members",
+    "searching": "Searching...",
+    "no_results": "No results"
+  },
+  "code_block": {
+    "copy_code": "Copy code"
+  },
+  "file_card": {
+    "uploading": "Uploading {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Title"
+  },
+  "mermaid": {
+    "render_error": "Unable to render Mermaid diagram.",
+    "rendering": "Rendering diagram…"
+  }
+}

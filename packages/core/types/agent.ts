@@ -115,11 +115,24 @@ export interface Agent {
   max_concurrent_tasks: number;
   model: string;
   owner_id: string | null;
-  skills: Skill[];
+  skills: AgentSkillSummary[];
   created_at: string;
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+}
+
+/**
+ * Minimal skill shape embedded in an Agent payload (`GET /api/agents`,
+ * `GET /api/agents/:id`). Only id/name/description are populated — the
+ * agent list batch query joins exactly those three columns. For full skill
+ * info, use `GET /api/agents/:id/skills` (returns `SkillSummary[]`) or
+ * `GET /api/skills/:id` (returns the full `Skill`).
+ */
+export interface AgentSkillSummary {
+  id: string;
+  name: string;
+  description: string;
 }
 
 export interface CreateAgentRequest {
@@ -156,17 +169,28 @@ export interface UpdateAgentRequest {
 
 // Skills
 
-export interface Skill {
+/**
+ * Lightweight skill shape returned by list endpoints (`GET /api/skills`,
+ * `GET /api/agents/:id/skills`). The full SKILL.md `content` is intentionally
+ * omitted — bodies routinely run 50–200KB each and shipping them in list
+ * payloads tripped CLI timeouts on high-latency links (GH
+ * multica-ai/multica#2174). Use `Skill` from a detail endpoint when you need
+ * the body. For skills embedded in an `Agent` payload see `AgentSkillSummary`.
+ */
+export interface SkillSummary {
   id: string;
   workspace_id: string;
   name: string;
   description: string;
-  content: string;
   config: Record<string, unknown>;
-  files: SkillFile[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Skill extends SkillSummary {
+  content: string;
+  files: SkillFile[];
 }
 
 export interface SkillFile {

@@ -171,7 +171,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		if opts.ResumeSessionID != "" {
-			_, err := c.request(runCtx, "session/load", map[string]any{
+			result, err := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
 				"mcpServers": []any{},
@@ -182,7 +182,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
+			// Apply the same defensive resolution kimi/hermes use: if
+			// kiro echoes a sessionId in the session/load response, prefer
+			// it (the canonical id the backend is committed to). When the
+			// response is empty or doesn't include sessionId — kiro's
+			// current observed shape — the helper falls back to the
+			// requested id, preserving today's behavior. Fixing this here
+			// too means a future kiro that DOES return a different id on
+			// silent state reset is handled the same way as hermes/kimi.
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "kiro",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,

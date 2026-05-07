@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build, type check, and test
-        run: pnpm exec turbo build typecheck test --filter='!@multica/docs'
+      - name: Build, type check, lint, and test
+        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
 
   backend:
     runs-on: ubuntu-latest

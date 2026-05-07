@@ -686,6 +686,115 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 	return items, nil
 }
 
+const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExceedingFailureThreshold :many
+
+WITH stats AS (
+    SELECT autopilot_id,
+           count(*) FILTER (WHERE status IN ('completed', 'failed', 'skipped')) AS total,
+           count(*) FILTER (WHERE status = 'failed') AS failed
+    FROM autopilot_run
+    WHERE created_at >= $3::timestamptz
+    GROUP BY autopilot_id
+)
+SELECT a.id, a.workspace_id, a.title, a.assignee_id,
+       a.created_by_type, a.created_by_id,
+       s.total::bigint  AS total_runs,
+       s.failed::bigint AS failed_runs
+FROM autopilot a
+JOIN stats s ON s.autopilot_id = a.id
+WHERE a.status = 'active'
+  AND s.total >= $1::bigint
+  AND s.failed::float8 / NULLIF(s.total, 0)::float8 >= $2::float8
+ORDER BY s.failed DESC, a.id ASC
+`
+
+type SelectAutopilotsExceedingFailureThresholdParams struct {
+	MinRuns            int64              `json:"min_runs"`
+	FailRatioThreshold float64            `json:"fail_ratio_threshold"`
+	Since              pgtype.Timestamptz `json:"since"`
+}
+
+type SelectAutopilotsExceedingFailureThresholdRow struct {
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	AssigneeID    pgtype.UUID `json:"assignee_id"`
+	CreatedByType string      `json:"created_by_type"`
+	CreatedByID   pgtype.UUID `json:"created_by_id"`
+	TotalRuns     int64       `json:"total_runs"`
+	FailedRuns    int64       `json:"failed_runs"`
+}
+
+// =====================
+// Failure-rate auto-pause
+// =====================
+// Find active autopilots whose recent run failure rate exceeds the threshold.
+// Counts only terminal runs (completed | failed | skipped); pending,
+// issue_created and running are excluded so in-flight work isn't penalised.
+// Used by the failure monitor to auto-pause sustained-failure autopilots
+// (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
+// that 100% failed for days, burning ~1.5k useless tasks per week).
+func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context, arg SelectAutopilotsExceedingFailureThresholdParams) ([]SelectAutopilotsExceedingFailureThresholdRow, error) {
+	rows, err := q.db.Query(ctx, selectAutopilotsExceedingFailureThreshold, arg.MinRuns, arg.FailRatioThreshold, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SelectAutopilotsExceedingFailureThresholdRow{}
+	for rows.Next() {
+		var i SelectAutopilotsExceedingFailureThresholdRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.AssigneeID,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.TotalRuns,
+			&i.FailedRuns,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
+`
+
+// Atomically pauses an autopilot only if it is currently active. Returns no
+// rows when the autopilot was already paused/archived (or another worker
+// raced first), letting the caller treat that as a benign no-op rather than
+// an error.
+func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+	row := q.db.QueryRow(ctx, systemPauseAutopilot, id)
+	var i Autopilot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.AssigneeID,
+		&i.Status,
+		&i.ExecutionMode,
+		&i.IssueTitleTemplate,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateAutopilot = `-- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE($2, title),

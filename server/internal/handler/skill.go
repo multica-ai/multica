@@ -38,6 +38,33 @@ type SkillResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
+// has except `content`. SKILL.md bodies routinely run 50–200KB and shipping
+// them in list payloads bloats responses past CLI timeouts on high-latency
+// links (GH multica-ai/multica#2174). Detail endpoints still return the full
+// SkillResponse with content.
+type SkillSummaryResponse struct {
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Config      any     `json:"config"`
+	CreatedBy   *string `json:"created_by"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
+// AgentSkillSummary is the still-narrower shape used for skills embedded in
+// an Agent payload (`GET /api/agents`, `GET /api/agents/{id}`). The agent
+// list batch query only joins enough columns to render the assignee chip in
+// the UI; the standalone `/api/agents/{id}/skills` endpoint returns the full
+// SkillSummaryResponse for callers that need the source/origin info.
+type AgentSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type SkillFileResponse struct {
 	ID        string `json:"id"`
 	SkillID   string `json:"skill_id"`
@@ -53,24 +80,48 @@ type SkillWithFilesResponse struct {
 }
 
 func skillToResponse(s db.Skill) SkillResponse {
-	var config any
-	if s.Config != nil {
-		json.Unmarshal(s.Config, &config)
-	}
-	if config == nil {
-		config = map[string]any{}
-	}
-
 	return SkillResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
 		Name:        s.Name,
 		Description: s.Description,
 		Content:     s.Content,
-		Config:      config,
+		Config:      decodeSkillConfig(s.Config),
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
+	}
+}
+
+// decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
+// missing or unparseable so the API surface always returns a JSON object.
+func decodeSkillConfig(raw []byte) any {
+	var config any
+	if raw != nil {
+		_ = json.Unmarshal(raw, &config)
+	}
+	if config == nil {
+		return map[string]any{}
+	}
+	return config
+}
+
+func skillSummaryToResponse(
+	id, workspaceID pgtype.UUID,
+	name, description string,
+	config []byte,
+	createdBy pgtype.UUID,
+	createdAt, updatedAt pgtype.Timestamptz,
+) SkillSummaryResponse {
+	return SkillSummaryResponse{
+		ID:          uuidToString(id),
+		WorkspaceID: uuidToString(workspaceID),
+		Name:        name,
+		Description: description,
+		Config:      decodeSkillConfig(config),
+		CreatedBy:   uuidToPtr(createdBy),
+		CreatedAt:   timestampToString(createdAt),
+		UpdatedAt:   timestampToString(updatedAt),
 	}
 }
 
@@ -152,15 +203,18 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1244,15 +1298,18 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1307,15 +1364,18 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated skills list.
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})

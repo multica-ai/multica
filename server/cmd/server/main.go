@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -294,9 +295,19 @@ func main() {
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
+	// Construct a LivenessStore that mirrors the one wired into the HTTP
+	// handler. Both the heartbeat write path (handler) and the sweeper read
+	// path (here) must agree on the same Redis-or-Noop choice; if they
+	// disagree, online runtimes get falsely marked offline.
+	var liveness handler.LivenessStore = handler.NewNoopLivenessStore()
+	if storeRedis != nil {
+		liveness = handler.NewRedisLivenessStore(storeRedis)
+	}
+
 	// Start background sweeper to mark stale runtimes as offline.
-	go runRuntimeSweeper(sweepCtx, queries, taskSvc, bus)
+	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
+	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
 	if metricsServer != nil {

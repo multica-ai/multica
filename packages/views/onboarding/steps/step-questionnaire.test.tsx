@@ -3,6 +3,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { StepQuestionnaire } from "./step-questionnaire";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enOnboarding from "../../locales/en/onboarding.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 const EMPTY_ANSWERS: QuestionnaireAnswers = {
   team_size: null,
@@ -16,10 +21,12 @@ const EMPTY_ANSWERS: QuestionnaireAnswers = {
 function renderStep(initial: Partial<QuestionnaireAnswers> = {}) {
   const onSubmit = vi.fn();
   render(
-    <StepQuestionnaire
-      initial={{ ...EMPTY_ANSWERS, ...initial }}
-      onSubmit={onSubmit}
-    />,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <StepQuestionnaire
+        initial={{ ...EMPTY_ANSWERS, ...initial }}
+        onSubmit={onSubmit}
+      />
+    </I18nProvider>,
   );
   return { onSubmit };
 }

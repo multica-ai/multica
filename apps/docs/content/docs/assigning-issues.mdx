@@ -32,9 +32,10 @@ The command-line equivalent:
 
 ```bash
 multica issue assign MUL-42 --to alice
+multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-`--to` takes a member username or an agent name. Giving agents memorable names makes this step smoother — if multiple agents share a name in the workspace, the first one listed wins, so rename before assigning.
+`--to` takes a member username or an agent name (fuzzy match). When names overlap — e.g. an agent `J` alongside `Cursor - J` — pass `--to-id <uuid>` instead, using the `user_id` (member) or `id` (agent) from `multica workspace members --output json` / `multica agent list --output json`. UUID matching is strict and unambiguous, which is what you want from scripts and from agents driving the CLI. `--to` and `--to-id` are mutually exclusive.
 
 Unassign:
 
