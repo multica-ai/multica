@@ -28,6 +28,13 @@ export interface ChatMessage {
   content: string;
   task_id: string | null;
   created_at: string;
+  /**
+   * RFC3339 timestamp set when an assistant turn has been written for this
+   * user message. `null` on a user row means "still waiting for the agent"
+   * — the queue/in-flight indicator hangs off this. Always null on
+   * assistant rows.
+   */
+  responded_at: string | null;
 }
 
 export interface SendChatMessageResponse {

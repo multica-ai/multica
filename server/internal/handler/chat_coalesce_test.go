@@ -323,6 +323,109 @@ func TestClaimTask_PopulatesBackwardsCompatChatMessage(t *testing.T) {
 	}
 }
 
+// TestGetPendingChatTask_PrefersRunningOverQueued is the regression guard
+// for JEH-654. When a chat task is mid-stream ('running') and the user
+// sends a follow-up that creates a 'queued' successor, the frontend's
+// pendingTaskId must keep pointing at the running task. Ordering by
+// created_at DESC alone returned the queued successor — flipping the
+// frontend's task subscription off the streaming task and hiding the
+// live timeline behind a blank state until the running task settled.
+//
+// We assert the priority order: running > dispatched > queued. Within a
+// status bucket the oldest row wins so coalesced queued tasks return
+// deterministically.
+func TestGetPendingChatTask_PrefersRunningOverQueued(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT a.id, a.runtime_id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id WHERE cs.id = $1`,
+		sessionID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("lookup agent/runtime: %v", err)
+	}
+
+	// Insert running task FIRST (older created_at), then a queued
+	// successor. Without the priority ORDER BY, the queued row would
+	// win on created_at DESC.
+	var runningID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'running', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&runningID); err != nil {
+		t.Fatalf("insert running task: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'queued', 0, $3)
+	`, agentID, runtimeID, sessionID); err != nil {
+		t.Fatalf("insert queued successor: %v", err)
+	}
+
+	pending, err := testHandler.Queries.GetPendingChatTask(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("GetPendingChatTask: %v", err)
+	}
+	if got := uuidToString(pending.ID); got != runningID {
+		t.Fatalf("expected running task %s to win, got %s (status=%s)",
+			runningID, got, pending.Status)
+	}
+	if pending.Status != "running" {
+		t.Fatalf("expected status=running, got %q", pending.Status)
+	}
+}
+
+// TestGetPendingChatTask_PrefersDispatchedOverQueued covers the in-between
+// state: the daemon has claimed the task but hasn't started streaming yet
+// (status='dispatched'). It should still win over a fresh queued
+// successor.
+func TestGetPendingChatTask_PrefersDispatchedOverQueued(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT a.id, a.runtime_id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id WHERE cs.id = $1`,
+		sessionID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("lookup agent/runtime: %v", err)
+	}
+
+	var dispatchedID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'dispatched', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&dispatchedID); err != nil {
+		t.Fatalf("insert dispatched task: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'queued', 0, $3)
+	`, agentID, runtimeID, sessionID); err != nil {
+		t.Fatalf("insert queued successor: %v", err)
+	}
+
+	pending, err := testHandler.Queries.GetPendingChatTask(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("GetPendingChatTask: %v", err)
+	}
+	if got := uuidToString(pending.ID); got != dispatchedID {
+		t.Fatalf("expected dispatched task %s to win, got %s (status=%s)",
+			dispatchedID, got, pending.Status)
+	}
+}
+
 func insertChatMessage(t *testing.T, sessionID, role, content string) {
 	t.Helper()
 	if _, err := testHandler.Queries.CreateChatMessage(context.Background(), db.CreateChatMessageParams{
