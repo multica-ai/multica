@@ -634,7 +634,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+            {onDone && issue.status !== "done" && issue.status !== "cancelled" && issue.status !== "archive" && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -839,7 +839,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
                     {childIssues.map((child) => {
                       const isDone =
-                        child.status === "done" || child.status === "cancelled";
+                        child.status === "done" || child.status === "cancelled" || child.status === "archive";
                       return (
                         <AppLink
                           key={child.id}

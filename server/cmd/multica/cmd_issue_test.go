@@ -725,6 +725,7 @@ func TestValidIssueStatuses(t *testing.T) {
 		"done":        true,
 		"blocked":     true,
 		"cancelled":   true,
+		"archive":     true,
 	}
 	for _, s := range validIssueStatuses {
 		if !expected[s] {

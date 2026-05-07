@@ -296,9 +296,9 @@ function MentionRow({
 }) {
   const { t } = useT("editor");
   if (item.type === "issue") {
-    // Visually dim closed issues (done/cancelled) so they're distinguishable
+    // Visually dim closed issues so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
-    const isClosed = item.status === "done" || item.status === "cancelled";
+    const isClosed = item.status === "done" || item.status === "cancelled" || item.status === "archive";
     return (
       <button
         ref={buttonRef}
@@ -426,7 +426,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     );
 
     // Cached issues give an instant first paint; MentionList adds server
-    // matches for done/cancelled and any other issues not in this cache.
+    // matches for closed and any other issues not in this cache.
     const issueItems: MentionItem[] = cachedIssues
       .filter(
         (i) =>

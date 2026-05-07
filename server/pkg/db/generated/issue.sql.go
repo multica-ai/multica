@@ -14,7 +14,7 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled', 'archive'))::bigint AS done
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
@@ -603,7 +603,7 @@ SELECT id, workspace_id, title, description, status, priority,
        parent_issue_id, position, due_date, created_at, updated_at, number, project_id
 FROM issue
 WHERE workspace_id = $1
-  AND status NOT IN ('done', 'cancelled')
+  AND status NOT IN ('done', 'cancelled', 'archive')
   AND ($2::text IS NULL OR priority = $2)
   AND ($3::uuid IS NULL OR assignee_id = $3)
   AND ($4::uuid[] IS NULL OR assignee_id = ANY($4::uuid[]))

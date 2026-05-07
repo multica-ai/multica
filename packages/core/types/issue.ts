@@ -7,7 +7,8 @@ export type IssueStatus =
   | "in_review"
   | "done"
   | "blocked"
-  | "cancelled";
+  | "cancelled"
+  | "archive";
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
