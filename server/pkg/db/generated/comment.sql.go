@@ -79,6 +79,23 @@ func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteCommentsByIssue = `-- name: DeleteCommentsByIssue :execrows
+DELETE FROM comment WHERE issue_id = $1 AND workspace_id = $2
+`
+
+type DeleteCommentsByIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteCommentsByIssue(ctx context.Context, arg DeleteCommentsByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCommentsByIssue, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getComment = `-- name: GetComment :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
 WHERE id = $1

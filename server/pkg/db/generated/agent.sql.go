@@ -395,6 +395,18 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 	return i, err
 }
 
+const deleteTasksByIssue = `-- name: DeleteTasksByIssue :execrows
+DELETE FROM agent_task_queue WHERE issue_id = $1
+`
+
+func (q *Queries) DeleteTasksByIssue(ctx context.Context, issueID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTasksByIssue, issueID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failAgentTask = `-- name: FailAgentTask :one
 UPDATE agent_task_queue
 SET status = 'failed',

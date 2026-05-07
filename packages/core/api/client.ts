@@ -512,6 +512,16 @@ export class ApiClient {
     });
   }
 
+  async clearIssueHistory(
+    issueId: string,
+    options: { clear_comments: boolean; clear_tasks: boolean },
+  ): Promise<{ comments_deleted: number; tasks_deleted: number }> {
+    return this.fetch(`/api/issues/${issueId}/clear-history`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
     return this.fetch(`/api/issues/${issueId}/comments`);

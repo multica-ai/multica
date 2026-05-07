@@ -216,6 +216,9 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: DeleteTasksByIssue :execrows
+DELETE FROM agent_task_queue WHERE issue_id = $1;
+
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1

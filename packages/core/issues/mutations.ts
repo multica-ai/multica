@@ -544,3 +544,28 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
   });
 }
+
+export function useClearIssueHistory() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      issueId,
+      clearComments,
+      clearTasks,
+    }: {
+      issueId: string;
+      clearComments: boolean;
+      clearTasks: boolean;
+    }) =>
+      api.clearIssueHistory(issueId, {
+        clear_comments: clearComments,
+        clear_tasks: clearTasks,
+      }),
+    onSuccess: (_data, { issueId }) => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.taskRuns(wsId, issueId) });
+    },
+  });
+}
