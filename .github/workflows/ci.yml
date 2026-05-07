@@ -30,7 +30,9 @@ jobs:
         run: pnpm install
 
       - name: Build, type check, lint, and test
-        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
+        # @multica/docs filter was removed: the docs package was deleted in
+        # an earlier upstream sync, and turbo errors on missing filter targets.
+        run: pnpm exec turbo build typecheck lint test
 
   backend:
     runs-on: ubuntu-latest

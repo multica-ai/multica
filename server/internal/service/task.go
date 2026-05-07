@@ -1757,6 +1757,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		ActorType:     pgtype.Text{String: "agent", Valid: true},
 		ActorID:       task.AgentID,
 		Details:       details,
+		Route:         "inbox",
 	})
 	if err != nil {
 		slog.Error("quick-create completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
@@ -1799,6 +1800,7 @@ func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.Agent
 		ActorType:     pgtype.Text{String: "agent", Valid: true},
 		ActorID:       task.AgentID,
 		Details:       details,
+		Route:         "inbox",
 	})
 	if err != nil {
 		slog.Error("quick-create failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
