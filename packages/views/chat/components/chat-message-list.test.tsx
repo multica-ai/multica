@@ -75,7 +75,13 @@ describe("ChatMessageList", () => {
     expect(screen.getByText(".../foo/bar.ts")).toBeInTheDocument();
   });
 
-  it("keeps non-final tool groups collapsed in completed assistant messages", () => {
+  it("keeps tool groups collapsed in completed assistant messages", () => {
+    // After upstream PR #2151, intermediate tool steps in a completed
+    // assistant message render inside a single OuterProcessFold that is
+    // collapsed by default (defaultOpen = isStreaming, and isStreaming is
+    // false for a persisted message). We assert the fold renders closed
+    // and that no tool names leak into the document until the user opens
+    // it manually.
     const qc = createTestQueryClient();
     qc.setQueryData(
       chatKeys.taskMessages(COMPLETED_TASK_ID),
@@ -103,10 +109,9 @@ describe("ChatMessageList", () => {
       qc,
     );
 
-    // Last group is open (current default), early group stays collapsed —
-    // EarlyTool is hidden, LateTool is visible.
+    // Outer fold is closed → neither early nor late tool visible.
     expect(screen.queryByText("EarlyTool")).not.toBeInTheDocument();
-    expect(screen.getByText("LateTool")).toBeInTheDocument();
+    expect(screen.queryByText("LateTool")).not.toBeInTheDocument();
   });
 });
 

@@ -46,6 +46,28 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
+  useSidebar: () => ({ isMobile: false, setOpenMobile: vi.fn() }),
+}));
+vi.mock("@multica/ui/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+// CEREBRO-PATCH(channels-flag-gate) — sidebar imports cerebro feature flags
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
+vi.mock("@multica/cerebro-notifications/core/queries", () => ({
+  notificationsListOptions: () => ({ queryKey: ["notifications"] }),
+}));
+vi.mock("@multica/cerebro-notifications/core/mutations", () => ({
+  useArchiveAllNotifications: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("../i18n", () => ({
+  useT: () => ({
+    t: (key: unknown) =>
+      typeof key === "function" ? "" : String(key ?? ""),
+  }),
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -88,11 +110,13 @@ vi.mock("@multica/core/paths", () => ({
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
+    documents: () => "/acme/documents",
     autopilots: () => "/acme/autopilots",
     agents: () => "/acme/agents",
     runtimes: () => "/acme/runtimes",
     skills: () => "/acme/skills",
     settings: () => "/acme/settings",
+    notifications: () => "/acme/notifications",
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
@@ -105,7 +129,13 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: 
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
-vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
+vi.mock("@multica/core/projects/queries", () => ({
+  projectDetailOptions: () => ({ queryKey: ["project"] }),
+  projectListOptions: () => ({ queryKey: ["projects"] }),
+}));
+vi.mock("@multica/core/projects/config", () => ({
+  getProjectColor: () => "blue",
+}));
 vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),

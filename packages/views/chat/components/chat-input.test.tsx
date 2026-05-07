@@ -52,7 +52,7 @@ vi.mock("../../editor", () => {
         defaultValue?: string;
         placeholder?: string;
       },
-      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void }>,
+      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void }>,
     ) => {
       useImperativeHandle(ref, () => ({
         getMarkdown: () => editorMarkdown.value,
@@ -60,6 +60,7 @@ vi.mock("../../editor", () => {
           editorMarkdown.value = "";
         },
         uploadFile: () => {},
+        blur: () => {},
       }));
       return (
         <div>

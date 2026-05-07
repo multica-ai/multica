@@ -31,8 +31,9 @@ const { SESSION_ID, RUNNING_TASK_ID, sendChatMessage } = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock("./chat-status-line", () => ({
+vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => <div data-testid="chat-status-line" />,
+  getToolSummary: () => null,
 }));
 
 vi.mock("./chat-message-list", () => ({
@@ -46,6 +47,24 @@ vi.mock("./chat-input", () => ({
       send
     </button>
   ),
+}));
+
+vi.mock("./context-anchor", () => ({
+  ContextAnchorButton: () => null,
+  ContextAnchorCard: () => null,
+  buildAnchorMarkdown: () => "",
+  useRouteAnchorCandidate: () => ({ candidate: null, isResolving: false }),
+}));
+
+vi.mock("./chat-session-history", () => ({
+  ChatSessionHistory: () => null,
+}));
+
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (key: unknown) =>
+      typeof key === "function" ? "" : String(key ?? ""),
+  }),
 }));
 
 vi.mock("./chat-resize-handles", () => ({
@@ -124,6 +143,10 @@ vi.mock("@multica/core/chat/queries", () => ({
     queryKey: ["pending-task", SESSION_ID],
     queryFn: async () => ({ task_id: RUNNING_TASK_ID, status: "running" }),
     staleTime: Infinity,
+  }),
+  pendingChatTasksOptions: () => ({
+    queryKey: ["pending-tasks"],
+    queryFn: async () => ({ tasks: [] }),
   }),
   chatKeys: {
     messages: (id: string) => ["messages", id],
