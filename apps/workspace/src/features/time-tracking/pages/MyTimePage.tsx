@@ -20,11 +20,20 @@ import { toast } from "sonner";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Groups time entries by calendar date (YYYY-MM-DD). */
+/** Returns "YYYY-MM-DD" in local time for the given ISO timestamp. */
+function localDateKey(isoString: string): string {
+  const d = new Date(isoString);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Groups time entries by local calendar date (YYYY-MM-DD). */
 function groupByDay(entries: TimeEntry[]): Map<string, TimeEntry[]> {
   const map = new Map<string, TimeEntry[]>();
   for (const entry of entries) {
-    const key = entry.start_time.slice(0, 10);
+    const key = localDateKey(entry.start_time);
     const bucket = map.get(key) ?? [];
     bucket.push(entry);
     map.set(key, bucket);
@@ -32,13 +41,17 @@ function groupByDay(entries: TimeEntry[]): Map<string, TimeEntry[]> {
   return map;
 }
 
-/** Formats a date string (YYYY-MM-DD) as "Today", "Yesterday", or "Jun 10". */
+/** Formats a local "YYYY-MM-DD" key as "Today", "Yesterday", or "Jun 10". */
 function formatDayLabel(dateStr: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const today = localDateKey(new Date().toISOString());
+  const yesterday = localDateKey(new Date(Date.now() - 86_400_000).toISOString());
   if (dateStr === today) return "Today";
   if (dateStr === yesterday) return "Yesterday";
-  return new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // Parse as local noon to avoid DST-edge midnight ambiguity.
+  return new Date(`${dateStr}T12:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 /** Sums all durations in a day bucket. */
