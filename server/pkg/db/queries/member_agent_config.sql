@@ -19,3 +19,11 @@ WHERE member_id = $1 AND workspace_id = $2;
 SELECT mac.* FROM member_agent_config mac
 JOIN member m ON mac.member_id = m.id
 WHERE m.user_id = $1 AND mac.workspace_id = $2;
+
+-- name: ListMemberAgentConfigs :many
+SELECT mac.*, m.user_id, u.name as user_name, u.avatar_url as user_avatar_url
+FROM member_agent_config mac
+JOIN member m ON mac.member_id = m.id
+JOIN "user" u ON m.user_id = u.id
+WHERE mac.workspace_id = $1
+ORDER BY mac.created_at ASC;

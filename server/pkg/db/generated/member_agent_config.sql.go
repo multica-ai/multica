@@ -76,6 +76,57 @@ func (q *Queries) GetMemberAgentConfigByOwner(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const listMemberAgentConfigs = `-- name: ListMemberAgentConfigs :many
+SELECT mac.id, mac.member_id, mac.workspace_id, mac.config, mac.created_at, mac.updated_at, m.user_id, u.name as user_name, u.avatar_url as user_avatar_url
+FROM member_agent_config mac
+JOIN member m ON mac.member_id = m.id
+JOIN "user" u ON m.user_id = u.id
+WHERE mac.workspace_id = $1
+ORDER BY mac.created_at ASC
+`
+
+type ListMemberAgentConfigsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Config        []byte             `json:"config"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	UserName      string             `json:"user_name"`
+	UserAvatarUrl pgtype.Text        `json:"user_avatar_url"`
+}
+
+func (q *Queries) ListMemberAgentConfigs(ctx context.Context, workspaceID pgtype.UUID) ([]ListMemberAgentConfigsRow, error) {
+	rows, err := q.db.Query(ctx, listMemberAgentConfigs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMemberAgentConfigsRow{}
+	for rows.Next() {
+		var i ListMemberAgentConfigsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MemberID,
+			&i.WorkspaceID,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserID,
+			&i.UserName,
+			&i.UserAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertMemberAgentConfig = `-- name: UpsertMemberAgentConfig :one
 INSERT INTO member_agent_config (member_id, workspace_id, config)
 VALUES ($1, $2, $3)
