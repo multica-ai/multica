@@ -4,9 +4,17 @@ import { issueKeys, PAGINATED_STATUSES } from "@multica/core/issues/queries";
 import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
 
+const authState = vi.hoisted(() => ({ userId: "u-current" }));
+
 // Mock the workspace id singleton — items() reads it imperatively.
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: {
+    getState: () => ({ user: { id: authState.userId } }),
+  },
 }));
 
 // Mock the API so we control searchIssues responses + observe calls.
@@ -23,7 +31,13 @@ import { createMentionSuggestion, type MentionItem } from "./mention-suggestion"
 
 function fakeQc(data: {
   members?: Array<{ user_id: string; name: string }>;
-  agents?: Array<{ id: string; name: string; archived_at: string | null }>;
+  agents?: Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+    visibility?: "workspace" | "private";
+    owner_id?: string | null;
+  }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
   mentionFrequency?: Array<{ actor_type: string; actor_id: string; frequency: number; last_mentioned_at: string }>;
 }): QueryClient {
@@ -48,6 +62,7 @@ function fakeQc(data: {
 describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
+    authState.userId = "u-current";
   });
 
   it("returns members and agents synchronously without waiting for the server search", () => {
@@ -66,6 +81,43 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "Alice")).toBe(true);
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
+  });
+
+  it("filters private agents owned by other users from mention suggestions", () => {
+    const qc = fakeQc({
+      agents: [
+        {
+          id: "own-private",
+          name: "Own Private",
+          archived_at: null,
+          visibility: "private",
+          owner_id: "u-current",
+        },
+        {
+          id: "other-workspace",
+          name: "Other Workspace",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: "u-other",
+        },
+        {
+          id: "other-private",
+          name: "Other Private",
+          archived_at: null,
+          visibility: "private",
+          owner_id: "u-other",
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const agentIds = result.filter((i) => i.type === "agent").map((i) => i.id);
+
+    expect(agentIds).toContain("own-private");
+    expect(agentIds).toContain("other-workspace");
+    expect(agentIds).not.toContain("other-private");
   });
 
   it("calls searchIssues with include_closed=true so done issues are findable", async () => {
