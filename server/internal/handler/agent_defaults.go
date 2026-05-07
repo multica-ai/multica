@@ -24,8 +24,13 @@ func (h *Handler) GetPersonalAgentDefaults(w http.ResponseWriter, r *http.Reques
 		WorkspaceID: parseUUID(workspaceID),
 	})
 	if err != nil {
-		// No record → return empty config
-		writeJSON(w, http.StatusOK, map[string]any{"config": map[string]any{}})
+		if isNotFound(err) {
+			writeJSON(w, http.StatusOK, map[string]any{"config": map[string]any{}})
+			return
+		}
+		slog.Warn("get member agent config failed",
+			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent defaults")
 		return
 	}
 
