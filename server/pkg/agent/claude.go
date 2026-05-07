@@ -419,7 +419,7 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"-p":                blockedStandalone, // non-interactive mode
 	"--output-format":   blockedWithValue,  // stream-json protocol
 	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // dontAsk for autonomous operation under managed policies
+	"--permission-mode": blockedWithValue,  // acceptEdits + handleControlRequest auto-allow under managed policies
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
@@ -430,7 +430,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "dontAsk",
+		"--permission-mode", "acceptEdits",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
