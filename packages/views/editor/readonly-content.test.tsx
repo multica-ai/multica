@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -50,10 +50,24 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 });
 
 import mermaid from "mermaid";
+import { configStore } from "@multica/core/config";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enEditor from "../locales/en/editor.json";
 import { ReadonlyContent } from "./readonly-content";
+
+const TEST_RESOURCES = { en: { common: enCommon, editor: enEditor } };
+const previewAttachmentMarkdown = vi.hoisted(() => vi.fn());
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    previewAttachmentMarkdown,
+  },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.getState().setCdnDomain("cdn.example.com");
 });
 
 afterEach(() => {
@@ -110,6 +124,55 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent file cards", () => {
+  it("previews markdown file cards before the download action", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Preview title\n\nGenerated markdown body");
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[permission-config-design.md](https://cdn.example.com/permission-config-design.md)" />
+      </I18nProvider>,
+    );
+
+    const previewButton = screen.getByRole("button", {
+      name: "Preview permission-config-design.md",
+    });
+    const downloadButton = screen.getByRole("button", {
+      name: "Download permission-config-design.md",
+    });
+    expect(previewButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(previewButton);
+
+    await waitFor(() =>
+      expect(previewAttachmentMarkdown).toHaveBeenCalledWith("https://cdn.example.com/permission-config-design.md"),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Generated markdown body");
+    expect(screen.getByTestId("markdown-preview-scroll")).toHaveClass("overflow-y-auto");
+  });
+
+  it("previews relative markdown file cards", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Local Preview");
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[local-preview.md](/uploads/workspaces/ws-1/local-preview.md)" />
+      </I18nProvider>,
+    );
+
+    const previewButton = screen.getByRole("button", {
+      name: "Preview local-preview.md",
+    });
+    fireEvent.click(previewButton);
+
+    await waitFor(() =>
+      expect(previewAttachmentMarkdown).toHaveBeenCalledWith("/uploads/workspaces/ws-1/local-preview.md"),
+    );
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Local Preview");
   });
 });
 

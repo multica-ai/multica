@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -27,7 +28,16 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-const maxUploadSize = 100 << 20 // 100 MB
+const maxUploadSize = 100 << 20        // 100 MB
+const maxMarkdownPreviewSize = 1 << 20 // 1 MB
+
+var fetchMarkdownPreview = func(ctx context.Context, rawURL string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -314,6 +324,128 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+}
+
+// PreviewAttachmentMarkdown — GET /api/attachments/preview?url=...
+func (h *Handler) PreviewAttachmentMarkdown(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	previewURL := r.URL.Query().Get("url")
+	if previewURL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	parsedPreviewURL, err := url.Parse(previewURL)
+	if err != nil || !isFetchablePreviewURL(parsedPreviewURL) {
+		writeError(w, http.StatusBadRequest, "invalid url")
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	att, err := h.Queries.GetAttachmentByURL(r.Context(), db.GetAttachmentByURLParams{
+		WorkspaceID: wsUUID,
+		Url:         previewURL,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	if !isMarkdownAttachment(att.Filename, att.ContentType) {
+		writeError(w, http.StatusBadRequest, "attachment is not markdown")
+		return
+	}
+
+	fetchURL := previewURL
+	if h.CFSigner != nil && parsedPreviewURL.IsAbs() {
+		fetchURL = h.CFSigner.SignedURL(att.Url, time.Now().Add(30*time.Minute))
+	} else if !parsedPreviewURL.IsAbs() {
+		fetchURL, ok = absolutePreviewURL(r, parsedPreviewURL)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid url")
+			return
+		}
+	}
+	resp, err := fetchMarkdownPreview(r.Context(), fetchURL)
+	if err != nil {
+		slog.Error("failed to fetch markdown attachment preview", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch attachment preview")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeError(w, http.StatusBadGateway, "failed to fetch attachment preview")
+		return
+	}
+	if resp.ContentLength > maxMarkdownPreviewSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "attachment preview too large")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMarkdownPreviewSize+1))
+	if err != nil {
+		slog.Error("failed to read markdown attachment preview", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch attachment preview")
+		return
+	}
+	if int64(len(body)) > maxMarkdownPreviewSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "attachment preview too large")
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	if _, err := w.Write(body); err != nil {
+		slog.Error("failed to write markdown attachment preview", "error", err)
+	}
+}
+
+func isFetchablePreviewURL(parsed *url.URL) bool {
+	return (parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")) ||
+		(parsed.Scheme == "" && parsed.Host == "" && strings.HasPrefix(parsed.Path, "/"))
+}
+
+func absolutePreviewURL(r *http.Request, parsed *url.URL) (string, bool) {
+	if !isFetchablePreviewURL(parsed) || parsed.IsAbs() {
+		return "", false
+	}
+	host := r.Host
+	if host == "" {
+		return "", false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if r.URL.Scheme == "http" || r.URL.Scheme == "https" {
+		scheme = r.URL.Scheme
+	}
+	if proto := strings.ToLower(r.Header.Get("X-Forwarded-Proto")); proto == "http" || proto == "https" {
+		scheme = proto
+	}
+	if scheme == "" {
+		scheme = "http"
+	}
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	absolute := *parsed
+	absolute.Scheme = scheme
+	absolute.Host = host
+	return absolute.String(), true
+}
+
+func isMarkdownAttachment(filename, contentType string) bool {
+	normalizedType := strings.ToLower(contentType)
+	normalizedName := strings.ToLower(filename)
+	return normalizedType == "text/markdown" ||
+		normalizedType == "text/x-markdown" ||
+		strings.HasSuffix(normalizedName, ".md") ||
+		strings.HasSuffix(normalizedName, ".markdown")
 }
 
 // ---------------------------------------------------------------------------

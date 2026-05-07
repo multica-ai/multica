@@ -399,6 +399,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Attachments
+			r.Get("/api/attachments/preview", h.PreviewAttachmentMarkdown)
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 

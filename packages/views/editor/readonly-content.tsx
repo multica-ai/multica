@@ -33,11 +33,13 @@ import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { isMarkdownFilename, MarkdownFilePreviewButton } from "./markdown-file-preview";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
@@ -433,6 +435,44 @@ function MermaidDiagram({ chart }: { chart: string }) {
   );
 }
 
+function ReadonlyFileCard({
+  href,
+  filename,
+}: {
+  href: string;
+  filename: string;
+}) {
+  const { t } = useT("editor");
+  const canPreview = Boolean(href) && isMarkdownFilename(filename);
+
+  return (
+    <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+      <FileText className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">{filename}</p>
+      </div>
+      {canPreview && (
+        <MarkdownFilePreviewButton
+          href={href}
+          filename={filename}
+          renderContent={(content) => <ReadonlyContent content={content} />}
+        />
+      )}
+      {href && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          aria-label={t(($) => $.file_card.download, { filename })}
+          title={t(($) => $.file_card.download, { filename })}
+          onClick={() => window.open(href, "_blank", "noopener,noreferrer")}
+        >
+          <Download className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
@@ -489,26 +529,9 @@ const components: Partial<Components> = {
     const dataType = node?.properties?.dataType as string | undefined;
     if (dataType === "fileCard") {
       const rawHref = (node?.properties?.dataHref as string) || "";
-      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-      const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+      const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
       const filename = (node?.properties?.dataFilename as string) || "";
-      return (
-        <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{filename}</p>
-          </div>
-          {href && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(href, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
-        </div>
-      );
+      return <ReadonlyFileCard href={href} filename={filename} />;
     }
     return <div {...props}>{children}</div>;
   },

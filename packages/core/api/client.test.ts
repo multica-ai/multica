@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { ApiClient, ApiError } from "./client";
 
 afterEach(() => {
+  setCurrentWorkspace(null, null);
   vi.unstubAllGlobals();
 });
 
@@ -125,6 +127,37 @@ describe("ApiClient", () => {
     expect(headers["X-Client-Platform"]).toBe("desktop");
     expect(headers["X-Client-Version"]).toBe("1.2.3");
     expect(headers["X-Client-OS"]).toBe("macos");
+  });
+
+  it("fetches markdown previews through the configured API base URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("# Preview", {
+        status: 200,
+        headers: { "Content-Type": "text/markdown" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      identity: { platform: "desktop", version: "1.2.3", os: "macos" },
+    });
+    client.setToken("token-1");
+    setCurrentWorkspace("acme", "ws_1");
+
+    await expect(client.previewAttachmentMarkdown("https://cdn.example.com/result.md?download=1")).resolves.toBe("# Preview");
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "https://api.example.test/api/attachments/preview?url=https%3A%2F%2Fcdn.example.com%2Fresult.md%3Fdownload%3D1",
+    );
+    expect(init?.credentials).toBe("include");
+    expect(init?.headers).toMatchObject({
+      Authorization: "Bearer token-1",
+      "X-Client-Platform": "desktop",
+      "X-Client-Version": "1.2.3",
+      "X-Client-OS": "macos",
+      "X-Workspace-Slug": "acme",
+    });
   });
 
   it("omits X-Client-* headers when identity is not configured", async () => {

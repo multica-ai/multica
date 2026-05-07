@@ -171,6 +171,7 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "edit_action": "Edit",
+    "download_attachment": "Download {{filename}}",
     "update_failed": "Failed to update comment",
     "send_failed": "Failed to send comment",
     "send_reply_failed": "Failed to send reply",

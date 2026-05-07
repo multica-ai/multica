@@ -19,6 +19,8 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FileText, Loader2, Download } from "lucide-react";
 import { useT } from "../../i18n";
+import { isMarkdownFilename, MarkdownFilePreviewButton } from "../markdown-file-preview";
+import { ReadonlyContent } from "../readonly-content";
 
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,7 @@ function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const canPreview = !uploading && Boolean(href) && isMarkdownFilename(filename);
 
   const openFile = () => {
     window.open(href, "_blank", "noopener,noreferrer");
@@ -54,10 +57,23 @@ function FileCardView({ node }: NodeViewProps) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm">{uploading ? t(($) => $.file_card.uploading, { filename }) : filename}</p>
         </div>
+        {canPreview && (
+          <MarkdownFilePreviewButton
+            href={href}
+            filename={filename}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            renderContent={(content) => <ReadonlyContent content={content} />}
+          />
+        )}
         {!uploading && href && (
           <button
             type="button"
             className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            aria-label={t(($) => $.file_card.download, { filename })}
+            title={t(($) => $.file_card.download, { filename })}
             onMouseDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -160,3 +176,5 @@ export const FileCardExtension = Node.create({
     return ReactNodeViewRenderer(FileCardView);
   },
 });
+
+export { FileCardView };

@@ -103,6 +103,35 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 	return i, err
 }
 
+const getAttachmentByURL = `-- name: GetAttachmentByURL :one
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
+WHERE workspace_id = $1 AND (url = $2 OR $2 LIKE url || '?%')
+`
+
+type GetAttachmentByURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Url         string      `json:"url"`
+}
+
+func (q *Queries) GetAttachmentByURL(ctx context.Context, arg GetAttachmentByURLParams) (Attachment, error) {
+	row := q.db.QueryRow(ctx, getAttachmentByURL, arg.WorkspaceID, arg.Url)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.UploaderType,
+		&i.UploaderID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
 UPDATE attachment
 SET comment_id = $1

@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -17,10 +20,10 @@ func (m *mockStorage) Upload(_ context.Context, key string, _ []byte, _ string, 
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
 }
 
-func (m *mockStorage) Delete(_ context.Context, _ string)        {}
-func (m *mockStorage) DeleteKeys(_ context.Context, _ []string)  {}
-func (m *mockStorage) KeyFromURL(rawURL string) string            { return rawURL }
-func (m *mockStorage) CdnDomain() string                         { return "cdn.example.com" }
+func (m *mockStorage) Delete(_ context.Context, _ string)       {}
+func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) KeyFromURL(rawURL string) string          { return rawURL }
+func (m *mockStorage) CdnDomain() string                        { return "cdn.example.com" }
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
@@ -158,5 +161,216 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 		"uuid-upload.txt",
 	); err != nil {
 		t.Fatalf("cleanup attachment: %v", err)
+	}
+}
+
+func TestPreviewAttachmentMarkdownUsesStoredAttachmentURL(t *testing.T) {
+	attachmentURL := "https://cdn.example.com/workspaces/" + testWorkspaceID + "/preview.md"
+	if _, err := testPool.Exec(
+		context.Background(),
+		`INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'preview.md', $3, 'text/markdown', 14)`,
+		testWorkspaceID,
+		testUserID,
+		attachmentURL,
+	); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	defer func() {
+		if _, err := testPool.Exec(
+			context.Background(),
+			`DELETE FROM attachment WHERE workspace_id = $1 AND url = $2`,
+			testWorkspaceID,
+			attachmentURL,
+		); err != nil {
+			t.Fatalf("cleanup attachment: %v", err)
+		}
+	}()
+
+	origFetch := fetchMarkdownPreview
+	fetchMarkdownPreview = func(_ context.Context, rawURL string) (*http.Response, error) {
+		if rawURL != attachmentURL+"?download=1" {
+			t.Fatalf("preview fetch URL = %q, want signed download URL", rawURL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString("# Preview\n")),
+		}, nil
+	}
+	defer func() { fetchMarkdownPreview = origFetch }()
+
+	req := httptest.NewRequest("GET", "/api/attachments/preview?url="+attachmentURL+"?download=1", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.PreviewAttachmentMarkdown(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PreviewAttachmentMarkdown: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != "# Preview\n" {
+		t.Fatalf("preview body = %q", got)
+	}
+}
+
+func TestPreviewAttachmentMarkdownRejectsUnknownURL(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/attachments/preview?url=https://cdn.example.com/missing.md", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.PreviewAttachmentMarkdown(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("PreviewAttachmentMarkdown unknown URL: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPreviewAttachmentMarkdownSupportsRelativeAttachmentURL(t *testing.T) {
+	attachmentURL := "/uploads/workspaces/" + testWorkspaceID + "/preview.md"
+	if _, err := testPool.Exec(
+		context.Background(),
+		`INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'relative-preview.md', $3, 'text/markdown', 14)`,
+		testWorkspaceID,
+		testUserID,
+		attachmentURL,
+	); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	defer func() {
+		if _, err := testPool.Exec(
+			context.Background(),
+			`DELETE FROM attachment WHERE workspace_id = $1 AND url = $2`,
+			testWorkspaceID,
+			attachmentURL,
+		); err != nil {
+			t.Fatalf("cleanup attachment: %v", err)
+		}
+	}()
+
+	origFetch := fetchMarkdownPreview
+	fetchMarkdownPreview = func(_ context.Context, rawURL string) (*http.Response, error) {
+		wantURL := "https://preview.example.com" + attachmentURL
+		if rawURL != wantURL {
+			t.Fatalf("preview fetch URL = %q, want %q", rawURL, wantURL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString("# Local Preview\n")),
+		}, nil
+	}
+	defer func() { fetchMarkdownPreview = origFetch }()
+
+	req := httptest.NewRequest("GET", "/api/attachments/preview?url="+url.QueryEscape(attachmentURL), nil)
+	req.Host = "preview.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.PreviewAttachmentMarkdown(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PreviewAttachmentMarkdown relative URL: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != "# Local Preview\n" {
+		t.Fatalf("preview body = %q", got)
+	}
+}
+
+func TestPreviewAttachmentMarkdownIgnoresForwardedHostForRelativeAttachmentURL(t *testing.T) {
+	attachmentURL := "/uploads/workspaces/" + testWorkspaceID + "/forwarded-host.md"
+	if _, err := testPool.Exec(
+		context.Background(),
+		`INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'forwarded-host.md', $3, 'text/markdown', 14)`,
+		testWorkspaceID,
+		testUserID,
+		attachmentURL,
+	); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	defer func() {
+		if _, err := testPool.Exec(
+			context.Background(),
+			`DELETE FROM attachment WHERE workspace_id = $1 AND url = $2`,
+			testWorkspaceID,
+			attachmentURL,
+		); err != nil {
+			t.Fatalf("cleanup attachment: %v", err)
+		}
+	}()
+
+	origFetch := fetchMarkdownPreview
+	fetchMarkdownPreview = func(_ context.Context, rawURL string) (*http.Response, error) {
+		wantURL := "https://api.example.com" + attachmentURL
+		if rawURL != wantURL {
+			t.Fatalf("preview fetch URL = %q, want %q", rawURL, wantURL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString("# Local Preview\n")),
+		}, nil
+	}
+	defer func() { fetchMarkdownPreview = origFetch }()
+
+	req := httptest.NewRequest("GET", "/api/attachments/preview?url="+url.QueryEscape(attachmentURL), nil)
+	req.Host = "api.example.com"
+	req.Header.Set("X-Forwarded-Host", "attacker.example.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.PreviewAttachmentMarkdown(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PreviewAttachmentMarkdown forwarded host: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPreviewAttachmentMarkdownRejectsOversizedPreview(t *testing.T) {
+	attachmentURL := "https://cdn.example.com/workspaces/" + testWorkspaceID + "/oversized.md"
+	if _, err := testPool.Exec(
+		context.Background(),
+		`INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'oversized.md', $3, 'text/markdown', $4)`,
+		testWorkspaceID,
+		testUserID,
+		attachmentURL,
+		maxMarkdownPreviewSize+1,
+	); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	defer func() {
+		if _, err := testPool.Exec(
+			context.Background(),
+			`DELETE FROM attachment WHERE workspace_id = $1 AND url = $2`,
+			testWorkspaceID,
+			attachmentURL,
+		); err != nil {
+			t.Fatalf("cleanup attachment: %v", err)
+		}
+	}()
+
+	origFetch := fetchMarkdownPreview
+	fetchMarkdownPreview = func(_ context.Context, _ string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: -1,
+			Body:          io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("a"), maxMarkdownPreviewSize+1))),
+		}, nil
+	}
+	defer func() { fetchMarkdownPreview = origFetch }()
+
+	req := httptest.NewRequest("GET", "/api/attachments/preview?url="+attachmentURL, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.PreviewAttachmentMarkdown(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("PreviewAttachmentMarkdown oversized body: expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), strings.Repeat("a", 100)) {
+		t.Fatalf("expected error response, got preview body")
 	}
 }

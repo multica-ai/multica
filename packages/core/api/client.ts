@@ -298,6 +298,37 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
+  private async fetchText(path: string, init?: RequestInit): Promise<string> {
+    const rid = createRequestId();
+    const start = Date.now();
+    const method = init?.method ?? "GET";
+
+    const headers: Record<string, string> = {
+      "X-Request-ID": rid,
+      ...this.authHeaders(),
+      ...((init?.headers as Record<string, string>) ?? {}),
+    };
+
+    this.logger.info(`→ ${method} ${path}`, { rid });
+
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
+      const logLevel = res.status === 404 ? "warn" : "error";
+      this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new ApiError(message, res.status, res.statusText, body);
+    }
+
+    this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    return res.text();
+  }
+
   // Auth
   async sendCode(email: string): Promise<void> {
     await this.fetch("/auth/send-code", {
@@ -1085,6 +1116,11 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  async previewAttachmentMarkdown(url: string): Promise<string> {
+    const search = new URLSearchParams({ url });
+    return this.fetchText(`/api/attachments/preview?${search.toString()}`);
   }
 
   // Projects

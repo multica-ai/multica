@@ -17,6 +17,10 @@ ORDER BY created_at ASC;
 SELECT * FROM attachment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetAttachmentByURL :one
+SELECT * FROM attachment
+WHERE workspace_id = $1 AND (url = $2 OR $2 LIKE url || '?%');
+
 -- name: ListAttachmentsByCommentIDs :many
 SELECT * FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2

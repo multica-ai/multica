@@ -16,7 +16,7 @@
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
-const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/
+const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\(([^)]+)\)$/
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
 const FILE_LINK_LINE = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/
@@ -27,6 +27,10 @@ function escapeAttr(s: string): string {
 
 function toFileCardHtml(filename: string, url: string): string {
   return `<div data-type="fileCard" data-href="${escapeAttr(url)}" data-filename="${escapeAttr(filename)}"></div>`
+}
+
+export function isAllowedFileCardHref(url: string): boolean {
+  return /^https?:\/\//i.test(url) || url.startsWith('/uploads/')
 }
 
 /**
@@ -74,6 +78,7 @@ export function preprocessFileCards(markdown: string, cdnDomain: string): string
       // New syntax: !file[name](url) — always a file card, no hostname check needed.
       const newMatch = trimmed.match(NEW_FILE_CARD_RE)
       if (newMatch) {
+        if (!isAllowedFileCardHref(newMatch[2]!)) return line
         return toFileCardHtml(newMatch[1]!, newMatch[2]!)
       }
 
