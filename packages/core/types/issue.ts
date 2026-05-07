@@ -1,4 +1,5 @@
 import type { Label } from "./label";
+import type { Attachment } from "./attachment";
 
 export type IssueStatus =
   | "backlog"
@@ -57,6 +58,7 @@ export interface Issue {
   position: number;
   due_date: string | null;
   reactions?: IssueReaction[];
+  attachments?: Attachment[];
   labels?: Label[];
   time_tracking?: IssueTimerSummary;
   created_at: string;

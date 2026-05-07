@@ -183,6 +183,7 @@ const mockApiObj = vi.hoisted(() => ({
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   listTaskMessages: vi.fn().mockResolvedValue([]),
+  listAttachments: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
@@ -381,6 +382,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -456,6 +458,62 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Created by")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     expect(screen.getByText("Updated")).toBeInTheDocument();
+  });
+
+  it("renders issue files in the sidebar with uploader attribution", async () => {
+    mockApiObj.listAttachments.mockResolvedValue([
+      {
+        id: "att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "requirements.pdf",
+        url: "https://example.com/requirements.pdf",
+        download_url: "https://example.com/requirements.pdf?download=1",
+        content_type: "application/pdf",
+        size_bytes: 2048,
+        created_at: "2026-01-18T00:00:00Z",
+      },
+      {
+        id: "att-2",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: "comment-2",
+        uploader_type: "agent",
+        uploader_id: "agent-1",
+        filename: "demo-video.mp4",
+        url: "https://example.com/demo-video.mp4",
+        download_url: "https://example.com/demo-video.mp4?download=1",
+        content_type: "video/mp4",
+        size_bytes: 4_194_304,
+        created_at: "2026-01-19T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Files")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("requirements.pdf")).toBeInTheDocument();
+    expect(screen.getByText("demo-video.mp4")).toBeInTheDocument();
+    expect(screen.getAllByText("Test User").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Claude Agent").length).toBeGreaterThan(0);
+  });
+
+  it("hides the files section when an issue has no attachments", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Files")).not.toBeInTheDocument();
+    });
   });
 
   it("shows 'not found' message when issue does not exist", async () => {

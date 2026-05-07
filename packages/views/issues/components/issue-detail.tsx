@@ -46,6 +46,7 @@ import { CommentInput } from "./comment-input";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { IssueTimerSection } from "./issue-timer-section";
+import { IssueFilesSection } from "./issue-files-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -465,6 +466,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
         </div>}
       </div>
+
+      <IssueFilesSection issueId={id} />
 
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself

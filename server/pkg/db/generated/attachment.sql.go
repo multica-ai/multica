@@ -279,8 +279,15 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 }
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at FROM attachment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT a.id, a.workspace_id, a.issue_id, a.comment_id, a.uploader_type, a.uploader_id, a.filename, a.url, a.content_type, a.size_bytes, a.created_at FROM attachment a
+WHERE a.workspace_id = $2
+  AND (
+    a.issue_id = $1
+    OR a.comment_id IN (
+      SELECT c.id FROM comment c
+      WHERE c.issue_id = $1 AND c.workspace_id = $2
+    )
+  )
 ORDER BY created_at ASC
 `
 

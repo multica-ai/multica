@@ -4,8 +4,15 @@ VALUES ($1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), $3, $4, $5, $6, $7, 
 RETURNING *;
 
 -- name: ListAttachmentsByIssue :many
-SELECT * FROM attachment
-WHERE issue_id = $1 AND workspace_id = $2
+SELECT a.* FROM attachment a
+WHERE a.workspace_id = $2
+  AND (
+    a.issue_id = $1
+    OR a.comment_id IN (
+      SELECT c.id FROM comment c
+      WHERE c.issue_id = $1 AND c.workspace_id = $2
+    )
+  )
 ORDER BY created_at ASC;
 
 -- name: ListAttachmentsByComment :many

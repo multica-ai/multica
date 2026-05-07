@@ -332,20 +332,24 @@ export function useRealtimeSync(
     const invalidateTimeline = (issueId: string) => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     };
+    const invalidateTimelineAndAttachments = (issueId: string) => {
+      invalidateTimeline(issueId);
+      qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
+    };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) invalidateTimelineAndAttachments(comment.issue_id);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) invalidateTimelineAndAttachments(comment.issue_id);
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) invalidateTimelineAndAttachments(issue_id);
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {

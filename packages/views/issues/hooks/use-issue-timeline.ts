@@ -54,6 +54,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   useWSReconnect(
     useCallback(() => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     }, [qc, issueId]),
   );
 
@@ -75,6 +76,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
             );
           },
         );
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
       },
       [qc, issueId],
     ),
@@ -93,6 +95,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
                 e.id === comment.id ? commentToTimelineEntry(comment) : e,
               ),
           );
+          qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
         }
       },
       [qc, issueId],
@@ -127,6 +130,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
               return old.filter((e) => !idsToRemove.has(e.id));
             },
           );
+          qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
         }
       },
       [qc, issueId],
@@ -220,10 +224,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       } catch {
         toast.error("Failed to send comment");
       } finally {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
         setSubmitting(false);
       }
     },
-    [userId, submitting, createCommentMutation],
+    [userId, submitting, createCommentMutation, qc, issueId],
   );
 
   const submitReply = useCallback(
@@ -238,9 +243,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         });
       } catch {
         toast.error("Failed to send reply");
+      } finally {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
       }
     },
-    [userId, createCommentMutation],
+    [userId, createCommentMutation, qc, issueId],
   );
 
   const editComment = useCallback(
@@ -249,9 +256,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         await updateCommentMutation.mutateAsync({ commentId, content });
       } catch {
         toast.error("Failed to update comment");
+      } finally {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
       }
     },
-    [updateCommentMutation],
+    [updateCommentMutation, qc, issueId],
   );
 
   const deleteComment = useCallback(
@@ -260,9 +269,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         await deleteCommentMutation.mutateAsync(commentId);
       } catch {
         toast.error("Failed to delete comment");
+      } finally {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
       }
     },
-    [deleteCommentMutation],
+    [deleteCommentMutation, qc, issueId],
   );
 
   // --- Optimistic UI derivation for comment reactions ---
