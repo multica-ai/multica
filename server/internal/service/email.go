@@ -119,7 +119,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	// Probe 8BITMIME after (possible) STARTTLS so the extension list is current.
 	// Use quoted-printable for relays that don't advertise 8BITMIME — safer for
 	// non-ASCII workspace/inviter names crossing strict or older SMTP hops.
-	_, has8Bit := c.Extension("8BITMIME")
+	has8Bit, _ := c.Extension("8BITMIME")
 	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
 	msgID := fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), s.smtpHost)
 
