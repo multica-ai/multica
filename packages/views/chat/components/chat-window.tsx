@@ -35,7 +35,7 @@ import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatSession } from "@multica/core/types";
+import type { Agent, ChatMessage, ChatPendingTask, ChatSession } from "@multica/core/types";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -181,7 +181,9 @@ export function ChatWindow() {
         setActiveSession(sessionId);
       }
 
-      // Optimistic: show user message immediately.
+      // Optimistic: show user message immediately. responded_at:null marks
+      // it as awaiting the agent so MessageBubble shows the queued/streaming
+      // indicator until the server returns the real row with a timestamp.
       const optimistic: ChatMessage = {
         id: `optimistic-${Date.now()}`,
         chat_session_id: sessionId,
@@ -189,6 +191,7 @@ export function ChatWindow() {
         content,
         task_id: null,
         created_at: new Date().toISOString(),
+        responded_at: null,
       };
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
@@ -203,11 +206,18 @@ export function ChatWindow() {
         taskId: result.task_id,
       });
       // Seed pending-task optimistically so the spinner shows instantly —
-      // the WS chat:message handler will invalidate + refetch to confirm.
-      qc.setQueryData(chatKeys.pendingTask(sessionId), {
-        task_id: result.task_id,
-        status: "queued",
-      });
+      // but only when there's nothing in flight. If we overwrite an already
+      // running task with the freshly-queued successor, ChatMessageList's
+      // pendingTaskId flips mid-stream and the live timeline disappears.
+      // Once the running task finishes, the WS chat:done handler invalidates
+      // pending-task and the refetch surfaces the next queued task.
+      qc.setQueryData<ChatPendingTask | undefined>(
+        chatKeys.pendingTask(sessionId),
+        (existing) =>
+          existing?.task_id
+            ? existing
+            : { task_id: result.task_id, status: "queued" },
+      );
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
     },
     [

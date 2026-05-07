@@ -528,7 +528,12 @@ type ChatMessageResponse struct {
 	Content       string               `json:"content"`
 	TaskID        *string              `json:"task_id"`
 	CreatedAt     string               `json:"created_at"`
-	Attachments   []AttachmentResponse `json:"attachments"`
+	// RespondedAt is set when an assistant turn has been written for this
+	// user message. NULL on a user message means "still waiting for the
+	// agent" — drives the queued/in-flight indicator on user bubbles.
+	// Always null on assistant rows.
+	RespondedAt *string              `json:"responded_at"`
+	Attachments []AttachmentResponse `json:"attachments"`
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -555,6 +560,7 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		Content:       m.Content,
 		TaskID:        uuidToPtr(m.TaskID),
 		CreatedAt:     timestampToString(m.CreatedAt),
+		RespondedAt:   timestampToPtr(m.RespondedAt),
 		Attachments:   attachments,
 	}
 }

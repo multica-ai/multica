@@ -135,11 +135,23 @@ ORDER BY completed_at DESC
 LIMIT 1;
 
 -- name: GetPendingChatTask :one
--- Returns the most recent in-flight task for a chat session, if any.
--- Used by the frontend to recover pending state after refresh / reopen.
+-- Returns the in-flight task the UI should follow for this chat session.
+-- Prefer the task that is actually mid-stream over a freshly-queued
+-- successor: when the user sends msg2 while msg1's task is still 'running',
+-- we want the frontend to keep watching task1's stream. Ordering by
+-- created_at alone (newest first) made the queued successor win the moment
+-- it was created — which flipped pendingTaskId mid-stream and hid the live
+-- timeline. Within a single status bucket we still pick the oldest so
+-- coalesced queued tasks return deterministically.
 SELECT id, status FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
-ORDER BY created_at DESC
+ORDER BY
+  CASE status
+    WHEN 'running' THEN 0
+    WHEN 'dispatched' THEN 1
+    WHEN 'queued' THEN 2
+  END,
+  created_at ASC
 LIMIT 1;
 
 -- name: ListPendingChatTasksByCreator :many

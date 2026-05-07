@@ -408,10 +408,11 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // Assistant message was just written and task flipped out of 'running'.
-      // Clear pending-task cache immediately so the live-timeline-vs-assistant
-      // race window collapses to zero — the subsequent refetch will confirm.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // Don't clear pending-task to {} here — invalidate + let the refetch
+      // decide. If a queued successor exists for this session, the next
+      // GetPendingChatTask returns it; clearing first creates a flicker
+      // window where the UI thinks nothing is pending and tears down its
+      // spinner / "waiting" markers, only to re-paint them on refetch.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -441,7 +442,8 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // See chat:done — invalidate, don't pre-clear. A queued successor
+      // would otherwise be hidden during the refetch round-trip.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -457,8 +459,9 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // No new message; just flip the pending signal.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      // Invalidate only — refetch decides whether a queued successor
+      // takes over. Pre-clearing would race the refetch and flicker the
+      // spinner off then on again.
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });

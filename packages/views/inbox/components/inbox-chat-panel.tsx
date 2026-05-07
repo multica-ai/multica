@@ -18,7 +18,7 @@ import { canAssignAgent } from "../../issues/components";
 import { ChatMessageList, ChatMessageSkeleton } from "../../chat/components/chat-message-list";
 import { ChatStatusLine } from "../../chat/components/chat-status-line";
 import { ChatInput } from "../../chat/components/chat-input";
-import type { Agent, ChatMessage } from "@multica/core/types";
+import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import {
@@ -109,7 +109,8 @@ export function InboxChatPanel({
         onSessionCreated?.(sid);
       }
 
-      // Optimistic user message
+      // Optimistic user message. responded_at:null marks it as awaiting
+      // the agent so the inbox bubble shows the queued indicator.
       const optimistic: ChatMessage = {
         id: `optimistic-${Date.now()}`,
         chat_session_id: sid,
@@ -117,6 +118,7 @@ export function InboxChatPanel({
         content,
         task_id: null,
         created_at: new Date().toISOString(),
+        responded_at: null,
       };
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sid),
@@ -124,10 +126,15 @@ export function InboxChatPanel({
       );
 
       const result = await api.sendChatMessage(sid, content);
-      qc.setQueryData(chatKeys.pendingTask(sid), {
-        task_id: result.task_id,
-        status: "queued",
-      });
+      // Don't overwrite a pending-task already in flight (running > queued).
+      // ChatMessageList relies on this to keep streaming the prior task.
+      qc.setQueryData<ChatPendingTask | undefined>(
+        chatKeys.pendingTask(sid),
+        (existing) =>
+          existing?.task_id
+            ? existing
+            : { task_id: result.task_id, status: "queued" },
+      );
       qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
     },
     [sessionId, activeAgent, createSession, onSessionCreated, qc],
