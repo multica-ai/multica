@@ -20,6 +20,7 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdTimeEntryIds: string[] = [];
   private user: Record<string, unknown> | null = null;
 
   async login(email: string, name: string) {
@@ -248,6 +249,52 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  // ── Time entry helpers ─────────────────────────────────────────────────────
+
+  /** Start a live timer (no stop_time). Returns the created TimeEntry. */
+  async startTimer(opts?: { issue_id?: string; description?: string }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/time-entries", {
+      method: "POST",
+      body: JSON.stringify({
+        start_time: new Date().toISOString(),
+        ...opts,
+      }),
+    });
+    const entry = await res.json();
+    this.createdTimeEntryIds.push(entry.id);
+    return entry;
+  }
+
+  /** Create a finished (manual) time entry. */
+  async createTimeEntry(opts: {
+    start_time: string;
+    stop_time: string;
+    description?: string;
+    issue_id?: string;
+  }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/time-entries", {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+    const entry = await res.json();
+    this.createdTimeEntryIds.push(entry.id);
+    return entry;
+  }
+
+  /** Stop the currently running timer by entry id. */
+  async stopTimer(entryId: string): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch(`/api/time-entries/${entryId}/stop`, {
+      method: "PATCH",
+    });
+    return res.json();
+  }
+
+  /** Delete a time entry. */
+  async deleteTimeEntry(id: string): Promise<void> {
+    await this.authedFetch(`/api/time-entries/${id}`, { method: "DELETE" });
+    this.createdTimeEntryIds = this.createdTimeEntryIds.filter((tid) => tid !== id);
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {
@@ -267,6 +314,15 @@ export class TestApiClient {
       }
     }
     this.createdProjectIds = [];
+
+    for (const id of this.createdTimeEntryIds) {
+      try {
+        await this.deleteTimeEntry(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdTimeEntryIds = [];
   }
 
   getToken() {

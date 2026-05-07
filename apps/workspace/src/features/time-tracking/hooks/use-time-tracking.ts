@@ -28,11 +28,32 @@ export function useCurrentTimerQuery(options?: Partial<UseQueryOptions<TimeEntry
   });
 }
 
-/** Paginated list of recent time entries for the current user. */
-export function useTimeEntriesQuery(params?: { limit?: number; offset?: number }) {
+/** Fetches time entries for the current user.
+ *
+ * Supports two modes:
+ * - Date-range: pass `since` + `until` (ISO 8601) to get all entries in the window.
+ *   Use this for calendar/day-grouped views so you never miss entries.
+ * - Pagination: pass `limit` + `offset` as a fallback.
+ *
+ * Each unique set of params is cached independently under the broad `entries` key,
+ * so `queryClient.invalidateQueries(queryKeys.timeTracking.entries(wsId))` invalidates all variants.
+ */
+export function useTimeEntriesQuery(params?: {
+  limit?: number;
+  offset?: number;
+  since?: string;
+  until?: string;
+}) {
   const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
+  // Stable params object for the queryKey — normalise to avoid cache misses.
+  const stableParams: Record<string, unknown> = {};
+  if (params?.since) stableParams.since = params.since;
+  if (params?.until) stableParams.until = params.until;
+  if (params?.limit) stableParams.limit = params.limit;
+  if (params?.offset) stableParams.offset = params.offset;
+
   return useQuery({
-    queryKey: queryKeys.timeTracking.entries(workspaceId),
+    queryKey: queryKeys.timeTracking.entriesParams(workspaceId, stableParams),
     queryFn: () => api.listTimeEntries(params),
     enabled: !!workspaceId,
     staleTime: 30_000,

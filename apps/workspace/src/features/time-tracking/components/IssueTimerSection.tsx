@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Play, Trash2, Clock } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Play, Trash2, Clock, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -116,6 +117,10 @@ interface IssueTimerSectionProps {
  */
 export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   const [showAll, setShowAll] = useState(false);
+  // Controls the inline description-input form before starting a timer.
+  const [expanded, setExpanded] = useState(false);
+  const [description, setDescription] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: entriesData, isLoading } = useIssueTimeEntriesQuery(issueId);
   const { data: currentEntry } = useCurrentTimerQuery();
@@ -129,6 +134,21 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   // Check if the current running timer belongs to this issue.
   const isTrackingThisIssue = currentEntry?.issue_id === issueId;
   const isAnotherIssueRunning = !!currentEntry && !isTrackingThisIssue;
+
+  // Collapse the description form whenever we start tracking this issue.
+  useEffect(() => {
+    if (isTrackingThisIssue) {
+      setExpanded(false);
+      setDescription("");
+    }
+  }, [isTrackingThisIssue]);
+
+  // Auto-focus the description input when the form opens.
+  useEffect(() => {
+    if (expanded) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [expanded]);
 
   // Combine issue entries with the running entry for display (avoid duplication).
   const allEntries: TimeEntry[] = isTrackingThisIssue && currentEntry
@@ -144,7 +164,7 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   const handleStart = () => {
     const now = new Date().toISOString();
     startMutation.mutate(
-      { issue_id: issueId, start_time: now },
+      { issue_id: issueId, description: description.trim() || undefined, start_time: now },
       { onError: () => toast.error("Failed to start timer") },
     );
   };
@@ -194,15 +214,66 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
             size="sm"
             variant="outline"
             className="h-7 gap-1.5 text-xs"
-            disabled={startMutation.isPending || isAnotherIssueRunning}
-            title={isAnotherIssueRunning ? "Another timer is already running" : undefined}
-            onClick={handleStart}
+            disabled={startMutation.isPending}
+            title={isAnotherIssueRunning ? "Switch timer to this issue" : "Start tracking time"}
+            onClick={() => setExpanded((v) => !v)}
           >
-            <Play className="size-3 fill-current" />
-            {isAnotherIssueRunning ? "Timer running" : "Start"}
+            {isAnotherIssueRunning ? (
+              <>
+                <RefreshCw className="size-3" />
+                Switch timer
+              </>
+            ) : (
+              <>
+                <Play className="size-3 fill-current" />
+                Start
+              </>
+            )}
           </Button>
         )}
       </div>
+
+      {/* Inline description form — shown when expanded and not already tracking this issue */}
+      {expanded && !isTrackingThisIssue && (
+        <div className="mb-3 space-y-2">
+          {isAnotherIssueRunning && (
+            <p className="text-xs text-muted-foreground">
+              Running timer will be stopped automatically.
+            </p>
+          )}
+          <Input
+            ref={inputRef}
+            placeholder="What are you working on?"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleStart();
+              if (e.key === "Escape") setExpanded(false);
+            }}
+            className="h-7 text-xs"
+          />
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 flex-1 text-xs"
+              disabled={startMutation.isPending}
+              onClick={handleStart}
+            >
+              <Play className="mr-1 size-3 fill-current" />
+              {isAnotherIssueRunning ? "Switch & Start" : "Start"}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0 text-muted-foreground"
+              onClick={() => setExpanded(false)}
+              aria-label="Cancel"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Entry list */}
       {isLoading ? (

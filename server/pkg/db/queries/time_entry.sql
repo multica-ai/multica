@@ -13,6 +13,15 @@ WHERE workspace_id = $1 AND user_id = $2
 ORDER BY start_time DESC
 LIMIT $3 OFFSET $4;
 
+-- name: ListTimeEntriesByUserRange :many
+-- Filters by start_time falling within [since, until) — ideal for day/week/month views.
+SELECT * FROM time_entry
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND start_time >= $3
+  AND start_time < $4
+ORDER BY start_time DESC;
+
 -- name: ListTimeEntriesByIssue :many
 SELECT * FROM time_entry
 WHERE issue_id = $1 AND workspace_id = $2

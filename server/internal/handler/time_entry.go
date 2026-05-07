@@ -42,9 +42,14 @@ type CreateTimeEntryRequest struct {
 
 // UpdateTimeEntryRequest allows patching description, issue link, and start/stop times.
 // All fields are optional. Duration is recalculated automatically when start or stop changes.
+//
+// issue_id semantics (using **string to distinguish JSON absent vs null):
+//   - field absent in JSON body  → outer pointer is nil → keep existing issue link unchanged
+//   - "issue_id": null in body   → outer pointer non-nil, inner nil → clear the issue link
+//   - "issue_id": "uuid" in body → both pointers non-nil → link to this issue
 type UpdateTimeEntryRequest struct {
-	Description *string `json:"description"`
-	IssueID     *string `json:"issue_id"`
+	Description *string  `json:"description"`
+	IssueID     **string `json:"issue_id"`
 	// StartTime and StopTime are ISO 8601 / RFC 3339. Only valid for stopped entries.
 	StartTime *string `json:"start_time"`
 	StopTime  *string `json:"stop_time"`
@@ -205,7 +210,12 @@ func (h *Handler) GetCurrentTimeEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, timeEntryToResponse(*entry))
 }
 
-// ListTimeEntries handles GET /api/time-entries — paginated list for the current user.
+// ListTimeEntries handles GET /api/time-entries — list time entries for the current user.
+//
+// Supports two modes:
+//   - Date-range mode (preferred): ?since=RFC3339&until=RFC3339 — returns all entries whose
+//     start_time falls within [since, until). Ideal for calendar and day-grouped views.
+//   - Pagination mode (fallback): ?limit=N&offset=N — returns at most N entries.
 func (h *Handler) ListTimeEntries(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -213,10 +223,32 @@ func (h *Handler) ListTimeEntries(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := resolveWorkspaceID(r)
 
-	limit := parseInt32Query(r, "limit", 50)
-	offset := parseInt32Query(r, "offset", 0)
+	sinceStr := r.URL.Query().Get("since")
+	untilStr := r.URL.Query().Get("until")
 
-	entries, err := h.timeEntrySvc().ListTimeEntries(r.Context(), workspaceID, userID, limit, offset)
+	var entries []db.TimeEntry
+	var err error
+
+	if sinceStr != "" && untilStr != "" {
+		// Date-range mode.
+		since, parseErr := time.Parse(time.RFC3339, sinceStr)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid since format (use RFC 3339)")
+			return
+		}
+		until, parseErr := time.Parse(time.RFC3339, untilStr)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid until format (use RFC 3339)")
+			return
+		}
+		entries, err = h.timeEntrySvc().ListTimeEntriesByRange(r.Context(), workspaceID, userID, since, until)
+	} else {
+		// Pagination fallback.
+		limit := parseInt32Query(r, "limit", 50)
+		offset := parseInt32Query(r, "offset", 0)
+		entries, err = h.timeEntrySvc().ListTimeEntries(r.Context(), workspaceID, userID, limit, offset)
+	}
+
 	if err != nil {
 		slog.Warn("list time entries failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list time entries")

@@ -227,6 +227,59 @@ func (q *Queries) ListTimeEntriesByUser(ctx context.Context, arg ListTimeEntries
 	return items, nil
 }
 
+const listTimeEntriesByUserRange = `-- name: ListTimeEntriesByUserRange :many
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at FROM time_entry
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND start_time >= $3
+  AND start_time < $4
+ORDER BY start_time DESC
+`
+
+type ListTimeEntriesByUserRangeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	StartTime   pgtype.Timestamptz `json:"start_time"`
+	StartTime_2 pgtype.Timestamptz `json:"start_time_2"`
+}
+
+// Filters by start_time falling within [since, until) — ideal for day/week/month views.
+func (q *Queries) ListTimeEntriesByUserRange(ctx context.Context, arg ListTimeEntriesByUserRangeParams) ([]TimeEntry, error) {
+	rows, err := q.db.Query(ctx, listTimeEntriesByUserRange,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.StartTime,
+		arg.StartTime_2,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TimeEntry{}
+	for rows.Next() {
+		var i TimeEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.IssueID,
+			&i.Description,
+			&i.StartTime,
+			&i.StopTime,
+			&i.DurationSeconds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setRunningTimer = `-- name: SetRunningTimer :exec
 INSERT INTO running_timer (user_id, time_entry_id, started_at)
 VALUES ($1, $2, now())

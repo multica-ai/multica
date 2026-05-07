@@ -813,10 +813,19 @@ export class ApiClient {
   }
 
   /** List time entries for the current user in the active workspace (most recent first). */
-  async listTimeEntries(params?: { limit?: number; offset?: number }): Promise<TimeEntry[]> {
+  async listTimeEntries(params?: {
+    limit?: number;
+    offset?: number;
+    /** ISO 8601/RFC 3339 — filter entries with start_time >= since (inclusive). */
+    since?: string;
+    /** ISO 8601/RFC 3339 — filter entries with start_time < until (exclusive). */
+    until?: string;
+  }): Promise<TimeEntry[]> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
+    if (params?.since) search.set("since", params.since);
+    if (params?.until) search.set("until", params.until);
     return this.fetch(`/api/time-entries?${search}`);
   }
 

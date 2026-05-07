@@ -204,14 +204,39 @@ func (s *TimeEntryService) ListIssueTimeEntries(ctx context.Context, workspaceID
 	return entries, nil
 }
 
-// UpdateTimeEntry patches description, issue_id, and/or start/stop times of an entry.
+// ListTimeEntriesByRange returns all time entries for the user whose start_time
+// falls within [since, until). Intended for calendar/day-grouped views that know
+// the visible date window and should not rely on a fixed record limit.
+func (s *TimeEntryService) ListTimeEntriesByRange(
+	ctx context.Context,
+	workspaceID, userID string,
+	since, until time.Time,
+) ([]db.TimeEntry, error) {
+	entries, err := s.Queries.ListTimeEntriesByUserRange(ctx, db.ListTimeEntriesByUserRangeParams{
+		WorkspaceID: util.ParseUUID(workspaceID),
+		UserID:      util.ParseUUID(userID),
+		StartTime:   pgtype.Timestamptz{Time: since, Valid: true},
+		StartTime_2: pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list time entries by range: %w", err)
+	}
+	return entries, nil
+}
+
+
 // If startTime or stopTime are provided and the entry is stopped, duration_seconds is
 // recalculated automatically.
+//
+// issueID is a double pointer to distinguish three states:
+//   - nil outer pointer: field not provided — keep existing issue link
+//   - non-nil outer, nil inner: explicit null — clear the issue link
+//   - non-nil outer and inner: set to this UUID
 func (s *TimeEntryService) UpdateTimeEntry(
 	ctx context.Context,
 	workspaceID, userID, timeEntryID string,
 	description *string,
-	issueID *string,
+	issueID **string,
 	startTime *time.Time,
 	stopTime *time.Time,
 ) (db.TimeEntry, error) {
@@ -237,6 +262,23 @@ func (s *TimeEntryService) UpdateTimeEntry(
 	}
 	if stopTime != nil {
 		pgStop = pgtype.Timestamptz{Time: *stopTime, Valid: true}
+	}
+
+	// Resolve the final issue_id to pass to SQL.
+	//   issueID == nil            → field not provided → preserve the existing value
+	//   *issueID == nil           → "issue_id": null → clear the link
+	//   *issueID != nil           → "issue_id": "uuid" → set to this UUID
+	var resolvedIssueID *string
+	if issueID == nil {
+		// Not provided — preserve existing.
+		if entry.IssueID.Valid {
+			uuidStr := util.UUIDToString(entry.IssueID)
+			resolvedIssueID = &uuidStr
+		}
+		// else: already null, keep nil
+	} else {
+		// Explicit value: either clear (nil) or a new UUID.
+		resolvedIssueID = *issueID
 	}
 
 	// Recalculate duration if start or stop is being changed on a completed entry.
@@ -268,7 +310,7 @@ func (s *TimeEntryService) UpdateTimeEntry(
 		ID:              util.ParseUUID(timeEntryID),
 		WorkspaceID:     util.ParseUUID(workspaceID),
 		Description:     util.PtrToText(description),
-		IssueID:         optionalUUID(issueID),
+		IssueID:         optionalUUID(resolvedIssueID),
 		StartTime:       pgStart,
 		StopTime:        pgStop,
 		DurationSeconds: newDuration,
