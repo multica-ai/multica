@@ -1,0 +1,245 @@
+{
+  "page": {
+    "title": "skill",
+    "tagline": "工作区里任何智能体都能使用的指令。",
+    "learn_more": "了解更多 →",
+    "new_skill": "新建 skill",
+    "search_placeholder": "搜索 skill...",
+    "scopes": {
+      "all": {
+        "label": "全部",
+        "description": "工作区里所有 skill"
+      },
+      "used": {
+        "label": "使用中",
+        "description": "至少分配给一个智能体的 skill"
+      },
+      "unused": {
+        "label": "未使用",
+        "description": "未分配给任何智能体的 skill"
+      },
+      "mine": {
+        "label": "我创建的",
+        "description": "你创建的 skill"
+      }
+    },
+    "empty": {
+      "title": "还没有 skill",
+      "description": "创建第一个 skill、从 URL 导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
+    },
+    "no_matches": {
+      "title": "无匹配",
+      "with_query": "没有 skill 匹配 \"{{query}}\"{{filterSuffix}}。",
+      "with_query_filter_suffix": "（在当前筛选下）",
+      "filter_only": "当前筛选下没有匹配的 skill。",
+      "try_different": " 换个关键词试试。"
+    },
+    "intro_banner": {
+      "title": "在工作区内共享。",
+      "body": "任何成员都可以创建 skill、从 URL 导入、或从本地运行时复制——之后所有智能体都能用它。",
+      "highlight": "本地运行时里的 skill 在你复制过来之前是私有的。"
+    },
+    "list_error": {
+      "title": "无法加载 skill",
+      "fallback": "拉取 skill 列表时出错。",
+      "retry": "重试"
+    },
+    "supporting_data_warning": "部分工作区数据加载失败。创建者归属、运行时名称、编辑权限可能显示不完整。"
+  },
+  "table": {
+    "name": "名称",
+    "used_by": "被谁使用",
+    "source": "来源 · 添加者",
+    "updated": "更新时间",
+    "no_description": "无描述",
+    "lock_tooltip": "只读——只有创建者或管理员能编辑",
+    "unused": "— 未使用",
+    "by_creator": "由 {{name}} 创建",
+    "source_manual": "手动创建",
+    "source_runtime_named": "来自 {{name}}",
+    "source_runtime_provider": "来自 {{provider}} 运行时",
+    "source_runtime_unknown": "来自某个运行时",
+    "source_clawhub": "来自 ClawHub",
+    "source_skills_sh": "来自 Skills.sh"
+  },
+  "detail": {
+    "all_skills": "全部 skill",
+    "read_only": "只读",
+    "delete_aria": "删除 skill",
+    "delete_tooltip": "删除 skill",
+    "supporting_data_warning": "部分工作区数据加载失败。创建者归属、运行时名称、编辑权限可能要等下次刷新才完整。",
+    "files_label": "文件 · {{count}}",
+    "add_file_aria": "添加文件",
+    "add_file_tooltip": "添加文件",
+    "delete_file": "删除文件",
+    "name_aria": "skill 名称",
+    "name_placeholder": "skill-name",
+    "description_label": "描述",
+    "description_placeholder": "用一句话描述智能体什么时候应该使用这个 skill...",
+    "subline": {
+      "origin_runtime_named": "本地运行时 · {{name}}",
+      "origin_runtime_provider": "本地运行时 · {{provider}}",
+      "origin_runtime_unknown": "本地运行时",
+      "origin_clawhub": "导入自 · ClawHub",
+      "origin_skills_sh": "导入自 · Skills.sh",
+      "origin_workspace": "工作区",
+      "updated_label": "{{when}}更新",
+      "by_creator": "由 {{name}}"
+    },
+    "conflict_banner": {
+      "title": "其他人更新了这个 skill",
+      "body": "你的修改已保留。Discard 来拉取他们的版本，或 Save 覆盖。"
+    },
+    "save_bar": {
+      "unsaved": "未保存的修改——保存会覆盖当前的 skill",
+      "discard": "丢弃",
+      "save": "保存修改",
+      "saving": "保存中..."
+    },
+    "sidebar": {
+      "metadata": "元数据",
+      "created": "创建于",
+      "updated": "更新于",
+      "created_by": "创建者",
+      "files": "文件",
+      "id": "ID",
+      "origin": "来源",
+      "used_by_one": "被 {{count}} 个智能体使用",
+      "used_by_other": "被 {{count}} 个智能体使用",
+      "permissions": "权限",
+      "permissions_owner": "你可以编辑和删除这个 skill。修改在智能体下次运行时生效。",
+      "permissions_locked_creator": "只有创建者（{{name}}）或工作区管理员能编辑这个 skill。",
+      "permissions_locked": "只有创建者或工作区管理员能编辑这个 skill。",
+      "used_by_empty": "还未分配给任何智能体。打开某个智能体的 Skills 标签页进行分配。"
+    },
+    "origin_card": {
+      "imported_runtime": "从本地运行时导入",
+      "imported_clawhub": "从 ClawHub 导入",
+      "imported_skills_sh": "从 Skills.sh 导入",
+      "provider": "provider · {{provider}}"
+    },
+    "not_found": {
+      "title": "未找到该 skill",
+      "fallback": "这个 skill 可能已被删除，或你没有访问权限。",
+      "back": "返回 Skills"
+    },
+    "toast_saved": "已保存 skill",
+    "toast_save_failed": "保存 skill 失败",
+    "toast_deleted": "已删除 skill",
+    "toast_delete_failed": "删除 skill 失败",
+    "delete_dialog": {
+      "title": "删除这个 skill？",
+      "description_with_agents_one": "将永久删除\"{{name}}\"，并从当前正在使用它的 {{count}} 个智能体上移除。",
+      "description_with_agents_other": "将永久删除\"{{name}}\"，并从当前正在使用它的 {{count}} 个智能体上移除。",
+      "description_no_agents": "将永久删除\"{{name}}\"，并从所有智能体上移除。",
+      "warning": "此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "永久删除",
+      "deleting": "删除中..."
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "添加",
+      "cancel": "取消",
+      "errors": {
+        "empty": "路径不能为空。",
+        "absolute": "不允许绝对路径。",
+        "double_dot": "路径不能包含 \"..\"。",
+        "reserved": "SKILL.md 已为主文件保留。",
+        "exists": "该路径已存在文件。"
+      }
+    }
+  },
+  "create": {
+    "back": "返回",
+    "back_aria": "返回方式选择",
+    "close": "关闭",
+    "close_aria": "关闭",
+    "method": {
+      "chooser": {
+        "title": "新建 skill",
+        "desc": "选择一种方式把 skill 添加到工作区。"
+      },
+      "manual": {
+        "title": "手动创建",
+        "desc": "从空白 SKILL.md 开始写。"
+      },
+      "url": {
+        "title": "从 URL 导入",
+        "desc": "通过 URL 拉取已发布的 skill，文件由服务端拉取。"
+      },
+      "runtime": {
+        "title": "从运行时复制",
+        "desc": "扫描本地运行时，把它磁盘上的 skill 提升到工作区。"
+      }
+    },
+    "method_card": {
+      "manual_title": "手动创建",
+      "manual_desc": "从空白 SKILL.md 开始，自己写指令。",
+      "url_title": "从 URL 导入",
+      "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
+      "runtime_title": "从运行时复制",
+      "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。"
+    },
+    "manual": {
+      "name_label": "名称",
+      "name_placeholder": "例如：review-helper",
+      "name_hint": "工作区内必须唯一。",
+      "description_label": "描述",
+      "description_placeholder": "用一句话说什么时候应该把这个 skill 分配给智能体。",
+      "name_conflict_hint": "请换一个名字再提交。",
+      "fallback_error": "创建 skill 失败",
+      "cancel": "取消",
+      "submit": "创建 skill",
+      "submitting": "创建中...",
+      "toast_created": "已创建 skill"
+    },
+    "url": {
+      "url_label": "skill URL",
+      "supported_sources": "支持的来源",
+      "import": "导入",
+      "importing": "导入中...",
+      "importing_clawhub": "正在从 ClawHub 导入...",
+      "importing_skills_sh": "正在从 Skills.sh 导入...",
+      "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
+      "fallback_error": "导入失败",
+      "cancel": "取消",
+      "toast_imported": "已导入 skill"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "运行时",
+    "runtime_placeholder": "选择一个本地运行时",
+    "no_local_runtimes_title": "暂无可用的本地运行时",
+    "no_local_runtimes_hint": "连接一个本地运行时，才能浏览并导入其本地 skill。",
+    "choose_runtime": "请选择一个运行时继续",
+    "must_be_online": "运行时必须在线才能浏览本地 skill。",
+    "load_failed": "加载本地 skill 失败",
+    "not_supported": "这个 provider 暂不支持本地 skill 列表。",
+    "no_skills_title": "未找到本地 skill",
+    "no_skills_hint": "这个运行时上还没有可发现的本地 skill。",
+    "ignored_files_hint": "导入时会忽略软链、不可读文件、超大文件以及超大目录。",
+    "ready": "准备导入",
+    "into_workspace": "到工作区。",
+    "select_skill": "请选择一个 skill 继续。",
+    "import_button": "导入到工作区",
+    "importing": "导入中...",
+    "skill_files_one": "{{count}} 个文件",
+    "skill_files_other": "{{count}} 个文件",
+    "skill_name_label": "工作区里的 skill 名称",
+    "skill_description_label": "描述",
+    "skill_description_placeholder": "可选——描述智能体什么时候应该使用这个 skill。",
+    "toast_imported": "已导入 skill",
+    "toast_import_failed": "导入 skill 失败"
+  },
+  "file_tree": {
+    "no_files": "无文件"
+  },
+  "file_viewer": {
+    "edit_tooltip": "编辑",
+    "preview_tooltip": "预览",
+    "no_content": "*暂无内容*",
+    "markdown_placeholder": "输入 Markdown 内容...",
+    "raw_placeholder": "文件内容..."
+  }
+}

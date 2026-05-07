@@ -6,6 +6,7 @@ import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ModelDropdown } from "./model-dropdown";
 import type {
+  Agent,
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
@@ -28,12 +29,20 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
+import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  VISIBILITY_DESCRIPTION,
+  VISIBILITY_LABEL,
+} from "@multica/core/agents";
+import { CharCounter } from "./char-counter";
+import { useT } from "../../i18n";
 
 export function CreateAgentDialog({
   runtimes,
   runtimesLoading,
   members,
   currentUserId,
+  template,
   onClose,
   onCreate,
 }: {
@@ -41,13 +50,27 @@ export function CreateAgentDialog({
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
+  // When provided, the dialog opens in "Duplicate" mode: the visible
+  // fields (name / description / runtime / visibility / model) are
+  // pre-populated from this agent, and the hidden fields
+  // (instructions / custom_args / custom_env / max_concurrent_tasks)
+  // are forwarded to the create call so the new agent is a true clone.
+  // Skills are copied separately by the caller after createAgent
+  // succeeds — they're not part of CreateAgentRequest.
+  template?: Agent | null;
   onClose: () => void;
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<AgentVisibility>("private");
-  const [model, setModel] = useState("");
+  const { t } = useT("agents");
+  const isDuplicate = !!template;
+  const [name, setName] = useState(
+    template ? `${template.name}${t(($) => $.create_dialog.duplicate_copy_suffix)}` : "",
+  );
+  const [description, setDescription] = useState(template?.description ?? "");
+  const [visibility, setVisibility] = useState<AgentVisibility>(
+    template?.visibility ?? "private",
+  );
+  const [model, setModel] = useState(template?.model ?? "");
   const [creating, setCreating] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
 
@@ -62,7 +85,11 @@ export function CreateAgentDialog({
       : runtimes;
   }, [runtimes, currentUserId]);
 
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState(filteredRuntimes[0]?.id ?? "");
+  // When duplicating, default to the template's runtime so the clone
+  // lands on the same machine — caller can still switch in the picker.
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(
+    template?.runtime_id ?? filteredRuntimes[0]?.id ?? "",
+  );
 
   useEffect(() => {
     if (!selectedRuntimeId && filteredRuntimes[0]) {
@@ -76,16 +103,37 @@ export function CreateAgentDialog({
     if (!name.trim() || !selectedRuntime) return;
     setCreating(true);
     try {
-      await onCreate({
+      // When duplicating, forward the hidden config fields the template
+      // carries (instructions / custom_args / custom_env / max_concurrent_tasks)
+      // so the clone is functional out of the box without the user
+      // having to walk back through every settings tab. Skills are
+      // copied by the caller in a follow-up setAgentSkills call.
+      const data: CreateAgentRequest = {
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         visibility,
         model: model.trim() || undefined,
-      });
+      };
+      if (template) {
+        if (template.instructions) data.instructions = template.instructions;
+        if (template.custom_args.length) data.custom_args = template.custom_args;
+        // Skip env when the template's values are redacted from the API
+        // response — copying placeholders would create a broken clone.
+        if (
+          !template.custom_env_redacted &&
+          Object.keys(template.custom_env).length > 0
+        ) {
+          data.custom_env = template.custom_env;
+        }
+        if (template.max_concurrent_tasks) {
+          data.max_concurrent_tasks = template.max_concurrent_tasks;
+        }
+      }
+      await onCreate(data);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create agent");
+      toast.error(err instanceof Error ? err.message : t(($) => $.create_dialog.create_failed_toast));
       setCreating(false);
     }
   };
@@ -94,39 +142,50 @@ export function CreateAgentDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create Agent</DialogTitle>
+          <DialogTitle>
+            {isDuplicate ? t(($) => $.create_dialog.title_duplicate) : t(($) => $.create_dialog.title_create)}
+          </DialogTitle>
           <DialogDescription>
-            Create a new AI agent for your workspace.
+            {isDuplicate
+              ? t(($) => $.create_dialog.description_duplicate, { name: template!.name })
+              : t(($) => $.create_dialog.description_create)}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 min-w-0">
           <div>
-            <Label className="text-xs text-muted-foreground">Name</Label>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>
             <Input
               autoFocus
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Deep Research Agent"
+              placeholder={t(($) => $.create_dialog.name_placeholder)}
               className="mt-1"
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             />
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Description</Label>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.description_label)}</Label>
             <Input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this agent do?"
+              placeholder={t(($) => $.create_dialog.description_placeholder)}
+              maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
               className="mt-1"
             />
+            <div className="mt-1">
+              <CharCounter
+                length={[...description].length}
+                max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Visibility</Label>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
             <div className="mt-1.5 flex gap-2">
               <button
                 type="button"
@@ -139,8 +198,10 @@ export function CreateAgentDialog({
               >
                 <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Workspace</div>
-                  <div className="text-xs text-muted-foreground">All members can assign</div>
+                  <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION.workspace}
+                  </div>
                 </div>
               </button>
               <button
@@ -154,8 +215,10 @@ export function CreateAgentDialog({
               >
                 <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="text-left">
-                  <div className="font-medium">Private</div>
-                  <div className="text-xs text-muted-foreground">Only you can assign</div>
+                  <div className="font-medium">{VISIBILITY_LABEL.private}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {VISIBILITY_DESCRIPTION.private}
+                  </div>
                 </div>
               </button>
             </div>
@@ -178,18 +241,18 @@ export function CreateAgentDialog({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">
-                      {runtimesLoading ? "Loading runtimes..." : (selectedRuntime?.name ?? "No runtime available")}
+                      {runtimesLoading ? t(($) => $.create_dialog.runtime_loading) : (selectedRuntime?.name ?? t(($) => $.create_dialog.runtime_none))}
                     </span>
                     {selectedRuntime?.runtime_mode === "cloud" && (
                       <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        Cloud
+                        {t(($) => $.create_dialog.runtime_cloud_badge)}
                       </span>
                     )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {selectedRuntime
                       ? (getOwnerMember(selectedRuntime.owner_id)?.name ?? selectedRuntime.device_info)
-                      : "Register a runtime before creating an agent"}
+                      : t(($) => $.create_dialog.runtime_register_first)}
                   </div>
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${runtimeOpen ? "rotate-180" : ""}`} />
@@ -214,7 +277,7 @@ export function CreateAgentDialog({
                           <span className="truncate font-medium">{device.name}</span>
                           {device.runtime_mode === "cloud" && (
                             <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                              Cloud
+                              {t(($) => $.create_dialog.runtime_cloud_badge)}
                             </span>
                           )}
                         </div>
@@ -252,13 +315,13 @@ export function CreateAgentDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t(($) => $.create_dialog.cancel)}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={creating || !name.trim() || !selectedRuntime}
           >
-            {creating ? "Creating..." : "Create"}
+            {creating ? t(($) => $.create_dialog.creating) : t(($) => $.create_dialog.create)}
           </Button>
         </DialogFooter>
       </DialogContent>

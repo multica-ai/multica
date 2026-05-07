@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
+import { labelKeys } from "../labels/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -9,7 +10,7 @@ import {
   removeIssueFromBuckets,
   removeIssueDetailQueries,
 } from "./cache-helpers";
-import type { Issue } from "../types";
+import type { Issue, IssueLabelsResponse, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -71,6 +72,35 @@ export function onIssueUpdated(
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
   }
+}
+
+/**
+ * Patch an issue's labels in-place across the list cache, my-issues caches,
+ * the detail cache, and the per-issue label cache. Triggered by the
+ * `issue_labels:changed` WS event after attach/detach so list/board chips
+ * and the issue-detail Properties LabelPicker update without a refetch.
+ *
+ * The byIssue cache backs `LabelPicker`; without patching it, externally
+ * driven label changes (agents, other tabs) leave the picker stale until it
+ * remounts — `staleTime: Infinity` + `refetchOnWindowFocus: false` (see
+ * `query-client.ts`) means focus changes won't recover it.
+ */
+export function onIssueLabelsChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
+  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
+    old ? patchIssueInBuckets(old, issueId, { labels }) : old,
+  );
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, labels } : old,
+  );
+  qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
+    old ? { ...old, labels } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(

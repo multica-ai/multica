@@ -144,6 +144,119 @@ func resolveManagedInstallPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+	return &release, nil
+}
+
+// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+func IsBrewInstall() bool {
+	exePath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		resolved = exePath
+	}
+
+	brewPrefix := GetBrewPrefix()
+	if brewPrefix != "" && strings.HasPrefix(resolved, brewPrefix) {
+		return true
+	}
+
+	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"} {
+		if strings.HasPrefix(resolved, prefix+"/Cellar/") {
+			return true
+		}
+	}
+	return false
+}
+
+// GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.
+func GetBrewPrefix() string {
+	out, err := exec.Command("brew", "--prefix").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
+// Returns the combined output and any error.
+func UpdateViaBrew() (string, error) {
+	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
+	}
+	return string(out), nil
+}
+
+func updateDownloadTimeoutOrDefault(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return DefaultUpdateDownloadTimeout
+	}
+	return timeout
+}
+
+// UpdateViaDownload downloads the latest release binary from GitHub and replaces
+// the current executable in-place. Returns the combined output message and any error.
+func UpdateViaDownload(targetVersion string) (string, error) {
+	return UpdateViaDownloadWithTimeout(targetVersion, DefaultUpdateDownloadTimeout)
+}
+
+// UpdateViaDownloadWithTimeout downloads the latest release binary with a caller-selected timeout.
+func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
+	// Determine current binary path.
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve executable path: %w", err)
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlink: %w", err)
+	}
+
+	tag := normalizeReleaseTag(targetVersion)
+	release, err := fetchReleaseByTag(tag)
+	if err != nil {
+		return "", fmt.Errorf("fetch release metadata: %w", err)
+	}
+	asset, err := findReleaseAsset(release.Assets, tag, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", err
+	}
+	downloadURL := asset.BrowserDownloadURL
+	assetName := asset.Name
+
+	// Download the archive.
+	client := &http.Client{Timeout: updateDownloadTimeoutOrDefault(downloadTimeout)}
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return "", fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed: HTTP %d from %s", resp.StatusCode, downloadURL)
+	}
+
+	// Extract the binary from the archive.
 	binaryName := "multica"
 	if runtime.GOOS == "windows" {
 		binaryName = "multica.exe"

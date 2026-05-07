@@ -45,8 +45,13 @@ import { taskMessagesOptions, chatKeys } from "@multica/core/chat/queries";
 import { api } from "@multica/core/api";
 import { copyMarkdown } from "../../editor";
 import { Markdown } from "@multica/views/common/markdown";
-import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
+import type { AgentAvailability } from "@multica/core/agents";
+import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { TaskStatusPill } from "./task-status-pill";
+import { formatElapsedMs } from "../lib/format";
+import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -80,10 +85,12 @@ export function ChatMessageList({
   const fadeStyle = useScrollFade(scrollRef);
   useAutoScroll(scrollRef);
 
+  const pendingTaskId = pendingTask?.task_id ?? null;
+
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
-  // timeline to avoid rendering the same content in two places during the
-  // invalidate → refetch window.
+  // timeline (and pill) to avoid rendering the same content in two places
+  // during the invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
@@ -97,6 +104,7 @@ export function ChatMessageList({
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
   return (
     <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
@@ -122,8 +130,12 @@ export function ChatMessageList({
             <TimelineView items={liveTimeline} />
           </div>
         )}
-        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        {showStatusPill && pendingTask && (
+          <TaskStatusPill
+            pendingTask={pendingTask}
+            taskMessages={liveTaskMessages ?? []}
+            availability={availability}
+          />
         )}
       </div>
     </div>
@@ -399,7 +411,94 @@ function AssistantMessage({
             </div>
           )}
         </div>
+      )}
+      {message.elapsed_ms != null && (
+        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+      )}
+    </div>
+  );
+}
+
+// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
+// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
+// it once at task completion, so this caption is identical across reloads
+// and devices. Skipped silently when null (legacy messages predating
+// migration 063 + user messages).
+function ElapsedCaption({
+  variant,
+  elapsedMs,
+  className,
+}: {
+  variant: "replied" | "failed";
+  elapsedMs: number;
+  className?: string;
+}) {
+  const { t } = useT("chat");
+  const text =
+    variant === "replied"
+      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
+      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
+  return (
+    <div className={cn("text-[11px] text-muted-foreground/80", className)}>
+      {text}
+    </div>
+  );
+}
+
+function FailureBubble({
+  reason,
+  rawError,
+  timeline,
+  elapsedMs,
+}: {
+  reason: string;
+  rawError: string;
+  timeline: ChatTimelineItem[];
+  elapsedMs?: number | null;
+}) {
+  const { t } = useT("chat");
+  const [open, setOpen] = useState(false);
+  // Map the back-end enum to copy via the shared label table; an unknown
+  // reason (e.g. a future enum value the front-end doesn't ship yet)
+  // falls back to a generic translated label.
+  const label =
+    failureReasonLabel[reason as TaskFailureReason] ??
+    t(($) => $.message_list.task_failed_fallback);
+
+  return (
+    <div className="w-full space-y-1.5">
+      {/* Failure read as an inline, low-key note — not a destructive
+       *  alert. Intentionally borderless / no background tint: a chat
+       *  failure is informational ("this didn't work"), not a system
+       *  error. The icon + muted destructive text are signal enough,
+       *  the rest stays in the normal reply rhythm. */}
+      <div className="flex items-start gap-1.5 text-sm">
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive/80 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-destructive/90">{label}</div>
+          {rawError.trim() && (
+            <Collapsible open={open} onOpenChange={setOpen}>
+              <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+                {open ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                <span>{t(($) => $.message_list.show_details)}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                  {rawError}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
       </div>
+      {timeline.length > 0 && <TimelineView items={timeline} />}
+      {elapsedMs != null && (
+        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
+      )}
     </div>
   );
 }
@@ -474,9 +573,10 @@ function ToolGroupCollapsible({
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
 }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(defaultOpen ?? false);
   const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const label = `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  const label = t(($) => $.message_list.tools, { count: toolCount });
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -571,11 +671,15 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
 
   const preview = output.length > 120 ? output.slice(0, 120) + "..." : output;
+  const labelPrefix = item.tool
+    ? t(($) => $.message_list.tool_result_named, { tool: item.tool })
+    : t(($) => $.message_list.tool_result_unnamed);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -584,7 +688,7 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {labelPrefix}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>

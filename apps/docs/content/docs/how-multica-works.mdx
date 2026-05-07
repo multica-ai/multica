@@ -1,0 +1,54 @@
+---
+title: How Multica works
+description: How the three core components (server / daemon / AI coding tool) coordinate to run an agent's work.
+---
+
+import { ArchitectureDiagram } from "@/components/architecture-diagram";
+
+Multica is a **distributed** platform. The web interface you see is just the front of house — the real work is done by three components: the **Multica server** owns the data ([workspaces](/workspaces), [issues](/issues), [members](/members-roles), the [task](/tasks) queue, and so on); the **[daemon](/daemon-runtimes)** runs on your own machine, picks up tasks, and drives the AI coding tool; and the **[AI coding tool](/providers)** (Claude Code, Codex, and other local CLIs) is the component that actually writes code. This is the biggest difference between Multica and Linear or Jira — **[agents](/agents) don't run on our servers, they run on your machine**.
+
+## The three core components
+
+<ArchitectureDiagram />
+
+- **Multica server** — the workspaces, issue lists, and comment threads you see all live in its database. It's also a WebSocket hub that pushes real-time updates between you and your teammates. It does **not** execute any agent tasks.
+- **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds.
+- **AI coding tools** — one of the eleven (or several in parallel): [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). Once the daemon has picked up a task, it uses these tools to actually do the work.
+
+Because the toolchain stays local, **your API keys, code directories, and authorized tools** are only ever used on your machine — the Multica server never sees any of them. This holds whether you self-host or use Cloud.
+
+## The lifecycle of a task
+
+Take the most common scenario — you assign an issue to an agent:
+
+1. You click assign in the web UI. The browser sends an HTTP request to the Multica server.
+2. The server sets the assignee on that issue to the agent and, at the same time, creates an execution task in the task queue with status `queued`.
+3. The daemon on your machine picks up the task on its next poll (within 3 seconds). Task status becomes `dispatched`.
+4. The daemon creates an isolated working directory locally and invokes the corresponding AI coding tool. Task status becomes `running`.
+5. The AI writes code locally, runs tests, and posts comments back to the server.
+6. Execution ends. The daemon reports the result (success / failure) to the server, and task status becomes `completed` or `failed`. You see the progress update in real time in the web UI (via WebSocket).
+
+For the detailed mechanics, see [Daemon and runtimes](/daemon-runtimes) and [Tasks](/tasks).
+
+## Four ways to get an agent working
+
+It's not only "assign an issue" — Multica has 4 triggers, one per collaboration style:
+
+| How | Typical scenario | Docs |
+|---|---|---|
+| **Assign an issue** | The most common. Assign an issue to an agent and it starts on its own | [Assigning issues](/assigning-issues) |
+| **@mention an agent in a comment** | "Take a look at this one for me" — don't change the assignee or status, just fire off a comment | [Mentioning agents](/mentioning-agents) |
+| **Direct chat** | Standalone conversation, not tied to an issue — ask questions, have it draft an issue | [Chat](/chat) |
+| **Autopilots (scheduled)** | Standing instructions — "do a standup summary every Monday morning" and the like | [Autopilots](/autopilots) |
+
+## Runtimes: where it runs, and how many tools
+
+A **runtime** is the pairing of "daemon × one AI coding tool." If the daemon on one machine has both Claude Code and Codex installed and is joined to two workspaces, Multica registers 4 independent runtimes (2 workspaces × 2 tools).
+
+Only the **local daemon** runtime model is supported today. Cloud runtimes (where you don't need your own machine running) are **coming soon**, currently waitlist-only — sign up on the [Downloads](https://multica.ai/download) page.
+
+## Next steps
+
+- [Cloud Quickstart](/cloud-quickstart) — connect to Multica Cloud in 5 minutes
+- [Self-Host Quickstart](/self-host-quickstart) — run your own backend
+- [Daemon and runtimes](/daemon-runtimes) — a deep dive into the component the architecture rests on

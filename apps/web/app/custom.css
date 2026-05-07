@@ -3,3 +3,44 @@
  * Shared styles (shiki, entrance-spin, sidebar, sonner, scrollbar) are in
  * @multica/ui/styles/base.css
  * ============================================================================= */
+
+/* The landing route tree is intentionally always-light (hero/cli/cloud
+ * sections use hardcoded dark/light palettes). Shared components rendered
+ * inside (e.g. CloudWaitlistExpand on /download) use semantic tokens that
+ * otherwise flip to dark values under the `.dark` class set by next-themes,
+ * producing a palette mismatch against the hardcoded section. Re-declare
+ * tokens to their light values so nested token-driven components stay in
+ * lockstep with the surrounding design. */
+.landing-light,
+.landing-light * {
+    color-scheme: light;
+}
+.landing-light {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.141 0.005 285.823);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.141 0.005 285.823);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.141 0.005 285.823);
+    --primary: oklch(0.21 0.006 285.885);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.967 0.001 286.375);
+    --muted-foreground: oklch(0.552 0.016 285.938);
+    --accent: oklch(0.967 0.001 286.375);
+    --accent-foreground: oklch(0.21 0.006 285.885);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.92 0.004 286.32);
+    --input: oklch(0.92 0.004 286.32);
+    --ring: oklch(0.705 0.015 286.067);
+    --brand: oklch(0.55 0.16 255);
+    --brand-foreground: oklch(0.985 0 0);
+    --success: oklch(0.55 0.16 145);
+    --warning: oklch(0.75 0.16 85);
+    --info: oklch(0.55 0.18 250);
+    --priority: oklch(0.65 0.18 50);
+    --scrollbar-thumb: oklch(0 0 0 / 10%);
+    --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
+    --scrollbar-track: transparent;
+}

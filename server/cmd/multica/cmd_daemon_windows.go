@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/signal"
@@ -12,23 +13,55 @@ import (
 )
 
 const (
+	// detachedProcess severs the inherited console so closing the parent
+	// cmd/PowerShell window no longer propagates CTRL_CLOSE_EVENT to the daemon.
 	detachedProcess = 0x00000008
-	sigBreak        = syscall.Signal(0x15)
+	// createBreakawayFromJob lets the daemon escape its parent shell's Job
+	// Object. Modern Windows Terminal / cmd.exe / PowerShell host the
+	// processes they spawn inside a Job Object that has KILL_ON_JOB_CLOSE
+	// set, so when the parent shell exits the kernel kills every process
+	// inside that job — including a child we tried to "detach" with
+	// detachedProcess alone. detachedProcess only severs the console, not
+	// the Job Object inheritance. Adding createBreakawayFromJob makes
+	// CreateProcess place the new process outside the parent's Job, so
+	// the daemon survives parent-shell exit.
+	//
+	// If the parent's Job has not granted BREAKAWAY_OK, CreateProcess
+	// returns ERROR_ACCESS_DENIED. In that case the caller falls back to
+	// detachedProcess alone — the daemon is then at the mercy of the
+	// parent's Job lifecycle, which is the pre-fix behaviour.
+	createBreakawayFromJob = 0x01000000
+	sigBreak               = syscall.Signal(0x15)
 )
 
 // daemonSysProcAttr returns the attributes used when spawning the background
-// daemon. DETACHED_PROCESS severs the inherited console so closing the parent
-// cmd/PowerShell window no longer propagates CTRL_CLOSE_EVENT to the daemon.
-// Because the detached daemon shares no console with the stop caller,
-// `daemon stop` talks to it via the HTTP /shutdown endpoint rather than
-// GenerateConsoleCtrlEvent. The daemon's stdout/stderr are already
-// redirected to the log file before Start() is called, so losing the
-// console is safe.
-func daemonSysProcAttr() *syscall.SysProcAttr {
+// daemon. The default is detachedProcess + createBreakawayFromJob so the
+// daemon survives both the parent's console close and the parent's Job
+// Object close. The daemon's stdout/stderr are already redirected to the
+// log file before Start() is called, so losing the console is safe; and
+// `daemon stop` talks to it via HTTP /shutdown rather than
+// GenerateConsoleCtrlEvent, so losing the process group is also safe.
+//
+// The withBreakaway argument exists so the caller can retry with
+// withBreakaway=false when CreateProcess fails with ERROR_ACCESS_DENIED
+// (the parent Job does not allow breakaway).
+func daemonSysProcAttr(withBreakaway bool) *syscall.SysProcAttr {
+	flags := uint32(detachedProcess)
+	if withBreakaway {
+		flags |= createBreakawayFromJob
+	}
 	return &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: detachedProcess,
+		CreationFlags: flags,
 	}
+}
+
+// isAccessDeniedSpawnErr reports whether the error returned from
+// (*exec.Cmd).Start() is the Windows ERROR_ACCESS_DENIED, which is what
+// CreateProcess returns when CREATE_BREAKAWAY_FROM_JOB is requested but
+// the parent's Job Object has not set JOB_OBJECT_LIMIT_BREAKAWAY_OK.
+func isAccessDeniedSpawnErr(err error) bool {
+	return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
 }
 
 func notifyShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {

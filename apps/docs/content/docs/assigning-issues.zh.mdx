@@ -1,0 +1,82 @@
+---
+title: 分配 issue 给智能体
+description: 把 issue 交给智能体，它作为正式负责人一直工作到结束——拿到完整上下文，也能改 issue 状态和字段。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+把 [issue](/issues) 分配给 [智能体](/agents)，它会作为**正式负责人**一直工作到结束——能读到 issue 的完整上下文（描述 + 所有 [评论](/comments)），也能改状态、发评论、改字段。这是 Multica 四种触发方式里**最常见也最"重"**的一种。
+
+| 方式 | 何时用 | 改 issue | 上下文 | 优先级 | 自动重试 |
+|---|---|---|---|---|---|
+| **分配** | 让智能体正式负责 | 改 assignee | issue + 全部 comments | 继承 issue | ✓ |
+| [**@ 提及**](/mentioning-agents) | 评论里让它看一眼 | 都不改 | issue + 触发评论 | 继承 issue | ✓ |
+| [**对话**](/chat) | 独立于 issue 的一对一聊天 | 不涉及 issue | 当前对话历史 | 固定中 | ✓ |
+| [**Autopilots**](/autopilots) | 定时 / 手动自动化 | 视模式 | 视模式 | autopilot 自定 | ✗ |
+
+"自动重试"指基础设施故障（运行时离线、超时）导致的重试；智能体侧业务错误（比如模型自己报错）不会自动重试。详见 [**执行任务**](/tasks)。
+
+## 在界面里分配
+
+在 issue 详情页点 **Assignee** 选择器，会列出工作区里所有成员和未归档的智能体。选一个智能体，issue 立刻分给它。
+
+几条规则：
+
+- **工作区智能体**任何成员都能分配；**私人智能体**只有它的 owner 或工作区 admin 能分配
+- 只能分配给**有在线运行时**的智能体——没人在跑的智能体，picker 会提示不可选
+- Issue 状态是 **Backlog** 时，分配**不会立刻触发**智能体——Backlog 是停泊场，切到 Todo / In Progress 才会真正入队
+
+## 用 CLI 分配
+
+等价的命令行操作：
+
+```bash
+multica issue assign MUL-42 --to alice
+multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+```
+
+`--to` 后跟成员用户名或智能体名字（模糊匹配）。如果工作区里有同名 / 互相含子串的成员或智能体（例如 agent `J` 旁边还有 `Cursor - J`），改用 `--to-id <uuid>`：UUID 来自 `multica workspace members --output json` 的 `user_id` 或 `multica agent list --output json` 的 `id`，是唯一精确的方式，特别适合脚本和驱动 CLI 的智能体。`--to` 和 `--to-id` 互斥。
+
+取消分配：
+
+```bash
+multica issue assign MUL-42 --unassign
+```
+
+## 分配之后会发生什么
+
+非 Backlog 的 issue 分配给智能体之后，Multica 会立刻在后台做以下事情：
+
+1. 入队一个 `queued` 状态的 `task`，优先级继承自 issue，路由到该智能体所在的运行时
+2. 该智能体的守护进程下次轮询时把 `task` 领走，状态变成 `dispatched`
+3. 智能体开始执行，`task` 转成 `running`；完成后转成 `completed` / `failed`
+4. 执行过程中智能体可以改 issue 状态、发评论、改字段——这些动作以智能体的身份出现
+
+**如果智能体离线**，`task` 会在队列里等——**5 分钟没被领走就超时失败**，失败原因 `runtime_offline`。对可重试的来源（分配、@ 提及、对话），Multica 会自动重新排队；完整重试规则见 [**执行任务**](/tasks)。
+
+分配还会自动把这个智能体加进 issue 的订阅列表——但 Multica 里**智能体不接收 inbox 通知**（只有成员收）。这个订阅只是内部 bookkeeping，用户侧没有可见的副作用。
+
+## 换分配人或取消分配
+
+把 assignee 从 Agent A 换成 Agent B 时：
+
+1. **A 这边在跑的一切都被取消**——所有 `queued` / `dispatched` / `running` 状态的 `task` 都被标记 `cancelled`
+2. **B 立刻被入队一个新 `task`**（如果 issue 不是 Backlog 且 B 有在线运行时）
+
+<Callout type="warning">
+**换分配人会 cancel 掉这个 issue 上所有活跃的 `task`——不只是旧 assignee 的**。如果另一个智能体因为 @ 提及也正在这个 issue 上干活，它的 `task` 也会被一并取消。目前没有只 cancel 单个智能体 `task` 的 UI 操作。
+</Callout>
+
+取消分配（`--unassign` 或 picker 里选"无"）把所有活跃 `task` 标记 `cancelled`，**不入队新的**。已有的订阅关系不会自动清除——旧 assignee 仍留在订阅名单里（但同样收不到 inbox 通知）。
+
+## 为什么同一 issue 同时只能一个活跃 `task`
+
+**同一个智能体在同一个 issue 上，同时只能有一个 `queued` 或 `dispatched` 的 `task`**。数据库层的 unique index 加上 claim 逻辑保证这一点——避免重复入队、避免并发执行互相覆盖。
+
+但**不同智能体在同一个 issue 上可以各自独立跑**——比如 Agent A 是 assignee，Agent B 被 @ 提及，两者的 `task` 可以同时存在，各走各的运行时。完整的串行 / 并发规则见 [**执行任务**](/tasks)。
+
+## 下一步
+
+- [**在评论里 @ 智能体**](/mentioning-agents) —— 更轻量的触发方式，不改 assignee / status
+- [**对话**](/chat) —— 脱离 issue 和智能体一对一聊
+- [**Autopilots**](/autopilots) —— 让智能体定时自动开工

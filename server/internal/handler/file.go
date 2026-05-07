@@ -188,8 +188,12 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {
+			issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
+			if !ok {
+				return
+			}
 			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-				ID:          parseUUID(issueID),
+				ID:          issueUUID,
 				WorkspaceID: parseUUID(workspaceID),
 			})
 			if err != nil {
@@ -199,7 +203,11 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.IssueID = issue.ID
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
-			comment, err := h.Queries.GetComment(r.Context(), parseUUID(commentID))
+			commentUUID, ok := parseUUIDOrBadRequest(w, commentID, "comment_id")
+			if !ok {
+				return
+			}
+			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
 			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
@@ -226,8 +234,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
+			"id":       "",
+			"url":      link,
 			"filename": header.Filename,
-			"link":     link,
 		})
 		return
 	}
@@ -240,8 +249,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
+		"id":       id.String(),
+		"url":      link,
 		"filename": header.Filename,
-		"link":     link,
 	})
 }
 
@@ -285,9 +295,18 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
 	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          parseUUID(attachmentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
@@ -314,9 +333,18 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
 	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          parseUUID(attachmentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
@@ -353,15 +381,11 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 // linkAttachmentsByIssueIDs links the given attachment IDs to an issue.
 // Only updates attachments that have no issue_id yet.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []string) {
-	uuids := make([]pgtype.UUID, len(ids))
-	for i, id := range ids {
-		uuids[i] = parseUUID(id)
-	}
+func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID) {
 	if err := h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
 		IssueID:     issueID,
 		WorkspaceID: workspaceID,
-		Column3:     uuids,
+		Column3:     ids,
 	}); err != nil {
 		slog.Error("failed to link attachments to issue", "error", err)
 	}
@@ -369,15 +393,11 @@ func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, worksp
 
 // linkAttachmentsByIDs links the given attachment IDs to a comment.
 // Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []string) {
-	uuids := make([]pgtype.UUID, len(ids))
-	for i, id := range ids {
-		uuids[i] = parseUUID(id)
-	}
+func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []pgtype.UUID) {
 	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
 		CommentID: commentID,
 		IssueID:   issueID,
-		Column3:   uuids,
+		Column3:   ids,
 	}); err != nil {
 		slog.Error("failed to link attachments to comment", "error", err)
 	}

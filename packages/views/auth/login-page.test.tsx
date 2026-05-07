@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement, ReactNode } from "react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enAuth from "../locales/en/auth.json";
+import enSettings from "../locales/en/settings.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, auth: enAuth, settings: enSettings },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function renderWithI18n(ui: ReactElement) {
+  return render(ui, { wrapper: I18nWrapper });
+}
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -99,7 +120,7 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
 
   it("renders email form with 'Sign in to Multica' title", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
@@ -117,7 +138,7 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
 
   it("shows error when submitting with empty email", async () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     // The Continue button is disabled when email is empty, so we submit the
     // form programmatically the same way the component does — via form submit.
@@ -145,7 +166,7 @@ describe("LoginPage", () => {
 
   it("calls sendCode on form submit with email", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -157,7 +178,7 @@ describe("LoginPage", () => {
   it("shows 'Sending code...' while submitting", async () => {
     // Never resolve so loading stays true
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -168,7 +189,7 @@ describe("LoginPage", () => {
 
   it("transitions to code step after successful sendCode", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -184,7 +205,7 @@ describe("LoginPage", () => {
 
   it("shows error when sendCode fails", async () => {
     mockSendCode.mockRejectedValueOnce(new Error("Rate limited"));
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -197,7 +218,7 @@ describe("LoginPage", () => {
 
   it("shows generic error when sendCode throws non-Error", async () => {
     mockSendCode.mockRejectedValueOnce("boom");
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -219,7 +240,7 @@ describe("LoginPage", () => {
     mockVerifyCode.mockResolvedValueOnce(undefined);
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
 
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     // Step 1: email
@@ -256,7 +277,7 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockRejectedValueOnce(new Error("Invalid code"));
 
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -283,7 +304,7 @@ describe("LoginPage", () => {
 
   it("disables resend button during cooldown", async () => {
     mockSendCode.mockResolvedValue(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -303,7 +324,7 @@ describe("LoginPage", () => {
   it("shows resend button with cooldown text after sending code", async () => {
     mockSendCode.mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
     await user.click(screen.getByRole("button", { name: /continue/i }));
@@ -318,7 +339,7 @@ describe("LoginPage", () => {
 
   it("calls sendCode again when resend is clicked after cooldown", async () => {
     mockSendCode.mockResolvedValue(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -367,7 +388,7 @@ describe("LoginPage", () => {
   });
 
   it("hides Google OAuth button when google prop omitted", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(
       screen.queryByRole("button", { name: /continue with google/i }),
     ).not.toBeInTheDocument();
@@ -599,7 +620,7 @@ describe("LoginPage", () => {
   });
 
   it("does not render logo placeholder when omitted", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(screen.queryByTestId("custom-logo")).not.toBeInTheDocument();
   });
 
@@ -645,7 +666,7 @@ describe("LoginPage", () => {
 
   it("back button returns to email step", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");

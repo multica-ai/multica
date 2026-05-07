@@ -51,6 +51,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// "approve_for_session" to every session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kimiArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -189,8 +190,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "kimi",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,

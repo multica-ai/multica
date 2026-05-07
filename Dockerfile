@@ -16,7 +16,7 @@ COPY release/cli-version.txt ./release/cli-version.txt
 # Build binaries
 ARG VERSION=dev
 ARG COMMIT=unknown
-RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/server ./cmd/server
+RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/server ./cmd/server
 RUN VERSION="$(tr -d '\r\n' < /src/release/cli-version.txt)" && \
     cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/migrate ./cmd/migrate

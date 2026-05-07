@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Monitor } from "lucide-react";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)

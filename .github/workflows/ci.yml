@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build, type check, and test
-        run: pnpm exec turbo build typecheck test --filter='!@multica/docs'
+      - name: Build, type check, lint, and test
+        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
 
   backend:
     runs-on: ubuntu-latest
@@ -48,8 +48,22 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      # Wires up the RedisLocalSkill*_test.go suite. Distinct from REDIS_URL
+      # (which would flip the server binary itself onto the Redis-backed
+      # realtime relay + request stores); the tests talk to this Redis
+      # directly so they run alongside the Postgres-backed suite.
+      REDIS_TEST_URL: redis://localhost:6379/1
     steps:
       - name: Checkout
         uses: actions/checkout@v6

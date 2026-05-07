@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -9,6 +9,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,16 +30,16 @@ interface ReplyInputProps {
 
 function ReplyInput({
   issueId,
-  placeholder = "Leave a reply...",
+  placeholder,
   avatarType,
   avatarId,
   onSubmit,
   size = "default",
 }: ReplyInputProps) {
+  const { t } = useT("issues");
+  const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
-  const measureRef = useRef<HTMLDivElement>(null);
   const [isEmpty, setIsEmpty] = useState(true);
-  const [hasOverflowContent, setHasOverflowContent] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -46,17 +47,6 @@ function ReplyInput({
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
-
-  useEffect(() => {
-    const el = measureRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) setHasOverflowContent(entry.contentRect.height > 32);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
@@ -102,23 +92,21 @@ function ReplyInput({
           isExpanded
             ? "h-[60vh]"
             : size === "sm" ? "max-h-40" : "max-h-56",
-          (hasOverflowContent || isExpanded) && "pb-7",
+          (!isEmpty || isExpanded) && "pb-7",
         )}
       >
-        <div className="flex-1 min-h-0 overflow-y-auto pr-14">
-          <div ref={measureRef}>
-            <ContentEditor
-              ref={editorRef}
-              placeholder={placeholder}
-              onUpdate={(md) => setIsEmpty(!md.trim())}
-              onSubmit={handleSubmit}
-              onUploadFile={handleUpload}
-              debounceMs={100}
-              currentIssueId={issueId}
-            />
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ContentEditor
+            ref={editorRef}
+            placeholder={placeholderText}
+            onUpdate={(md) => setIsEmpty(!md.trim())}
+            onSubmit={handleSubmit}
+            onUploadFile={handleUpload}
+            debounceMs={100}
+            currentIssueId={issueId}
+          />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1 text-muted-foreground transition-colors group-focus-within/editor:text-foreground">
+        <div className="absolute bottom-0 right-0 flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -128,13 +116,13 @@ function ReplyInput({
                     setIsExpanded((v) => !v);
                     editorRef.current?.focus();
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                 >
                   {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
                 </button>
               }
             />
-            <TooltipContent side="top">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+            <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
           </Tooltip>
           <FileUploadButton
             size="sm"

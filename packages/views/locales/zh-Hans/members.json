@@ -1,0 +1,13 @@
+{
+  "role": {
+    "owner": "所有者",
+    "admin": "管理员",
+    "member": "成员"
+  },
+  "card": {
+    "unavailable": "成员信息不可用",
+    "agents_section": "智能体（{{count}}）",
+    "detail_link": "详情 →",
+    "more_agents_other": "另有 {{count}} 个智能体"
+  }
+}

@@ -37,6 +37,14 @@ linux:
     - deb
     - rpm
   artifactName: multica-desktop-${version}-linux-${arch}.${ext}
+rpm:
+  # Disable RPM build-id symlinks. Electron apps embed the upstream Electron
+  # binary, whose GNU build-id is identical across every app shipping the same
+  # Electron version (Slack, VS Code, Discord, ...). Without this, our RPM
+  # would own /usr/lib/.build-id/<hash> paths and collide with any other
+  # Electron RPM already installed, breaking `dnf install` on Fedora/RHEL.
+  fpm:
+    - "--rpm-rpmbuild-define=_build_id_links none"
 win:
   target:
     - nsis

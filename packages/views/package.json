@@ -17,7 +17,7 @@
     "./issues/hooks": "./issues/hooks/index.ts",
     "./issues/utils/filter": "./issues/utils/filter.ts",
     "./issues/utils/sort": "./issues/utils/sort.ts",
-    "./issues/utils/redact": "./issues/utils/redact.ts",
+    "./common/task-transcript": "./common/task-transcript/index.ts",
     "./projects/components": "./projects/components/index.ts",
     "./autopilots/components": "./autopilots/components/index.ts",
     "./modals/registry": "./modals/registry.tsx",
@@ -39,8 +39,12 @@
     "./chat": "./chat/index.ts",
     "./settings": "./settings/index.ts",
     "./invite": "./invite/index.ts",
+    "./invitations": "./invitations/index.ts",
     "./onboarding": "./onboarding/index.ts",
-    "./platform": "./platform/index.ts"
+    "./platform": "./platform/index.ts",
+    "./i18n": "./i18n/index.ts",
+    "./locales": "./locales/index.ts",
+    "./locales/*": "./locales/*"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -48,7 +52,6 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/dom": "^1.7.6",
-
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
@@ -72,19 +75,28 @@
     "@tiptap/suggestion": "^3.22.1",
     "cmdk": "^1.1.1",
     "hast-util-to-html": "^4.0.1",
+    "katex": "catalog:",
     "lowlight": "^3.3.0",
+    "mermaid": "catalog:",
+    "motion": "^12.38.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
     "recharts": "3.8.0",
+    "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "remark-math": "catalog:",
     "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
+    "@tanstack/react-table": "catalog:",
+    "i18next": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-i18next": "catalog:",
     "zustand": "catalog:"
   },
   "devDependencies": {
@@ -95,6 +107,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "eslint-plugin-i18next": "catalog:",
     "jsdom": "catalog:",
     "rehype-sanitize": "^6.0.0",
     "typescript": "catalog:",

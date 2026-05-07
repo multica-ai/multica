@@ -9,14 +9,17 @@ import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
+import { SkillDetailPage } from "./pages/skill-detail-page";
+import { AgentDetailPage } from "./pages/agent-detail-page";
+import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { RuntimesPage } from "@multica/views/runtimes";
 import { SkillsPage } from "@multica/views/skills";
 import { WikiPage } from "@multica/views/wiki";
 import { DaemonRuntimeCard } from "./components/daemon-runtime-card";
+import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
@@ -115,12 +118,27 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "runtimes",
-            element: <RuntimesPage topSlot={<DaemonRuntimeCard />} />,
+            element: <DesktopRuntimesPage />,
             handle: { title: "Runtimes" },
+          },
+          {
+            path: "runtimes/:id",
+            element: <RuntimeDetailPage />,
+            handle: { title: "Runtime" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "wiki", element: <WikiPage />, handle: { title: "Wiki" } },
+          {
+            path: "skills/:id",
+            element: <SkillDetailPage />,
+            handle: { title: "Skill" },
+          },
           { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          {
+            path: "agents/:id",
+            element: <AgentDetailPage />,
+            handle: { title: "Agent" },
+          },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {
             path: "settings",
