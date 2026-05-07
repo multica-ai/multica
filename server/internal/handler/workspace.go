@@ -271,6 +271,8 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
+	// TEAM_APP_INTEGRATION: workspace:updated is consumed by the standalone
+	// team-app mirror subscriber to refresh workspace metadata without duplicate emits.
 	h.publish(protocol.EventWorkspaceUpdated, id, "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
 
 	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
@@ -433,6 +435,8 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
+	// TEAM_APP_INTEGRATION: member:added is consumed by the standalone team-app
+	// mirror subscriber to sync roster membership without duplicate emits.
 	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, eventPayload)
 
 	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
@@ -505,6 +509,8 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := requestUserID(r)
+	// TEAM_APP_INTEGRATION: member:updated is consumed by the standalone team-app
+	// mirror subscriber to sync roster roles without duplicate emits.
 	h.publish(protocol.EventMemberUpdated, workspaceID, "member", userID, map[string]any{
 		"member": memberWithUserResponse(updatedMember, user),
 	})
@@ -551,6 +557,8 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(target.ID), "workspace_id", workspaceID, "user_id", uuidToString(target.UserID))...)
 	userID := requestUserID(r)
+	// TEAM_APP_INTEGRATION: member:removed is consumed by the standalone team-app
+	// mirror subscriber to tombstone roster membership without duplicate emits.
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
 		"member_id":    uuidToString(target.ID),
 		"workspace_id": workspaceID,
@@ -587,6 +595,8 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
 	userID := requestUserID(r)
+	// TEAM_APP_INTEGRATION: member:removed is consumed by the standalone team-app
+	// mirror subscriber to tombstone roster membership without duplicate emits.
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
 		"member_id":    uuidToString(member.ID),
 		"workspace_id": workspaceID,

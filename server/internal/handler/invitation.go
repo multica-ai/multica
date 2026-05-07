@@ -409,6 +409,8 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if ws, err := h.Queries.GetWorkspace(r.Context(), accepted.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
+	// TEAM_APP_INTEGRATION: member:added is consumed by the standalone team-app
+	// mirror subscriber to sync roster membership without duplicate emits.
 	h.publish(protocol.EventMemberAdded, wsID, "member", userID, eventPayload)
 
 	// Notify the workspace about the acceptance.
