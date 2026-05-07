@@ -95,10 +95,12 @@ function PropRow({
 const projectViewStore = createIssueViewStore("project_issues_view");
 
 function ProjectIssuesContent({
+  projectId,
   projectIssues,
   scope,
   filter,
 }: {
+  projectId: string;
   projectIssues: Issue[];
   scope: string;
   filter: MyIssuesFilter;
@@ -168,6 +170,7 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          projectId={projectId}
         />
       ) : (
         <ListView
@@ -176,6 +179,7 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          projectId={projectId}
         />
       )}
     </div>
@@ -581,6 +585,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <ViewStoreProvider store={projectViewStore}>
               <IssuesHeader scopedIssues={projectIssues} />
               <ProjectIssuesContent
+                projectId={projectId}
                 projectIssues={projectIssues}
                 scope={projectScope}
                 filter={projectFilter}

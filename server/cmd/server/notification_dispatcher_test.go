@@ -193,6 +193,42 @@ func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
 	}
 }
 
+func TestBuildDingTalkDeliveryMarkdown_TruncatesBodyWithoutClippingActionLink(t *testing.T) {
+	link := "https://multica.wujieai.com/openharness/issues/OPE-293"
+	body := "Review " + link + "\n\n" + strings.Repeat(
+		"The generated dashboards should include latency, request rate, and alerts for the multica-bot namespace.\n",
+		80,
+	)
+
+	card := buildDingTalkDeliveryMarkdown(notificationEventPayload{
+		Title:           "Build Observability Dashboards and Alerts for multica-bot Namespace",
+		IssueIdentifier: "OPE-293",
+		ActorName:       "Alice",
+		Body:            body,
+		Link:            link,
+	})
+
+	actionLink := "[Open In Multica](" + dingtalkExternalBrowserURL(link) + ")"
+	if !strings.Contains(card.Text, actionLink) {
+		t.Fatalf("expected full action link to be preserved, got %q", card.Text)
+	}
+	if !strings.HasSuffix(card.Text, actionLink) {
+		t.Fatalf("expected truncation marker before the action link, got %q", card.Text)
+	}
+	if count := strings.Count(card.Text, "Open In Multica"); count != 1 {
+		t.Fatalf("expected exactly one Open In Multica link, got %d in %q", count, card.Text)
+	}
+	if got := dingTalkRuneLen(card.Text); got > dingTalkMarkdownTextLimit {
+		t.Fatalf("expected markdown text <= %d runes, got %d", dingTalkMarkdownTextLimit, got)
+	}
+	if !strings.Contains(card.Text, "\n...") {
+		t.Fatalf("expected long body to be truncated on a separate line, got %q", card.Text)
+	}
+	if strings.Contains(card.Text, link+"...") || strings.Contains(card.Text, link+"…") {
+		t.Fatalf("body truncation marker should not be appended to a URL, got %q", card.Text)
+	}
+}
+
 func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	cleanupNotificationDispatchData(t)
 	t.Cleanup(func() { cleanupNotificationDispatchData(t) })

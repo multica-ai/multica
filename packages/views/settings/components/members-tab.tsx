@@ -205,6 +205,7 @@ function InviteLinkRow({
     revoked: "Revoked",
     used_up: "Used up",
   };
+  const usageLabel = `${inviteLink.used_count}/${inviteLink.max_uses} joins used`;
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -218,7 +219,7 @@ function InviteLinkRow({
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span>{statusLabel[inviteLink.status]}</span>
-          <span>{inviteLink.used_count}/{inviteLink.max_uses} used</span>
+          <span>{usageLabel}</span>
           {inviteLink.expires_at && <span>Expires {new Date(inviteLink.expires_at).toLocaleDateString()}</span>}
         </div>
       </div>
@@ -262,7 +263,7 @@ export function MembersTab() {
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [linkRole, setLinkRole] = useState<Exclude<MemberRole, "owner">>("member");
-  const [linkTTLHours, setLinkTTLHours] = useState("168");
+  const [linkTTLDays, setLinkTTLDays] = useState("7");
   const [linkMaxUses, setLinkMaxUses] = useState("1");
   const [linkLoading, setLinkLoading] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
@@ -280,6 +281,12 @@ export function MembersTab() {
   const isOwner = currentMember?.role === "owner";
   const maxUsesValue = Number(linkMaxUses.trim());
   const linkMaxUsesValid = /^\d+$/.test(linkMaxUses.trim()) && maxUsesValue >= 1 && maxUsesValue <= 100;
+  const ttlHoursByDays: Record<string, number> = {
+    "1": 24,
+    "3": 72,
+    "7": 168,
+    "30": 720,
+  };
 
   const inviteURLFor = (inviteLink: InviteLink) => {
     const value = inviteLink.invite_url || (inviteLink.token ? `/invite/${encodeURIComponent(inviteLink.token)}` : `/invite/${encodeURIComponent(inviteLink.id)}`);
@@ -302,7 +309,7 @@ export function MembersTab() {
     try {
       const inviteLink = await api.createInviteLink(workspace.id, {
         role: linkRole,
-        ttl_hours: Number(linkTTLHours),
+        ttl_hours: ttlHoursByDays[linkTTLDays] ?? 168,
         max_uses: maxUsesValue,
       });
       const url = inviteURLFor(inviteLink);
@@ -441,13 +448,13 @@ export function MembersTab() {
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={linkTTLHours} onValueChange={(value) => { if (value) setLinkTTLHours(value); }}>
+                  <Select value={linkTTLDays} onValueChange={(value) => { if (value) setLinkTTLDays(value); }}>
                     <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="24">24 hours</SelectItem>
-                      <SelectItem value="72">3 days</SelectItem>
-                      <SelectItem value="168">7 days</SelectItem>
-                      <SelectItem value="720">30 days</SelectItem>
+                      <SelectItem value="1">1 day</SelectItem>
+                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="30">30 days</SelectItem>
                     </SelectContent>
                   </Select>
                   <Input
@@ -457,14 +464,17 @@ export function MembersTab() {
                     step={1}
                     value={linkMaxUses}
                     onChange={(e) => setLinkMaxUses(e.target.value)}
-                    placeholder="Uses"
+                    placeholder="Join limit"
                   />
                   <Button onClick={handleCreateInviteLink} disabled={linkLoading || !linkMaxUsesValid}>
                     {linkLoading ? "Generating..." : "Generate"}
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Validity: {linkTTLDays} day(s) · Join limit: up to {linkMaxUsesValid ? maxUsesValue : "?"} member(s)
+                </p>
                 {!linkMaxUsesValid && (
-                  <p className="text-xs text-destructive">Uses must be a whole number from 1 to 100.</p>
+                  <p className="text-xs text-destructive">Join limit must be a whole number from 1 to 100.</p>
                 )}
                 {generatedLink && (
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
