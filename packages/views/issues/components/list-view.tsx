@@ -13,9 +13,8 @@ import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { sortIssues } from "../utils/sort";
-import { StatusIcon } from "./status-icon";
+import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 
@@ -102,7 +101,6 @@ export function ListView({
         }}
       >
         {visibleStatuses.map((status) => {
-          const cfg = STATUS_CONFIG[status];
           const statusIssues = issuesByStatus.get(status) ?? [];
           const statusIssueIds = statusIssues.map((i) => i.id);
           const selectedCount = statusIssueIds.filter((id) => selectedIds.has(id)).length;
@@ -131,13 +129,10 @@ export function ListView({
                 </div>
                 <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none">
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-                  <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.iconColor}`}>
-                    <StatusIcon status={status} className="h-3 w-3" inheritColor />
-                    {cfg.label}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {status === "done" ? displayDoneTotal : statusIssues.length}
-                  </span>
+                  <StatusHeading
+                    status={status}
+                    count={status === "done" ? displayDoneTotal : statusIssues.length}
+                  />
                 </Accordion.Trigger>
                 <div className="pr-2">
                   <Tooltip>
