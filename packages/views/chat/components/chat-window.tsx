@@ -240,11 +240,21 @@ export function ChatWindow() {
       // and server-authoritative created_at land below; until then the pill
       // is anchored to the local clock (drift is the request RTT, ~50–200ms,
       // which doesn't change the rendered "Ns" value).
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: `optimistic-${optimistic.id}`,
-        status: "queued",
-        created_at: sentAt,
-      });
+      // CEREBRO-PATCH(chat-running-task-preserve): JEH-654 — preserve a
+      // still-running task instead of clobbering it with the queued
+      // successor's optimistic id. The successor surfaces via WS
+      // chat:done → invalidate → refetch once the running task finishes.
+      qc.setQueryData<ChatPendingTask | undefined>(
+        chatKeys.pendingTask(sessionId),
+        (existing) =>
+          existing?.task_id
+            ? existing
+            : {
+                task_id: `optimistic-${optimistic.id}`,
+                status: "queued",
+                created_at: sentAt,
+              },
+      );
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
       const result = await api.sendChatMessage(sessionId, finalContent);

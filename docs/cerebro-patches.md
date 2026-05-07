@@ -84,6 +84,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-index-cerebro` | packages/views/chat/index.ts | 0 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-input-mcp-onboarding` | packages/views/chat/components/chat-input.tsx | 53 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-message-list-cerebro` | packages/views/chat/components/chat-message-list.tsx | 41 | Chat view cerebro additions (MCP onboarding, status, archive) |
+| `chat-running-task-preserve` | packages/views/chat/components/chat-window.tsx | 7 | JEH-654 — preserve a still-running pending task instead of clobbering it with the queued successor's optimistic id; the successor surfaces via WS chat:done → invalidate → refetch once the running task finishes. Required after upstream presence-v4 (#1856) added an unconditional optimistic seed on top of the JEH-654 conditional seed |
 | `chat-status-line` | packages/views/chat/components/chat-status-line.tsx | 93 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-tool-summary` | packages/views/chat/components/tool-summary.ts | 35 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-window-cerebro` | packages/views/chat/components/chat-window.tsx | 7 | Chat view cerebro additions (MCP onboarding, status, archive) |
