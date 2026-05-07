@@ -932,6 +932,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		Content:     imported.content,
 		Config:      []byte("{}"),
 		CreatedBy:   parseUUID(creatorID),
+		OwnerID:     parseUUID(creatorID),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -956,6 +957,21 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		fileResps = append(fileResps, skillFileToResponse(sf))
+	}
+
+	// Snapshot v1.0.0 baseline so imported skills get the same version-history
+	// behaviour as user-created ones — otherwise ListSkillVersions returns
+	// empty for imports and any future change request has no base to diff.
+	if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
+		SkillID:     skill.ID,
+		Version:     skill.CurrentVersion,
+		Content:     skill.Content,
+		Files:       skillFilesToVersionJSON(fileResps),
+		Description: "Imported from " + req.URL,
+		CreatedBy:   parseUUID(creatorID),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to snapshot imported version: "+err.Error())
+		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {

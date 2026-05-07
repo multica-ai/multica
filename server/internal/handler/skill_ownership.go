@@ -374,7 +374,10 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 	case "approve":
 		// Approve transitions to merged in one shot — we apply the proposed
 		// content/version atomically, snapshot the new version, then mark the
-		// change request merged.
+		// change request merged. We re-fetch the CR inside the tx with
+		// FOR UPDATE so two approvers can't race past the status check, and
+		// we re-validate semverGT in case the owner did a direct UpdateSkill
+		// (which bumps current_version) between propose and approve.
 		tx, err := h.TxStarter.Begin(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -383,10 +386,34 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 
+		locked, err := qtx.GetSkillChangeRequestForUpdate(r.Context(), cr.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to lock change request: "+err.Error())
+			return
+		}
+		if locked.Status != "pending" {
+			writeError(w, http.StatusConflict, "change request is no longer pending")
+			return
+		}
+		freshSkill, err := qtx.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+			ID:          skill.ID,
+			WorkspaceID: skill.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload skill: "+err.Error())
+			return
+		}
+		if !semverGT(locked.ProposedVersion, freshSkill.CurrentVersion) {
+			writeError(w, http.StatusConflict, fmt.Sprintf(
+				"proposed_version %s is no longer greater than current %s — rebase the change request",
+				locked.ProposedVersion, freshSkill.CurrentVersion))
+			return
+		}
+
 		updatedSkill, err := qtx.UpdateSkillCurrentVersion(r.Context(), db.UpdateSkillCurrentVersionParams{
 			ID:             skill.ID,
-			CurrentVersion: cr.ProposedVersion,
-			Content:        cr.ProposedContent,
+			CurrentVersion: locked.ProposedVersion,
+			Content:        locked.ProposedContent,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to apply change: "+err.Error())
@@ -398,7 +425,7 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, "failed to clear files: "+err.Error())
 			return
 		}
-		for _, f := range decodeVersionFiles(cr.ProposedFiles) {
+		for _, f := range decodeVersionFiles(locked.ProposedFiles) {
 			if _, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 				SkillID: updatedSkill.ID,
 				Path:    f.Path,
@@ -411,10 +438,10 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 
 		if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
 			SkillID:     updatedSkill.ID,
-			Version:     cr.ProposedVersion,
-			Content:     cr.ProposedContent,
-			Files:       cr.ProposedFiles,
-			Description: cr.Title,
+			Version:     locked.ProposedVersion,
+			Content:     locked.ProposedContent,
+			Files:       locked.ProposedFiles,
+			Description: locked.Title,
 			CreatedBy:   parseUUID(userID),
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to snapshot version: "+err.Error())
@@ -422,7 +449,7 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		}
 
 		updatedCR, err := qtx.ReviewSkillChangeRequest(r.Context(), db.ReviewSkillChangeRequestParams{
-			ID:            cr.ID,
+			ID:            locked.ID,
 			Status:        "merged",
 			ReviewedBy:    parseUUID(userID),
 			ReviewComment: req.Comment,

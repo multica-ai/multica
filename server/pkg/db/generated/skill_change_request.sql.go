@@ -91,6 +91,37 @@ func (q *Queries) GetSkillChangeRequest(ctx context.Context, id pgtype.UUID) (Sk
 	return i, err
 }
 
+const getSkillChangeRequestForUpdate = `-- name: GetSkillChangeRequestForUpdate :one
+SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at FROM skill_change_request
+WHERE id = $1
+FOR UPDATE
+`
+
+// GetSkillChangeRequestForUpdate locks the row so concurrent reviews on the
+// same change request can't race past the status check.
+func (q *Queries) GetSkillChangeRequestForUpdate(ctx context.Context, id pgtype.UUID) (SkillChangeRequest, error) {
+	row := q.db.QueryRow(ctx, getSkillChangeRequestForUpdate, id)
+	var i SkillChangeRequest
+	err := row.Scan(
+		&i.ID,
+		&i.SkillID,
+		&i.Title,
+		&i.Description,
+		&i.BaseVersion,
+		&i.ProposedVersion,
+		&i.ProposedContent,
+		&i.ProposedFiles,
+		&i.Status,
+		&i.ProposedBy,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.ReviewComment,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listPendingChangeRequestsByWorkspace = `-- name: ListPendingChangeRequestsByWorkspace :many
 SELECT cr.id, cr.skill_id, cr.title, cr.description, cr.base_version, cr.proposed_version, cr.proposed_content, cr.proposed_files, cr.status, cr.proposed_by, cr.reviewed_by, cr.reviewed_at, cr.review_comment, cr.created_at, cr.updated_at
 FROM skill_change_request cr
