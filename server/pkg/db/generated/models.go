@@ -189,6 +189,7 @@ type Comment struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ParentID    pgtype.UUID        `json:"parent_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type CommentReaction struct {
