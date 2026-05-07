@@ -151,6 +151,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `inbox-chat-panel` | packages/views/inbox/components/inbox-chat-panel.tsx | 298 | Inbox view additions |
 | `inbox-folder-handler` | server/internal/handler/inbox_folder.go | 413 | Inbox-folder server handler (cerebro-only feature) |
 | `inbox-list-item-cerebro` | packages/views/inbox/components/inbox-list-item.tsx | 17 | Inbox view additions |
+| `inbox-mobile-detail-flex-height` | packages/views/inbox/components/inbox-page.tsx | 1 | Mobile inbox detail wrapper must be a flex column so embedded IssueDetail/ChannelDetail/InboxChatPanel get a defined height — overflow-y-auto block parent collapsed the body to zero height (JEH-697) |
 | `inbox-page-stub` | packages/views/inbox/components/inbox-page.tsx | 0 | Routes to cerebro inbox-page when feature flag enabled |
 | `install-runtime-script` | server/internal/handler/install_runtime.sh<br>server/internal/handler/install_runtime_embed.go | 236 | Runtime-setup token + install script (cerebro feature) |
 | `invite-page-cerebro` | packages/views/invite/invite-page.tsx | 3 | Invite-page additions |

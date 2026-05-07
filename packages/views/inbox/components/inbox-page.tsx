@@ -1038,7 +1038,8 @@ export function InboxPage() {
               {t(($) => $.page.back)}
             </Button>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* CEREBRO-PATCH(inbox-mobile-detail-flex-height): IssueDetail/ChannelDetail/InboxChatPanel rely on h-full + flex-1 for their internal scroll regions, so the wrapper must be a flex column (not an overflow-y-auto block) or the body collapses to zero height (JEH-697). */}
+          <div className="flex flex-1 flex-col min-h-0">
             {detailContent}
           </div>
         </div>
