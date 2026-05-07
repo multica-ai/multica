@@ -252,6 +252,7 @@ function makeFallbackChannel(id: string): Channel {
     creator_id: "",
     participants: [],
     unread_count: 0,
+    last_message: null,
     created_at: "",
     updated_at: "",
   };

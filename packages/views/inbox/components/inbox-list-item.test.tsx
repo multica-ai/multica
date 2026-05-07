@@ -64,6 +64,7 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
       { user_type: "member", user_id: "alice" },
     ],
     unread_count: 0,
+    last_message: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,

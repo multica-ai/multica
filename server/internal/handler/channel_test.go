@@ -234,6 +234,91 @@ func TestChannelsHiddenFromIssueList(t *testing.T) {
 	}
 }
 
+// TestListChannelsIncludesLastMessage verifies the inbox-preview contract:
+// each channel row in /api/channels carries the latest user comment so the
+// inbox sidebar can render "Sara: shipping at 3" without N+1 round-trips.
+// Channels with no messages must still appear, with last_message=null.
+func TestListChannelsIncludesLastMessage(t *testing.T) {
+	peerID, cleanup := createSecondTestUser(t, "last-msg-peer")
+	defer cleanup()
+
+	// Channel with messages.
+	w := httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "preview-test",
+		"member_ids": []string{peerID},
+	}))
+	var withMsgs ChannelResponse
+	json.NewDecoder(w.Body).Decode(&withMsgs)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, withMsgs.ID)
+	})
+
+	// Channel with no messages.
+	w = httptest.NewRecorder()
+	testHandler.CreateChannel(w, newRequest("POST", "/api/channels", map[string]any{
+		"kind":       "channel",
+		"name":       "no-messages",
+		"member_ids": []string{peerID},
+	}))
+	var empty ChannelResponse
+	json.NewDecoder(w.Body).Decode(&empty)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, empty.ID)
+	})
+
+	// Insert two comments on the first channel; the second one should win
+	// because it's newer.
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		 VALUES ($1, $2, 'member', $3, $4, 'comment', now() - interval '1 minute'),
+		        ($1, $2, 'member', $3, $5, 'comment', now())`,
+		withMsgs.ID, testWorkspaceID, testUserID, "earlier message", "shipping at 3",
+	); err != nil {
+		t.Fatalf("insert comments: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.ListChannels(w, newRequest("GET", "/api/channels", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChannels: expected 200, got %d", w.Code)
+	}
+	var list []ChannelResponse
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var got, gotEmpty *ChannelResponse
+	for i, c := range list {
+		if c.ID == withMsgs.ID {
+			got = &list[i]
+		}
+		if c.ID == empty.ID {
+			gotEmpty = &list[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("channel with messages not in list")
+	}
+	if got.LastMessage == nil {
+		t.Fatalf("expected last_message to be populated, got nil")
+	}
+	if got.LastMessage.Content != "shipping at 3" {
+		t.Fatalf("expected latest comment, got %q", got.LastMessage.Content)
+	}
+	if got.LastMessage.AuthorID != testUserID {
+		t.Fatalf("expected author %q, got %q", testUserID, got.LastMessage.AuthorID)
+	}
+
+	if gotEmpty == nil {
+		t.Fatalf("empty channel not in list")
+	}
+	if gotEmpty.LastMessage != nil {
+		t.Fatalf("expected last_message=nil for empty channel, got %+v", gotEmpty.LastMessage)
+	}
+}
+
 // TestGetChannelRejectsNonParticipant verifies subscriber-based access
 // control on GET /api/channels/{id}.
 func TestGetChannelRejectsNonParticipant(t *testing.T) {

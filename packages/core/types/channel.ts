@@ -9,6 +9,13 @@ export interface ChannelMember {
   user_id: string;
 }
 
+export interface ChannelLastMessage {
+  author_type: "member" | "agent";
+  author_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Channel {
   id: string;
   workspace_id: string;
@@ -25,6 +32,7 @@ export interface Channel {
   creator_id: string;
   participants: ChannelMember[];
   unread_count: number;
+  last_message: ChannelLastMessage | null;
   created_at: string;
   updated_at: string;
 }

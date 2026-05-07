@@ -212,19 +212,31 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     };
 
+    // Channel rows in the inbox preview the latest message, so any change
+    // to comments on a channel needs to refresh the channel list cache.
+    // Cheap to over-invalidate here — the list is small and ws-bursty
+    // invalidation is debounced upstream.
+    const invalidateChannelList = () => {
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    };
+
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      invalidateChannelList();
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      invalidateChannelList();
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+      invalidateChannelList();
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {

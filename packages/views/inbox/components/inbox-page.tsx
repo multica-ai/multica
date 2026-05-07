@@ -49,6 +49,7 @@ import {
 } from "@multica/core/chat/queries";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { projectListOptions } from "@multica/core/projects";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
@@ -161,6 +162,7 @@ export function InboxPage() {
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
 
   const userId = useAuthStore((s) => s.user?.id ?? "");
+  const { getActorName } = useActorName();
   const groupByStorageKey = `multica_inbox_groupby_${wsId}_${userId}`;
   const [groupBy, setGroupBy] = useState<{ primary: GroupByMode; secondary: GroupByMode }>(() => {
     if (typeof window === "undefined") return { primary: "none", secondary: "none" };
@@ -564,11 +566,26 @@ export function InboxPage() {
   const renderEntry = (entry: MergedEntry) => {
     if (entry.kind === "channel") {
       const channel = entry.channel;
+      const lastMsg = channel.last_message;
+      // "You" beats the user's full name when the latest message is from
+      // them — Slack/iMessage style. Markdown lives in the snippet, but a
+      // single-line preview only needs the first line, so we collapse
+      // whitespace runs to keep the row tidy.
+      const preview = lastMsg
+        ? {
+            author:
+              lastMsg.author_type === "member" && lastMsg.author_id === userId
+                ? "You"
+                : getActorName(lastMsg.author_type, lastMsg.author_id),
+            text: lastMsg.content.replace(/\s+/g, " ").trim(),
+          }
+        : null;
       return (
         <ChannelListItem
           key={`channel:${channel.id}`}
           channel={channel}
           mentioned={mentionedChannels.has(channel.id)}
+          preview={preview}
           isSelected={channel.id === selectedKey}
           onClick={() => setSelectedKey("issue", channel.id)}
           onArchive={() => {

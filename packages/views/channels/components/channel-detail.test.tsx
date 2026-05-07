@@ -127,6 +127,7 @@ const baseChannel: Channel = {
     { user_type: "agent", user_id: "lando" },
   ],
   unread_count: 0,
+  last_message: null,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };

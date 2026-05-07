@@ -17,6 +17,18 @@ WHERE i.workspace_id = $1
   AND s.user_id = $2
 ORDER BY i.updated_at DESC;
 
+-- name: ListLatestCommentsForIssues :many
+-- Returns the most recent user comment per issue from a list of issue IDs.
+-- DISTINCT ON keeps a single row per issue — the latest one. Used by the
+-- inbox to render a "Sara: shipping at 3" preview under each channel row
+-- without doing N round-trips.
+SELECT DISTINCT ON (c.issue_id)
+       c.issue_id, c.author_type, c.author_id, c.content, c.created_at
+FROM comment c
+WHERE c.issue_id = ANY($1::uuid[])
+  AND c.type = 'comment'
+ORDER BY c.issue_id, c.created_at DESC;
+
 -- name: GetDMByMembers :one
 -- Find an existing DM between exactly two members. Used to make DM
 -- creation idempotent — opening "DM with Sara" twice returns the same
