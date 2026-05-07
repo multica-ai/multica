@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var testHandler *Handler
@@ -934,6 +935,139 @@ func TestCommentCRUD(t *testing.T) {
 	req = newRequest("DELETE", "/api/issues/"+issueID, nil)
 	req = withURLParam(req, "id", issueID)
 	testHandler.DeleteIssue(w, req)
+}
+
+func captureHandlerEvents(eventType string) *[]events.Event {
+	captured := []events.Event{}
+	testHandler.Bus.Subscribe(eventType, func(e events.Event) {
+		captured = append(captured, e)
+	})
+	return &captured
+}
+
+func assertOneHandlerEvent(t *testing.T, eventType string, captured *[]events.Event) events.Event {
+	t.Helper()
+	if got := len(*captured); got != 1 {
+		t.Fatalf("%s: expected exactly 1 publish, got %d", eventType, got)
+	}
+	return (*captured)[0]
+}
+
+func createHandlerEventMember(t *testing.T, email, role string) MemberWithUserResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/members", map[string]any{
+		"email": email,
+		"role":  role,
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateMember(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateMember: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var member MemberWithUserResponse
+	if err := json.NewDecoder(w.Body).Decode(&member); err != nil {
+		t.Fatalf("decode member response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE id = $1`, member.ID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, member.UserID)
+	})
+	return member
+}
+
+func TestTeamAppIntegrationEventPublishCounts(t *testing.T) {
+	t.Run("comment created", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title": "Team app event comment issue",
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var issue IssueResponse
+		json.NewDecoder(w.Body).Decode(&issue)
+		t.Cleanup(func() {
+			cleanupReq := withURLParam(newRequest("DELETE", "/api/issues/"+issue.ID, nil), "id", issue.ID)
+			testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+		})
+
+		events := captureHandlerEvents(protocol.EventCommentCreated)
+		w = httptest.NewRecorder()
+		req = withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+			"content": "team-app integration comment",
+		}), "id", issue.ID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		evt := assertOneHandlerEvent(t, protocol.EventCommentCreated, events)
+		if evt.WorkspaceID != testWorkspaceID {
+			t.Fatalf("comment event workspace_id = %s, want %s", evt.WorkspaceID, testWorkspaceID)
+		}
+	})
+
+	t.Run("workspace updated", func(t *testing.T) {
+		events := captureHandlerEvents(protocol.EventWorkspaceUpdated)
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("PATCH", "/api/workspaces/"+testWorkspaceID, map[string]any{
+			"description": "team-app event workspace update",
+		}), "id", testWorkspaceID)
+		testHandler.UpdateWorkspace(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateWorkspace: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		assertOneHandlerEvent(t, protocol.EventWorkspaceUpdated, events)
+	})
+
+	t.Run("member added", func(t *testing.T) {
+		events := captureHandlerEvents(protocol.EventMemberAdded)
+		member := createHandlerEventMember(t, fmt.Sprintf("event-added-%d@multica.ai", len(*events)+1), "member")
+		if member.UserID == "" {
+			t.Fatal("expected created member user id")
+		}
+		assertOneHandlerEvent(t, protocol.EventMemberAdded, events)
+	})
+
+	t.Run("member updated", func(t *testing.T) {
+		member := createHandlerEventMember(t, "event-updated@multica.ai", "member")
+		events := captureHandlerEvents(protocol.EventMemberUpdated)
+		w := httptest.NewRecorder()
+		req := withURLParams(newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/members/"+member.ID, map[string]any{
+			"role": "admin",
+		}), "id", testWorkspaceID, "memberId", member.ID)
+		testHandler.UpdateMember(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateMember: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		assertOneHandlerEvent(t, protocol.EventMemberUpdated, events)
+	})
+
+	t.Run("member removed by admin", func(t *testing.T) {
+		member := createHandlerEventMember(t, "event-removed@multica.ai", "member")
+		events := captureHandlerEvents(protocol.EventMemberRemoved)
+		w := httptest.NewRecorder()
+		req := withURLParams(newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/members/"+member.ID, nil), "id", testWorkspaceID, "memberId", member.ID)
+		testHandler.DeleteMember(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+		}
+		assertOneHandlerEvent(t, protocol.EventMemberRemoved, events)
+	})
+
+	t.Run("member removed by leave", func(t *testing.T) {
+		member := createHandlerEventMember(t, "event-left@multica.ai", "member")
+		events := captureHandlerEvents(protocol.EventMemberRemoved)
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil), "id", testWorkspaceID)
+		req.Header.Set("X-User-ID", member.UserID)
+		testHandler.LeaveWorkspace(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("LeaveWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
+		}
+		assertOneHandlerEvent(t, protocol.EventMemberRemoved, events)
+	})
 }
 
 func TestAgentCRUD(t *testing.T) {

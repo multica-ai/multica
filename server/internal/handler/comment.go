@@ -18,19 +18,19 @@ import (
 )
 
 type CommentResponse struct {
-	ID                string               `json:"id"`
-	IssueID           string               `json:"issue_id"`
-	AuthorType        string               `json:"author_type"`
-	AuthorID          string               `json:"author_id"`
-	Content           string               `json:"content"`
-	Type              string               `json:"type"`
-	ParentID          *string              `json:"parent_id"`
-	ReviewThreadID    *string              `json:"review_thread_id,omitempty"`
-	PostedToGithubAt  *string              `json:"posted_to_github_at,omitempty"`
-	CreatedAt         string               `json:"created_at"`
-	UpdatedAt         string               `json:"updated_at"`
-	Reactions         []ReactionResponse   `json:"reactions"`
-	Attachments       []AttachmentResponse `json:"attachments"`
+	ID               string               `json:"id"`
+	IssueID          string               `json:"issue_id"`
+	AuthorType       string               `json:"author_type"`
+	AuthorID         string               `json:"author_id"`
+	Content          string               `json:"content"`
+	Type             string               `json:"type"`
+	ParentID         *string              `json:"parent_id"`
+	ReviewThreadID   *string              `json:"review_thread_id,omitempty"`
+	PostedToGithubAt *string              `json:"posted_to_github_at,omitempty"`
+	CreatedAt        string               `json:"created_at"`
+	UpdatedAt        string               `json:"updated_at"`
+	Reactions        []ReactionResponse   `json:"reactions"`
+	Attachments      []AttachmentResponse `json:"attachments"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -337,6 +337,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
+	// TEAM_APP_INTEGRATION: comment:created is consumed by the standalone team-app
+	// mirror subscriber to sync comments and activity without duplicate emits.
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
