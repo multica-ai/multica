@@ -87,6 +87,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  AgentDefaults,
+  AgentDefaultsWithUser,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -1228,5 +1230,27 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Personal Agent Defaults
+  async getPersonalAgentDefaults(workspaceId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`);
+  }
+
+  async updatePersonalAgentDefaults(workspaceId: string, config: Record<string, unknown>): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`, {
+      method: "PUT",
+      body: JSON.stringify({ config }),
+    });
+  }
+
+  async listAllAgentDefaults(workspaceId: string): Promise<AgentDefaultsWithUser[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults`);
+  }
+
+  async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
+      method: "POST",
+    });
   }
 }

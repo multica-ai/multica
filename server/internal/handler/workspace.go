@@ -233,6 +233,17 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// When settings includes agent_defaults, require owner/admin role.
+	if req.Settings != nil {
+		if settingsMap, ok := req.Settings.(map[string]any); ok {
+			if _, hasAgentDefaults := settingsMap["agent_defaults"]; hasAgentDefaults {
+				if _, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin"); !ok {
+					return
+				}
+			}
+		}
+	}
+
 	params := db.UpdateWorkspaceParams{
 		ID: parseUUID(id),
 	}

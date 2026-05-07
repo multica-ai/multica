@@ -135,6 +135,9 @@ export function EnvTab({
           <p className="text-xs text-muted-foreground mt-0.5">
             Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.
           </p>
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            This agent also inherits environment variables from System defaults and your Personal defaults.
+          </p>
         </div>
         {envEntries.length > 0 ? (
           <div className="space-y-2">
@@ -179,6 +182,9 @@ export function EnvTab({
           <p className="text-xs text-muted-foreground mt-0.5">
             Injected into the agent process at launch (e.g. ANTHROPIC_API_KEY,
             ANTHROPIC_BASE_URL)
+          </p>
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            This agent also inherits environment variables from System defaults and your Personal defaults.
           </p>
         </div>
         <Button

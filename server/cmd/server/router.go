@@ -211,6 +211,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					r.Get("/invite-links", h.ListInviteLinks)
+					r.Get("/agent-defaults/me", h.GetPersonalAgentDefaults)
+					r.Put("/agent-defaults/me", h.UpdatePersonalAgentDefaults)
+					r.Get("/agent-defaults", h.ListAllAgentDefaults)
+					r.Post("/agent-defaults/duplicate/{configId}", h.DuplicateAgentDefaults)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

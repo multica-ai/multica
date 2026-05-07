@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { Bot, Plus, Archive, ChevronDown, Check } from "lucide-react";
-import type { CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
+import { Bot, Plus, Archive, ChevronDown, Check, Sliders, Settings2 } from "lucide-react";
+import type { CreateAgentRequest, UpdateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -29,10 +29,19 @@ import { PageHeader } from "../../layout/page-header";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentListItem } from "./agent-list-item";
 import { AgentDetail } from "./agent-detail";
+import { PersonalDefaultsDetail, SystemDefaultsDetail, OtherDefaultsDetail } from "./defaults-detail";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { MemberWithUser } from "@multica/core/types";
 
 type AgentScope = "mine" | "all";
+
+const PERSONAL_DEFAULTS_ID = "personal-defaults";
+const SYSTEM_DEFAULTS_ID = "system-defaults";
+const defaultsPrefix = "defaults-";
+
+function isDefaultsId(id: string) {
+  return id === PERSONAL_DEFAULTS_ID || id === SYSTEM_DEFAULTS_ID || id.startsWith(defaultsPrefix);
+}
 
 export function AgentsPage() {
   const currentUser = useAuthStore((s) => s.user);
@@ -51,6 +60,17 @@ export function AgentsPage() {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_agents_layout",
   });
+
+  // All defaults (fetched only in "all" scope)
+  const { data: allDefaults = [] } = useQuery({
+    queryKey: ["workspaces", wsId, "all-agent-defaults"],
+    queryFn: () => api.listAllAgentDefaults(wsId),
+    enabled: scope === "all",
+  });
+
+  const myMembership = members.find((m) => m.user_id === currentUser?.id) ?? null;
+  const isAdminOrOwner =
+    myMembership?.role === "owner" || myMembership?.role === "admin";
 
   const uniqueOwners = useMemo(() => {
     if (scope !== "all") return [] as MemberWithUser[];
@@ -101,8 +121,9 @@ export function AgentsPage() {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
   };
 
-  // Select first agent on initial load or when filter changes
+  // Select first item on initial load or when filter changes
   useEffect(() => {
+    if (isDefaultsId(selectedId)) return;
     if (filteredAgents.length > 0 && !filteredAgents.some((a) => a.id === selectedId)) {
       setSelectedId(filteredAgents[0]!.id);
     }
@@ -157,7 +178,21 @@ export function AgentsPage() {
     }
   };
 
+  const handleDuplicateDefaults = async (configId: string) => {
+    try {
+      await api.duplicateAgentDefaults(wsId, configId);
+      qc.invalidateQueries({ queryKey: ["workspaces", wsId, "personal-agent-defaults"] });
+      toast.success("Defaults duplicated. Environment variable keys were copied — please fill in the values.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to duplicate defaults");
+    }
+  };
+
   const selected = agents.find((a) => a.id === selectedId) ?? null;
+  const selectedOtherDefaults: AgentDefaultsWithUser | null =
+    selectedId.startsWith(defaultsPrefix)
+      ? allDefaults.find((d) => d.id === selectedId.slice(defaultsPrefix.length)) ?? null
+      : null;
 
   if (isLoading) {
     return (
@@ -198,6 +233,54 @@ export function AgentsPage() {
       </div>
     );
   }
+
+  // ── Render detail panel ──────────────────────────────────────────────────
+  const renderDetail = () => {
+    if (selectedId === PERSONAL_DEFAULTS_ID) {
+      return <PersonalDefaultsDetail key={PERSONAL_DEFAULTS_ID} />;
+    }
+    if (selectedId === SYSTEM_DEFAULTS_ID) {
+      return <SystemDefaultsDetail key={SYSTEM_DEFAULTS_ID} />;
+    }
+    if (selectedOtherDefaults) {
+      return (
+        <OtherDefaultsDetail
+          key={selectedOtherDefaults.id}
+          defaults={selectedOtherDefaults}
+          onDuplicate={() => handleDuplicateDefaults(selectedOtherDefaults.id!)}
+        />
+      );
+    }
+    if (selected) {
+      return (
+        <AgentDetail
+          key={selected.id}
+          agent={selected}
+          runtimes={runtimes}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          onUpdate={handleUpdate}
+          onArchive={handleArchive}
+          onRestore={handleRestore}
+          onDuplicate={() => handleDuplicate(selected.id)}
+        />
+      );
+    }
+    return (
+      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+        <Bot className="h-10 w-10 text-muted-foreground/30" />
+        <p className="mt-3 text-sm">Select an agent to view details</p>
+        <Button
+          onClick={() => setShowCreate(true)}
+          size="xs"
+          className="mt-3"
+        >
+          <Plus className="h-3 w-3" />
+          Create Agent
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <ResizablePanelGroup
@@ -316,7 +399,69 @@ export function AgentsPage() {
             )}
           </div>
 
-          {filteredAgents.length === 0 ? (
+          {/* Defaults cards — shown at top of list */}
+          {scope === "mine" && !showArchived && (
+            <div className="border-b">
+              {/* Personal Defaults */}
+              <button
+                onClick={() => setSelectedId(PERSONAL_DEFAULTS_ID)}
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  selectedId === PERSONAL_DEFAULTS_ID ? "bg-accent" : "hover:bg-accent/50"
+                }`}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
+                  <Sliders className="h-4 w-4 text-blue-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-medium">Personal Defaults</span>
+                  <p className="text-xs text-muted-foreground">Your default agent config</p>
+                </div>
+              </button>
+              {/* System Defaults — admin/owner only */}
+              {isAdminOrOwner && (
+                <button
+                  onClick={() => setSelectedId(SYSTEM_DEFAULTS_ID)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors border-t ${
+                    selectedId === SYSTEM_DEFAULTS_ID ? "bg-accent" : "hover:bg-accent/50"
+                  }`}
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
+                    <Settings2 className="h-4 w-4 text-amber-500" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium">System Defaults</span>
+                    <p className="text-xs text-muted-foreground">Workspace-wide defaults</p>
+                  </div>
+                </button>
+              )}
+            </div>
+          )}
+
+          {scope === "all" && !showArchived && allDefaults.length > 0 && (
+            <div className="border-b">
+              <div className="px-4 py-2">
+                <span className="text-xs font-medium text-muted-foreground">Agent Defaults</span>
+              </div>
+              {allDefaults.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => setSelectedId(`${defaultsPrefix}${d.id}`)}
+                  className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    selectedId === `${defaultsPrefix}${d.id}` ? "bg-accent" : "hover:bg-accent/50"
+                  }`}
+                >
+                  <ActorAvatar actorType="member" actorId={d.user_id} size={24} />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium truncate">{d.user_name}</span>
+                    <p className="text-xs text-muted-foreground">Personal Defaults</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Agent list */}
+          {filteredAgents.length === 0 && !isDefaultsId(selectedId) ? (
             <div className="flex flex-col items-center justify-center px-4 py-12">
               <Bot className="h-8 w-8 text-muted-foreground/40" />
               <p className="mt-3 text-sm text-muted-foreground">
@@ -352,7 +497,6 @@ export function AgentsPage() {
                   isSelected={agent.id === selectedId}
                   onClick={() => setSelectedId(agent.id)}
                   ownerMember={scope === "all" ? getOwnerMember(agent.owner_id) : undefined}
-
                 />
               ))}
             </div>
@@ -363,33 +507,7 @@ export function AgentsPage() {
       <ResizableHandle />
 
       <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — agent detail */}
-        {selected ? (
-          <AgentDetail
-            key={selected.id}
-            agent={selected}
-            runtimes={runtimes}
-            members={members}
-            currentUserId={currentUser?.id ?? null}
-            onUpdate={handleUpdate}
-            onArchive={handleArchive}
-            onRestore={handleRestore}
-            onDuplicate={() => handleDuplicate(selected.id)}
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Bot className="h-10 w-10 text-muted-foreground/30" />
-            <p className="mt-3 text-sm">Select an agent to view details</p>
-            <Button
-              onClick={() => setShowCreate(true)}
-              size="xs"
-              className="mt-3"
-            >
-              <Plus className="h-3 w-3" />
-              Create Agent
-            </Button>
-          </div>
-        )}
+        {renderDetail()}
       </ResizablePanel>
 
       {showCreate && (
