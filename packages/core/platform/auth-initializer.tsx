@@ -92,7 +92,14 @@ export function AuthInitializer({
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
         .catch((err) => {
-          logger.error("cookie auth init failed", err);
+          // CEREBRO-PATCH(auth-init-401-info): no-active-session (401) is the
+          // expected pre-login state — log as info, not error, to keep the
+          // dev console overlay quiet on first paint.
+          if (err?.status === 401) {
+            logger.info("cookie auth init: no active session");
+          } else {
+            logger.error("cookie auth init failed", err);
+          }
           onAuthFailure();
         });
       return;

@@ -34,6 +34,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `api-client-401-warn` | packages/core/api/client.ts | 1 | Log 401 as warn (like 404) — expected pre-login state, keeps Next.js dev overlay quiet |
+| `auth-init-401-info` | packages/core/platform/auth-initializer.tsx | 5 | No-active-session (401) is expected pre-login state — log as info, not error |
+| `docs-panel-mdx-shims` | apps/web/app/[workspaceSlug]/(dashboard)/settings/docs-panel.tsx<br>apps/web/app/[workspaceSlug]/(dashboard)/settings/cerebro-mdx-shims.tsx | 2 (panel) + 79 (shim file) | MDX components (`NumberedCard`, `Step`, ...) used in cerebro docs MDX but missing after upstream's docs rewrite (commit 8c2e0841) |
 | `SA3-project-picker` | packages/views/projects/components/project-picker.tsx | 29 | Project-picker — RestrictedLock + custom icon rendering (no clean wrap-point) |
 | `access-handler` | server/internal/handler/access_test.go<br>server/internal/handler/access_ws_test.go<br>server/internal/handler/access.go<br>...+2 more | 873 | Project-access + privacy enforcement (cerebro feature) |
 | `account-tab-cerebro` | packages/views/settings/components/account-tab.tsx | 3 | Settings page cerebro additions |
