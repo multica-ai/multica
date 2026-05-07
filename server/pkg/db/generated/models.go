@@ -330,6 +330,15 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MemberAgentConfig struct {
+	ID          pgtype.UUID        `json:"id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Config      []byte             `json:"config"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MentionFrequency struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	ActorType       string             `json:"actor_type"`
