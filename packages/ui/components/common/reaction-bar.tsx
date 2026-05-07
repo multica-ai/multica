@@ -1,7 +1,7 @@
 "use client";
 
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { QuickEmojiPicker } from "./quick-emoji-picker";
+import { LikeButton } from "./like-button";
 
 interface ReactionItem {
   id: string;
@@ -52,6 +52,7 @@ function ReactionBar({
   hideAddButton,
 }: ReactionBarProps) {
   const grouped = groupReactions(reactions, currentUserId);
+  const userAlreadyLiked = grouped.some((g) => g.emoji === "👍" && g.reacted);
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
@@ -78,7 +79,7 @@ function ReactionBar({
           </TooltipContent>
         </Tooltip>
       ))}
-      {!hideAddButton && <QuickEmojiPicker onSelect={onToggle} />}
+      {!hideAddButton && !userAlreadyLiked && <LikeButton onToggle={onToggle} />}
     </div>
   );
 }

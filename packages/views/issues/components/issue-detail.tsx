@@ -55,9 +55,7 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
-import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
-import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
@@ -342,11 +340,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     return { repliesByParent, groups };
   }, [timeline]);
-
-  const {
-    reactions: issueReactions,
-    toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
@@ -765,13 +758,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               currentIssueId={id}
             />
 
-            <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
+            <div className="flex items-center mt-3">
               <FileUploadButton
                 size="sm"
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}

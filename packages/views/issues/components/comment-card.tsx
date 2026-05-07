@@ -26,7 +26,6 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
@@ -247,11 +246,7 @@ function CommentRow({
 
         {!isTemp && (
           <div className="ml-auto flex items-center gap-0.5">
-            <QuickEmojiPicker
-              onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-              align="end"
-            />
-          <DropdownMenu>
+            <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
@@ -474,11 +469,7 @@ function CommentCardImpl({
 
             {open && !isTemp && (
               <div className="ml-auto flex items-center gap-0.5">
-                <QuickEmojiPicker
-                  onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-                  align="end"
-                />
-              <DropdownMenu>
+                <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
                     <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
