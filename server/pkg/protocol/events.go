@@ -77,13 +77,6 @@ const (
 	EventPinCreated = "pin:created"
 	EventPinDeleted = "pin:deleted"
 
-	// Inbox folder events
-	EventInboxFolderCreated      = "inbox_folder:created"
-	EventInboxFolderUpdated      = "inbox_folder:updated"
-	EventInboxFolderDeleted      = "inbox_folder:deleted"
-	EventInboxFolderItemAdded    = "inbox_folder:item_added"
-	EventInboxFolderItemRemoved  = "inbox_folder:item_removed"
-
 	// Invitation events
 	EventInvitationCreated  = "invitation:created"
 	EventInvitationAccepted = "invitation:accepted"

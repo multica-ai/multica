@@ -28,6 +28,15 @@ FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
 ORDER BY cs.updated_at DESC;
 
+-- name: ListArchivedChatSessionsByCreator :many
+-- Returns archived sessions with the unread flag, mirroring the active
+-- variant. Backs the "show archived" view alongside the archived inbox feed.
+SELECT cs.*,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
+ORDER BY cs.updated_at DESC;
+
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1

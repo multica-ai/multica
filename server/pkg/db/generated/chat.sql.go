@@ -324,6 +324,69 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 	return items, nil
 }
 
+const listArchivedChatSessionsByCreator = `-- name: ListArchivedChatSessionsByCreator :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
+ORDER BY cs.updated_at DESC
+`
+
+type ListArchivedChatSessionsByCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+type ListArchivedChatSessionsByCreatorRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	HasUnread   bool               `json:"has_unread"`
+}
+
+// Returns archived sessions with the unread flag, mirroring the active
+// variant. Backs the "show archived" view alongside the archived inbox feed.
+func (q *Queries) ListArchivedChatSessionsByCreator(ctx context.Context, arg ListArchivedChatSessionsByCreatorParams) ([]ListArchivedChatSessionsByCreatorRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedChatSessionsByCreatorRow{}
+	for rows.Next() {
+		var i ListArchivedChatSessionsByCreatorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatMessages = `-- name: ListChatMessages :many
 SELECT id, chat_session_id, role, content, task_id, created_at, responded_at FROM chat_message
 WHERE chat_session_id = $1

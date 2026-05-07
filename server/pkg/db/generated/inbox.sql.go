@@ -337,6 +337,170 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 	return i, err
 }
 
+const listArchivedInboxFeed = `-- name: ListArchivedInboxFeed :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = true
+  AND i.route = 'inbox'
+ORDER BY i.created_at DESC
+`
+
+type ListArchivedInboxFeedParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListArchivedInboxFeedRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+}
+
+// Archived inbox-routed items for a user. Backs the "show archived" view in
+// the inbox kebab menu.
+func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInboxFeedParams) ([]ListArchivedInboxFeedRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedInboxFeed, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedInboxFeedRow{}
+	for rows.Next() {
+		var i ListArchivedInboxFeedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.Route,
+			&i.IssueStatus,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInboxFeed = `-- name: ListInboxFeed :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'inbox'
+ORDER BY i.created_at DESC
+`
+
+type ListInboxFeedParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListInboxFeedRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+}
+
+// Inbox-routed items (route='inbox') for a user, not archived. Backs the
+// default inbox view.
+func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([]ListInboxFeedRow, error) {
+	rows, err := q.db.Query(ctx, listInboxFeed, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInboxFeedRow{}
+	for rows.Next() {
+		var i ListInboxFeedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.Route,
+			&i.IssueStatus,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
        iss.status as issue_status
@@ -373,7 +537,7 @@ type ListInboxItemsRow struct {
 }
 
 // Generic non-archived listing across both routes. Used only by tests today;
-// production paths use the route-specific ListInboxItemsUnfiled (route='inbox')
+// production paths use the route-specific ListInboxFeed (route='inbox')
 // and ListNotificationsItems (route='notifications') queries.
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
@@ -402,6 +566,88 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.Details,
 			&i.Route,
 			&i.IssueStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsItems = `-- name: ListNotificationsItems :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+       iss.status as issue_status,
+       iss.project_id as project_id
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND i.route = 'notifications'
+ORDER BY i.created_at DESC
+`
+
+type ListNotificationsItemsParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListNotificationsItemsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	Route         string             `json:"route"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+}
+
+// Notifications-routed items (route='notifications') that are not archived.
+// Mirrors ListInboxFeed but for the lighter-weight notifications page.
+func (q *Queries) ListNotificationsItems(ctx context.Context, arg ListNotificationsItemsParams) ([]ListNotificationsItemsRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationsItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationsItemsRow{}
+	for rows.Next() {
+		var i ListNotificationsItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.Route,
+			&i.IssueStatus,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}

@@ -3,23 +3,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDraggable,
-  useDroppable,
-  DragOverlay,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   inboxListOptions,
   inboxArchivedListOptions,
-  inboxListInFolderOptions,
   activeIssueTasksOptions,
   deduplicateInboxItems,
 } from "@multica/core/inbox/queries";
@@ -31,15 +19,6 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
-import {
-  inboxFolderListOptions,
-  inboxFolderMembershipsOptions,
-  useCreateInboxFolder,
-  useRenameInboxFolder,
-  useDeleteInboxFolder,
-  useAddInboxFolderItem,
-  useSetInboxFolderParent,
-} from "@multica/core/inbox/folders";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { ChannelDetail, NewMessageModal } from "../../channels";
@@ -57,19 +36,13 @@ import {
   ArrowLeft,
   Plus,
   Bot,
-  Folder,
-  FolderOpen,
-  Trash2,
-  Pencil,
   ChevronRight,
   ChevronDown,
-  FolderPlus,
   MessageSquarePlus,
 } from "lucide-react";
-import type { Channel, InboxItem, InboxItemType, InboxFolder, InboxFolderItemType } from "@multica/core/types";
+import type { Channel, InboxItem, InboxItemType } from "@multica/core/types";
 import {
   chatSessionsOptions,
-  chatSessionsInFolderOptions,
   archivedChatSessionsOptions,
   allChatSessionsOptions,
   pendingChatTasksOptions,
@@ -100,10 +73,7 @@ import { ChannelListItem, InboxListItem, timeAgo } from "./inbox-list-item";
 import { typeLabels } from "./inbox-detail-label";
 import { InboxChatPanel } from "./inbox-chat-panel";
 
-type ViewMode =
-  | { kind: "inbox" }
-  | { kind: "archived" }
-  | { kind: "folder"; id: string };
+type ViewMode = { kind: "inbox" } | { kind: "archived" };
 
 type GroupByMode = "none" | "project" | "agent" | "type";
 
@@ -137,61 +107,38 @@ export function InboxPage() {
   }, [urlSelected]);
 
   const wsId = useWorkspaceId();
-  const isFolderView = viewMode.kind === "folder";
   const isArchivedView = viewMode.kind === "archived";
-  const folderId = isFolderView ? viewMode.id : "";
 
-  // Query each shape; only one is enabled at a time. Doing it this way keeps
-  // hook order stable and lets each query keep its own queryKey type.
   const inboxDefaultQuery = useQuery({
     ...inboxListOptions(wsId),
-    enabled: !isFolderView && !isArchivedView,
-  });
-  const inboxInFolderQuery = useQuery({
-    ...inboxListInFolderOptions(wsId, folderId),
-    enabled: isFolderView && !!folderId,
+    enabled: !isArchivedView,
   });
   const inboxArchivedQuery = useQuery({
     ...inboxArchivedListOptions(wsId),
     enabled: isArchivedView,
   });
-  const rawItems = isFolderView
-    ? inboxInFolderQuery.data ?? []
-    : isArchivedView
-      ? inboxArchivedQuery.data ?? []
-      : inboxDefaultQuery.data ?? [];
-  const loading = isFolderView
-    ? inboxInFolderQuery.isLoading
-    : isArchivedView
-      ? inboxArchivedQuery.isLoading
-      : inboxDefaultQuery.isLoading;
+  const rawItems = isArchivedView
+    ? inboxArchivedQuery.data ?? []
+    : inboxDefaultQuery.data ?? [];
+  const loading = isArchivedView
+    ? inboxArchivedQuery.isLoading
+    : inboxDefaultQuery.isLoading;
   const items = useMemo(
-    () =>
-      isFolderView
-        ? rawItems.filter((i) => !i.archived)
-        : isArchivedView
-          ? rawItems
-          : deduplicateInboxItems(rawItems),
-    [rawItems, isFolderView, isArchivedView],
+    () => (isArchivedView ? rawItems : deduplicateInboxItems(rawItems)),
+    [rawItems, isArchivedView],
   );
 
   const chatDefaultQuery = useQuery({
     ...chatSessionsOptions(wsId),
-    enabled: !isFolderView && !isArchivedView,
-  });
-  const chatInFolderQuery = useQuery({
-    ...chatSessionsInFolderOptions(wsId, folderId),
-    enabled: isFolderView && !!folderId,
+    enabled: !isArchivedView,
   });
   const chatArchivedQuery = useQuery({
     ...archivedChatSessionsOptions(wsId),
     enabled: isArchivedView,
   });
-  const chatSessions = isFolderView
-    ? chatInFolderQuery.data ?? []
-    : isArchivedView
-      ? chatArchivedQuery.data ?? []
-      : chatDefaultQuery.data ?? [];
+  const chatSessions = isArchivedView
+    ? chatArchivedQuery.data ?? []
+    : chatDefaultQuery.data ?? [];
 
   // Workspace-wide "agent is working" signals: which issues and chat sessions
   // currently have an in-flight task. Used to render the small live indicator
@@ -234,9 +181,6 @@ export function InboxPage() {
     setCollapsedGroups((c) => ({ ...c, [key]: !c[key] }));
   }, []);
 
-  const { data: folders = [] } = useQuery(inboxFolderListOptions(wsId));
-  useQuery(inboxFolderMembershipsOptions(wsId)); // primed for cache; not read here
-
   // All sessions (active + archived). Used purely for URL-driven lookup so a
   // pasted/bookmarked chat URL still resolves when the active list doesn't
   // contain that session — e.g. an archived chat opened via deep link.
@@ -246,7 +190,7 @@ export function InboxPage() {
   // any inbox row with the same issue_id is folded into the channel row.
   const { data: channels = [] } = useQuery({
     ...channelListOptions(wsId),
-    enabled: !isArchivedView && !isFolderView,
+    enabled: !isArchivedView,
   });
   const channelMap = useMemo(
     () => new Map(channels.map((c) => [c.id, c])),
@@ -271,12 +215,6 @@ export function InboxPage() {
   const view = useInboxViewStore((s) => s.view);
   const setView = useInboxViewStore((s) => s.setView);
   const [showNewMessage, setShowNewMessage] = useState(false);
-
-  const createFolder = useCreateInboxFolder();
-  const renameFolder = useRenameInboxFolder();
-  const deleteFolder = useDeleteInboxFolder();
-  const addItemToFolder = useAddInboxFolderItem();
-  const setFolderParent = useSetInboxFolderParent();
 
   const selectedChatSession =
     chatSessions.find((s) => s.id === selectedKey) ??
@@ -411,134 +349,9 @@ export function InboxPage() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  // -- Drag and drop ---------------------------------------------------------
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-  const [activeDrag, setActiveDrag] = useState<
-    | { kind: "item"; type: InboxFolderItemType; id: string; label: string }
-    | { kind: "folder"; id: string; label: string }
-    | null
-  >(null);
-
-  // Map of folder.id → set of descendant ids (for client-side cycle blocking).
-  const folderDescendants = useMemo(() => {
-    const childrenByParent = new Map<string | null, InboxFolder[]>();
-    for (const f of folders) {
-      const key = f.parent_id;
-      const list = childrenByParent.get(key) ?? [];
-      list.push(f);
-      childrenByParent.set(key, list);
-    }
-    const collect = (rootId: string): Set<string> => {
-      const result = new Set<string>([rootId]);
-      const stack = [rootId];
-      while (stack.length) {
-        const cur = stack.pop()!;
-        for (const child of childrenByParent.get(cur) ?? []) {
-          if (!result.has(child.id)) {
-            result.add(child.id);
-            stack.push(child.id);
-          }
-        }
-      }
-      return result;
-    };
-    const map = new Map<string, Set<string>>();
-    for (const f of folders) map.set(f.id, collect(f.id));
-    return map;
-  }, [folders]);
-
-  const handleDragStart = useCallback(
-    (event: DragStartEvent) => {
-      const id = String(event.active.id);
-      if (id.startsWith("folder-move:")) {
-        const folderId = id.slice("folder-move:".length);
-        const folder = folders.find((f) => f.id === folderId);
-        if (folder) setActiveDrag({ kind: "folder", id: folderId, label: folder.name });
-        return;
-      }
-      const [type, itemId] = id.split(":");
-      if (type === "notification") {
-        const item = items.find((i) => i.id === itemId);
-        if (item)
-          setActiveDrag({ kind: "item", type: "notification", id: itemId ?? "", label: item.title });
-      } else if (type === "chat_session") {
-        const session = chatSessions.find((s) => s.id === itemId);
-        if (session) {
-          const agent = agentMap.get(session.agent_id);
-          setActiveDrag({
-            kind: "item",
-            type: "chat_session",
-            id: itemId ?? "",
-            label: session.title || agent?.name || "Chat",
-          });
-        }
-      }
-    },
-    [items, chatSessions, agentMap, folders],
-  );
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      setActiveDrag(null);
-      const { active, over } = event;
-      if (!over) return;
-      const overId = String(over.id);
-      const activeId = String(active.id);
-
-      // Folder reparent.
-      if (activeId.startsWith("folder-move:")) {
-        const folderId = activeId.slice("folder-move:".length);
-        let newParent: string | null = null;
-        if (overId === "folder-root") {
-          newParent = null;
-        } else if (overId.startsWith("folder:")) {
-          newParent = overId.slice("folder:".length);
-        } else {
-          return;
-        }
-        if (newParent === folderId) return;
-        // Reject if target is a descendant of the dragged folder (would cycle).
-        if (newParent && (folderDescendants.get(folderId)?.has(newParent) ?? false)) {
-          toast.error("Cannot move folder into its own subtree");
-          return;
-        }
-        // Skip no-op (already this parent).
-        const folder = folders.find((f) => f.id === folderId);
-        if (folder && (folder.parent_id ?? null) === newParent) return;
-        setFolderParent.mutate(
-          { id: folderId, parentId: newParent },
-          { onError: () => toast.error("Failed to move folder") },
-        );
-        return;
-      }
-
-      // Item drop on folder.
-      if (!overId.startsWith("folder:")) return;
-      const targetFolderId = overId.slice("folder:".length);
-      const [type, itemId] = activeId.split(":");
-      if (!itemId) return;
-      if (type !== "notification" && type !== "chat_session") return;
-      addItemToFolder.mutate(
-        { folderId: targetFolderId, itemType: type, itemId },
-        { onError: () => toast.error("Failed to move item") },
-      );
-      if (selectedKey === itemId) {
-        setSelectedKey(null, "");
-      }
-    },
-    [addItemToFolder, setFolderParent, folders, folderDescendants, selectedKey, setSelectedKey],
-  );
-
-  const currentFolder = isFolderView ? folders.find((f) => f.id === folderId) : null;
-  const headerTitle = isFolderView
-    ? currentFolder?.name ?? "Folder"
-    : isArchivedView
-      ? "Archived"
-      : "Inbox";
-  const showBack = isFolderView || isArchivedView;
-
-  const showViewSwitch = !isFolderView && !isArchivedView;
+  const headerTitle = isArchivedView ? "Archived" : "Inbox";
+  const showBack = isArchivedView;
+  const showViewSwitch = !isArchivedView;
   const currentViewLabel =
     INBOX_VIEW_OPTIONS.find((o) => o.value === view)?.label ?? "All";
 
@@ -752,23 +565,19 @@ export function InboxPage() {
     if (entry.kind === "channel") {
       const channel = entry.channel;
       return (
-        <DraggableRow
+        <ChannelListItem
           key={`channel:${channel.id}`}
-          draggableId={`channel:${channel.id}`}
-        >
-          <ChannelListItem
-            channel={channel}
-            mentioned={mentionedChannels.has(channel.id)}
-            isSelected={channel.id === selectedKey}
-            onClick={() => setSelectedKey("issue", channel.id)}
-            onArchive={() => {
-              // Channels currently archive via the issue API by archiving any
-              // inbox row attached to them — same behavior as issues.
-              const itemForChannel = items.find((i) => i.issue_id === channel.id);
-              if (itemForChannel) handleArchive(itemForChannel.id);
-            }}
-          />
-        </DraggableRow>
+          channel={channel}
+          mentioned={mentionedChannels.has(channel.id)}
+          isSelected={channel.id === selectedKey}
+          onClick={() => setSelectedKey("issue", channel.id)}
+          onArchive={() => {
+            // Channels currently archive via the issue API by archiving any
+            // inbox row attached to them — same behavior as issues.
+            const itemForChannel = items.find((i) => i.issue_id === channel.id);
+            if (itemForChannel) handleArchive(itemForChannel.id);
+          }}
+        />
       );
     }
     if (entry.kind === "chat") {
@@ -776,69 +585,61 @@ export function InboxPage() {
       const agent = agentMap.get(session.agent_id);
       const isAgentActive = activeChatSessionIds.has(session.id);
       return (
-        <DraggableRow
+        <div
           key={`chat:${session.id}`}
-          draggableId={`chat_session:${session.id}`}
+          className={`group/chat flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
+            session.id === selectedKey ? "bg-accent" : ""
+          }`}
+          onClick={() => setSelectedKey("chat", session.id)}
         >
-          <div
-            className={`group/chat flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
-              session.id === selectedKey ? "bg-accent" : ""
-            }`}
-            onClick={() => setSelectedKey("chat", session.id)}
-          >
-            <Avatar className="size-7 shrink-0">
-              {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
-              <AvatarFallback className="bg-purple-100 text-purple-700 text-xs">
-                <Bot className="size-3.5" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                {session.has_unread && (
-                  <span className="size-1.5 shrink-0 rounded-full bg-brand" />
-                )}
-                <span
-                  className={`truncate text-sm ${session.has_unread ? "font-medium" : "text-muted-foreground"}`}
-                >
-                  {session.title || agent?.name || "Chat"}
-                </span>
-              </div>
-              <span className={`flex items-center gap-1.5 text-xs ${session.has_unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-                {isAgentActive && <AgentRunningPip />}
-                {agent?.name} · {timeAgo(session.updated_at)}
+          <Avatar className="size-7 shrink-0">
+            {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
+            <AvatarFallback className="bg-purple-100 text-purple-700 text-xs">
+              <Bot className="size-3.5" />
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              {session.has_unread && (
+                <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+              )}
+              <span
+                className={`truncate text-sm ${session.has_unread ? "font-medium" : "text-muted-foreground"}`}
+              >
+                {session.title || agent?.name || "Chat"}
               </span>
             </div>
-            <button
-              type="button"
-              className="flex h-9 w-9 sm:h-6 sm:w-6 sm:hidden shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent sm:group-hover/chat:flex"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleArchiveChat(session.id);
-              }}
-              title="Archive"
-              aria-label="Archive chat"
-            >
-              <Archive className="size-4 sm:size-3" />
-            </button>
+            <span className={`flex items-center gap-1.5 text-xs ${session.has_unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+              {isAgentActive && <AgentRunningPip />}
+              {agent?.name} · {timeAgo(session.updated_at)}
+            </span>
           </div>
-        </DraggableRow>
+          <button
+            type="button"
+            className="flex h-9 w-9 sm:h-6 sm:w-6 sm:hidden shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent sm:group-hover/chat:flex"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleArchiveChat(session.id);
+            }}
+            title="Archive"
+            aria-label="Archive chat"
+          >
+            <Archive className="size-4 sm:size-3" />
+          </button>
+        </div>
       );
     }
     const item = entry.item;
     const isAgentActive = !!item.issue_id && activeIssueIds.has(item.issue_id);
     return (
-      <DraggableRow
+      <InboxListItem
         key={`notif:${item.id}`}
-        draggableId={`notification:${item.id}`}
-      >
-        <InboxListItem
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          isAgentActive={isAgentActive}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      </DraggableRow>
+        item={item}
+        isSelected={(item.issue_id ?? item.id) === selectedKey}
+        isAgentActive={isAgentActive}
+        onClick={() => handleSelect(item)}
+        onArchive={() => handleArchive(item.id)}
+      />
     );
   };
 
@@ -1001,11 +802,7 @@ export function InboxPage() {
     );
   };
 
-  const emptyMessage = isFolderView
-    ? "Empty folder"
-    : isArchivedView
-      ? "No archived items"
-      : "No notifications";
+  const emptyMessage = isArchivedView ? "No archived items" : "No notifications";
 
   const listBody = (
     <div>
@@ -1024,35 +821,6 @@ export function InboxPage() {
         filteredEntries.map(renderEntry)
       )}
     </div>
-  );
-
-  const folderSection = (
-    <FolderSection
-      folders={folders}
-      selectedFolderId={isFolderView ? folderId : null}
-      onSelect={(id) => {
-        setSelectedKey(null, "");
-        setViewMode(id ? { kind: "folder", id } : { kind: "inbox" });
-      }}
-      onCreate={(name, parentId) =>
-        createFolder.mutate(
-          { name, parentId },
-          { onError: () => toast.error("Failed to create folder") },
-        )
-      }
-      onRename={(id, name) =>
-        renameFolder.mutate(
-          { id, name },
-          { onError: () => toast.error("Failed to rename") },
-        )
-      }
-      onDelete={(id) => {
-        if (isFolderView && folderId === id) setViewMode({ kind: "inbox" });
-        deleteFolder.mutate(id, {
-          onError: () => toast.error("Failed to delete folder"),
-        });
-      }}
-    />
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
@@ -1155,22 +923,12 @@ export function InboxPage() {
 
     return (
       <>
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="flex flex-1 flex-col min-h-0">
-            {listHeader}
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {listBody}
-            </div>
-            {folderSection}
+        <div className="flex flex-1 flex-col min-h-0">
+          {listHeader}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {listBody}
           </div>
-          <DragOverlay>
-            {activeDrag && (
-              <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
-                {activeDrag.label}
-              </div>
-            )}
-          </DragOverlay>
-        </DndContext>
+        </div>
         <NewMessageModal
           open={showNewMessage}
           onClose={() => setShowNewMessage(false)}
@@ -1214,41 +972,31 @@ export function InboxPage() {
 
   return (
     <>
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-          <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-            <div className="flex flex-col border-r h-full">
-              {listHeader}
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                {listBody}
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+        <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
+          <div className="flex flex-col border-r h-full">
+            {listHeader}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {listBody}
+            </div>
+          </div>
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel id="detail" minSize="40%">
+          <div className="flex flex-col min-h-0 h-full">
+            {detailContent ?? (
+              <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+                <p className="text-sm">
+                  {items.length === 0 && channels.length === 0
+                    ? "Your inbox is empty"
+                    : "Select a conversation to view it"}
+                </p>
               </div>
-              {folderSection}
-            </div>
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="detail" minSize="40%">
-            <div className="flex flex-col min-h-0 h-full">
-              {detailContent ?? (
-                <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-                  <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-                  <p className="text-sm">
-                    {items.length === 0 && channels.length === 0
-                      ? "Your inbox is empty"
-                      : "Select a conversation to view it"}
-                  </p>
-                </div>
-              )}
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-        <DragOverlay>
-          {activeDrag && (
-            <div className="rounded border bg-background px-3 py-2 text-sm shadow-md">
-              {activeDrag.label}
-            </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+            )}
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
       <NewMessageModal
         open={showNewMessage}
         onClose={() => setShowNewMessage(false)}
@@ -1308,382 +1056,5 @@ function AgentRunningPip() {
       <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
       <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
     </span>
-  );
-}
-
-// -----------------------------------------------------------------------------
-// Draggable wrapper
-// -----------------------------------------------------------------------------
-
-function DraggableRow({
-  draggableId,
-  children,
-}: {
-  draggableId: string;
-  children: React.ReactNode;
-}) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: draggableId,
-  });
-  return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      className={isDragging ? "opacity-30" : ""}
-    >
-      {children}
-    </div>
-  );
-}
-
-// -----------------------------------------------------------------------------
-// Folder section: list of user folders + create / rename / delete
-// -----------------------------------------------------------------------------
-
-function FolderSection({
-  folders,
-  selectedFolderId,
-  onSelect,
-  onCreate,
-  onRename,
-  onDelete,
-}: {
-  folders: InboxFolder[];
-  selectedFolderId: string | null;
-  onSelect: (id: string | null) => void;
-  onCreate: (name: string, parentId: string | null) => void;
-  onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  // Top-level (parent_id = null) inline create. Subfolder create is per-row
-  // and stored as { underParentId, name } so only one row at a time edits.
-  const [topCreating, setTopCreating] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createUnderParent, setCreateUnderParent] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-
-  const childrenByParent = useMemo(() => {
-    const map = new Map<string | null, InboxFolder[]>();
-    const sorted = [...folders].sort(
-      (a, b) =>
-        a.position - b.position ||
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
-    for (const f of sorted) {
-      const key = f.parent_id;
-      const list = map.get(key) ?? [];
-      list.push(f);
-      map.set(key, list);
-    }
-    return map;
-  }, [folders]);
-
-  const submitCreate = () => {
-    const name = createName.trim();
-    if (name) onCreate(name, createUnderParent);
-    setCreateName("");
-    setTopCreating(false);
-    setCreateUnderParent(null);
-    if (createUnderParent) {
-      // Auto-expand the parent so the new folder is visible.
-      setExpanded((e) => ({ ...e, [createUnderParent]: true }));
-    }
-  };
-
-  const submitRename = (id: string) => {
-    const name = renameValue.trim();
-    if (name) onRename(id, name);
-    setRenamingId(null);
-    setRenameValue("");
-  };
-
-  const { setNodeRef: setRootRef, isOver: isOverRoot } = useDroppable({ id: "folder-root" });
-
-  const renderTree = (parentId: string | null, depth: number): React.ReactNode => {
-    const list = childrenByParent.get(parentId) ?? [];
-    return list.map((folder) => (
-      <div key={folder.id}>
-        <FolderRow
-          folder={folder}
-          depth={depth}
-          isSelected={selectedFolderId === folder.id}
-          isExpanded={expanded[folder.id] ?? false}
-          hasChildren={(childrenByParent.get(folder.id) ?? []).length > 0}
-          isRenaming={renamingId === folder.id}
-          renameValue={renameValue}
-          onToggleExpand={() =>
-            setExpanded((e) => ({ ...e, [folder.id]: !(e[folder.id] ?? false) }))
-          }
-          onSelect={() => onSelect(folder.id === selectedFolderId ? null : folder.id)}
-          onStartRename={() => {
-            setRenamingId(folder.id);
-            setRenameValue(folder.name);
-          }}
-          onChangeRename={setRenameValue}
-          onSubmitRename={() => submitRename(folder.id)}
-          onCancelRename={() => {
-            setRenamingId(null);
-            setRenameValue("");
-          }}
-          onCreateChild={() => {
-            setCreateUnderParent(folder.id);
-            setCreateName("");
-            setExpanded((e) => ({ ...e, [folder.id]: true }));
-          }}
-          onDelete={() => onDelete(folder.id)}
-        />
-        {(expanded[folder.id] ?? false) && (
-          <>
-            {renderTree(folder.id, depth + 1)}
-            {createUnderParent === folder.id && (
-              <FolderCreateRow
-                depth={depth + 1}
-                value={createName}
-                onChange={setCreateName}
-                onSubmit={submitCreate}
-                onCancel={() => {
-                  setCreateUnderParent(null);
-                  setCreateName("");
-                }}
-              />
-            )}
-          </>
-        )}
-      </div>
-    ));
-  };
-
-  return (
-    <div
-      ref={setRootRef}
-      className={`border-t bg-background ${isOverRoot ? "ring-1 ring-inset ring-brand" : ""}`}
-    >
-      <div className="flex items-center justify-between px-4 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Folders
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground"
-          onClick={() => {
-            setCreateUnderParent(null);
-            setCreateName("");
-            setTopCreating(true);
-          }}
-          title="New folder"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="pb-2">
-        {renderTree(null, 0)}
-        {topCreating && createUnderParent === null && (
-          <FolderCreateRow
-            depth={0}
-            value={createName}
-            onChange={setCreateName}
-            onSubmit={submitCreate}
-            onCancel={() => {
-              setTopCreating(false);
-              setCreateName("");
-            }}
-          />
-        )}
-        {folders.length === 0 && !topCreating && (
-          <p className="px-4 py-1 text-xs text-muted-foreground">
-            Drop chats and notifications here to organize them.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function FolderCreateRow({
-  depth,
-  value,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  depth: number;
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      className="flex items-center gap-2 py-1.5 pr-4"
-      style={{ paddingLeft: 16 + depth * 16 }}
-    >
-      <Folder className="size-4 shrink-0 text-muted-foreground" />
-      <input
-        autoFocus
-        className="flex-1 bg-transparent text-base md:text-sm outline-none"
-        placeholder="Folder name"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit();
-          if (e.key === "Escape") onCancel();
-        }}
-        onBlur={onSubmit}
-      />
-    </div>
-  );
-}
-
-function FolderRow({
-  folder,
-  depth,
-  isSelected,
-  isExpanded,
-  hasChildren,
-  isRenaming,
-  renameValue,
-  onToggleExpand,
-  onSelect,
-  onStartRename,
-  onChangeRename,
-  onSubmitRename,
-  onCancelRename,
-  onCreateChild,
-  onDelete,
-}: {
-  folder: InboxFolder;
-  depth: number;
-  isSelected: boolean;
-  isExpanded: boolean;
-  hasChildren: boolean;
-  isRenaming: boolean;
-  renameValue: string;
-  onToggleExpand: () => void;
-  onSelect: () => void;
-  onStartRename: () => void;
-  onChangeRename: (value: string) => void;
-  onSubmitRename: () => void;
-  onCancelRename: () => void;
-  onCreateChild: () => void;
-  onDelete: () => void;
-}) {
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `folder:${folder.id}` });
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setDragRef,
-    isDragging,
-  } = useDraggable({ id: `folder-move:${folder.id}` });
-  const Icon = isSelected ? FolderOpen : Folder;
-
-  // Combine drag + drop refs onto a single element.
-  const setRefs = useCallback(
-    (node: HTMLElement | null) => {
-      setDropRef(node);
-      setDragRef(node);
-    },
-    [setDropRef, setDragRef],
-  );
-
-  return (
-    <div
-      ref={setRefs}
-      {...attributes}
-      {...listeners}
-      className={`group/folder flex items-center gap-1 py-1.5 pr-2 cursor-pointer text-sm transition-colors ${
-        isSelected ? "bg-accent" : ""
-      } ${isOver ? "bg-accent/70 ring-1 ring-inset ring-brand" : "hover:bg-accent/50"} ${
-        isDragging ? "opacity-30" : ""
-      }`}
-      style={{ paddingLeft: 8 + depth * 16 }}
-      onClick={isRenaming ? undefined : onSelect}
-    >
-      {hasChildren ? (
-        <button
-          type="button"
-          className="flex size-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleExpand();
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {isExpanded ? (
-            <ChevronDown className="size-3" />
-          ) : (
-            <ChevronRight className="size-3" />
-          )}
-        </button>
-      ) : (
-        <span className="size-4 shrink-0" />
-      )}
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      {isRenaming ? (
-        <input
-          autoFocus
-          className="flex-1 bg-transparent text-base md:text-sm outline-none"
-          value={renameValue}
-          onChange={(e) => onChangeRename(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmitRename();
-            if (e.key === "Escape") onCancelRename();
-          }}
-          onBlur={onSubmitRename}
-        />
-      ) : (
-        <span className="flex-1 truncate">{folder.name}</span>
-      )}
-      {!isRenaming && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                type="button"
-                className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent group-hover/folder:flex"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              />
-            }
-          >
-            <MoreHorizontal className="size-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreateChild();
-              }}
-            >
-              <FolderPlus className="size-3.5" />
-              New subfolder
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onStartRename();
-              }}
-            >
-              <Pencil className="size-3.5" />
-              Rename
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-            >
-              <Trash2 className="size-3.5" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </div>
   );
 }

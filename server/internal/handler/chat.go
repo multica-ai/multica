@@ -82,7 +82,6 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 
 	status := r.URL.Query().Get("status")
-	folderID := r.URL.Query().Get("folder")
 
 	type listed struct {
 		ID, WorkspaceID, AgentID, CreatorID pgtype.UUID
@@ -92,21 +91,8 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	var rows []listed
 
-	switch {
-	case folderID != "":
-		raw, err := h.Queries.ListChatSessionsInFolder(r.Context(), db.ListChatSessionsInFolderParams{
-			ID:          parseUUID(folderID),
-			WorkspaceID: parseUUID(workspaceID),
-			UserID:      parseUUID(userID),
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
-			return
-		}
-		for _, s := range raw {
-			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
-		}
-	case status == "all":
+	switch status {
+	case "all":
 		raw, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
 			WorkspaceID: parseUUID(workspaceID),
 			CreatorID:   parseUUID(userID),
@@ -118,8 +104,8 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		for _, s := range raw {
 			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
 		}
-	case status == "archived":
-		raw, err := h.Queries.ListArchivedChatSessionsUnfiled(r.Context(), db.ListArchivedChatSessionsUnfiledParams{
+	case "archived":
+		raw, err := h.Queries.ListArchivedChatSessionsByCreator(r.Context(), db.ListArchivedChatSessionsByCreatorParams{
 			WorkspaceID: parseUUID(workspaceID),
 			CreatorID:   parseUUID(userID),
 		})
@@ -131,7 +117,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, listed{s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.Title, s.Status, s.HasUnread, s.CreatedAt, s.UpdatedAt})
 		}
 	default:
-		raw, err := h.Queries.ListChatSessionsUnfiled(r.Context(), db.ListChatSessionsUnfiledParams{
+		raw, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
 			WorkspaceID: parseUUID(workspaceID),
 			CreatorID:   parseUUID(userID),
 		})

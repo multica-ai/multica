@@ -37,9 +37,6 @@ export type {
   InboxItem,
   InboxSeverity,
   InboxItemType,
-  InboxFolder,
-  InboxFolderMembership,
-  InboxFolderItemType,
 } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";

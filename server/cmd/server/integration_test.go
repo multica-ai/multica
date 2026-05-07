@@ -944,8 +944,6 @@ func TestRouterBlastRadius_NoStaticShadowedByParam(t *testing.T) {
 		{"inbox active-issue-tasks", "/api/inbox/active-issue-tasks"},
 		{"inbox notifications", "/api/inbox/notifications"},
 		{"inbox notifications unread-count", "/api/inbox/notifications/unread-count"},
-		{"inbox folders", "/api/inbox/folders"},
-		{"inbox folder-memberships", "/api/inbox/folder-memberships"},
 		{"chat pending-tasks", "/api/chat/pending-tasks"},
 		{"assignee-frequency", "/api/assignee-frequency"},
 		{"invitations list", "/api/invitations"},

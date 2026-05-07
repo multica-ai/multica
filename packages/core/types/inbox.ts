@@ -18,25 +18,6 @@ export type InboxItemType =
   | "agent_completed"
   | "reaction_added";
 
-export interface InboxFolder {
-  id: string;
-  workspace_id: string;
-  user_id: string;
-  name: string;
-  position: number;
-  created_at: string;
-  parent_id: string | null;
-}
-
-export type InboxFolderItemType = "chat_session" | "notification";
-
-export interface InboxFolderMembership {
-  folder_id: string;
-  item_type: InboxFolderItemType;
-  item_id: string;
-  added_at: string;
-}
-
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of
 // the sidebar. The route is decided server-side at insert time from the
