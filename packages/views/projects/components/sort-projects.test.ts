@@ -17,6 +17,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     updated_at: "2026-04-10T00:00:00Z",
     issue_count: 0,
     done_count: 0,
+    resource_count: 0,
     ...overrides,
   };
 }

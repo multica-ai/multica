@@ -97,11 +97,6 @@ export function ChatWindow() {
     : null;
   const isSessionArchived = currentSession?.status === "archived";
 
-  const sessionAgent = useMemo(
-    () => agents.find((a) => a.id === currentSession?.agent_id) ?? null,
-    [agents, currentSession?.agent_id],
-  );
-
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
@@ -469,21 +464,11 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* Messages / skeleton / empty state */}
-      {showSkeleton ? (
-        <ChatMessageSkeleton />
-      ) : hasMessages ? (
-        <ChatMessageList
-          messages={messages}
-          pendingTaskId={pendingTaskId}
-          isWaiting={!!pendingTaskId}
-          sessionId={activeSessionId}
-          sessionCreatorId={currentSession?.creator_id ?? null}
-          agentOwnerId={sessionAgent?.owner_id ?? null}
-          userId={user?.id}
-          isSessionArchived={isSessionArchived}
-          wsId={wsId}
-        />
+      {/* History panel takes over the body when toggled — surfaces the
+       *  per-row delete button. Hidden by default; the input + banners
+       *  are skipped here because the panel has its own affordances. */}
+      {showHistory ? (
+        <ChatSessionHistory />
       ) : (
         <>
           {/* Messages / skeleton / empty state */}

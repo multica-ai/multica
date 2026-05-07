@@ -1,13 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
   BookOpen,
-  Download,
-  FolderOpen,
   Plus,
   Search,
 } from "lucide-react";
@@ -15,29 +12,8 @@ import type {
   AgentRuntime,
   MemberWithUser,
   Skill,
-  CreateSkillRequest,
-  UpdateSkillRequest,
-  BatchImportSkillsResponse,
 } from "@multica/core/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@multica/ui/components/ui/dialog";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { Label } from "@multica/ui/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
-import { toast } from "sonner";
-import { api } from "@multica/core/api";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -60,9 +36,6 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { FileTree } from "./file-tree";
-import { FileViewer } from "./file-viewer";
-import { parseSkillDirectory } from "../lib/parse-skill-directory";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { readOrigin } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";

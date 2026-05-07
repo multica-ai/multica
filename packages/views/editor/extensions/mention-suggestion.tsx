@@ -18,7 +18,12 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
-import type { Issue, ListIssuesCache, MemberWithUser, Agent, MentionFrequencyEntry } from "@multica/core/types";
+import type {
+  Issue,
+  ListIssuesCache,
+  MemberWithUser,
+  Agent,
+} from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useT } from "../../i18n";
@@ -353,35 +358,6 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-const MAX_ITEMS = 15;
-
-function sortByMentionFrequency(items: MentionItem[], freq: MentionFrequencyEntry[]): MentionItem[] {
-  if (freq.length === 0) return items;
-  const rank = new Map<string, { idx: number; ts: number; frequency: number }>();
-  for (const [i, f] of freq.entries()) {
-    const key = `${f.actor_type}:${f.actor_id}`;
-    if (rank.has(key)) continue;
-    const ts = Date.parse(f.last_mentioned_at);
-    rank.set(key, {
-      idx: i,
-      ts: Number.isNaN(ts) ? 0 : ts,
-      frequency: f.frequency,
-    });
-  }
-  return [...items].sort((a, b) => {
-    const aRank = rank.get(`${a.type}:${a.id}`);
-    const bRank = rank.get(`${b.type}:${b.id}`);
-    if (aRank && bRank) {
-      if (aRank.ts !== bRank.ts) return bRank.ts - aRank.ts;
-      if (aRank.frequency !== bRank.frequency) return bRank.frequency - aRank.frequency;
-      return aRank.idx - bRank.idx;
-    }
-    if (aRank) return -1;
-    if (bRank) return 1;
-    return 0;
-  });
-}
-
 export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
@@ -400,7 +376,6 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
-    const mentionFreq: MentionFrequencyEntry[] = qc.getQueryData(workspaceKeys.mentionFrequency(wsId)) ?? [];
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
@@ -456,48 +431,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    const sortedPeople = sortByMentionFrequency([...allItem, ...memberItems, ...agentItems], mentionFreq);
-    return [...sortedPeople, ...issueItems];
-  }
-
-  function startServerIssueSearch(query: string, syncItems: MentionItem[]) {
-    // Supersede any in-flight search; the next-arrived response wins.
-    if (searchAbort) searchAbort.abort();
-    const mySeq = ++searchSeq;
-    const wsId = getCurrentWsId();
-    if (!wsId) return;
-
-    void (async () => {
-      // Debounce: skip the fetch if a newer keystroke arrives within 150ms.
-      await new Promise((r) => setTimeout(r, 150));
-      if (mySeq !== searchSeq) return;
-
-      const controller = new AbortController();
-      searchAbort = controller;
-      try {
-        const res = await api.searchIssues({
-          q: query,
-          limit: 10,
-          include_closed: true,
-          signal: controller.signal,
-        });
-        if (mySeq !== searchSeq) return;
-        if (!renderer || !activeCommand) return;
-
-        const existingIssueIds = new Set(
-          syncItems.filter((i) => i.type === "issue").map((i) => i.id),
-        );
-        const extraIssueItems = res.issues
-          .map(issueToMention)
-          .filter((i) => !existingIssueIds.has(i.id));
-        if (extraIssueItems.length === 0) return;
-
-        const merged = [...syncItems, ...extraIssueItems].slice(0, MAX_ITEMS);
-        renderer.updateProps({ items: merged, command: activeCommand });
-      } catch {
-        // Aborted or network error: nothing to do — sync items remain.
-      }
-    })();
+    return [...allItem, ...userItems, ...issueItems];
   }
 
   return {

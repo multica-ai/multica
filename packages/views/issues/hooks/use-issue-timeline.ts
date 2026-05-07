@@ -65,7 +65,6 @@ export interface UseIssueTimelineOptions {
 }
 
 export function useIssueTimeline(
-  wsId: string,
   issueId: string,
   userId?: string,
   options: UseIssueTimelineOptions = {},
@@ -350,7 +349,7 @@ export function useIssueTimeline(
 
   const pendingReactionVars = useMutationState({
     filters: {
-      mutationKey: ["toggleCommentReaction", wsId, issueId],
+      mutationKey: ["toggleCommentReaction", issueId],
       status: "pending",
     },
     select: (m) =>

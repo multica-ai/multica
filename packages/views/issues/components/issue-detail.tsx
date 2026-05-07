@@ -52,7 +52,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
-import { memberListOptions, agentListOptions, mentionFrequencyOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
@@ -180,8 +180,6 @@ interface IssueDetailProps {
   onDone?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
-  /** Controls whether the component canonicalizes the browser URL to /issues/{identifier}. */
-  syncUrl?: boolean;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
 }
@@ -190,12 +188,10 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", syncUrl = true, highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
-  const deepLinkedCommentId = router.searchParams?.get("comment") ?? undefined;
-  const targetCommentId = highlightCommentId ?? deepLinkedCommentId;
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
@@ -204,10 +200,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  useQuery(mentionFrequencyOptions(wsId));
-  const currentMemberRole = members.find((m) => m.user_id === user?.id)?.role;
+  // Workspace owners and admins moderate any comment authored by anyone
+  // (mirrors backend `comment.go:507-512`). Computed here so per-comment
+  // rendering doesn't have to re-derive it for every row.
+  const currentUserRole =
+    members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
-    currentMemberRole === "owner" || currentMemberRole === "admin";
+    currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
@@ -230,16 +229,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  const scrollToTop = useCallback(() => {
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-  }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -249,22 +238,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: issue = null, isLoading: issueLoading } = useQuery({
     ...issueDetailOptions(wsId, id),
     initialData: () => {
-      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
+      const cached = allIssues.find((i) => i.id === id);
       return cached?.description != null ? cached : undefined;
     },
   });
-  const issueResourceId = issue?.id ?? id;
-  const searchString = router.searchParams?.toString() ?? "";
-
-  useEffect(() => {
-    if (!syncUrl) return;
-    if (!issue) return;
-    if (id === issue.identifier) return;
-    const nextPath = paths.issueDetail(issue.identifier);
-    const nextSearch = new URLSearchParams(searchString);
-    const query = nextSearch.toString();
-    router.replace(query ? `${nextPath}?${query}` : nextPath);
-  }, [syncUrl, issue, id, paths, router.replace, searchString]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -369,14 +346,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(wsId, issueResourceId, user?.id);
+  } = useIssueReactions(id, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(wsId, issueResourceId, user?.id);
+  } = useIssueSubscribers(id, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(wsId, issueResourceId));
+  const { data: usage } = useQuery(issueUsageOptions(id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -386,7 +363,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
   const { data: childIssues = [] } = useQuery({
-    ...childIssuesOptions(wsId, issueResourceId),
+    ...childIssuesOptions(wsId, id),
     enabled: !!issue,
   });
   // Parent's children — used to render the "x/y" progress next to the
@@ -401,19 +378,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
   useEffect(() => {
-    if (!targetCommentId || timeline.length === 0) return;
-    if (didHighlightRef.current === targetCommentId) return;
-    const el = document.getElementById(`comment-${targetCommentId}`);
+    if (!highlightCommentId || timeline.length === 0) return;
+    if (didHighlightRef.current === highlightCommentId) return;
+    const el = document.getElementById(`comment-${highlightCommentId}`);
     if (el) {
-      didHighlightRef.current = targetCommentId;
+      didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        setHighlightedId(targetCommentId);
+        el.scrollIntoView({ behavior: "instant", block: "center" });
+        setHighlightedId(highlightCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
       });
     }
-  }, [targetCommentId, timeline.length]);
+  }, [highlightCommentId, timeline.length]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -552,7 +529,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </button>
           {parentIssueOpen && <div className="pl-2">
             <AppLink
-              href={paths.issueDetail(parentIssue.identifier)}
+              href={paths.issueDetail(parentIssue.id)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
             >
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -645,7 +622,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {parentIssue && (
               <>
                 <AppLink
-                  href={paths.issueDetail(parentIssue.identifier)}
+                  href={paths.issueDetail(parentIssue.id)}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
@@ -653,9 +630,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="shrink-0 text-muted-foreground">
-              {issue.identifier}
-            </span>
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>
@@ -756,7 +730,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
           {parentIssue && (
             <AppLink
-              href={paths.issueDetail(parentIssue.identifier)}
+              href={paths.issueDetail(parentIssue.id)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
@@ -880,7 +854,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       return (
                         <AppLink
                           key={child.id}
-                          href={paths.issueDetail(child.identifier)}
+                          href={paths.issueDetail(child.id)}
                           className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
                         >
                           <StatusIcon

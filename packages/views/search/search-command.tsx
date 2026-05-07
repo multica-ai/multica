@@ -97,7 +97,6 @@ type NavKey =
   | "issues"
   | "projects"
   | "agents"
-  | "wiki"
   | "runtimes"
   | "skills"
   | "settings";
@@ -108,18 +107,6 @@ interface NavPage {
   icon: LucideIcon;
   keywords: string[];
 }
-
-const navPages: NavPage[] = [
-  { key: "inbox", label: "Inbox", icon: Inbox, keywords: ["inbox", "notifications"] },
-  { key: "myIssues", label: "My Issues", icon: CircleUser, keywords: ["my", "issues", "assigned"] },
-  { key: "issues", label: "Issues", icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
-  { key: "projects", label: "Projects", icon: FolderKanban, keywords: ["projects", "kanban"] },
-  { key: "agents", label: "Agents", icon: Bot, keywords: ["agents", "bots", "ai"] },
-  { key: "wiki", label: "Wiki", icon: BookOpenText, keywords: ["wiki", "docs", "knowledge"] },
-  { key: "runtimes", label: "Runtimes", icon: Monitor, keywords: ["runtimes", "environments"] },
-  { key: "skills", label: "Skills", icon: BookOpenText, keywords: ["skills", "library"] },
-  { key: "settings", label: "Settings", icon: Settings, keywords: ["settings", "config", "preferences"] },
-];
 
 type ThemeValue = "light" | "dark" | "system";
 
@@ -622,7 +609,7 @@ export function SearchCommand() {
                 {results.issues.map((issue) => (
                   <CommandPrimitive.Item
                     key={issue.id}
-                    value={issue.identifier}
+                    value={issue.id}
                     onSelect={handleSelect}
                     className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
@@ -669,7 +656,7 @@ export function SearchCommand() {
                 {recentIssues.map((item) => (
                   <CommandPrimitive.Item
                     key={item.id}
-                    value={item.identifier}
+                    value={item.id}
                     onSelect={handleSelect}
                     className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >

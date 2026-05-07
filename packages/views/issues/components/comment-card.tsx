@@ -1,8 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,8 +34,6 @@ import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, us
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { issueKeys } from "@multica/core/issues/queries";
-import type { Agent } from "@multica/core/types/agent";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -47,16 +44,9 @@ import { useT } from "../../i18n";
 // ---------------------------------------------------------------------------
 
 interface CommentCardProps {
-  wsId: string;
   issueId: string;
   entry: TimelineEntry;
   allReplies: Map<string, TimelineEntry[]>;
-  /** All comment entries by id (for thread ancestry). */
-  commentById: Map<string, TimelineEntry>;
-  agents: Agent[];
-  isWorkspaceAdmin: boolean;
-  /** False when issue is done or cancelled — hides Retry on agent replies. */
-  issueOpen: boolean;
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -72,22 +62,6 @@ interface CommentCardProps {
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
-}
-
-/** Walk parent_id until a member-authored comment (for issue-thread agent retry permissions). */
-function findMemberAncestorComment(
-  entry: TimelineEntry,
-  commentById: Map<string, TimelineEntry>,
-): TimelineEntry | null {
-  const seen = new Set<string>();
-  let cur: TimelineEntry | undefined = entry;
-  while (cur && !seen.has(cur.id)) {
-    seen.add(cur.id);
-    if (cur.actor_type === "member") return cur;
-    if (!cur.parent_id) break;
-    cur = commentById.get(cur.parent_id);
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,26 +160,16 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
 // ---------------------------------------------------------------------------
 
 function CommentRow({
-  wsId,
   issueId,
   entry,
-  commentById,
-  agents,
-  isWorkspaceAdmin,
-  issueOpen,
   currentUserId,
   canModerate = false,
   onEdit,
   onDelete,
   onToggleReaction,
 }: {
-  wsId: string;
   issueId: string;
   entry: TimelineEntry;
-  commentById: Map<string, TimelineEntry>;
-  agents: Agent[];
-  isWorkspaceAdmin: boolean;
-  issueOpen: boolean;
   currentUserId?: string;
   canModerate?: boolean;
   onEdit: (commentId: string, content: string) => Promise<void>;
@@ -214,7 +178,6 @@ function CommentRow({
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
@@ -229,33 +192,6 @@ function CommentRow({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmAgentDelete, setConfirmAgentDelete] = useState(false);
-
-  const agentMeta = entry.actor_type === "agent" ? agents.find((a) => a.id === entry.actor_id) : undefined;
-  const memberAncestor =
-    entry.actor_type === "agent" ? findMemberAncestorComment(entry, commentById) : null;
-  const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
-  const isTriggerMember = !!(
-    memberAncestor &&
-    currentUserId &&
-    memberAncestor.actor_type === "member" &&
-    memberAncestor.actor_id === currentUserId
-  );
-  const canDeleteAgentReply = entry.actor_type === "agent" && !isTemp && (isWorkspaceAdmin || isAgentOwner);
-  const canRetryAgentReply =
-    entry.actor_type === "agent" && !isTemp && issueOpen && (isWorkspaceAdmin || isAgentOwner || isTriggerMember);
-
-  const retryAgentMut = useMutation({
-    mutationFn: () => api.retryAgentComment(entry.id),
-    onSuccess: () => {
-      toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
-    },
-    onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
-  });
-
-  const showAgentActionsFooter = canRetryAgentReply || canDeleteAgentReply;
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -331,22 +267,6 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
-              {showAgentActionsFooter && <DropdownMenuSeparator />}
-              {canRetryAgentReply && (
-                <DropdownMenuItem
-                  disabled={retryAgentMut.isPending}
-                  onClick={() => retryAgentMut.mutate()}
-                >
-                  <RotateCw className="h-3.5 w-3.5" />
-                  Retry
-                </DropdownMenuItem>
-              )}
-              {canDeleteAgentReply && (
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirmAgentDelete(true)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </DropdownMenuItem>
-              )}
               {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
@@ -370,11 +290,6 @@ function CommentRow({
           <DeleteCommentDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
-            onConfirm={() => onDelete(entry.id)}
-          />
-          <DeleteCommentDialog
-            open={confirmAgentDelete}
-            onOpenChange={setConfirmAgentDelete}
             onConfirm={() => onDelete(entry.id)}
           />
           </div>
@@ -437,14 +352,9 @@ function CommentRow({
 // ---------------------------------------------------------------------------
 
 function CommentCardImpl({
-  wsId,
   issueId,
   entry,
   allReplies,
-  commentById,
-  agents,
-  isWorkspaceAdmin,
-  issueOpen,
   currentUserId,
   canModerate = false,
   onReply,
@@ -455,7 +365,6 @@ function CommentCardImpl({
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const qc = useQueryClient();
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -478,32 +387,6 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmAgentDelete, setConfirmAgentDelete] = useState(false);
-
-  const rootAgentMeta = entry.actor_type === "agent" ? agents.find((a) => a.id === entry.actor_id) : undefined;
-  const rootMemberAncestor =
-    entry.actor_type === "agent" ? findMemberAncestorComment(entry, commentById) : null;
-  const rootIsAgentOwner = !!(rootAgentMeta?.owner_id && currentUserId && rootAgentMeta.owner_id === currentUserId);
-  const rootIsTriggerMember = !!(
-    rootMemberAncestor &&
-    currentUserId &&
-    rootMemberAncestor.actor_type === "member" &&
-    rootMemberAncestor.actor_id === currentUserId
-  );
-  const canDeleteRootAgentReply = entry.actor_type === "agent" && !isTemp && (isWorkspaceAdmin || rootIsAgentOwner);
-  const canRetryRootAgentReply =
-    entry.actor_type === "agent" && !isTemp && issueOpen && (isWorkspaceAdmin || rootIsAgentOwner || rootIsTriggerMember);
-  const showRootAgentActionsFooter = canRetryRootAgentReply || canDeleteRootAgentReply;
-
-  const retryRootAgentMut = useMutation({
-    mutationFn: () => api.retryAgentComment(entry.id),
-    onSuccess: () => {
-      toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
-    },
-    onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
-  });
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -611,22 +494,6 @@ function CommentCardImpl({
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
-                  {showRootAgentActionsFooter && <DropdownMenuSeparator />}
-                  {canRetryRootAgentReply && (
-                    <DropdownMenuItem
-                      disabled={retryRootAgentMut.isPending}
-                      onClick={() => retryRootAgentMut.mutate()}
-                    >
-                      <RotateCw className="h-3.5 w-3.5" />
-                      Retry
-                    </DropdownMenuItem>
-                  )}
-                  {canDeleteRootAgentReply && (
-                    <DropdownMenuItem variant="destructive" onClick={() => setConfirmAgentDelete(true)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </DropdownMenuItem>
-                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
@@ -650,12 +517,6 @@ function CommentCardImpl({
               <DeleteCommentDialog
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
-                onConfirm={() => onDelete(entry.id)}
-                hasReplies
-              />
-              <DeleteCommentDialog
-                open={confirmAgentDelete}
-                onOpenChange={setConfirmAgentDelete}
                 onConfirm={() => onDelete(entry.id)}
                 hasReplies
               />
@@ -721,13 +582,8 @@ function CommentCardImpl({
           {allNestedReplies.map((reply) => (
             <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
               <CommentRow
-                wsId={wsId}
                 issueId={issueId}
                 entry={reply}
-                commentById={commentById}
-                agents={agents}
-                isWorkspaceAdmin={isWorkspaceAdmin}
-                issueOpen={issueOpen}
                 currentUserId={currentUserId}
                 canModerate={canModerate}
                 onEdit={onEdit}

@@ -182,7 +182,6 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
-          projectId={projectId}
         />
       ) : (
         <ListView
@@ -191,7 +190,6 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
-          projectId={projectId}
         />
       )}
     </div>
