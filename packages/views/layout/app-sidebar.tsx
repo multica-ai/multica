@@ -122,6 +122,11 @@ const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
+export function getCreateIssueModalData(pathname: string) {
+  const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+}
+
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;
@@ -309,10 +314,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         if (isEditable) return;
         if (useModalStore.getState().modal) return;
         e.preventDefault();
-        // Auto-fill project when on a project detail page
-        const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-        const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-        useModalStore.getState().open("create-issue", data);
+        useModalStore.getState().open("create-issue", getCreateIssueModalData(pathname));
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -435,7 +437,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("create-issue")}
+                onClick={() =>
+                  useModalStore
+                    .getState()
+                    .open("create-issue", getCreateIssueModalData(pathname))
+                }
               >
                 <span className="relative">
                   <SquarePen />
