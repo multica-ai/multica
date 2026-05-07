@@ -77,3 +77,4 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type { AgentDefaults } from "./agent-defaults";
