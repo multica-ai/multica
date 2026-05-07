@@ -80,6 +80,66 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 }
 
+// When `brew --prefix` is unavailable but the executable path is under a
+// known Cellar root, triggerRestart must recover the prefix from the
+// known-prefix list and target <prefix>/bin/multica.
+func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+	})
+
+	const knownPrefix = "/home/linuxbrew/.linuxbrew"
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return "" }
+	matchKnownBrewPrefix = func(string) string { return knownPrefix }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	want := filepath.Join(knownPrefix, "bin", "multica")
+	if got := d.RestartBinary(); got != want {
+		t.Fatalf("restart binary = %q, want %q", got, want)
+	}
+}
+
+// When `brew --prefix` is unavailable AND the executable is not under any
+// known Cellar root, triggerRestart logs a warning and keeps the executable
+// path (no fabricated <prefix>/bin/multica path).
+func TestTriggerRestart_BrewPrefixUnavailable_NoKnownPrefix_KeepsExecutable(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+	})
+
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return "" }
+	matchKnownBrewPrefix = func(string) string { return "" }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if got := d.RestartBinary(); got != exe {
+		t.Fatalf("restart binary = %q, want unchanged executable %q", got, exe)
+	}
+}
+
 func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	t.Parallel()
 
