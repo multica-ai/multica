@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -553,7 +554,7 @@ type githubTreeEntry struct {
 func fetchGitHubDefaultBranch(httpClient *http.Client, owner, repo string) string {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo))
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
@@ -828,7 +829,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 
 	// 2. List supporting files via GitHub API
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
-	dirResp, err := httpClient.Get(apiURL)
+	dirResp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Can't list files — return what we have (SKILL.md only)
 		if dirResp != nil {
@@ -880,7 +881,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
 	}
@@ -934,7 +935,7 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
 			}
-			subResp, err := httpClient.Get(subURL)
+			subResp, err := doGitHubAPIGet(httpClient, subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
 				attrs := []any{"url", subURL}
 				if subResp != nil {
@@ -980,7 +981,7 @@ func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, 
 
 func listGitHubSkillMdPaths(httpClient *http.Client, owner, repo, repoPath, ref string) ([]string, error) {
 	apiURL := buildGitHubContentsURL(owner, repo, repoPath, ref)
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil {
 		return nil, err
 	}
@@ -1026,7 +1027,7 @@ func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentE
 			subURL = parsed.String()
 		}
 
-		subResp, err := httpClient.Get(subURL)
+		subResp, err := doGitHubAPIGet(httpClient, subURL)
 		if err != nil || subResp.StatusCode != http.StatusOK {
 			attrs := []any{"url", subURL}
 			if subResp != nil {
@@ -1152,6 +1153,35 @@ func parseSkillFrontmatter(content string) (name, description string) {
 
 // --- GitHub import ---
 
+// errGitHubAPIBlocked signals that an api.github.com probe was rejected for
+// auth/rate-limit reasons (401/403/429) rather than because the resource
+// genuinely does not exist. Resolvers treat this as "indeterminate" and may
+// fall back to the optimistic URL split rather than aborting the import.
+var errGitHubAPIBlocked = errors.New("github API blocked (rate limit or auth)")
+
+// doGitHubAPIGet performs a GET against an api.github.com URL, attaching the
+// GITHUB_TOKEN bearer header when the env var is set. Unauthenticated GitHub
+// API requests are capped at 60/hour per IP, which is trivially exhausted on
+// shared self-hosted servers and surfaces to users as 403 errors during
+// skill imports. Setting GITHUB_TOKEN raises the limit to 5000/hour.
+func doGitHubAPIGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	addGitHubAuthHeader(req)
+	return httpClient.Do(req)
+}
+
+func addGitHubAuthHeader(req *http.Request) {
+	if req == nil {
+		return
+	}
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
 // githubSpec captures the parsed components of a github.com URL pointing at a
 // skill (or single-skill repository).
 type githubSpec struct {
@@ -1255,10 +1285,18 @@ func resolveGitHubRefAndPath(httpClient *http.Client, spec *githubSpec) error {
 	}
 	// Try longest prefix first so that release/v2 wins over release.
 	tried := make([]string, 0, len(spec.refSegments))
+	blocked := false
 	for n := len(spec.refSegments); n >= 1; n-- {
 		candidate := strings.Join(spec.refSegments[:n], "/")
 		tried = append(tried, candidate)
 		ok, err := githubRefExists(httpClient, spec.owner, spec.repo, candidate)
+		if errors.Is(err, errGitHubAPIBlocked) {
+			// 401/403/429 means we can't tell whether the ref exists. Keep
+			// trying the remaining (shorter) candidates so we don't punish
+			// the common single-segment-ref case for one bad probe.
+			blocked = true
+			continue
+		}
 		if err != nil {
 			// Network / transport errors should not be silently treated as
 			// "ref does not exist" — surface them so the caller can retry.
@@ -1273,6 +1311,16 @@ func resolveGitHubRefAndPath(httpClient *http.Client, spec *githubSpec) error {
 			}
 			return nil
 		}
+	}
+	if blocked {
+		// Every probe was either a confirmed 404 or rate-limited and we never
+		// got a confirmation. Fall back to the optimistic single-segment
+		// split that parseGitHubURL populated. If that's wrong, the
+		// subsequent raw-file fetch will surface a clearer "SKILL.md not
+		// found" error than failing the whole import on a 403.
+		slog.Warn("github import: ref resolution blocked by GitHub API (rate limit or auth); falling back to optimistic single-segment ref. Set GITHUB_TOKEN to enable disambiguation of slash-bearing refs.",
+			"owner", spec.owner, "repo", spec.repo, "tried", tried)
+		return nil
 	}
 	return fmt.Errorf("could not resolve ref in github.com/%s/%s URL — tried: %s. Make sure the branch, tag, or commit exists and that the URL is the canonical /tree/{ref}/{path} or /blob/{ref}/{path}/SKILL.md form",
 		spec.owner, spec.repo, strings.Join(tried, ", "))
@@ -1294,6 +1342,7 @@ func githubRefExists(httpClient *http.Client, owner, repo, ref string) (bool, er
 	// Per GitHub docs: Accept: application/vnd.github.v3.sha returns just
 	// the SHA when the ref resolves, which is the cheapest possible probe.
 	req.Header.Set("Accept", "application/vnd.github.v3.sha")
+	addGitHubAuthHeader(req)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return false, err
@@ -1304,6 +1353,8 @@ func githubRefExists(httpClient *http.Client, owner, repo, ref string) (bool, er
 		return true, nil
 	case http.StatusNotFound, http.StatusUnprocessableEntity:
 		return false, nil
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return false, errGitHubAPIBlocked
 	default:
 		return false, fmt.Errorf("github API returned status %d for ref %q", resp.StatusCode, ref)
 	}
@@ -1365,7 +1416,7 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	}
 
 	apiURL := buildGitHubContentsURL(spec.owner, spec.repo, spec.skillDir, spec.ref)
-	dirResp, err := httpClient.Get(apiURL)
+	dirResp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Cannot list the directory — return what we have (SKILL.md only).
 		// Keep this lenient: a private rate-limited request shouldn't fail
