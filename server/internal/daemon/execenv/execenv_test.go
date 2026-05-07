@@ -1487,7 +1487,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing reused codex workspace skill: %v", err)
 	}
-	if string(data) != "Write clearly." {
+	if string(data) != "---\nname: writing\ndescription: writing skill\n---\nWrite clearly." {
 		t.Errorf("skill content = %q", data)
 	}
 	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
@@ -1546,7 +1546,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing reused codex workspace skill: %v", err)
 	}
-	if string(data) != "Updated writing guidance." {
+	if string(data) != "---\nname: writing\ndescription: writing skill\n---\nUpdated writing guidance." {
 		t.Errorf("skill content = %q", data)
 	}
 	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
@@ -1663,7 +1663,7 @@ func TestPrepareIssueModeUsesSharedPath(t *testing.T) {
 	// First task on the issue.
 	env1, err := Prepare(PrepareParams{
 		WorkspacesRoot:  workspacesRoot,
-		WorkspaceID:    "ws-issue-001",
+		WorkspaceID:     "ws-issue-001",
 		TaskID:          "00000000-0000-0000-0000-000000000001",
 		IssueIdentifier: "TIM-42",
 		Sharing:         "issue",
@@ -1693,7 +1693,7 @@ func TestPrepareIssueModeUsesSharedPath(t *testing.T) {
 	// reuse the same root and NOT remove the marker.
 	env2, err := Prepare(PrepareParams{
 		WorkspacesRoot:  workspacesRoot,
-		WorkspaceID:    "ws-issue-001",
+		WorkspaceID:     "ws-issue-001",
 		TaskID:          "00000000-0000-0000-0000-000000000002",
 		IssueIdentifier: "TIM-42",
 		Sharing:         "issue",
@@ -1719,7 +1719,7 @@ func TestPrepareTaskModeUnchanged(t *testing.T) {
 	// Empty Sharing should fall back to the legacy task layout.
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot:  workspacesRoot,
-		WorkspaceID:    "ws-task-001",
+		WorkspaceID:     "ws-task-001",
 		TaskID:          "abcdef12-3456-7890-abcd-ef1234567890",
 		IssueIdentifier: "TIM-42", // ignored in task mode
 		Sharing:         "",
@@ -1744,7 +1744,7 @@ func TestPrepareIssueModeFallsBackWhenIdentifierMissing(t *testing.T) {
 	// fall back to the per-task layout so chat/autopilot keep working.
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:   "ws-fallback",
+		WorkspaceID:    "ws-fallback",
 		TaskID:         "feedface-0000-0000-0000-000000000000",
 		Sharing:        "issue",
 		AgentName:      "Agent A",

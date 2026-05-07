@@ -281,6 +281,7 @@ type Issue struct {
 	PrUrl              pgtype.Text        `json:"pr_url"`
 	PrNumber           pgtype.Int4        `json:"pr_number"`
 	PrRepo             pgtype.Text        `json:"pr_repo"`
+	EstimateMinutes    pgtype.Int4        `json:"estimate_minutes"`
 	// BMAD phase-progress tracking. Managed by the bmad-sidecar service.
 	PhaseState []byte `json:"phase_state"`
 }

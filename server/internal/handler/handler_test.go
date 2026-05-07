@@ -252,8 +252,8 @@ func TestIssueCRUD(t *testing.T) {
 	if created.Title != "Test issue from Go test" {
 		t.Fatalf("CreateIssue: expected title 'Test issue from Go test', got '%s'", created.Title)
 	}
-	if created.Status != "todo" {
-		t.Fatalf("CreateIssue: expected status 'todo', got '%s'", created.Status)
+	if created.Status != "backlog" {
+		t.Fatalf("CreateIssue: expected status 'backlog', got '%s'", created.Status)
 	}
 	issueID := created.ID
 
@@ -274,7 +274,7 @@ func TestIssueCRUD(t *testing.T) {
 
 	// Update - partial (only status)
 	w = httptest.NewRecorder()
-	status := "in_progress"
+	status := "todo"
 	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
 		"status": status,
 	})
@@ -286,8 +286,8 @@ func TestIssueCRUD(t *testing.T) {
 
 	var updated IssueResponse
 	json.NewDecoder(w.Body).Decode(&updated)
-	if updated.Status != "in_progress" {
-		t.Fatalf("UpdateIssue: expected status 'in_progress', got '%s'", updated.Status)
+	if updated.Status != "todo" {
+		t.Fatalf("UpdateIssue: expected status 'todo', got '%s'", updated.Status)
 	}
 	if updated.Title != "Test issue from Go test" {
 		t.Fatalf("UpdateIssue: title should be preserved, got '%s'", updated.Title)
@@ -330,10 +330,157 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
-// TestCreateIssueDefaultStatusIsTodo verifies that issues created without an
-// explicit status default to "todo" so the daemon picks them up immediately.
-// Before this fix the default was "backlog", which daemons ignore.
-func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
+func TestIssueEstimateMinutesCreateUpdateAndGet(t *testing.T) {
+	initial := int32(90)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":            "Estimated issue from Go test",
+		"priority":         "medium",
+		"estimate_minutes": initial,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+	if created.EstimateMinutes == nil || *created.EstimateMinutes != initial {
+		t.Fatalf("CreateIssue: expected estimate_minutes %d, got %v", initial, created.EstimateMinutes)
+	}
+	t.Cleanup(func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	})
+
+	updatedEstimate := int32(120)
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"estimate_minutes": updatedEstimate,
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated issue: %v", err)
+	}
+	if updated.EstimateMinutes == nil || *updated.EstimateMinutes != updatedEstimate {
+		t.Fatalf("UpdateIssue: expected estimate_minutes %d, got %v", updatedEstimate, updated.EstimateMinutes)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+created.ID, nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fetched IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode fetched issue: %v", err)
+	}
+	if fetched.EstimateMinutes == nil || *fetched.EstimateMinutes != updatedEstimate {
+		t.Fatalf("GetIssue: expected estimate_minutes %d, got %v", updatedEstimate, fetched.EstimateMinutes)
+	}
+}
+
+func TestGetIssueComputedEstimateRollupAndListOmission(t *testing.T) {
+	ctx := context.Background()
+	nextNumber := func(t *testing.T) int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = issue_counter + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		`, testWorkspaceID).Scan(&n); err != nil {
+			t.Fatalf("read next issue number: %v", err)
+		}
+		return n
+	}
+
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, estimate_minutes)
+		VALUES ($1, 'Rollup parent from Go test', 'backlog', 'medium', 'member', $2, $3, 30)
+		RETURNING id
+	`, testWorkspaceID, testUserID, nextNumber(t)).Scan(&parentID); err != nil {
+		t.Fatalf("insert parent issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parentID)
+	})
+
+	for _, child := range []struct {
+		title          string
+		assigneeType   string
+		assigneeID     string
+		estimateMinute int
+	}{
+		{"member child 1", "member", testUserID, 60},
+		{"member child 2", "member", testUserID, 90},
+		{"agent child", "agent", testRuntimeID, 120},
+	} {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, assignee_type, assignee_id,
+				creator_type, creator_id, parent_issue_id, number, estimate_minutes
+			)
+			VALUES ($1, $2, 'backlog', 'medium', $3, $4, 'member', $5, $6, $7, $8)
+		`, testWorkspaceID, child.title, child.assigneeType, child.assigneeID, testUserID, parentID, nextNumber(t), child.estimateMinute); err != nil {
+			t.Fatalf("insert %s: %v", child.title, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+parentID, nil)
+	req = withURLParam(req, "id", parentID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var fetched IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode fetched issue: %v", err)
+	}
+	if fetched.ComputedEstimateMinutes == nil || *fetched.ComputedEstimateMinutes != 150 {
+		t.Fatalf("GetIssue: expected computed_estimate_minutes 150, got %v", fetched.ComputedEstimateMinutes)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listResp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list issues: %v", err)
+	}
+	for _, issue := range listResp.Issues {
+		if issue["id"] == parentID {
+			if _, ok := issue["computed_estimate_minutes"]; ok {
+				t.Fatalf("ListIssues: computed_estimate_minutes should be omitted from list responses")
+			}
+			return
+		}
+	}
+	t.Fatalf("ListIssues: parent issue %s not found", parentID)
+}
+
+func TestCreateIssueDefaultStatusIsBacklog(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Issue with no explicit status",
@@ -345,8 +492,8 @@ func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
-	if created.Status != "todo" {
-		t.Fatalf("CreateIssue: expected default status 'todo', got '%s'", created.Status)
+	if created.Status != "backlog" {
+		t.Fatalf("CreateIssue: expected default status 'backlog', got '%s'", created.Status)
 	}
 
 	// Cleanup
@@ -1038,7 +1185,7 @@ func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or
 	// using a cancelled context if the query respects it.
-	
+
 	// Create a handler with a "broken" queries object is hard because it's a struct.
 	// Instead, let's use a context that is already cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1053,13 +1200,13 @@ func TestSendCodeDbError(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	testHandler.SendCode(w, req)
-	
+
 	// If the DB query respects the cancelled context, it should return an error.
 	// pgx usually returns context.Canceled which is not what isNotFound checks for.
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-	
+
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] != "failed to lookup user" {

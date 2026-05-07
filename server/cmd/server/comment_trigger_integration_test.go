@@ -368,10 +368,9 @@ func TestCommentTriggerOnAssignNoStatusGate(t *testing.T) {
 
 	// Create an in_progress issue.
 	issueID := createIssue(t, "On-assign status gate test")
-	resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "in_progress",
-	})
-	resp.Body.Close()
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET status = 'in_progress' WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
 
 	t.Cleanup(func() {
 		clearTasks(t, issueID)
@@ -380,7 +379,7 @@ func TestCommentTriggerOnAssignNoStatusGate(t *testing.T) {
 	})
 
 	// Assign the agent — should trigger despite non-todo status.
-	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
+	resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
@@ -403,10 +402,9 @@ func TestCommentTriggerOnMentionNoStatusGate(t *testing.T) {
 
 	// Create a done issue (not assigned to agent).
 	issueID := createIssue(t, "On-mention done issue test")
-	resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "done",
-	})
-	resp.Body.Close()
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET status = 'done' WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("set issue done: %v", err)
+	}
 
 	t.Cleanup(func() {
 		clearTasks(t, issueID)
