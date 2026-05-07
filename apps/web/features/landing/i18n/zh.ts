@@ -284,6 +284,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.27",
+        date: "2026-05-07",
+        title: "Chat 更清爽、Skill 支持 GitHub 导入，日常体验更顺手",
+        changes: [],
+        features: [
+          "支持直接从 GitHub URL 导入 Skill",
+          "Issue 菜单可一键复制本地 workdir 路径",
+          "`multica workspace update` 支持通过 CLI 修改工作区信息",
+        ],
+        improvements: [
+          "Chat 历史合并为一个 Active / Archived 菜单，复制回复更方便，过程信息展示更清爽",
+          "Inbox 归档当前项后会自动选中下一项",
+          "新建子 Issue 会自动带上父 Issue 的项目和状态",
+          "Autopilot 连续失败后会自动暂停，异常自动化更容易处理",
+        ],
+        fixes: [
+          "中文输入法选字时不再误触发提交",
+          "GitHub Skill 导入和旧版 OpenClaw 的失败提示更清楚",
+          "Issue 时间线和 Agent 实时状态卡在更多边界情况下保持准确",
+          "桌面端升级后更不容易白屏或异常中断",
+        ],
+      },
+      {
         version: "0.2.26",
         date: "2026-05-06",
         title: "i18n 全量铺开、长 Issue Timeline 提速与系统通知开关",
