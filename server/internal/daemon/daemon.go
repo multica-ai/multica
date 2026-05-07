@@ -1588,12 +1588,26 @@ func preflightPrivateAgentGate(task Task) error {
 	if task.Agent.Visibility != "private" {
 		return nil
 	}
-	if task.TriggerActorType != "member" || task.TriggerActorID == "" {
+
+	switch task.TriggerActorType {
+	case "member":
+		if task.TriggerActorID == "" {
+			return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
+		}
+		if task.Agent.OwnerID != "" && task.TriggerActorID == task.Agent.OwnerID {
+			return nil
+		}
+	case "agent":
+		// Allow same-owner agent-to-agent invocations: if the triggering
+		// agent's owner matches the target agent's owner, the invocation
+		// is authorised (the owner effectively delegated to both agents).
+		if task.TriggerActorOwnerID != "" && task.Agent.OwnerID != "" && task.TriggerActorOwnerID == task.Agent.OwnerID {
+			return nil
+		}
+	default:
 		return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
 	}
-	if task.Agent.OwnerID != "" && task.TriggerActorID == task.Agent.OwnerID {
-		return nil
-	}
+
 	return fmt.Errorf("private agent execution denied: only the agent owner can run this task")
 }
 

@@ -388,6 +388,34 @@ func TestPreflightPrivateAgentGate(t *testing.T) {
 			},
 			wantErr: "private agent execution denied: only the agent owner can run this task",
 		},
+		{
+			name: "same-owner agent trigger allows execution",
+			task: Task{
+				TriggerActorType:    "agent",
+				TriggerActorID:      otherID,
+				TriggerActorOwnerID: ownerID,
+				Agent:               &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+		},
+		{
+			name: "different-owner agent trigger is rejected",
+			task: Task{
+				TriggerActorType:    "agent",
+				TriggerActorID:      otherID,
+				TriggerActorOwnerID: otherID,
+				Agent:               &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+			wantErr: "private agent execution denied: only the agent owner can run this task",
+		},
+		{
+			name: "agent trigger without owner ID is rejected",
+			task: Task{
+				TriggerActorType: "agent",
+				TriggerActorID:   otherID,
+				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+			wantErr: "private agent execution denied: only the agent owner can run this task",
+		},
 	}
 
 	for _, tt := range tests {
