@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
+import { useRecentIssuesStore } from "./stores";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -178,4 +179,5 @@ export function onIssueDeleted(
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+  useRecentIssuesStore.getState().forgetIssue(wsId, issueId);
 }
