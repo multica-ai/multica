@@ -7,6 +7,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import type { Agent, AgentTask } from "@multica/core/types";
+import { useDashboardStore } from "../../core/store";
 
 const EMPTY_AGENTS: Agent[] = [];
 
@@ -18,6 +19,7 @@ interface AgentStripProps {
 // the shared agent-task-snapshot cache so it doesn't add network traffic on
 // top of pages that already mounted that query.
 export function AgentStrip({ wsId }: AgentStripProps) {
+  const actorId = useDashboardStore((s) => s.actorId);
   const { data: agents = EMPTY_AGENTS, isLoading } = useQuery({
     queryKey: ["workspaces", wsId, "agents", "list"],
     queryFn: () => api.listAgents({ workspace_id: wsId }),
@@ -25,6 +27,7 @@ export function AgentStrip({ wsId }: AgentStripProps) {
     staleTime: 60 * 1000,
   });
   const { data: snapshot } = useQuery(agentTaskSnapshotOptions(wsId));
+  const visible = actorId ? agents.filter((a) => a.id === actorId) : agents;
 
   if (isLoading) {
     return (
@@ -36,11 +39,13 @@ export function AgentStrip({ wsId }: AgentStripProps) {
     );
   }
 
-  if (agents.length === 0) {
+  if (visible.length === 0) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Ingen agenter i dette workspace endnu.
+          {agents.length === 0
+            ? "Ingen agenter i dette workspace endnu."
+            : "Ingen agents matcher filteret."}
         </CardContent>
       </Card>
     );
@@ -48,7 +53,7 @@ export function AgentStrip({ wsId }: AgentStripProps) {
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {agents.slice(0, 8).map((agent) => {
+      {visible.slice(0, 8).map((agent) => {
         const lastTask = pickLatestTask(snapshot, agent.id);
         return <AgentCard key={agent.id} agent={agent} lastTask={lastTask} />;
       })}

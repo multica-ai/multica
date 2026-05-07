@@ -704,8 +704,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {/* CEREBRO-PATCH(dashboard-nav): JEH-684 cerebro dashboard entry */}
-                <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {personalNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
@@ -772,6 +770,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
+                {/* CEREBRO-PATCH(dashboard-nav): JEH-684 cerebro dashboard entry in workspace group */}
+                <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
