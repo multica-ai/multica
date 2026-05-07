@@ -31,8 +31,12 @@ export function useTimeTrackingSync(ws: WSClient | null) {
     const unsubStarted = ws.on("time_entry:started", (raw) => {
       const { time_entry: entry } = raw as TimeEntryStartedPayload;
       const w = wid();
-      queryClient.setQueryData(queryKeys.timeTracking.current(w), entry);
-      useTimeTrackingStore.getState().setCurrentEntry(entry);
+      // Only update the current-timer slot when the entry is actually running.
+      // Manual entries (stop_time set, duration_seconds > 0) should not become currentEntry.
+      if (entry.duration_seconds < 0) {
+        queryClient.setQueryData(queryKeys.timeTracking.current(w), entry);
+        useTimeTrackingStore.getState().setCurrentEntry(entry);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.entries(w) });
       if (entry.issue_id) {
         void queryClient.invalidateQueries({
