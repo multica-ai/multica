@@ -13,4 +13,8 @@ Fallback order for later execution is:
 
 Authentication data for this feature is already stored in `testcase/auth/auth.json`. For the fixed verification code login case, use `tester@multica.com` with verification code `888888`, then verify that the browser leaves `/login` and reaches the default authenticated Issues route.
 
+For authenticated settings cases, reuse the same auth fixture, then navigate to the workspace `Settings` page and open the `Notifications` tab. Prefer asserting by visible section titles such as `Notifications`, `Custom Webhooks`, `Webhook endpoints`, `Channels`, `Delivery channels`, and the `Custom Webhook` channel row shown in the UI.
+
 Browser-observable assertions are preferred over implementation details. For this feature, the key proof points are the login card transition from email entry to code entry, the absence of visible login errors, and the final authenticated Issues page after successful verification.
+
+For the custom webhook feature, the key proof points are the ability to create a webhook endpoint from the Notifications settings page, the visible masked webhook entry after saving, successful test-send feedback, and a persisted `Custom Webhook` master toggle that controls the supported webhook-trigger events together.

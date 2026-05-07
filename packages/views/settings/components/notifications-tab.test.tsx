@@ -5,6 +5,10 @@ import userEvent from "@testing-library/user-event";
 const apiMock = vi.hoisted(() => ({
   listNotificationBindings: vi.fn(),
   listNotificationPreferences: vi.fn(),
+  listNotificationWebhooks: vi.fn(),
+  createNotificationWebhook: vi.fn(),
+  deleteNotificationWebhook: vi.fn(),
+  testNotificationWebhook: vi.fn(),
   updateNotificationPreference: vi.fn(),
 }));
 
@@ -25,6 +29,7 @@ describe("NotificationsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.listNotificationBindings.mockResolvedValue({ bindings: [] });
+    apiMock.listNotificationWebhooks.mockResolvedValue({ webhooks: [] });
     apiMock.listNotificationPreferences.mockResolvedValue({
       preferences: [
         {
@@ -41,6 +46,27 @@ describe("NotificationsTab", () => {
           binding_id: null,
           requires_binding: true,
         },
+        {
+          channel: "custom_webhook",
+          event_type: "mentioned",
+          enabled: false,
+          binding_id: null,
+          requires_binding: false,
+        },
+        {
+          channel: "custom_webhook",
+          event_type: "issue_assigned",
+          enabled: false,
+          binding_id: null,
+          requires_binding: false,
+        },
+        {
+          channel: "custom_webhook",
+          event_type: "subscribed_issue_updated",
+          enabled: false,
+          binding_id: null,
+          requires_binding: false,
+        },
       ],
     });
     apiMock.updateNotificationPreference.mockImplementation(async (payload) => ({
@@ -53,11 +79,11 @@ describe("NotificationsTab", () => {
   it("shows not connected state for dingtalk and keeps the toggle disabled", async () => {
     render(<NotificationsTab />);
 
-    expect(await screen.findByText("When you are mentioned")).toBeInTheDocument();
+    expect(await screen.findByText("DingTalk")).toBeInTheDocument();
     expect(screen.getAllByText(/Profile → Linked Accounts/).length).toBeGreaterThan(0);
 
     const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(2);
+    expect(switches).toHaveLength(3);
     expect(switches[1]).toHaveAttribute("aria-disabled", "true");
   });
 
@@ -66,7 +92,7 @@ describe("NotificationsTab", () => {
     render(<NotificationsTab />);
 
     const inboxSwitch = await screen.findByRole("switch", {
-      name: "Toggle Inbox mentions",
+      name: "Toggle Inbox",
     });
     expect(inboxSwitch).toHaveAttribute("aria-checked", "true");
 
@@ -78,6 +104,53 @@ describe("NotificationsTab", () => {
         event_type: "mentioned",
         enabled: false,
       });
+    });
+  });
+
+  it("shows one custom webhook channel switch and toggles all supported events", async () => {
+    const user = userEvent.setup();
+    apiMock.listNotificationWebhooks.mockResolvedValue({
+      webhooks: [
+        {
+          id: "webhook-1",
+          name: "GTD",
+          masked_url: "https://example.com/***",
+          enabled: true,
+          workspace_id: null,
+          created_at: "2026-05-07T00:00:00Z",
+          updated_at: "2026-05-07T00:00:00Z",
+        },
+      ],
+    });
+
+    render(<NotificationsTab />);
+
+    const customSwitch = await screen.findByRole("switch", {
+      name: "Toggle Custom Webhook",
+    });
+    expect(screen.queryByText("@ mentions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assigned to me")).not.toBeInTheDocument();
+    expect(screen.queryByText("Subscribed issue updates")).not.toBeInTheDocument();
+
+    await user.click(customSwitch);
+
+    await waitFor(() => {
+      expect(apiMock.updateNotificationPreference).toHaveBeenCalledTimes(3);
+    });
+    expect(apiMock.updateNotificationPreference).toHaveBeenCalledWith({
+      channel: "custom_webhook",
+      event_type: "mentioned",
+      enabled: true,
+    });
+    expect(apiMock.updateNotificationPreference).toHaveBeenCalledWith({
+      channel: "custom_webhook",
+      event_type: "issue_assigned",
+      enabled: true,
+    });
+    expect(apiMock.updateNotificationPreference).toHaveBeenCalledWith({
+      channel: "custom_webhook",
+      event_type: "subscribed_issue_updated",
+      enabled: true,
     });
   });
 });

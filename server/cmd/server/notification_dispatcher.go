@@ -24,11 +24,13 @@ const (
 	notificationDispatchBatchSize = 20
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
+	webhookDeliveryMaxAttempts    = 3
 	dingTalkMarkdownTitleLimit    = 80
 	dingTalkMarkdownTextLimit     = 1800
 )
 
 var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
+var customWebhookSender = notifyutil.WebhookSender{}
 
 type dingtalkDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
@@ -58,6 +60,11 @@ type emailDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
 	Provider          string          `json:"provider"`
 	ExternalUserID    string          `json:"external_user_id"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+type customWebhookDeliveryPayload struct {
+	WebhookEndpointID string          `json:"webhook_endpoint_id"`
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
@@ -111,6 +118,9 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 		case "email":
 			dispatched++
 			processEmailDelivery(ctx, queries, emailSvc, delivery)
+		case "custom_webhook":
+			dispatched++
+			processCustomWebhookDelivery(ctx, queries, delivery)
 		}
 	}
 }
@@ -241,6 +251,159 @@ func processEmailDelivery(ctx context.Context, queries *db.Queries, emailSvc *se
 			"error", err,
 		)
 	}
+}
+
+func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim custom webhook delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload customWebhookDeliveryPayload
+	if err := json.Unmarshal(claimed.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("invalid custom webhook delivery payload"))
+		return
+	}
+	endpointID := strings.TrimSpace(payload.WebhookEndpointID)
+	if endpointID == "" && claimed.TargetType == "webhook_endpoint" {
+		endpointID = util.UUIDToString(claimed.TargetID)
+	}
+	if endpointID == "" {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("missing custom webhook endpoint id"))
+		return
+	}
+
+	endpoint, err := queries.GetNotificationWebhookEndpoint(ctx, util.ParseUUID(endpointID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("custom webhook endpoint not found"))
+			return
+		}
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if !endpoint.Enabled {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("custom webhook endpoint is disabled"))
+		return
+	}
+
+	endpointURL, err := notifyutil.DecryptToken(endpoint.UrlEncrypted)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("failed to decrypt custom webhook url"))
+		return
+	}
+	secret := ""
+	if endpoint.SecretEncrypted.Valid && strings.TrimSpace(endpoint.SecretEncrypted.String) != "" {
+		secret, err = notifyutil.DecryptToken(endpoint.SecretEncrypted.String)
+		if err != nil {
+			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("failed to decrypt custom webhook secret"))
+			return
+		}
+	}
+
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+	event, err := queries.GetNotificationEvent(ctx, claimed.NotificationEventID)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	outbound, err := buildCustomWebhookPayload(claimed, event, eventPayload)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if err := customWebhookSender.SendJSON(ctx, endpointURL, secret, outbound); err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark custom webhook delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
+func buildCustomWebhookPayload(delivery db.NotificationDelivery, event db.NotificationEvent, eventPayload notificationEventPayload) ([]byte, error) {
+	eventID := util.UUIDToString(delivery.NotificationEventID)
+	details := json.RawMessage(event.Details)
+	if len(details) == 0 {
+		details = json.RawMessage(`{}`)
+	}
+	return json.Marshal(map[string]any{
+		"event_id":          eventID,
+		"delivery_id":       util.UUIDToString(delivery.ID),
+		"event_type":        firstValue(event.Type, eventPayload.Type),
+		"workspace_id":      util.UUIDToString(event.WorkspaceID),
+		"recipient_user_id": util.UUIDToString(event.RecipientUserID),
+		"title":             firstValue(event.Title, eventPayload.Title),
+		"body":              firstValue(pgTextToString(event.Body), eventPayload.Body),
+		"link":              firstValue(pgTextToString(event.Link), eventPayload.Link),
+		"issue": map[string]any{
+			"id":         util.UUIDToPtr(event.IssueID),
+			"identifier": eventPayload.IssueIdentifier,
+		},
+		"comment": map[string]any{
+			"id": util.UUIDToPtr(event.CommentID),
+		},
+		"actor": map[string]any{
+			"type": util.TextToPtr(event.ActorType),
+			"id":   util.UUIDToPtr(event.ActorID),
+		},
+		"details":     details,
+		"occurred_at": delivery.CreatedAt.Time.UTC().Format(time.RFC3339),
+	})
+}
+
+func finalizeFailedCustomWebhookDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= webhookDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark custom webhook delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: custom webhook delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
 }
 
 func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
@@ -625,4 +788,11 @@ func firstValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func pgTextToString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }

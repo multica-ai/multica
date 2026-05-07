@@ -363,6 +363,8 @@ type NotificationDelivery struct {
 	SentAt              pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TargetType          string             `json:"target_type"`
+	TargetID            pgtype.UUID        `json:"target_id"`
 }
 
 type NotificationEvent struct {
@@ -380,6 +382,18 @@ type NotificationEvent struct {
 	Link            pgtype.Text        `json:"link"`
 	Details         []byte             `json:"details"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type NotificationWebhookEndpoint struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Name            string             `json:"name"`
+	UrlEncrypted    string             `json:"url_encrypted"`
+	SecretEncrypted pgtype.Text        `json:"secret_encrypted"`
+	Enabled         bool               `json:"enabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PersonalAccessToken struct {

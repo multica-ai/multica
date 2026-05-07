@@ -37,6 +37,24 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 		DefaultEnabled:  false,
 		RequiresBinding: true,
 	},
+	{
+		Channel:         "custom_webhook",
+		EventType:       "mentioned",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "custom_webhook",
+		EventType:       "issue_assigned",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "custom_webhook",
+		EventType:       "subscribed_issue_updated",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
 }
 
 type NotificationBindingResponse struct {
@@ -251,6 +269,17 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 			return
 		}
 		bindingID = binding.ID
+	}
+	if channel == "custom_webhook" && *req.Enabled {
+		endpoints, err := h.Queries.ListEnabledNotificationWebhookEndpointsByUser(r.Context(), parseUUID(userID))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load notification webhooks")
+			return
+		}
+		if len(endpoints) == 0 {
+			writeError(w, http.StatusBadRequest, "custom webhook is not configured")
+			return
+		}
 	}
 
 	pref, err := h.Queries.UpsertNotificationChannelPreference(r.Context(), db.UpsertNotificationChannelPreferenceParams{

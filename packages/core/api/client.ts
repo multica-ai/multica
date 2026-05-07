@@ -61,6 +61,11 @@ import type {
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
+  NotificationWebhook,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
@@ -425,6 +430,41 @@ export class ApiClient {
 
   async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
     return this.fetch("/api/me/notification-preferences");
+  }
+
+  async listNotificationWebhooks(): Promise<ListNotificationWebhooksResponse> {
+    return this.fetch("/api/me/notification-webhooks");
+  }
+
+  async createNotificationWebhook(
+    data: CreateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch("/api/me/notification-webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateNotificationWebhook(
+    id: string,
+    data: UpdateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteNotificationWebhook(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testNotificationWebhook(id: string): Promise<TestNotificationWebhookResponse> {
+    return this.fetch(`/api/me/notification-webhooks/${id}/test`, {
+      method: "POST",
+    });
   }
 
   async updateNotificationPreference(
