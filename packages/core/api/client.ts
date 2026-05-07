@@ -77,6 +77,11 @@ import type {
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
+  NotificationWebhook,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
@@ -100,6 +105,8 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  AgentDefaults,
+  AgentDefaultsWithUser,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -489,6 +496,41 @@ export class ApiClient {
 
   async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
     return this.fetch("/api/me/notification-preferences");
+  }
+
+  async listNotificationWebhooks(): Promise<ListNotificationWebhooksResponse> {
+    return this.fetch("/api/me/notification-webhooks");
+  }
+
+  async createNotificationWebhook(
+    data: CreateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch("/api/me/notification-webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateNotificationWebhook(
+    id: string,
+    data: UpdateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteNotificationWebhook(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testNotificationWebhook(id: string): Promise<TestNotificationWebhookResponse> {
+    return this.fetch(`/api/me/notification-webhooks/${id}/test`, {
+      method: "POST",
+    });
   }
 
   async updateNotificationPreference(
@@ -1442,5 +1484,27 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Personal Agent Defaults
+  async getPersonalAgentDefaults(workspaceId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`);
+  }
+
+  async updatePersonalAgentDefaults(workspaceId: string, config: Record<string, unknown>): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`, {
+      method: "PUT",
+      body: JSON.stringify({ config }),
+    });
+  }
+
+  async listAllAgentDefaults(workspaceId: string): Promise<AgentDefaultsWithUser[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults`);
+  }
+
+  async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
+      method: "POST",
+    });
   }
 }

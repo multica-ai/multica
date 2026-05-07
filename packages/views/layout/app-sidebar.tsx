@@ -140,6 +140,11 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
+export function getCreateIssueModalData(pathname: string) {
+  const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+}
+
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;

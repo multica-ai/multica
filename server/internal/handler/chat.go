@@ -59,6 +59,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
+	// Private agents can only be chatted with by their owner.
+	if agent.Visibility == "private" && uuidToString(agent.OwnerID) != userID {
+		writeError(w, http.StatusForbidden, "private agent belongs to another user")
+		return
+	}
 
 	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
 		WorkspaceID: workspaceUUID,

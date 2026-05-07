@@ -197,6 +197,7 @@ type Comment struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ParentID    pgtype.UUID        `json:"parent_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type CommentReaction struct {
@@ -349,6 +350,15 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MemberAgentConfig struct {
+	ID          pgtype.UUID        `json:"id"`
+	MemberID    pgtype.UUID        `json:"member_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Config      []byte             `json:"config"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MentionFrequency struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	ActorType       string             `json:"actor_type"`
@@ -382,6 +392,8 @@ type NotificationDelivery struct {
 	SentAt              pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TargetType          string             `json:"target_type"`
+	TargetID            pgtype.UUID        `json:"target_id"`
 }
 
 type NotificationEvent struct {
@@ -407,6 +419,20 @@ type NotificationPreference struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Preferences []byte             `json:"preferences"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationWebhookEndpoint struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Name            string             `json:"name"`
+	UrlEncrypted    string             `json:"url_encrypted"`
+	SecretEncrypted pgtype.Text        `json:"secret_encrypted"`
+	Enabled         bool               `json:"enabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	PayloadTemplate string             `json:"payload_template"`
+	ContentPrefix   string             `json:"content_prefix"`
 }
 
 type PersonalAccessToken struct {

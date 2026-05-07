@@ -147,6 +147,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir. See https://kiro.dev/docs/cli/acp/
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "deepseek":
+		// DeepSeek-TUI auto-discovers project-level skills from .deepseek/skills/
+		// in the workdir.
+		skillsDir = filepath.Join(workDir, ".deepseek", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

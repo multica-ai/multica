@@ -129,9 +129,11 @@ vi.mock("../../editor", () => ({
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      setMarkdown: (markdown: string) => { valueRef.current = markdown; setValue(markdown); },
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
       uploadFile: () => {},
+      hasActiveUploads: () => false,
     }));
     return (
       <textarea

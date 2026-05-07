@@ -770,8 +770,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	return &task, nil
 }
 
-// FailTask marks a task as failed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// FailTask marks a task as failed. If the task belongs to an issue, the
+// issue is moved to blocked in the same transaction so runtime failures do
+// not leave the board showing work as still active.
 //
 // sessionID/workDir are optional: when the agent established a real session
 // before failing (e.g. crashed mid-conversation, was cancelled, or hit a
@@ -783,6 +784,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // Pass "" when unknown (treated as 'agent_error').
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
+	var blockedIssue *db.Issue
+	var prevIssueStatus string
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
 			ID:            taskID,
@@ -814,6 +817,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
 		}
+		if issue, prevStatus, changed, err := s.blockIssueForFailedTask(ctx, qtx, t); err != nil {
+			return err
+		} else if changed {
+			blockedIssue = &issue
+			prevIssueStatus = prevStatus
+		}
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
@@ -843,6 +852,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	}
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
+
+	if blockedIssue != nil {
+		s.broadcastIssueStatusChanged(*blockedIssue, prevIssueStatus)
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
@@ -1115,6 +1128,32 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+func (s *TaskService) blockIssueForFailedTask(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) (db.Issue, string, bool, error) {
+	if !task.IssueID.Valid {
+		return db.Issue{}, "", false, nil
+	}
+
+	issue, err := qtx.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return db.Issue{}, "", false, fmt.Errorf("load issue for failed task: %w", err)
+	}
+
+	switch issue.Status {
+	case "blocked", "done", "cancelled":
+		return issue, issue.Status, false, nil
+	}
+
+	prevStatus := issue.Status
+	blockedIssue, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:     issue.ID,
+		Status: "blocked",
+	})
+	if err != nil {
+		return db.Issue{}, "", false, fmt.Errorf("block issue for failed task: %w", err)
+	}
+	return blockedIssue, prevStatus, true, nil
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
@@ -1395,6 +1434,23 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
 		ActorType:   "system",
 		ActorID:     "",
 		Payload:     map[string]any{"issue": issueToMap(issue, prefix)},
+	})
+}
+
+func (s *TaskService) broadcastIssueStatusChanged(issue db.Issue, prevStatus string) {
+	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"issue":            issueToMap(issue, prefix),
+			"status_changed":   prevStatus != issue.Status,
+			"prev_status":      prevStatus,
+			"assignee_changed": false,
+			"priority_changed": false,
+		},
 	})
 }
 

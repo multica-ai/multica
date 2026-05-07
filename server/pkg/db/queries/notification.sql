@@ -36,6 +36,20 @@ INSERT INTO notification_delivery (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
+-- name: CreateTargetedNotificationDelivery :one
+INSERT INTO notification_delivery (
+    notification_event_id,
+    channel,
+    target_type,
+    target_id,
+    status,
+    attempt_count,
+    last_error,
+    payload_snapshot,
+    sent_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
 -- name: ListNotificationDeliveriesByEvent :many
 SELECT * FROM notification_delivery
 WHERE notification_event_id = $1

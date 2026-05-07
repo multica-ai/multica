@@ -1179,6 +1179,83 @@ func TestSetAgentSkillsRejectsMalformedSkillID(t *testing.T) {
 	}
 }
 
+func TestListCommentsExcludesSoftDeletedRows(t *testing.T) {
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Soft-deleted comment list test",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var softDelIssue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&softDelIssue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, softDelIssue.ID)
+	})
+
+	createComment := func(content string) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+softDelIssue.ID+"/comments", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "id", softDelIssue.ID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", content, w.Code, w.Body.String())
+		}
+		var comment CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&comment); err != nil {
+			t.Fatalf("decode comment: %v", err)
+		}
+		return comment
+	}
+
+	active := createComment("visible comment")
+	deleted := createComment("soft-deleted comment")
+	if _, err := testPool.Exec(ctx, `UPDATE comment SET deleted_at = now() WHERE id = $1`, deleted.ID); err != nil {
+		t.Fatalf("mark comment deleted: %v", err)
+	}
+
+	assertOnlyActiveComment := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("GET", path, nil)
+		req = withURLParam(req, "id", softDelIssue.ID)
+		testHandler.ListComments(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListComments(%q): expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+
+		var comments []CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&comments); err != nil {
+			t.Fatalf("decode comments: %v", err)
+		}
+		if len(comments) != 1 {
+			t.Fatalf("ListComments(%q): expected 1 visible comment, got %d", path, len(comments))
+		}
+		if comments[0].ID != active.ID {
+			t.Fatalf("ListComments(%q): expected active comment %s, got %s", path, active.ID, comments[0].ID)
+		}
+		return w
+	}
+
+	assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments")
+
+	w = assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments?limit=10&offset=0")
+	if total := w.Header().Get("X-Total-Count"); total != "1" {
+		t.Fatalf("paginated ListComments: expected X-Total-Count 1, got %q", total)
+	}
+
+	since := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+	assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments?since=" + since)
+}
+
 func TestAgentCRUD(t *testing.T) {
 	// List agents
 	w := httptest.NewRecorder()

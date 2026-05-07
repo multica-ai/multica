@@ -48,8 +48,13 @@ export type {
   ExternalAccountBindingStatus,
   ExternalAccountBinding,
   NotificationChannelPreference,
+  NotificationWebhook,
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
@@ -104,3 +109,4 @@ export type {
   ListAutopilotRunsResponse,
 } from "./autopilot";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
+export type { AgentDefaults, AgentDefaultsWithUser } from "./agent-defaults";

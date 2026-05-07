@@ -96,6 +96,7 @@ interface ContentEditorProps {
 
 interface ContentEditorRef {
   getMarkdown: () => string;
+  setMarkdown: (markdown: string) => void;
   clearContent: () => void;
   focus: () => void;
   /** Drop focus from the editor — used by chat after send so the caret
@@ -213,6 +214,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
+      setMarkdown: (markdown: string) => {
+        if (!editor) return;
+        const processed = markdown ? preprocessMarkdown(markdown) : "";
+        if (processed) {
+          editor.commands.setContent(processed, { contentType: "markdown" });
+        } else {
+          editor.commands.clearContent();
+        }
+      },
       clearContent: () => {
         editor?.commands.clearContent();
       },

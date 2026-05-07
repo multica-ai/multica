@@ -89,6 +89,9 @@ export function CustomArgsTab({
           <p className="text-xs text-muted-foreground">
             {t(($) => $.tab_body.custom_args.intro)}
           </p>
+          <p className="text-xs text-muted-foreground/70 mt-1 italic">
+            This agent also inherits custom arguments from System defaults and your Personal defaults.
+          </p>
           {launchHeader && (
             <p className="text-xs text-muted-foreground">
               {t(($) => $.tab_body.custom_args.launch_mode_prefix)}

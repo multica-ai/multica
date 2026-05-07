@@ -980,15 +980,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		var customEnv map[string]string
+
+		// Parse agent's own config values.
+		var agentEnv map[string]string
 		if agent.CustomEnv != nil {
-			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
+			if err := json.Unmarshal(agent.CustomEnv, &agentEnv); err != nil {
 				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
-		var customArgs []string
+		var agentArgs []string
 		if agent.CustomArgs != nil {
-			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
+			if err := json.Unmarshal(agent.CustomArgs, &agentArgs); err != nil {
 				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
@@ -996,15 +998,56 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+
+		// Build agent config layer.
+		agentLayer := AgentConfigLayer{
+			Instructions: agent.Instructions,
+			CustomEnv:    agentEnv,
+			CustomArgs:   agentArgs,
+		}
+
+		// Load system defaults from workspace.settings.agent_defaults.
+		var systemLayer AgentConfigLayer
+		if ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID); err == nil {
+			systemLayer = parseAgentConfigLayer(ws.Settings, "agent_defaults")
+		}
+
+		// Load personal defaults for the agent's owner.
+		var personalLayer AgentConfigLayer
+		if agent.OwnerID.Valid {
+			if cfg, err := h.Queries.GetMemberAgentConfigByOwner(r.Context(), db.GetMemberAgentConfigByOwnerParams{
+				UserID:      agent.OwnerID,
+				WorkspaceID: agent.WorkspaceID,
+			}); err == nil {
+				personalLayer = parseAgentConfigLayer(cfg.Config, "")
+			}
+		}
+
+		// Merge: system → personal → agent (agent wins).
+		merged := MergeAgentConfigs(systemLayer, personalLayer, agentLayer)
+
+		// Resolve extra skills from defaults that aren't already on the agent.
+		existingIDs := h.loadExistingSkillIDs(r.Context(), task.AgentID)
+		var extraIDs []string
+		for _, id := range merged.SkillIDs {
+			if _, already := existingIDs[id]; !already {
+				extraIDs = append(extraIDs, id)
+			}
+		}
+		allSkills := skills
+		if extra := h.loadExtraSkills(r.Context(), skills, extraIDs); len(extra) > 0 {
+			allSkills = append(allSkills, extra...)
+		}
+
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
 			Visibility:   agent.Visibility,
 			OwnerID:      uuidToString(agent.OwnerID),
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
+			Instructions: merged.Instructions,
+			Skills:       allSkills,
+			CustomEnv:    merged.CustomEnv,
+			CustomArgs:   merged.CustomArgs,
 			McpConfig:    mcpConfig,
 			Model:        agent.Model.String,
 		}

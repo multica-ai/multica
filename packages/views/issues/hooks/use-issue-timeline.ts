@@ -291,7 +291,12 @@ export function useIssueTimeline(
 
   const submitComment = useCallback(
     async (content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || submitting || !userId) return;
+      if (!content.trim()) return;
+      if (submitting) throw new Error("Comment submission already in progress");
+      if (!userId) {
+        toast.error("Failed to send comment");
+        throw new Error("Cannot submit comment without an authenticated user");
+      }
       setSubmitting(true);
       try {
         await createComment({ content, attachmentIds });
@@ -306,7 +311,11 @@ export function useIssueTimeline(
 
   const submitReply = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+      if (!content.trim()) return;
+      if (!userId) {
+        toast.error("Failed to send reply");
+        throw new Error("Cannot submit reply without an authenticated user");
+      }
       try {
         await createComment({
           content,

@@ -260,6 +260,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/notification-bindings/email/verify", h.VerifyMyEmailBinding)
 		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)
 		r.Delete("/api/me/notification-bindings/{bindingId}", h.DeleteMyNotificationBinding)
+		r.Get("/api/me/notification-webhooks", h.ListMyNotificationWebhooks)
+		r.Post("/api/me/notification-webhooks", h.CreateMyNotificationWebhook)
+		r.Patch("/api/me/notification-webhooks/{webhookId}", h.UpdateMyNotificationWebhook)
+		r.Delete("/api/me/notification-webhooks/{webhookId}", h.DeleteMyNotificationWebhook)
+		r.Post("/api/me/notification-webhooks/{webhookId}/test", h.TestMyNotificationWebhook)
 		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)
 		r.Patch("/api/me/notification-preferences", h.UpdateMyNotificationPreference)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
@@ -283,6 +288,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					r.Get("/invite-links", h.ListInviteLinks)
+					r.Get("/agent-defaults/me", h.GetPersonalAgentDefaults)
+					r.Put("/agent-defaults/me", h.UpdatePersonalAgentDefaults)
+					r.Get("/agent-defaults", h.ListAllAgentDefaults)
+					r.Post("/agent-defaults/duplicate/{configId}", h.DuplicateAgentDefaults)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
