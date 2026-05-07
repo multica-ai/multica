@@ -7,3 +7,10 @@ export interface AgentDefaults {
   created_at?: string;
   updated_at?: string;
 }
+
+/** Agent defaults record with user information (returned by list endpoint). */
+export interface AgentDefaultsWithUser extends AgentDefaults {
+  user_id: string;
+  user_name: string;
+  user_avatar_url: string;
+}

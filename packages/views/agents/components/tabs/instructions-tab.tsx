@@ -43,7 +43,7 @@ export function InstructionsTab({
           injected into the agent&apos;s context for every task.
         </p>
         <p className="text-xs text-muted-foreground/70 mt-1 italic">
-          This agent also inherits instructions from System defaults and your Personal defaults (configured in Settings).
+          This agent also inherits instructions from System defaults and your Personal defaults.
         </p>
       </div>
 
