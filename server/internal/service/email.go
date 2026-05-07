@@ -4,10 +4,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html"
+	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -76,10 +79,18 @@ func NewEmailService() *EmailService {
 // Set SMTP_TLS_INSECURE=true for self-signed or private CA certificates.
 func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
-	conn, err := net.Dial("tcp", addr)
+
+	// Bounded dial + whole-session deadline: prevents a blackholed SMTP server
+	// from hanging the auth handler (or a background goroutine) indefinitely.
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("smtp dial %s: %w", addr, err)
 	}
+	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp set deadline: %w", err)
+	}
+
 	c, err := smtp.NewClient(conn, s.smtpHost)
 	if err != nil {
 		conn.Close()
@@ -87,6 +98,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	}
 	defer c.Close()
 
+	// STARTTLS if advertised — refreshes the extension list for 8BITMIME check below.
 	if ok, _ := c.Extension("STARTTLS"); ok {
 		tlsCfg := &tls.Config{
 			ServerName:         s.smtpHost,
@@ -104,6 +116,27 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 		}
 	}
 
+	// Probe 8BITMIME after (possible) STARTTLS so the extension list is current.
+	// Use quoted-printable for relays that don't advertise 8BITMIME — safer for
+	// non-ASCII workspace/inviter names crossing strict or older SMTP hops.
+	_, has8Bit := c.Extension("8BITMIME")
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	msgID := fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), s.smtpHost)
+
+	var bodyBytes []byte
+	var cte string
+	if has8Bit {
+		bodyBytes = []byte(htmlBody)
+		cte = "8bit"
+	} else {
+		var buf strings.Builder
+		qpw := quotedprintable.NewWriter(&buf)
+		_, _ = qpw.Write([]byte(htmlBody))
+		_ = qpw.Close()
+		bodyBytes = []byte(buf.String())
+		cte = "quoted-printable"
+	}
+
 	if err = c.Mail(s.fromEmail); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}
@@ -116,11 +149,14 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	}
 	headers := "From: " + s.fromEmail + "\r\n" +
 		"To: " + to + "\r\n" +
-		"Subject: " + subject + "\r\n" +
+		"Subject: " + encodedSubject + "\r\n" +
+		"Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n" +
+		"Message-ID: " + msgID + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/html; charset=UTF-8\r\n" +
+		"Content-Transfer-Encoding: " + cte + "\r\n" +
 		"\r\n"
-	if _, err = fmt.Fprint(w, headers+htmlBody); err != nil {
+	if _, err = fmt.Fprintf(w, "%s%s", headers, bodyBytes); err != nil {
 		return fmt.Errorf("smtp write body: %w", err)
 	}
 	if err = w.Close(); err != nil {
