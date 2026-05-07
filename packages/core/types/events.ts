@@ -29,6 +29,7 @@ export type WSEventType =
   | "inbox:archived"
   | "inbox:batch-read"
   | "inbox:batch-archived"
+  | "desktop:notify"
   | "workspace:updated"
   | "workspace:deleted"
   | "member:added"
@@ -121,6 +122,19 @@ export interface InboxBatchReadPayload {
 export interface InboxBatchArchivedPayload {
   recipient_id: string;
   count: number;
+}
+
+// Fired when a notification's desktop channel is enabled for the recipient.
+// Carries enough banner copy that the desktop renderer can show the toast
+// without round-tripping to fetch the inbox row.
+export interface DesktopNotifyPayload {
+  recipient_id: string;
+  type: string;
+  severity: string;
+  title: string;
+  body: string;
+  issue_id: string;
+  issue_status: string;
 }
 
 export interface CommentCreatedPayload {

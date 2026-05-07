@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -599,5 +600,182 @@ func TestRouteKey_FormatStaysStable(t *testing.T) {
 	}
 	if k := routeKey("due_date_changed", false); !strings.HasSuffix(k, ".follower") {
 		t.Errorf("split follower suffix changed, got %q", k)
+	}
+}
+
+// captureBus records every event published via SubscribeAll, so a test can
+// assert that a desktop:notify event was emitted (or wasn't) without
+// touching the WS hub.
+type captureBus struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (c *captureBus) attach(bus *events.Bus) {
+	bus.SubscribeAll(func(e events.Event) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.events = append(c.events, e)
+	})
+}
+
+func (c *captureBus) byType(t string) []events.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []events.Event
+	for _, e := range c.events {
+		if e.Type == t {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TestDesktopGate_FiresWhenChannelOn verifies that a recipient with the
+// desktop channel on for the routing key receives a desktop:notify event
+// alongside the inbox row.
+func TestDesktopGate_FiresWhenChannelOn(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	cap := &captureBus{}
+	cap.attach(bus)
+
+	subEmail := "notif-desk-on@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subEmail)
+		clearUserPrefs(t, subID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", subID, "creator")
+
+	// task_failed has desktop=on by default and inbox=on (writes a row),
+	// which satisfies the dispatch precondition for the desktop banner.
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"agent_id": testUserID,
+			"issue_id": issueID,
+		},
+	})
+
+	desktops := cap.byType(protocol.EventDesktopNotify)
+	if len(desktops) != 1 {
+		t.Fatalf("expected 1 desktop:notify, got %d", len(desktops))
+	}
+	payload, _ := desktops[0].Payload.(map[string]any)
+	if got, _ := payload["recipient_id"].(string); got != subID {
+		t.Errorf("desktop:notify recipient_id = %q, want %q", got, subID)
+	}
+	if got, _ := payload["type"].(string); got != "task_failed" {
+		t.Errorf("desktop:notify type = %q, want task_failed", got)
+	}
+	if got, _ := payload["issue_id"].(string); got != issueID {
+		t.Errorf("desktop:notify issue_id = %q, want %q", got, issueID)
+	}
+}
+
+// TestDesktopGate_OffSuppressesBanner verifies that turning desktop off for
+// the key suppresses the banner — even when other channels still write rows.
+func TestDesktopGate_OffSuppressesBanner(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	cap := &captureBus{}
+	cap.attach(bus)
+
+	subEmail := "notif-desk-off@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subEmail)
+		clearUserPrefs(t, subID)
+	})
+
+	setUserChannelPrefs(t, subID, map[string]map[string]string{
+		channelDesktop: {"task_failed": "off"},
+	}, nil)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", subID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"agent_id": testUserID,
+			"issue_id": issueID,
+		},
+	})
+
+	if got := cap.byType(protocol.EventDesktopNotify); len(got) != 0 {
+		t.Errorf("desktop=off should suppress banner, got %d events", len(got))
+	}
+	// Inbox row still gets written (default for task_failed.inbox is on).
+	inbox := inboxItemsByRoute(t, subID, routeInbox)
+	if len(inbox) != 1 {
+		t.Errorf("expected 1 inbox-routed task_failed, got %+v", inbox)
+	}
+}
+
+// TestDesktopGate_NoBannerWhenAllStorageOff verifies the same precondition
+// as the mobile gate: if neither inbox nor notifications wrote a row, the
+// banner doesn't fire even with desktop on — there's nothing to open.
+func TestDesktopGate_NoBannerWhenAllStorageOff(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	cap := &captureBus{}
+	cap.attach(bus)
+
+	subEmail := "notif-desk-nostorage@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subEmail)
+		clearUserPrefs(t, subID)
+	})
+
+	// task_failed defaults: inbox=on, notifications=off, desktop=on.
+	// Turning inbox off (and leaving notifications at its default off) means
+	// no row gets written — the banner should be suppressed by the
+	// "must have something to open" rule.
+	setUserChannelPrefs(t, subID, map[string]map[string]string{
+		channelInbox: {"task_failed": "off"},
+	}, nil)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", subID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"agent_id": testUserID,
+			"issue_id": issueID,
+		},
+	})
+
+	if got := cap.byType(protocol.EventDesktopNotify); len(got) != 0 {
+		t.Errorf("no inbox/notif row should suppress banner, got %d events", len(got))
 	}
 }

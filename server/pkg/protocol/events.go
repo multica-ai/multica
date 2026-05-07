@@ -37,6 +37,12 @@ const (
 	EventInboxBatchRead     = "inbox:batch-read"
 	EventInboxBatchArchived = "inbox:batch-archived"
 
+	// Desktop banner — a transient in-app banner. Fired alongside an inbox
+	// item when the recipient's desktop channel is on for the routing key,
+	// so the desktop renderer can show a toast without re-fetching from
+	// the inbox.
+	EventDesktopNotify = "desktop:notify"
+
 	// Workspace events
 	EventWorkspaceUpdated = "workspace:updated"
 	EventWorkspaceDeleted = "workspace:deleted"

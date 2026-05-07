@@ -93,7 +93,7 @@ type inboxItemDraft struct {
 // and/or Notifications). Returns true if at least one item was created.
 //
 // Mobile and Desktop are push channels — they don't create rows in inbox_item.
-// Mobile is gated on the same row-level on/off plus the existence of an
+// Both are gated on the same row-level on/off plus the existence of an
 // inbox/notifications item (we don't push something the user can't open).
 //
 // Agents always behave as inbox-only: resolveChannelChoice returns true for
@@ -129,6 +129,27 @@ func dispatchToMember(
 	// not a standalone notification.
 	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.IssueID, d.NotifType, d.Title, d.Body)
+	}
+
+	// Desktop banner fires under the same "must have a real item to open"
+	// rule as mobile. It rides the WS hub via EventDesktopNotify and is
+	// scoped to the recipient by listeners.go.
+	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) {
+		bus.Publish(events.Event{
+			Type:        protocol.EventDesktopNotify,
+			WorkspaceID: d.WorkspaceID,
+			ActorType:   d.Actor.ActorType,
+			ActorID:     d.Actor.ActorID,
+			Payload: map[string]any{
+				"recipient_id": d.RecipientID,
+				"type":         d.NotifType,
+				"severity":     d.Severity,
+				"title":        d.Title,
+				"body":         d.Body,
+				"issue_id":     d.IssueID,
+				"issue_status": d.IssueStatus,
+			},
+		})
 	}
 
 	return created
