@@ -182,7 +182,7 @@ export function AgentsPage() {
     try {
       await api.duplicateAgentDefaults(wsId, configId);
       qc.invalidateQueries({ queryKey: ["workspaces", wsId, "personal-agent-defaults"] });
-      toast.success("Defaults duplicated to your personal config");
+      toast.success("Defaults duplicated to your personal config. Environment variables are not duplicated for security reasons.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to duplicate defaults");
     }
