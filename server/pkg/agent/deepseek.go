@@ -271,7 +271,7 @@ func (b *deepseekBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("deepseek stdin pipe: %w", err)
 	}
-	providerErr := newACPProviderErrorSniffer("deepseek")
+	providerErr := newACPProviderErrorSniffer("DeepSeek-TUI")
 	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[deepseek:stderr] "), providerErr)
 
 	if err := cmd.Start(); err != nil {

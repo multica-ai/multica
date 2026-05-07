@@ -12,7 +12,7 @@ import (
 
 func TestNewReturnsDeepseekBackend(t *testing.T) {
 	t.Parallel()
-	b, err := New("deepseek", Config{ExecutablePath: "/nonexistent/deepseek"})
+	b, err := New("DeepSeek-TUI", Config{ExecutablePath: "/nonexistent/deepseek"})
 	if err != nil {
 		t.Fatalf("New(deepseek) error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestDeepseekBackendNativeProtocol(t *testing.T) {
 		t.Fatalf("write fake deepseek: %v", err)
 	}
 
-	backend, err := New("deepseek", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("DeepSeek-TUI", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("new deepseek backend: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestDeepseekBackendThreadStartFailure(t *testing.T) {
 		t.Fatalf("write fake deepseek: %v", err)
 	}
 
-	backend, err := New("deepseek", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("DeepSeek-TUI", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("new deepseek backend: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestDeepseekBackendInvokesAppServerStdio(t *testing.T) {
 		t.Fatalf("write fake deepseek: %v", err)
 	}
 
-	backend, err := New("deepseek", Config{
+	backend, err := New("DeepSeek-TUI", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
 		Env:            map[string]string{"DEEPSEEK_ARGS_FILE": argsFile},

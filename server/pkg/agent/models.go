@@ -79,7 +79,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
-	case "deepseek":
+	case "DeepSeek-TUI":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverDeepseekModels(ctx, executablePath)
 		})
@@ -522,8 +522,8 @@ func discoverDeepseekModels(ctx context.Context, executablePath string) ([]Model
 // ACP discovery fails. The list covers DeepSeek's two flagship models.
 func deepseekStaticModels() []Model {
 	return []Model{
-		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "deepseek", Default: true},
-		{ID: "deepseek-v4-flash", Label: "DeepSeek V4 Flash", Provider: "deepseek"},
+		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "DeepSeek-TUI", Default: true},
+		{ID: "deepseek-v4-flash", Label: "DeepSeek V4 Flash", Provider: "DeepSeek-TUI"},
 	}
 }
 
