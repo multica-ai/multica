@@ -70,6 +70,10 @@ type Handler struct {
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
 	cfg                   Config
+
+	// Preview environment proxy. Set in router.go before the server accepts
+	// traffic so concurrent requests never race on initialization.
+	PreviewClient *PreviewGeneratorClient
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

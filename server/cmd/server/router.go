@@ -102,6 +102,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	if previewURL := os.Getenv("PREVIEW_GENERATOR_URL"); previewURL != "" {
+		h.PreviewClient = handler.NewPreviewGeneratorClient(previewURL)
+	}
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
@@ -504,6 +507,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
+			})
+
+			// Preview environments (proxied to agent-preview-generator)
+			r.Route("/api/previews", func(r chi.Router) {
+				r.Post("/", h.CreatePreview)
+				r.Get("/", h.ListPreviews)
+				r.Get("/{id}", h.GetPreview)
+				r.Delete("/{id}", h.DeletePreview)
 			})
 		})
 	})

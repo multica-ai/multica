@@ -116,6 +116,8 @@ spec:
                   key: port
             - name: REDIS_URL
               value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
+            - name: PREVIEW_GENERATOR_URL
+              value: "http://agent-preview-generator.agent-preview-generator.svc.cluster.local:80"
           livenessProbe:
             httpGet:
               path: /health
