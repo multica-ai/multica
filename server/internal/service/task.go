@@ -28,6 +28,20 @@ type TaskService struct {
 	Bus       *events.Bus
 }
 
+type TriggerActor struct {
+	Source    string
+	ActorType string
+	ActorID   pgtype.UUID
+}
+
+func (t TriggerActor) sourceText() pgtype.Text {
+	return pgtype.Text{String: t.Source, Valid: t.Source != ""}
+}
+
+func (t TriggerActor) actorTypeText() pgtype.Text {
+	return pgtype.Text{String: t.ActorType, Valid: t.ActorType != ""}
+}
+
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus) *TaskService {
 	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus}
 }
@@ -35,7 +49,7 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
-func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, trigger TriggerActor, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -66,6 +80,9 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: commentID,
+		TriggerSource:    trigger.sourceText(),
+		TriggerActorType: trigger.actorTypeText(),
+		TriggerActorID:   trigger.ActorID,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -79,7 +96,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
-func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -100,6 +117,9 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: triggerCommentID,
+		TriggerSource:    trigger.sourceText(),
+		TriggerActorType: trigger.actorTypeText(),
+		TriggerActorID:   trigger.ActorID,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -112,7 +132,7 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, trigger TriggerActor) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -130,6 +150,9 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		RuntimeID:     agent.RuntimeID,
 		Priority:      2, // medium priority for chat
 		ChatSessionID: chatSession.ID,
+		TriggerSource: trigger.sourceText(),
+		TriggerActorType: trigger.actorTypeText(),
+		TriggerActorID: trigger.ActorID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)

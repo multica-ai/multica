@@ -1,0 +1,65 @@
+{
+  "cli": {
+    "version": ">= 13.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
+        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "env": {
+        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
+        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "env": {
+        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
+        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
+      },
+      "ios": {
+        "autoIncrement": "buildNumber"
+      },
+      "android": {
+        "autoIncrement": "versionCode",
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6766756591",
+        "appleId": "airthor@163.com",
+        "appleTeamId": "BLSLB9GA43"
+      }
+    }
+  }
+}

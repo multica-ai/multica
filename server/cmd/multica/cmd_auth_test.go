@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,8 +11,20 @@ import (
 // registered, matching the rootCmd setup used in production.
 func testCmd() *cobra.Command {
 	cmd := &cobra.Command{}
-	cmd.PersistentFlags().String("profile", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("config", "", "")
 	return cmd
+}
+
+func TestResolveConfigPath(t *testing.T) {
+	cmd := testCmd()
+	want := filepath.Join(t.TempDir(), "dev.json")
+	if err := cmd.Flags().Set("config", want); err != nil {
+		t.Fatalf("set config flag: %v", err)
+	}
+	if got := resolveConfigPath(cmd); got != want {
+		t.Fatalf("resolveConfigPath() = %q, want %q", got, want)
+	}
 }
 
 func TestResolveAppURL(t *testing.T) {
@@ -52,6 +65,33 @@ func TestNormalizeAPIBaseURL(t *testing.T) {
 	t.Run("falls back to raw value for invalid URL", func(t *testing.T) {
 		if got := normalizeAPIBaseURL("://bad-url"); got != "://bad-url" {
 			t.Fatalf("normalizeAPIBaseURL() = %q, want %q", got, "://bad-url")
+		}
+	})
+}
+
+func TestBrowserCommandsForOS(t *testing.T) {
+	t.Run("windows includes fallbacks", func(t *testing.T) {
+		cmds, err := browserCommandsForOS("windows", "https://example.com")
+		if err != nil {
+			t.Fatalf("browserCommandsForOS() error = %v", err)
+		}
+		if len(cmds) != 3 {
+			t.Fatalf("browserCommandsForOS() len = %d, want 3", len(cmds))
+		}
+		if cmds[0].name != "rundll32" {
+			t.Fatalf("first windows browser command = %q, want %q", cmds[0].name, "rundll32")
+		}
+		if cmds[1].name != "cmd" {
+			t.Fatalf("second windows browser command = %q, want %q", cmds[1].name, "cmd")
+		}
+		if cmds[2].name != "powershell" {
+			t.Fatalf("third windows browser command = %q, want %q", cmds[2].name, "powershell")
+		}
+	})
+
+	t.Run("unsupported platform errors", func(t *testing.T) {
+		if _, err := browserCommandsForOS("plan9", "https://example.com"); err == nil {
+			t.Fatal("browserCommandsForOS() expected error for unsupported platform")
 		}
 	})
 }

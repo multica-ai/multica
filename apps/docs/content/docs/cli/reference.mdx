@@ -171,6 +171,23 @@ multica daemon start
 
 Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root.
 
+### Explicit Config Files
+
+For advanced use cases, you can also isolate an instance with an explicit config path:
+
+```bash
+# Start a cloud-connected daemon using the default instance
+multica daemon start
+
+# Configure a second instance backed by a separate config file
+multica --config ~/.multica/instances/local/config.json setup self-host --port 8080 --frontend-port 3000
+
+# Start a second daemon bound to that config instance
+multica --config ~/.multica/instances/local/config.json daemon start
+```
+
+When `--config` is used, Multica isolates the config file, daemon pid/log files, health port, and workspace root as one instance.
+
 ## Workspaces
 
 ### List Workspaces
@@ -351,6 +368,7 @@ multica issue list --project <project-id>
 
 ```bash
 multica config show
+multica --config ~/.multica/instances/local/config.json config show
 ```
 
 Shows config file path, server URL, app URL, and default workspace.
@@ -361,6 +379,7 @@ Shows config file path, server URL, app URL, and default workspace.
 multica config set server_url wss://api.example.com/ws
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
+multica --config ~/.multica/instances/local/config.json config set server_url http://localhost:8080
 ```
 
 ## Other Commands

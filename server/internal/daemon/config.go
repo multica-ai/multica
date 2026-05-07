@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const (
@@ -20,45 +22,49 @@ const (
 	DefaultHealthPort            = 19514
 	DefaultMaxConcurrentTasks    = 20
 	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour // 5 days
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
 	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
 
 	// Rate Limit retry configuration
-	DefaultRateLimitInitialDelay  = 5 * time.Second  // 5 seconds
-	DefaultRateLimitMaxRetries     = 6                   // max 6 retries
-	DefaultRateLimitBackoffFactor = 2.0                 // exponential backoff
+	DefaultRateLimitInitialDelay  = 5 * time.Second // 5 seconds
+	DefaultRateLimitMaxRetries    = 6               // max 6 retries
+	DefaultRateLimitBackoffFactor = 2.0             // exponential backoff
 )
 
 // Config holds all daemon configuration.
 type Config struct {
-	ServerBaseURL      string
-	DaemonID           string
-	LegacyDaemonIDs    []string              // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
-	DeviceName         string
-	RuntimeName        string
-	CLIVersion         string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
-	Profile            string                // profile name (empty = default)
-	Agents             map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi
-	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
-	KeepEnvAfterTask   bool                  // preserve env after task for debugging
-	HealthPort         int                   // local HTTP port for health checks (default: 19514)
-	MaxConcurrentTasks int                   // max tasks running in parallel (default: 20)
-	GCEnabled          bool                  // enable periodic workspace garbage collection (default: true)
-	GCInterval         time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL              time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
-	GCOrphanTTL        time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
-	PollInterval       time.Duration
-	HeartbeatInterval  time.Duration
-	AgentTimeout       time.Duration
-	RateLimitConfig RateLimitConfig
+	ServerBaseURL              string
+	DaemonID                   string
+	LegacyDaemonIDs            []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	DeviceName                 string
+	RuntimeName                string
+	CLIVersion                 string                // multica CLI version (e.g. "0.1.13")
+	LaunchedBy                 string                // "desktop" when spawned by the Electron app, empty for standalone
+	Profile                    string                // profile name (empty = default)
+	ConfigPath                 string                // explicit config path (empty = profile/default resolution)
+	Agents                     map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi
+	WorkspacesRoot             string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask           bool                  // preserve env after task for debugging
+	LocalNotificationEnabled   bool                  // enable local system notifications after task completion/failure
+	LocalNotificationOnSuccess bool                  // send local notification on successful task completion
+	LocalNotificationOnFailure bool                  // send local notification on failed/blocked task completion
+	HealthPort                 int                   // local HTTP port for health checks (default: 19514)
+	MaxConcurrentTasks         int                   // max tasks running in parallel (default: 20)
+	GCEnabled                  bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval                 time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL                      time.Duration         // clean dirs whose issue is done/canceled and updated_at < now()-TTL (default: 5d)
+	GCOrphanTTL                time.Duration         // clean orphan dirs (no meta or unknown issue) older than this (default: 30d)
+	PollInterval               time.Duration
+	HeartbeatInterval          time.Duration
+	AgentTimeout               time.Duration
+	RateLimitConfig            RateLimitConfig
 }
 
 // RateLimitConfig holds configuration for automatic rate limit retries.
 type RateLimitConfig struct {
 	InitialDelay  time.Duration // initial delay before first retry (default: 5s)
 	MaxRetries    int           // maximum number of retries (default: 6)
-	BackoffFactor float64     // exponential backoff factor (default: 2.0)
+	BackoffFactor float64       // exponential backoff factor (default: 2.0)
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -74,6 +80,7 @@ type Overrides struct {
 	DeviceName         string
 	RuntimeName        string
 	Profile            string // profile name (empty = default)
+	ConfigPath         string // explicit config path (empty = profile/default resolution)
 	HealthPort         int    // health check port (0 = use default)
 }
 
@@ -162,8 +169,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
 		}
 	}
+	kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
+	if _, err := exec.LookPath(kiroPath); err == nil {
+		agents["kiro"] = AgentEntry{
+			Path:  kiroPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, or kimi and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
 	}
 
 	// Host info
@@ -205,8 +219,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
 
-	// Profile
+	// Profile/config instance selector
 	profile := overrides.Profile
+	configPath := strings.TrimSpace(overrides.ConfigPath)
 
 	// daemon_id resolution: override > env > persistent UUID on disk.
 	// The persistent UUID is written once to `<profile-dir>/daemon.id` and
@@ -219,7 +234,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		daemonID = overrides.DaemonID
 	}
 	if daemonID == "" {
-		persisted, err := EnsureDaemonID(profile)
+		persisted, err := EnsureDaemonID(profile, configPath)
 		if err != nil {
 			return Config{}, fmt.Errorf("ensure daemon id: %w", err)
 		}
@@ -263,7 +278,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
 		}
-		if profile != "" {
+		if configPath != "" {
+			stateDir, err := cli.StateDirForInstance(profile, configPath)
+			if err != nil {
+				return Config{}, fmt.Errorf("resolve state dir for workspaces root: %w", err)
+			}
+			workspacesRoot = filepath.Join(stateDir, "workspaces")
+		} else if profile != "" {
 			workspacesRoot = filepath.Join(home, "multica_workspaces_"+profile)
 		} else {
 			workspacesRoot = filepath.Join(home, "multica_workspaces")
@@ -282,6 +303,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
+	localNotificationEnabled := boolFromEnv("MULTICA_LOCAL_NOTIFICATION_ENABLED", true)
+	localNotificationOnSuccess := boolFromEnv("MULTICA_LOCAL_NOTIFICATION_ON_SUCCESS", true)
+	localNotificationOnFailure := boolFromEnv("MULTICA_LOCAL_NOTIFICATION_ON_FAILURE", true)
 
 	// GC config: env > defaults
 	gcEnabled := true
@@ -308,25 +332,29 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	return Config{
-		ServerBaseURL:      serverBaseURL,
-		DaemonID:           daemonID,
-		LegacyDaemonIDs:    legacyDaemonIDs,
-		DeviceName:         deviceName,
-		RuntimeName:        runtimeName,
-		Profile:            profile,
-		Agents:             agents,
-		WorkspacesRoot:     workspacesRoot,
-		KeepEnvAfterTask:   keepEnv,
-		GCEnabled:          gcEnabled,
-		GCInterval:         gcInterval,
-		GCTTL:              gcTTL,
-		GCOrphanTTL:        gcOrphanTTL,
-		HealthPort:         healthPort,
-		MaxConcurrentTasks: maxConcurrentTasks,
-		PollInterval:       pollInterval,
-		HeartbeatInterval:  heartbeatInterval,
-		AgentTimeout:       agentTimeout,
-		RateLimitConfig:    rateLimitCfg,
+		ServerBaseURL:              serverBaseURL,
+		DaemonID:                   daemonID,
+		LegacyDaemonIDs:            legacyDaemonIDs,
+		DeviceName:                 deviceName,
+		RuntimeName:                runtimeName,
+		Profile:                    profile,
+		ConfigPath:                 configPath,
+		Agents:                     agents,
+		WorkspacesRoot:             workspacesRoot,
+		KeepEnvAfterTask:           keepEnv,
+		LocalNotificationEnabled:   localNotificationEnabled,
+		LocalNotificationOnSuccess: localNotificationOnSuccess,
+		LocalNotificationOnFailure: localNotificationOnFailure,
+		GCEnabled:                  gcEnabled,
+		GCInterval:                 gcInterval,
+		GCTTL:                      gcTTL,
+		GCOrphanTTL:                gcOrphanTTL,
+		HealthPort:                 healthPort,
+		MaxConcurrentTasks:         maxConcurrentTasks,
+		PollInterval:               pollInterval,
+		HeartbeatInterval:          heartbeatInterval,
+		AgentTimeout:               agentTimeout,
+		RateLimitConfig:            rateLimitCfg,
 	}, nil
 }
 

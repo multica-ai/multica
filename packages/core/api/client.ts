@@ -39,6 +39,7 @@ import type {
   RuntimeModelListRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
+  MentionFrequencyEntry,
   TaskMessagePayload,
   Attachment,
   ChatSession,
@@ -55,6 +56,27 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  InviteLink,
+  CreateInviteLinkRequest,
+  ListNotificationBindingsResponse,
+  ListNotificationPreferencesResponse,
+  NotificationChannelPreference,
+  NotificationWebhook,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
+  UpdateNotificationPreferenceRequest,
+  StartDingTalkBindingRequest,
+  StartDingTalkBindingResponse,
+  CompleteDingTalkBindingResponse,
+  StartEmailBindingRequest,
+  StartEmailBindingResponse,
+  VerifyEmailBindingRequest,
+  VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -176,7 +198,10 @@ export class ApiClient {
     return headers;
   }
 
-  private handleUnauthorized() {
+  private handleUnauthorized(requestToken: string | null) {
+    if (requestToken !== this.token) {
+      return;
+    }
     this.token = null;
     // Workspace id is owned by the URL-driven workspace-storage singleton
     // (set by [workspaceSlug]/layout.tsx). On 401, the auth flow navigates
@@ -199,6 +224,7 @@ export class ApiClient {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const requestToken = this.token;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -216,7 +242,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(requestToken);
       const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
@@ -250,6 +276,20 @@ export class ApiClient {
 
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
+  async googleMobileLogin(idToken: string, platform: string): Promise<LoginResponse> {
+    return this.fetch("/auth/google/mobile", {
+      method: "POST",
+      body: JSON.stringify({ id_token: idToken, platform }),
+    });
+  }
+
+  async dingtalkLogin(code: string, redirectUri: string): Promise<LoginResponse> {
+    return this.fetch("/auth/dingtalk", {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
@@ -317,6 +357,120 @@ export class ApiClient {
 
   async updateMe(data: UpdateMeRequest): Promise<User> {
     return this.fetch("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listNotificationBindings(): Promise<ListNotificationBindingsResponse> {
+    return this.fetch("/api/me/notification-bindings");
+  }
+
+  async deleteNotificationBinding(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-bindings/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async startDingTalkBinding(
+    payload: StartDingTalkBindingRequest,
+  ): Promise<StartDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeDingTalkBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteDingTalkBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/dingtalk/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async startEmailBinding(
+    payload: StartEmailBindingRequest,
+  ): Promise<StartEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async verifyEmailBinding(
+    payload: VerifyEmailBindingRequest,
+  ): Promise<VerifyEmailBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/email/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async startGoogleBinding(
+    payload: StartGoogleBindingRequest,
+  ): Promise<StartGoogleBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/google/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeGoogleBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteGoogleBindingResponse> {
+    return this.fetch("/api/notification-bindings/google/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
+    return this.fetch("/api/me/notification-preferences");
+  }
+
+  async listNotificationWebhooks(): Promise<ListNotificationWebhooksResponse> {
+    return this.fetch("/api/me/notification-webhooks");
+  }
+
+  async createNotificationWebhook(
+    data: CreateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch("/api/me/notification-webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateNotificationWebhook(
+    id: string,
+    data: UpdateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteNotificationWebhook(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testNotificationWebhook(id: string): Promise<TestNotificationWebhookResponse> {
+    return this.fetch(`/api/me/notification-webhooks/${id}/test`, {
+      method: "POST",
+    });
+  }
+
+  async updateNotificationPreference(
+    data: UpdateNotificationPreferenceRequest,
+  ): Promise<NotificationChannelPreference> {
+    return this.fetch("/api/me/notification-preferences", {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -398,6 +552,16 @@ export class ApiClient {
     });
   }
 
+  async clearIssueHistory(
+    issueId: string,
+    options: { clear_comments: boolean; clear_tasks: boolean },
+  ): Promise<{ comments_deleted: number; tasks_deleted: number }> {
+    return this.fetch(`/api/issues/${issueId}/clear-history`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
     return this.fetch(`/api/issues/${issueId}/comments`);
@@ -421,6 +585,10 @@ export class ApiClient {
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
     return this.fetch("/api/assignee-frequency");
+  }
+
+  async getMentionFrequency(): Promise<MentionFrequencyEntry[]> {
+    return this.fetch("/api/mention-frequency");
   }
 
   async updateComment(commentId: string, content: string): Promise<Comment> {
@@ -657,6 +825,11 @@ export class ApiClient {
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    google_client_id?: string;
+    google_ios_client_id?: string;
+    dingtalk_client_id?: string;
+    dingtalk_oauth_scope?: string;
+    hide_email_login?: boolean;
     posthog_key?: string;
     posthog_host?: string;
   }> {
@@ -679,7 +852,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -725,6 +898,33 @@ export class ApiClient {
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/invitations/${invitationId}`, {
       method: "DELETE",
+    });
+  }
+
+  async createInviteLink(workspaceId: string, data: CreateInviteLinkRequest): Promise<InviteLink> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listInviteLinks(workspaceId: string): Promise<InviteLink[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`);
+  }
+
+  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async validateInviteLink(token: string): Promise<InviteLink> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}`);
+  }
+
+  async acceptInviteLink(token: string): Promise<MemberWithUser> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
     });
   }
 
@@ -831,6 +1031,7 @@ export class ApiClient {
 
     const rid = createRequestId();
     const start = Date.now();
+    const requestToken = this.token;
     this.logger.info("→ POST /api/upload-file", { rid });
 
     const res = await fetch(`${this.baseUrl}/api/upload-file`, {
@@ -841,7 +1042,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(requestToken);
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);

@@ -24,7 +24,7 @@ var configShowCmd = &cobra.Command{
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a CLI configuration value",
-	Long:  "Supported keys: server_url, app_url, workspace_id",
+	Long:  "Supported keys: server_url, app_url, workspace_id, update_manifest_url",
 	Args:  exactArgs(2),
 	RunE:  runConfigSet,
 }
@@ -36,12 +36,13 @@ func init() {
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err != nil {
 		return err
 	}
 
-	path, _ := cli.CLIConfigPathForProfile(profile)
+	path, _ := cli.CLIConfigPathForInstance(profile, configPath)
 	fmt.Fprintf(os.Stdout, "Config file: %s\n", path)
 	if profile != "" {
 		fmt.Fprintf(os.Stdout, "Profile:      %s\n", profile)
@@ -49,6 +50,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "server_url:   %s\n", valueOrDefault(cfg.ServerURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "app_url:      %s\n", valueOrDefault(cfg.AppURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "workspace_id: %s\n", valueOrDefault(cfg.WorkspaceID, "(not set)"))
+	fmt.Fprintf(os.Stdout, "update_manifest_url: %s\n", valueOrDefault(cfg.UpdateManifestURL, "(not set)"))
 	return nil
 }
 
@@ -56,7 +58,8 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	key, value := args[0], args[1]
 
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err != nil {
 		return err
 	}
@@ -68,18 +71,19 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		cfg.AppURL = value
 	case "workspace_id":
 		cfg.WorkspaceID = value
+	case "update_manifest_url":
+		cfg.UpdateManifestURL = value
 	default:
-		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id)", key)
+		return fmt.Errorf("unknown config key %q (supported: server_url, app_url, workspace_id, update_manifest_url)", key)
 	}
 
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, value)
 	return nil
 }
-
 
 func valueOrDefault(v, fallback string) string {
 	if v == "" {

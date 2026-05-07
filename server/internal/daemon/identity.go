@@ -36,8 +36,8 @@ const daemonIDFileName = "daemon.id"
 //
 // If the file exists but is corrupt (unparseable), it is regenerated so the
 // daemon can continue starting up instead of hard-failing.
-func EnsureDaemonID(profile string) (string, error) {
-	dir, err := cli.ProfileDir("")
+func EnsureDaemonID(profile, configPath string) (string, error) {
+	dir, err := daemonIDBaseDir(profile, configPath)
 	if err != nil {
 		return "", err
 	}
@@ -58,7 +58,7 @@ func EnsureDaemonID(profile string) (string, error) {
 	}
 
 	// One-time promotion from pre-change per-profile layout.
-	if promoted, ok := promoteProfileDaemonID(profile, path); ok {
+	if promoted, ok := promoteProfileDaemonID(profile, configPath, path); ok {
 		return promoted, nil
 	}
 
@@ -78,8 +78,8 @@ func EnsureDaemonID(profile string) (string, error) {
 // success; returns "", false when there is nothing valid to promote (empty
 // profile, missing/corrupt source file, any I/O failure). Promotion is a
 // best-effort migration — a failure here falls through to fresh UUID mint.
-func promoteProfileDaemonID(profile, targetPath string) (string, bool) {
-	if profile == "" {
+func promoteProfileDaemonID(profile, configPath, targetPath string) (string, bool) {
+	if profile == "" || strings.TrimSpace(configPath) != "" {
 		return "", false
 	}
 	profileDir, err := cli.ProfileDir(profile)
@@ -129,6 +129,13 @@ func writeDaemonIDFile(path, id string) error {
 		return fmt.Errorf("rename daemon id file: %w", err)
 	}
 	return nil
+}
+
+func daemonIDBaseDir(profile, configPath string) (string, error) {
+	if strings.TrimSpace(configPath) != "" {
+		return cli.StateDirForInstance(profile, configPath)
+	}
+	return cli.ProfileDir("")
 }
 
 // LegacyDaemonIDs returns the set of daemon_id values this machine may have

@@ -33,8 +33,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    instructions, custom_env, custom_args, mcp_config, model, custom_env_copied_pending
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -53,6 +53,7 @@ UPDATE agent SET
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
+    custom_env_copied_pending = COALESCE(sqlc.narg('custom_env_copied_pending'), custom_env_copied_pending),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -78,8 +79,11 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    trigger_source, trigger_actor_type, trigger_actor_id
+)
+VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), $5, $6, $7)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec
@@ -211,6 +215,9 @@ ORDER BY created_at DESC;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: DeleteTasksByIssue :execrows
+DELETE FROM agent_task_queue WHERE issue_id = $1;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()

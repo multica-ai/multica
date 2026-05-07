@@ -25,7 +25,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi":
+	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -152,8 +152,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, and Kimi discover skills natively from their respective paths — just list names.
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
+			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "gemini":
 			// Gemini reads GEMINI.md directly; point it at the fallback skills dir.

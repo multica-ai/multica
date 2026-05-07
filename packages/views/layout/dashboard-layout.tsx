@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
+import { useViewportHeight } from "@multica/ui/hooks/use-viewport-height";
 import { ModalRegistry } from "../modals/registry";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
@@ -22,15 +23,17 @@ export function DashboardLayout({
   searchSlot,
   loadingIndicator,
 }: DashboardLayoutProps) {
+  useViewportHeight();
+
   return (
     <DashboardGuard
       loadingFallback={
-        <div className="flex h-svh items-center justify-center">
+        <div className="flex h-svh items-center justify-center" style={{ height: "var(--vh, 100svh)" }}>
           {loadingIndicator}
         </div>
       }
     >
-      <SidebarProvider className="h-svh">
+      <SidebarProvider className="h-svh" style={{ height: "var(--vh, 100svh)" }}>
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
           {children}

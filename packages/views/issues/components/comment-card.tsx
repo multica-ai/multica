@@ -46,6 +46,7 @@ import { useCommentCollapseStore } from "@multica/core/issues/stores";
 // ---------------------------------------------------------------------------
 
 interface CommentCardProps {
+  wsId: string;
   issueId: string;
   entry: TimelineEntry;
   allReplies: Map<string, TimelineEntry[]>;
@@ -175,6 +176,7 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
 // ---------------------------------------------------------------------------
 
 function CommentRow({
+  wsId,
   issueId,
   entry,
   commentById,
@@ -186,6 +188,7 @@ function CommentRow({
   onDelete,
   onToggleReaction,
 }: {
+  wsId: string;
   issueId: string;
   entry: TimelineEntry;
   commentById: Map<string, TimelineEntry>;
@@ -231,7 +234,7 @@ function CommentRow({
     mutationFn: () => api.retryAgentComment(entry.id),
     onSuccess: () => {
       toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
@@ -415,6 +418,7 @@ function CommentRow({
 // ---------------------------------------------------------------------------
 
 function CommentCard({
+  wsId,
   issueId,
   entry,
   allReplies,
@@ -468,7 +472,7 @@ function CommentCard({
     mutationFn: () => api.retryAgentComment(entry.id),
     onSuccess: () => {
       toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
@@ -686,6 +690,7 @@ function CommentCard({
           {allNestedReplies.map((reply) => (
             <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
               <CommentRow
+                wsId={wsId}
                 issueId={issueId}
                 entry={reply}
                 commentById={commentById}

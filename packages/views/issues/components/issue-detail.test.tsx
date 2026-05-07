@@ -62,6 +62,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
+  mentionFrequencyOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "mention-frequency"],
+    queryFn: () => Promise.resolve([]),
+  }),
   workspaceListOptions: () => ({
     queryKey: ["workspaces"],
     queryFn: () => Promise.resolve([{ id: "ws-1", name: "Test WS", slug: "test" }]),
@@ -348,6 +352,39 @@ import { IssueDetail } from "./issue-detail";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+if (typeof window !== "undefined" && !window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }),
+  });
+}
+
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  class ResizeObserverMock {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    value: ResizeObserverMock,
+  });
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    writable: true,
+    value: ResizeObserverMock,
+  });
+}
 
 function createTestQueryClient() {
   return new QueryClient({

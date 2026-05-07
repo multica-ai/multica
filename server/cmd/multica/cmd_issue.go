@@ -139,6 +139,13 @@ var issueSearchCmd = &cobra.Command{
 	RunE:  runIssueSearch,
 }
 
+var issueClearHistoryCmd = &cobra.Command{
+	Use:   "clear-history <issue-id>",
+	Short: "Clear execution and comment history for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueClearHistory,
+}
+
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
@@ -155,6 +162,7 @@ func init() {
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueSearchCmd)
+	issueCmd.AddCommand(issueClearHistoryCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
@@ -242,6 +250,11 @@ func init() {
 	// issue subscriber remove
 	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (defaults to the caller)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue clear-history
+	issueClearHistoryCmd.Flags().Bool("comments", true, "Clear comment history")
+	issueClearHistoryCmd.Flags().Bool("tasks", true, "Clear execution (task) history")
+	issueClearHistoryCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,4 +1157,37 @@ func truncateID(id string) string {
 		return string(runes[:8])
 	}
 	return id
+}
+
+func runIssueClearHistory(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	clearComments, _ := cmd.Flags().GetBool("comments")
+	clearTasks, _ := cmd.Flags().GetBool("tasks")
+
+	body := map[string]bool{
+		"clear_comments": clearComments,
+		"clear_tasks":    clearTasks,
+	}
+
+	var result map[string]any
+	path := "/api/issues/" + args[0] + "/clear-history"
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("clear history: %w", err)
+	}
+
+	outputFormat, _ := cmd.Flags().GetString("output")
+	if outputFormat == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Cleared: %v comments, %v task runs\n",
+		result["comments_deleted"], result["tasks_deleted"])
+	return nil
 }

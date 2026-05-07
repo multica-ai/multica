@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -577,6 +578,83 @@ func TestCommentCRUD(t *testing.T) {
 	testHandler.DeleteIssue(w, req)
 }
 
+func TestListCommentsExcludesSoftDeletedRows(t *testing.T) {
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Soft-deleted comment list test",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	createComment := func(content string) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "id", issue.ID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", content, w.Code, w.Body.String())
+		}
+		var comment CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&comment); err != nil {
+			t.Fatalf("decode comment: %v", err)
+		}
+		return comment
+	}
+
+	active := createComment("visible comment")
+	deleted := createComment("soft-deleted comment")
+	if _, err := testPool.Exec(ctx, `UPDATE comment SET deleted_at = now() WHERE id = $1`, deleted.ID); err != nil {
+		t.Fatalf("mark comment deleted: %v", err)
+	}
+
+	assertOnlyActiveComment := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("GET", path, nil)
+		req = withURLParam(req, "id", issue.ID)
+		testHandler.ListComments(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListComments(%q): expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+
+		var comments []CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&comments); err != nil {
+			t.Fatalf("decode comments: %v", err)
+		}
+		if len(comments) != 1 {
+			t.Fatalf("ListComments(%q): expected 1 visible comment, got %d", path, len(comments))
+		}
+		if comments[0].ID != active.ID {
+			t.Fatalf("ListComments(%q): expected active comment %s, got %s", path, active.ID, comments[0].ID)
+		}
+		return w
+	}
+
+	assertOnlyActiveComment("/api/issues/" + issue.ID + "/comments")
+
+	w = assertOnlyActiveComment("/api/issues/" + issue.ID + "/comments?limit=10&offset=0")
+	if total := w.Header().Get("X-Total-Count"); total != "1" {
+		t.Fatalf("paginated ListComments: expected X-Total-Count 1, got %q", total)
+	}
+
+	since := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+	assertOnlyActiveComment("/api/issues/" + issue.ID + "/comments?since=" + since)
+}
+
 func TestAgentCRUD(t *testing.T) {
 	// List agents
 	w := httptest.NewRecorder()
@@ -677,6 +755,174 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	}
 	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
+}
+
+func TestRetryAgentComment_UsesRetryRequesterAsTriggerActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Retry Requester", "retry-requester@multica.ai").Scan(&otherUserID); err != nil {
+		t.Fatalf("setup: create other user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, parseUUID(otherUserID)) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("setup: add other member: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_id, assignee_type, number, position
+		)
+		VALUES ($1, 'retry trigger actor issue', 'in_progress', 'medium', $2, 'member', $3, 'agent', 92001, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var ancestorCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'ancestor member comment', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&ancestorCommentID); err != nil {
+		t.Fatalf("setup: create ancestor comment: %v", err)
+	}
+
+	var agentCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'agent reply', 'comment', $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID, ancestorCommentID).Scan(&agentCommentID); err != nil {
+		t.Fatalf("setup: create agent comment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/comments/"+agentCommentID+"/retry", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "commentId", agentCommentID)
+
+	testHandler.RetryAgentComment(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("RetryAgentComment: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotSource, gotActorType, gotActorID, gotTriggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_source, trigger_actor_type, trigger_actor_id::text, trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&gotSource, &gotActorType, &gotActorID, &gotTriggerCommentID); err != nil {
+		t.Fatalf("read queued retry task: %v", err)
+	}
+
+	if gotSource != "retry" {
+		t.Fatalf("expected trigger_source retry, got %q", gotSource)
+	}
+	if gotActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", gotActorType)
+	}
+	if gotActorID != otherUserID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", otherUserID, gotActorID)
+	}
+	if gotTriggerCommentID != ancestorCommentID {
+		t.Fatalf("expected trigger_comment_id %q, got %q", ancestorCommentID, gotTriggerCommentID)
+	}
+}
+
+func TestTriggerAutopilot_UsesManualRequesterAsTriggerActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Autopilot Trigger User", "autopilot-trigger@multica.ai").Scan(&otherUserID); err != nil {
+		t.Fatalf("setup: create other user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, parseUUID(otherUserID)) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("setup: add other member: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode, status,
+			created_by_type, created_by_id, priority
+		)
+		VALUES ($1, 'manual trigger actor test', $2, 'run_only', 'active', 'member', $3, 'medium')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("setup: create autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "id", autopilotID)
+
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotSource, gotActorType, gotActorID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT q.trigger_source, q.trigger_actor_type, q.trigger_actor_id::text
+		FROM agent_task_queue q
+		JOIN autopilot_run r ON r.id = q.autopilot_run_id
+		WHERE r.autopilot_id = $1
+		ORDER BY q.created_at DESC
+		LIMIT 1
+	`, autopilotID).Scan(&gotSource, &gotActorType, &gotActorID); err != nil {
+		t.Fatalf("read autopilot task: %v", err)
+	}
+
+	if gotSource != "autopilot_manual" {
+		t.Fatalf("expected trigger_source autopilot_manual, got %q", gotSource)
+	}
+	if gotActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", gotActorType)
+	}
+	if gotActorID != otherUserID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", otherUserID, gotActorID)
+	}
 }
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
@@ -826,7 +1072,7 @@ func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or
 	// using a cancelled context if the query respects it.
-	
+
 	// Create a handler with a "broken" queries object is hard because it's a struct.
 	// Instead, let's use a context that is already cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -841,13 +1087,13 @@ func TestSendCodeDbError(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	testHandler.SendCode(w, req)
-	
+
 	// If the DB query respects the cancelled context, it should return an error.
 	// pgx usually returns context.Canceled which is not what isNotFound checks for.
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("SendCode (db error): expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-	
+
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["error"] != "failed to lookup user" {
@@ -882,6 +1128,35 @@ func TestSendCodeRateLimit(t *testing.T) {
 	testHandler.SendCode(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("SendCode (second): expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendCodeFixedVerificationCodeSkipsTemporaryCode(t *testing.T) {
+	const email = "fixed-sendcode-test@multica.ai"
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, "123456")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email})
+	req := httptest.NewRequest("POST", "/auth/send-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.SendCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SendCode fixed code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM verification_code WHERE email = $1`, email).Scan(&count); err != nil {
+		t.Fatalf("count verification_code: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("SendCode fixed code: expected no temporary codes, got %d", count)
 	}
 }
 
@@ -941,6 +1216,70 @@ func TestVerifyCode(t *testing.T) {
 	}
 }
 
+func TestVerifyFixedVerificationCode(t *testing.T) {
+	const (
+		email = "fixed-verify-test@multica.ai"
+		code  = "123456"
+	)
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, code)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM external_account_binding WHERE external_user_id = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": code})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("VerifyCode fixed code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp LoginResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Token == "" {
+		t.Fatal("VerifyCode fixed code: expected non-empty token")
+	}
+	if resp.User.Email != email {
+		t.Fatalf("VerifyCode fixed code: expected email %q, got %q", email, resp.User.Email)
+	}
+
+	if _, err := testHandler.Queries.GetUserByEmail(ctx, email); err != nil {
+		t.Fatalf("VerifyCode fixed code: expected user to be created: %v", err)
+	}
+}
+
+func TestVerifyFixedVerificationCodeWrongCode(t *testing.T) {
+	const email = "fixed-wrong-code-test@multica.ai"
+	ctx := context.Background()
+
+	insertFixedVerificationCode(t, email, "123456")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM fixed_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "000000"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("VerifyCode fixed wrong code: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testHandler.Queries.GetUserByEmail(ctx, email); err == nil {
+		t.Fatal("VerifyCode fixed wrong code: expected user not to be created")
+	}
+}
+
 func TestVerifyCodeWrongCode(t *testing.T) {
 	const email = "wrong-code-test@multica.ai"
 	ctx := context.Background()
@@ -966,6 +1305,19 @@ func TestVerifyCodeWrongCode(t *testing.T) {
 	testHandler.VerifyCode(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("VerifyCode (wrong code): expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func insertFixedVerificationCode(t *testing.T, email, code string) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO fixed_verification_code (email, code_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (email) DO UPDATE
+		SET code_hash = EXCLUDED.code_hash
+	`, email, fixedVerificationCodeHash(code))
+	if err != nil {
+		t.Fatalf("insert fixed verification code: %v", err)
 	}
 }
 

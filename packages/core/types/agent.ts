@@ -61,6 +61,8 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  /** True when this agent was duplicated and env values were stripped; owner must fill secrets. */
+  custom_env_copied_pending?: boolean;
 }
 
 /** Optional body for POST /api/agents/:id/copy */

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,28 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+type stubNotifier struct {
+	calls []struct {
+		title string
+		body  string
+	}
+	err error
+}
+
+func (s *stubNotifier) Notify(_ context.Context, title, body string) error {
+	s.calls = append(s.calls, struct {
+		title string
+		body  string
+	}{title: title, body: body})
+	return s.err
+}
 
 func createDaemonTestRepo(t *testing.T) string {
 	t.Helper()
@@ -135,6 +154,39 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	}
 }
 
+func TestResolveAuthUsesExplicitConfigPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	configPath := filepath.Join(t.TempDir(), "instance", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configJSON := `{
+  "server_url": "http://127.0.0.1:18090",
+  "app_url": "http://127.0.0.1:13003",
+  "token": "explicit-config-token"
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	d := &Daemon{
+		cfg: Config{
+			Profile:    "local",
+			ConfigPath: configPath,
+		},
+		client: NewClient("http://127.0.0.1:18090"),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	if err := d.resolveAuth(); err != nil {
+		t.Fatalf("resolveAuth returned error: %v", err)
+	}
+	if got := d.client.Token(); got != "explicit-config-token" {
+		t.Fatalf("client token = %q, want %q", got, "explicit-config-token")
+	}
+}
+
 func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 	t.Parallel()
 
@@ -148,6 +200,259 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
+	}
+}
+
+func TestPreflightPrivateAgentGate(t *testing.T) {
+	t.Parallel()
+
+	ownerID := "11111111-1111-1111-1111-111111111111"
+	otherID := "22222222-2222-2222-2222-222222222222"
+
+	tests := []struct {
+		name    string
+		task    Task
+		wantErr string
+	}{
+		{
+			name: "no agent data allows execution",
+			task: Task{},
+		},
+		{
+			name: "workspace agent allows execution",
+			task: Task{
+				Agent: &AgentData{Visibility: "workspace", OwnerID: ownerID},
+			},
+		},
+		{
+			name: "private agent with owner actor allows execution",
+			task: Task{
+				TriggerActorType: "member",
+				TriggerActorID:   ownerID,
+				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+		},
+		{
+			name: "private agent with missing actor is rejected",
+			task: Task{
+				TriggerActorType: "member",
+				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+			wantErr: "private agent execution denied: task dispatch actor is missing or not owner",
+		},
+		{
+			name: "private agent with non member actor is rejected",
+			task: Task{
+				TriggerActorType: "system",
+				TriggerActorID:   ownerID,
+				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+			wantErr: "private agent execution denied: task dispatch actor is missing or not owner",
+		},
+		{
+			name: "private agent with non owner actor is rejected",
+			task: Task{
+				TriggerActorType: "member",
+				TriggerActorID:   otherID,
+				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
+			},
+			wantErr: "private agent execution denied: only the agent owner can run this task",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := preflightPrivateAgentGate(tt.task)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tt.wantErr)
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("expected error %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestNotifyTaskResultHonorsConfig(t *testing.T) {
+	t.Parallel()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: false,
+		},
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-1", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, true, "")
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "boom")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	if n.calls[0].title != "Multica 任务已完成" {
+		t.Fatalf("title = %q", n.calls[0].title)
+	}
+}
+
+func TestNotifyTaskResultUsesExpectedContent(t *testing.T) {
+	t.Parallel()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "disk full")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:   false,
+		AgentName: "Tony Bot",
+		IssueID:   "issue-9",
+		Message:   "disk full",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestNotifyTaskResultUsesIssueSummaryWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/issues/issue-9" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-9",
+			"identifier": "OPE-251",
+			"title":      "新增通知渠道 系统通知栏",
+		})
+	}))
+	defer srv.Close()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		client:   NewClient(srv.URL),
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, true, "")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:         true,
+		AgentName:       "Tony Bot",
+		IssueID:         "issue-9",
+		IssueIdentifier: "OPE-251",
+		IssueTitle:      "新增通知渠道 系统通知栏",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestNotifyTaskResultFallsBackWhenIssueLookupFails(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	n := &stubNotifier{}
+	d := &Daemon{
+		cfg: Config{
+			LocalNotificationEnabled:   true,
+			LocalNotificationOnSuccess: true,
+			LocalNotificationOnFailure: true,
+		},
+		client:   NewClient(srv.URL),
+		notifier: n,
+		logger:   slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	task := Task{IssueID: "issue-9", Agent: &AgentData{Name: "Tony Bot"}}
+	d.notifyTaskResult(context.Background(), d.logger, task, false, "disk full")
+
+	if len(n.calls) != 1 {
+		t.Fatalf("notify calls = %d, want 1", len(n.calls))
+	}
+	wantTitle, wantBody := daemonnotifier.BuildNotificationContent(daemonnotifier.TaskNotificationPayload{
+		Success:   false,
+		AgentName: "Tony Bot",
+		IssueID:   "issue-9",
+		Message:   "disk full",
+	})
+	if n.calls[0].title != wantTitle || n.calls[0].body != wantBody {
+		t.Fatalf("got (%q, %q), want (%q, %q)", n.calls[0].title, n.calls[0].body, wantTitle, wantBody)
+	}
+}
+
+func TestEnrichTaskNotificationPayloadUsesTimeout(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(5 * time.Second):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		client: NewClient(srv.URL),
+		logger: slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+
+	start := time.Now()
+	payload := d.enrichTaskNotificationPayload(context.Background(), d.logger, daemonnotifier.TaskNotificationPayload{
+		IssueID: "issue-9",
+	})
+
+	if payload.IssueIdentifier != "" || payload.IssueTitle != "" {
+		t.Fatalf("expected timeout fallback payload, got %+v", payload)
+	}
+	if elapsed := time.Since(start); elapsed >= 4*time.Second {
+		t.Fatalf("issue lookup did not timeout quickly enough: %s", elapsed)
 	}
 }
 
@@ -323,6 +628,70 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 	if int(fb.idx.Load()) != 1 {
 		t.Fatalf("expected 1 call, got %d", fb.idx.Load())
+	}
+}
+
+func TestHandleTask_PrivateGateRejectsBeforeStartOrExecute(t *testing.T) {
+	t.Parallel()
+
+	var startCalls atomic.Int32
+	var failCalls atomic.Int32
+	var failBody string
+
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/start"):
+			startCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/fail"):
+			failCalls.Add(1)
+			body, _ := io.ReadAll(r.Body)
+			failBody = string(body)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"queued"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	})
+
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
+	d.cfg = Config{
+		Agents: map[string]AgentEntry{
+			"codex": {Path: "/does/not/matter"},
+		},
+	}
+
+	task := Task{
+		ID:               "task-1",
+		RuntimeID:        "rt-1",
+		TriggerActorType: "member",
+		TriggerActorID:   "not-owner",
+		Agent: &AgentData{
+			ID:         "agent-1",
+			Name:       "Private Agent",
+			Visibility: "private",
+			OwnerID:    "owner-1",
+		},
+	}
+
+	d.handleTask(context.Background(), task)
+
+	if startCalls.Load() != 0 {
+		t.Fatalf("expected StartTask not to be called, got %d", startCalls.Load())
+	}
+	if failCalls.Load() != 1 {
+		t.Fatalf("expected FailTask to be called once, got %d", failCalls.Load())
+	}
+	if strings.Contains(failBody, "\"session_id\"") {
+		t.Fatalf("expected preflight fail body not to include session_id, got %s", failBody)
+	}
+	if strings.Contains(failBody, "\"work_dir\"") {
+		t.Fatalf("expected preflight fail body not to include work_dir, got %s", failBody)
+	}
+	if !strings.Contains(failBody, "private agent execution denied: only the agent owner can run this task") {
+		t.Fatalf("expected fail body to contain owner gate message, got %s", failBody)
 	}
 }
 

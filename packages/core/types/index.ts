@@ -28,10 +28,35 @@ export type {
   RuntimeModelsResult,
   IssueUsageSummary,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, InviteLink, CreateInviteLinkRequest } from "./workspace";
+export type {
+  NotificationChannel,
+  NotificationEventType,
+  ExternalAccountBindingStatus,
+  ExternalAccountBinding,
+  NotificationChannelPreference,
+  NotificationWebhook,
+  ListNotificationBindingsResponse,
+  ListNotificationPreferencesResponse,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
+  UpdateNotificationPreferenceRequest,
+  StartDingTalkBindingRequest,
+  StartDingTalkBindingResponse,
+  CompleteDingTalkBindingResponse,
+  StartEmailBindingRequest,
+  StartEmailBindingResponse,
+  VerifyEmailBindingRequest,
+  VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
+} from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
-export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
+export type { TimelineEntry, AssigneeFrequencyEntry, MentionFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";

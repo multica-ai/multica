@@ -21,7 +21,8 @@ func tryResolveAppURL(cmd *cobra.Command) string {
 		}
 	}
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err == nil && cfg.AppURL != "" {
 		return strings.TrimRight(cfg.AppURL, "/")
 	}
@@ -88,7 +89,8 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	}
 
 	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	configPath := resolveConfigPath(cmd)
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
 	if err != nil {
 		return err
 	}
@@ -98,7 +100,7 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 		cfg.WorkspaceID = workspaces[0].ID
 	}
 
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	if err := cli.SaveCLIConfigForInstance(cfg, profile, configPath); err != nil {
 		return err
 	}
 

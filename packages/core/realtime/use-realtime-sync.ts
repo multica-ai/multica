@@ -218,7 +218,9 @@ export function useRealtimeSync(
     // isn't served on next mount (staleTime: Infinity relies on this).
 
     const invalidateTimeline = (issueId: string) => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
@@ -255,22 +257,26 @@ export function useRealtimeSync(
 
     const unsubIssueReactionAdded = ws.on("issue_reaction:added", (p) => {
       const { issue_id } = p as IssueReactionAddedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId && issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issue_id) });
     });
 
     const unsubIssueReactionRemoved = ws.on("issue_reaction:removed", (p) => {
       const { issue_id } = p as IssueReactionRemovedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId && issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issue_id) });
     });
 
     const unsubSubscriberAdded = ws.on("subscriber:added", (p) => {
       const { issue_id } = p as SubscriberAddedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId && issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issue_id) });
     });
 
     const unsubSubscriberRemoved = ws.on("subscriber:removed", (p) => {
       const { issue_id } = p as SubscriberRemovedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId && issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issue_id) });
     });
 
     // --- Side-effect handlers (toast, navigation) ---

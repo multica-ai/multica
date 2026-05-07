@@ -681,7 +681,14 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	run, err := h.AutopilotService.DispatchAutopilot(
+		r.Context(),
+		autopilot,
+		pgtype.UUID{},
+		"manual",
+		nil,
+		buildTriggerActor("autopilot_manual", "member", requestUserID(r)),
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return

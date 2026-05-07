@@ -71,7 +71,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
-	
+
 	signupConfig := handler.Config{
 		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
@@ -128,10 +128,15 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	}
 
 	// Auth (public)
+	r.Get("/api/config", h.GetConfig)
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/google/mobile", h.GoogleMobileLogin)
+	r.Post("/auth/dingtalk", h.DingTalkLogin)
 	r.Post("/auth/logout", h.Logout)
+	r.Post("/api/notification-bindings/google/callback", h.CompleteGoogleBindingByState)
+	r.Get("/api/invite-links/{token}", h.ValidateInviteLink)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -169,9 +174,23 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
-		r.Get("/api/config", h.GetConfig)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Post("/api/me/notification-bindings/dingtalk/start", h.StartMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/dingtalk/callback", h.CompleteMyDingTalkBinding)
+		r.Post("/api/me/notification-bindings/google/start", h.StartMyGoogleBinding)
+		r.Post("/api/me/notification-bindings/google/callback", h.CompleteMyGoogleBinding)
+		r.Post("/api/me/notification-bindings/email/start", h.StartMyEmailBinding)
+		r.Post("/api/me/notification-bindings/email/verify", h.VerifyMyEmailBinding)
+		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)
+		r.Delete("/api/me/notification-bindings/{bindingId}", h.DeleteMyNotificationBinding)
+		r.Get("/api/me/notification-webhooks", h.ListMyNotificationWebhooks)
+		r.Post("/api/me/notification-webhooks", h.CreateMyNotificationWebhook)
+		r.Patch("/api/me/notification-webhooks/{webhookId}", h.UpdateMyNotificationWebhook)
+		r.Delete("/api/me/notification-webhooks/{webhookId}", h.DeleteMyNotificationWebhook)
+		r.Post("/api/me/notification-webhooks/{webhookId}/test", h.TestMyNotificationWebhook)
+		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)
+		r.Patch("/api/me/notification-preferences", h.UpdateMyNotificationPreference)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
@@ -191,6 +210,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/invite-links", h.ListInviteLinks)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -198,6 +218,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)
+					r.Post("/invite-links", h.CreateInviteLink)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
@@ -205,7 +226,11 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 				})
 				// Owner-only access
-				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"))
+					r.Delete("/", h.DeleteWorkspace)
+					r.Delete("/invite-links/{invitationId}", h.RevokeInviteLink)
+				})
 			})
 		})
 
@@ -214,6 +239,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
 		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+		r.Post("/api/invite-links/{token}/accept", h.AcceptInviteLink)
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
@@ -227,6 +253,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+			r.Get("/api/mention-frequency", h.GetMentionFrequency)
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
@@ -254,6 +281,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
+					r.Post("/clear-history", h.ClearIssueHistory)
 				})
 			})
 

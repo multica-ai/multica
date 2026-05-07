@@ -3,10 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -63,6 +69,468 @@ func parseMentions(content string) []mention {
 		result[i] = mention{Type: m.Type, ID: m.ID}
 	}
 	return result
+}
+
+func buildNotificationLink(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID string) string {
+	return buildNotificationContext(ctx, queries, workspaceID, issueID, commentID, "").Link
+}
+
+type notificationContext struct {
+	Link            string
+	IssueIdentifier string
+}
+
+func resolveNotificationActorName(ctx context.Context, queries *db.Queries, actorType, actorID string) string {
+	actorType = strings.TrimSpace(actorType)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return ""
+	}
+
+	switch actorType {
+	case "member":
+		user, err := queries.GetUser(ctx, parseUUID(actorID))
+		if err != nil {
+			return ""
+		}
+		return firstValue(user.Name, user.Email)
+	case "agent":
+		agent, err := queries.GetAgent(ctx, parseUUID(actorID))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(agent.Name)
+	default:
+		return ""
+	}
+}
+
+func buildNotificationContext(ctx context.Context, queries *db.Queries, workspaceID, issueID, commentID, appOrigin string) notificationContext {
+	if workspaceID == "" || issueID == "" {
+		return notificationContext{}
+	}
+
+	workspace, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil {
+		slog.Error("failed to resolve workspace for notification link",
+			"workspace_id", workspaceID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
+		return notificationContext{}
+	}
+
+	identifier := ""
+	if issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(issueID),
+		WorkspaceID: parseUUID(workspaceID),
+	}); err == nil {
+		identifier = fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
+	} else {
+		slog.Error("failed to resolve issue identifier for notification",
+			"workspace_id", workspaceID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"error", err,
+		)
+	}
+
+	issueRef := issueID
+	if identifier != "" {
+		issueRef = identifier
+	}
+	baseURL := notificationBaseURL(appOrigin)
+	if commentID != "" {
+		return notificationContext{
+			Link:            notifyutil.CommentURL(baseURL, workspace.Slug, issueRef, commentID),
+			IssueIdentifier: identifier,
+		}
+	}
+	return notificationContext{
+		Link:            notifyutil.IssueURL(baseURL, workspace.Slug, issueRef),
+		IssueIdentifier: identifier,
+	}
+}
+
+func notificationBaseURL(appOrigin string) string {
+	if normalized := normalizeNotificationBaseURL(appOrigin); normalized != "" {
+		return normalized
+	}
+	return notifyutil.AppURL()
+}
+
+func normalizeNotificationBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+func recordMentionNotification(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	recipientID string,
+	issueID string,
+	commentID string,
+	title string,
+	body string,
+	link string,
+	issueIdentifier string,
+	actorName string,
+	details []byte,
+) {
+	recordNotification(ctx, queries, e, recipientID, "mentioned", "info", issueID, commentID, title, body, link, issueIdentifier, actorName, details)
+}
+
+func recordNotification(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	recipientID string,
+	eventType string,
+	severity string,
+	issueID string,
+	commentID string,
+	title string,
+	body string,
+	link string,
+	issueIdentifier string,
+	actorName string,
+	details []byte,
+) {
+	if len(details) == 0 {
+		details = emptyDetails
+	}
+
+	payloadSnapshot, err := json.Marshal(map[string]any{
+		"type":             eventType,
+		"severity":         severity,
+		"title":            title,
+		"body":             body,
+		"link":             link,
+		"issue_id":         issueID,
+		"issue_identifier": issueIdentifier,
+		"comment_id":       commentID,
+		"actor_type":       e.ActorType,
+		"actor_id":         e.ActorID,
+		"actor_name":       actorName,
+		"details":          json.RawMessage(details),
+	})
+	if err != nil {
+		payloadSnapshot = emptyDetails
+	}
+
+	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
+		WorkspaceID:     parseUUID(e.WorkspaceID),
+		RecipientUserID: parseUUID(recipientID),
+		Type:            eventType,
+		Severity:        severity,
+		IssueID:         parseUUID(issueID),
+		CommentID:       parseUUID(commentID),
+		ActorType:       util.StrToText(e.ActorType),
+		ActorID:         parseUUID(e.ActorID),
+		Title:           title,
+		Body:            util.StrToText(body),
+		Link:            util.StrToText(link),
+		Details:         details,
+	})
+	if err != nil {
+		slog.Error("failed to create canonical notification",
+			"recipient_id", recipientID,
+			"issue_id", issueID,
+			"comment_id", commentID,
+			"type", eventType,
+			"error", err,
+		)
+		return
+	}
+
+	_, err = queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "inbox",
+		Status:              "sent",
+		AttemptCount:        1,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     payloadSnapshot,
+		SentAt:              pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+	if err != nil {
+		slog.Error("failed to create inbox delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+
+	if eventType == "mentioned" {
+		recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+		recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	}
+	recordCustomWebhookDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
+}
+
+func recordMentionDingTalkDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for dingtalk delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var dingtalkPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "dingtalk" && pref.EventType == "mentioned" && pref.Enabled {
+			dingtalkPref = pref
+			break
+		}
+	}
+	if dingtalkPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load external account bindings for dingtalk delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "dingtalk" || candidate.Status != "active" {
+			continue
+		}
+		if dingtalkPref.BindingID.Valid && util.UUIDToString(dingtalkPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"binding_id":         util.UUIDToString(binding.ID),
+		"provider":           binding.Provider,
+		"external_user_id":   binding.ExternalUserID,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	dingtalkPayload, err := json.Marshal(payload)
+	if err != nil {
+		dingtalkPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "dingtalk",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     dingtalkPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create dingtalk delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+}
+
+func recordMentionEmailDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for email delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var emailPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "email" && pref.EventType == "mentioned" && pref.Enabled {
+			emailPref = pref
+			break
+		}
+	}
+	if emailPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load external account bindings for email delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "email" || candidate.Status != "active" {
+			continue
+		}
+		if emailPref.BindingID.Valid && util.UUIDToString(emailPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"binding_id":         util.UUIDToString(binding.ID),
+		"provider":           binding.Provider,
+		"external_user_id":   binding.ExternalUserID,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	emailPayload, err := json.Marshal(payload)
+	if err != nil {
+		emailPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "email",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     emailPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create email delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+}
+
+func recordCustomWebhookDeliveries(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	preferenceEventType := customWebhookPreferenceEventType(event.Type)
+	if preferenceEventType == "" {
+		return
+	}
+
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for custom webhook delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	enabled := false
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "custom_webhook" && pref.EventType == preferenceEventType && pref.Enabled {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		return
+	}
+
+	endpoints, err := queries.ListEnabledNotificationWebhookEndpointsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load custom webhook endpoints",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	for _, endpoint := range endpoints {
+		payload := map[string]any{
+			"webhook_endpoint_id": util.UUIDToString(endpoint.ID),
+			"notification_event":  json.RawMessage(payloadSnapshot),
+		}
+		webhookPayload, err := json.Marshal(payload)
+		if err != nil {
+			webhookPayload = payloadSnapshot
+		}
+
+		if _, err := queries.CreateTargetedNotificationDelivery(ctx, db.CreateTargetedNotificationDeliveryParams{
+			NotificationEventID: event.ID,
+			Channel:             "custom_webhook",
+			TargetType:          "webhook_endpoint",
+			TargetID:            endpoint.ID,
+			Status:              "pending",
+			AttemptCount:        0,
+			LastError:           pgtype.Text{},
+			PayloadSnapshot:     webhookPayload,
+			SentAt:              pgtype.Timestamptz{},
+		}); err != nil {
+			slog.Error("failed to create custom webhook delivery record",
+				"notification_event_id", util.UUIDToString(event.ID),
+				"recipient_id", recipientID,
+				"webhook_endpoint_id", util.UUIDToString(endpoint.ID),
+				"error", err,
+			)
+		}
+	}
+}
+
+func customWebhookPreferenceEventType(notificationType string) string {
+	switch notificationType {
+	case "mentioned":
+		return "mentioned"
+	case "issue_assigned":
+		return "issue_assigned"
+	case "new_comment", "assignee_changed", "status_changed", "priority_changed", "due_date_changed", "task_failed":
+		return "subscribed_issue_updated"
+	default:
+		return ""
+	}
 }
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
@@ -185,6 +653,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, "", "")
+		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
+
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -241,6 +712,11 @@ func notifyDirect(
 		return
 	}
 
+	notificationCtx := buildNotificationContext(ctx, queries, workspaceID, issueID, "", "")
+	if recipientType == "member" {
+		recordNotification(ctx, queries, e, recipientID, notifType, severity, issueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
+	}
+
 	resp := inboxItemToResponse(item)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
@@ -253,22 +729,29 @@ func notifyDirect(
 }
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
-// excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents).
+// excluding any IDs in the skip set. The actor is skipped for expanded @all
+// mentions, but an explicit self-mention still produces a notification.
+// When an @all mention is present, all workspace members are notified
+// (excluding agents).
 func notifyMentionedMembers(
 	bus *events.Bus,
 	queries *db.Queries,
 	e events.Event,
 	mentions []mention,
 	issueID string,
-	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
+	commentID string,
+	appOrigin string,
 	skip map[string]bool,
 	details []byte,
 ) {
+	ctx := context.Background()
+
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
+	explicitRecipientIDs := map[string]bool{}
 
 	hasAll := false
 	for _, m := range mentions {
@@ -278,12 +761,13 @@ func notifyMentionedMembers(
 		}
 		if m.Type == "member" {
 			recipientIDs[m.ID] = true
+			explicitRecipientIDs[m.ID] = true
 		}
 	}
 
 	// If @all is present, expand to all workspace members.
 	if hasAll {
-		members, err := queries.ListMembers(context.Background(), parseUUID(e.WorkspaceID))
+		members, err := queries.ListMembers(ctx, parseUUID(e.WorkspaceID))
 		if err != nil {
 			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
 		} else {
@@ -293,11 +777,22 @@ func notifyMentionedMembers(
 		}
 	}
 
+	if len(recipientIDs) == 0 {
+		return
+	}
+
+	notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID, appOrigin)
+	actorName := resolveNotificationActorName(ctx, queries, e.ActorType, e.ActorID)
+
 	for id := range recipientIDs {
-		if id == e.ActorID || skip[id] {
+		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
+		if skip[id] && !isExplicitSelfMention {
 			continue
 		}
-		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		if id == e.ActorID && !explicitRecipientIDs[id] {
+			continue
+		}
+		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),
@@ -305,6 +800,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       parseUUID(e.ActorID),
 			Details:       details,
@@ -322,6 +818,8 @@ func notifyMentionedMembers(
 			ActorID:     e.ActorID,
 			Payload:     map[string]any{"item": resp},
 		})
+
+		recordMentionNotification(ctx, queries, e, id, issueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, actorName, details)
 	}
 }
 
@@ -345,6 +843,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
+		appOrigin, _ := payload["app_origin"].(string)
 
 		// Track who already got notified to avoid duplicates
 		skip := map[string]bool{e.ActorID: true}
@@ -365,8 +864,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// Notify @mentions in description
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
-			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Status,
+				issue.Title, *issue.Description, "", appOrigin, skip, emptyDetails)
 		}
 	})
 
@@ -380,6 +879,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
+		appOrigin, _ := payload["app_origin"].(string)
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		statusChanged, _ := payload["status_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
@@ -503,8 +1003,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
-				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Status,
+					issue.Title, *issue.Description, "", appOrigin, skip, emptyDetails)
 			}
 		}
 	})
@@ -535,6 +1035,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
+		appOrigin, _ := payload["app_origin"].(string)
 
 		commentDetails := emptyDetails
 		if commentID != "" {
@@ -552,8 +1053,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		mentions := parseMentions(commentContent)
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
-			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
+			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueStatus,
+				issueTitle, commentContent, commentID, appOrigin, skip, commentDetails)
 		}
 	})
 

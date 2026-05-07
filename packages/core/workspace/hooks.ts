@@ -1,8 +1,21 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useWorkspaceId } from "../hooks";
-import { memberListOptions, agentListOptions } from "./queries";
+import { memberListOptions, agentListOptions, workspaceListOptions } from "./queries";
+
+export function useWorkspaceList() {
+  return useQuery(workspaceListOptions());
+}
+
+export function useMemberList(workspaceId: string) {
+  return useQuery(memberListOptions(workspaceId));
+}
+
+export function useAgentList(workspaceId: string) {
+  return useQuery(agentListOptions(workspaceId));
+}
 
 export function useActorName() {
   const wsId = useWorkspaceId();
@@ -42,4 +55,34 @@ export function useActorName() {
   };
 
   return { getMemberName, getAgentName, getActorName, getActorInitials, getActorAvatarUrl };
+}
+
+export type WorkspaceMentionTarget = {
+  id: string;
+  label: string;
+  type: "all" | "member" | "agent";
+};
+
+export function useWorkspaceMentionTargets(wsId: string) {
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+
+  return useMemo<WorkspaceMentionTarget[]>(
+    () => [
+      { id: "all", label: "All members", type: "all" },
+      ...members.map((member) => ({
+        id: member.user_id,
+        label: member.name,
+        type: "member" as const,
+      })),
+      ...agents
+        .filter((agent) => !agent.archived_at)
+        .map((agent) => ({
+          id: agent.id,
+          label: agent.name,
+          type: "agent" as const,
+        })),
+    ],
+    [agents, members],
+  );
 }

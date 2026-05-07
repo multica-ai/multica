@@ -17,6 +17,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -25,6 +26,8 @@ import (
 // URL is not present in the workspace's repo configuration after a fresh
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
+
+const notificationIssueLookupTimeout = 2 * time.Second
 
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
@@ -40,6 +43,7 @@ type workspaceState struct {
 type Daemon struct {
 	cfg       Config
 	client    *Client
+	notifier  notifier.Notifier
 	repoCache *repocache.Cache
 	logger    *slog.Logger
 
@@ -63,6 +67,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	return &Daemon{
 		cfg:           cfg,
 		client:        NewClient(cfg.ServerBaseURL),
+		notifier:      notifier.New(),
 		repoCache:     repocache.New(cacheRoot, logger),
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
@@ -161,7 +166,7 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
-	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	cfg, err := cli.LoadCLIConfigForInstance(d.cfg.Profile, d.cfg.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
@@ -676,32 +681,15 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		"status": "running",
 	})
 
-	// Try Homebrew first, fall back to direct download.
-	var output string
-	if cli.IsBrewInstall() {
-		d.logger.Info("updating CLI via Homebrew...")
-		var err error
-		output, err = cli.UpdateViaBrew()
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err, "output", output)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
-			})
-			return
-		}
-	} else {
-		d.logger.Info("updating CLI via direct download...", "target_version", update.TargetVersion)
-		var err error
-		output, err = cli.UpdateViaDownload(update.TargetVersion)
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err)
-			d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("download update failed: %v", err),
-			})
-			return
-		}
+	d.logger.Info("updating CLI via configured manifest...", "target_version", update.TargetVersion)
+	output, err := cli.UpdateViaDownload(update.TargetVersion)
+	if err != nil {
+		d.logger.Error("CLI update failed", "error", err)
+		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  fmt.Sprintf("download update failed: %v", err),
+		})
+		return
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
@@ -715,22 +703,16 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
-// so the restarted daemon picks up the new Cellar version automatically.
-// For non-brew installs, it resolves to the absolute path of the replaced binary.
-// The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
+// The restart target should match the managed install path whenever possible so
+// the child process starts from the newly-replaced binary.
 func (d *Daemon) triggerRestart() {
-	newBin, err := os.Executable()
+	newBin, err := cli.ResolveInstalledBinaryPath()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
-		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
-			newBin = resolved
-		}
+	if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
+		newBin = resolved
 	}
 
 	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
@@ -849,6 +831,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
+	if err := preflightPrivateAgentGate(task); err != nil {
+		taskLog.Warn("private agent gate rejected task", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
+			taskLog.Error("fail task after private gate rejection failed", "error", failErr)
+		}
+		return
+	}
+
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", ""); failErr != nil {
@@ -900,6 +890,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// to forward — best we can do is record the failure.
 		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", ""); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, false, err.Error())
 		}
 		return
 	}
@@ -929,6 +921,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// rather than start over and "forget" the conversation.
 		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, false, result.Comment)
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
@@ -936,7 +930,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
+			} else {
+				d.notifyTaskResult(ctx, taskLog, task, false, fmt.Sprintf("complete task failed: %s", err.Error()))
 			}
+		} else {
+			d.notifyTaskResult(ctx, taskLog, task, true, "")
 		}
 	}
 
@@ -948,6 +946,91 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 		}
 	}
+}
+
+func (d *Daemon) notifyTaskResult(ctx context.Context, taskLog *slog.Logger, task Task, success bool, message string) {
+	if !d.cfg.LocalNotificationEnabled {
+		return
+	}
+	if success && !d.cfg.LocalNotificationOnSuccess {
+		return
+	}
+	if !success && !d.cfg.LocalNotificationOnFailure {
+		return
+	}
+	if d.notifier == nil {
+		return
+	}
+
+	payload := notifier.TaskNotificationPayload{
+		Success:   success,
+		AgentName: taskAgentName(task),
+		IssueID:   task.IssueID,
+		Message:   message,
+	}
+	payload = d.enrichTaskNotificationPayload(ctx, taskLog, payload)
+
+	title, body := notifier.BuildNotificationContent(payload)
+	if err := d.notifier.Notify(ctx, title, body); err != nil {
+		taskLog.Warn("local notification failed", "error", err)
+	}
+}
+
+func (d *Daemon) enrichTaskNotificationPayload(ctx context.Context, taskLog *slog.Logger, payload notifier.TaskNotificationPayload) notifier.TaskNotificationPayload {
+	if d.client == nil {
+		return payload
+	}
+	if strings.TrimSpace(payload.IssueID) == "" {
+		return payload
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, notificationIssueLookupTimeout)
+	defer cancel()
+
+	issue, err := d.client.GetIssue(lookupCtx, payload.IssueID)
+	if err != nil {
+		taskLog.Debug("load issue summary for local notification failed", "issue_id", payload.IssueID, "error", err)
+		return payload
+	}
+	if issue == nil {
+		return payload
+	}
+
+	identifier := strings.TrimSpace(issue.Identifier)
+	title := strings.TrimSpace(issue.Title)
+	if identifier == "" || title == "" {
+		return payload
+	}
+
+	payload.IssueIdentifier = identifier
+	payload.IssueTitle = title
+	return payload
+}
+
+func taskAgentName(task Task) string {
+	if task.Agent == nil {
+		return "Agent"
+	}
+	if name := strings.TrimSpace(task.Agent.Name); name != "" {
+		return name
+	}
+	return "Agent"
+}
+
+func preflightPrivateAgentGate(task Task) error {
+	if task.Agent == nil {
+		return nil
+	}
+	if task.Agent.Visibility != "private" {
+		return nil
+	}
+	if task.TriggerActorType != "member" || task.TriggerActorID == "" {
+		return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
+	}
+	if task.Agent.OwnerID != "" && task.TriggerActorID == task.Agent.OwnerID {
+		return nil
+	}
+	return fmt.Errorf("private agent execution denied: only the agent owner can run this task")
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {

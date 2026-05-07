@@ -12,6 +12,7 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
+import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
@@ -41,14 +42,35 @@ export interface InvitePageProps {
 export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   const { push } = useNavigation();
   const qc = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.isLoading);
   const [accepting, setAccepting] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"accepted" | "declined" | null>(null);
 
   const { data: invitation, isLoading, error: fetchError } = useQuery({
-    queryKey: ["invitation", invitationId],
-    queryFn: () => api.getInvitation(invitationId),
+    queryKey: ["invitation", invitationId, user?.id ?? "public"],
+    queryFn: async () => {
+      try {
+        const link = await api.validateInviteLink(invitationId);
+        return {
+          ...link,
+          invite_method: "link" as const,
+          invitee_email: "",
+          invitee_user_id: null,
+        };
+      } catch (linkError) {
+        if (!user) throw linkError;
+        const emailInvite = await api.getInvitation(invitationId);
+        return {
+          ...emailInvite,
+          invite_method: "email" as const,
+          max_uses: 1,
+          used_count: emailInvite.status === "pending" ? 0 : 1,
+        };
+      }
+    },
   });
 
   // Workspace list for the fallback "Go to dashboard" destinations. The invite
@@ -58,10 +80,18 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   const fallbackDest = resolvePostAuthDestination(wsList, hasOnboarded);
 
   const handleAccept = async () => {
+    if (!user) {
+      push(`${paths.login()}?next=${encodeURIComponent(paths.invite(invitationId))}`);
+      return;
+    }
     setAccepting(true);
     setError(null);
     try {
-      await api.acceptInvitation(invitationId);
+      if (invitation?.invite_method === "email") {
+        await api.acceptInvitation(invitationId);
+      } else {
+        await api.acceptInviteLink(invitationId);
+      }
       setDone("accepted");
       // Fetch the refreshed workspace list so we know the joined workspace's slug.
       const nextList = await qc.fetchQuery({
@@ -84,6 +114,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   };
 
   const handleDecline = async () => {
+    if (invitation?.invite_method !== "email") return;
     setDeclining(true);
     setError(null);
     try {
@@ -97,7 +128,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
@@ -166,6 +197,8 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   }
 
   const isExpired = invitation.status !== "pending";
+  const isLinkInvite = invitation.invite_method === "link";
+  const isLinkInvalid = isLinkInvite && invitation.status !== "valid";
   const isAlreadyHandled = invitation.status === "accepted" || invitation.status === "declined";
 
   return (
@@ -181,8 +214,14 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
               Join {invitation.workspace_name ?? "workspace"}
             </h2>
             <p className="text-sm text-muted-foreground">
-              <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-              invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+              {invitation.inviter_name || invitation.inviter_email ? (
+                <>
+                  <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
+                  invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
+                </>
+              ) : (
+                <>You can join as {invitation.role === "admin" ? "an admin" : "a member"}.</>
+              )}
             </p>
           </div>
 
@@ -190,26 +229,32 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="text-sm text-muted-foreground">
               This invitation has already been {invitation.status}.
             </div>
-          ) : isExpired ? (
+          ) : isLinkInvalid ? (
+            <div className="text-sm text-muted-foreground">
+              This invite link is {invitation.status.replace("_", " ")}.
+            </div>
+          ) : !isLinkInvite && isExpired ? (
             <div className="text-sm text-muted-foreground">
               This invitation has expired.
             </div>
           ) : (
             <div className="flex gap-3 w-full">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={handleDecline}
-                disabled={accepting || declining}
-              >
-                {declining ? "Declining..." : "Decline"}
-              </Button>
+              {!isLinkInvite && (
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleDecline}
+                  disabled={accepting || declining}
+                >
+                  {declining ? "Declining..." : "Decline"}
+                </Button>
+              )}
               <Button
                 className="flex-1"
                 onClick={handleAccept}
                 disabled={accepting || declining}
               >
-                {accepting ? "Joining..." : "Accept & Join"}
+                {accepting ? "Joining..." : user ? "Accept & Join" : "Log in to join"}
               </Button>
             </div>
           )}
@@ -236,6 +281,7 @@ function InviteShell({
   children: ReactNode;
 }) {
   const logout = useLogout();
+  const user = useAuthStore((s) => s.user);
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
       <DragStrip />
@@ -250,15 +296,17 @@ function InviteShell({
           Back
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
-        onClick={logout}
-      >
-        <LogOut />
-        Log out
-      </Button>
+      {user && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
+          onClick={logout}
+        >
+          <LogOut />
+          Log out
+        </Button>
+      )}
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         {children}
       </div>

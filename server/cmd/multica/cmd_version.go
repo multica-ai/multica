@@ -21,22 +21,27 @@ var versionCmd = &cobra.Command{
 
 func runVersion(cmd *cobra.Command, _ []string) error {
 	output, _ := cmd.Flags().GetString("output")
+	exePath, _ := os.Executable()
 
 	if output == "json" {
 		info := map[string]string{
-			"version":   version,
-			"commit":    commit,
-			"date":      date,
-			"go":        runtime.Version(),
-			"os":        runtime.GOOS,
-			"arch":      runtime.GOARCH,
+			"version":         version,
+			"commit":          commit,
+			"date":            date,
+			"go":              runtime.Version(),
+			"os":              runtime.GOOS,
+			"arch":            runtime.GOARCH,
+			"executable_path": exePath,
 		}
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	}
 
-	fmt.Printf("multica %s (commit: %s, built: %s)\n", version, commit, date)
-	fmt.Printf("go: %s, os/arch: %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(cmd.OutOrStdout(), "multica %s (commit: %s, built: %s)\n", version, commit, date)
+	fmt.Fprintf(cmd.OutOrStdout(), "go: %s, os/arch: %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	if exePath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "executable: %s\n", exePath)
+	}
 	return nil
 }

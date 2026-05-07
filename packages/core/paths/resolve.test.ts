@@ -10,6 +10,7 @@ function makeWs(slug: string): Workspace {
     slug,
     description: null,
     context: null,
+    wiki_content: null,
     settings: {},
     repos: [],
     issue_prefix: slug.toUpperCase(),
