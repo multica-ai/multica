@@ -128,7 +128,10 @@
     "sidebar_tooltip": "Alternar barra lateral",
     "update_failed": "Error al actualizar la incidencia",
     "link_copied": "Enlace copiado",
-    "link_copy_failed": "Error al copiar el enlace"
+    "link_copy_failed": "Error al copiar el enlace",
+    "workdir_path_copied": "Ruta del directorio de trabajo copiada",
+    "workdir_path_copy_failed": "Error al copiar la ruta del directorio de trabajo",
+    "workdir_path_unavailable": "Aún no hay un directorio de trabajo local — la incidencia no ha sido ejecutada por un agente local"
   },
   "timeline": {
     "show_older": "Mostrar más antiguos",
@@ -152,7 +155,8 @@
     "task_completed_one": "completó la tarea",
     "task_completed_other": "completó la tarea ({{count}} veces)",
     "task_failed_one": "la tarea falló",
-    "task_failed_other": "la tarea falló ({{count}} veces)"
+    "task_failed_other": "la tarea falló ({{count}} veces)",
+    "coalesced_badge": "×{{count}}"
   },
   "comment": {
     "delete_title": "Eliminar comentario",
@@ -248,6 +252,7 @@
     "pin_to_sidebar": "Fijar en la barra lateral",
     "unpin_from_sidebar": "Desfijar de la barra lateral",
     "copy_link": "Copiar enlace",
+    "copy_workdir_path": "Copiar ruta del directorio de trabajo",
     "more": "Más",
     "create_sub_issue": "Crear subincidencia",
     "set_parent_issue": "Establecer incidencia padre...",

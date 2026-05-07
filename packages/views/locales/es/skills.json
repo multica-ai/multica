@@ -60,7 +60,8 @@
     "source_runtime_provider": "Desde runtime {{provider}}",
     "source_runtime_unknown": "Desde un runtime",
     "source_clawhub": "Desde ClawHub",
-    "source_skills_sh": "Desde Skills.sh"
+    "source_skills_sh": "Desde Skills.sh",
+    "source_github": "Desde GitHub"
   },
   "detail": {
     "all_skills": "Todas las habilidades",
@@ -84,7 +85,8 @@
       "origin_skills_sh": "Importado · Skills.sh",
       "origin_workspace": "Espacio de trabajo",
       "updated_label": "Actualizado {{when}}",
-      "by_creator": "por {{name}}"
+      "by_creator": "por {{name}}",
+      "origin_github": "Importado · GitHub"
     },
     "conflict_banner": {
       "title": "Alguien más actualizó esta habilidad",
@@ -116,6 +118,7 @@
       "imported_runtime": "Importado desde runtime local",
       "imported_clawhub": "Importado desde ClawHub",
       "imported_skills_sh": "Importado desde Skills.sh",
+      "imported_github": "Importado desde GitHub",
       "provider": "proveedor · {{provider}}"
     },
     "not_found": {
@@ -201,6 +204,7 @@
       "importing": "Importando…",
       "importing_clawhub": "Importando desde ClawHub…",
       "importing_skills_sh": "Importando desde Skills.sh…",
+      "importing_github": "Importando desde GitHub…",
       "name_conflict_hint": " El nombre de la habilidad importada ya existe — elimina la existente antes de reintentar.",
       "fallback_error": "Error al importar",
       "cancel": "Cancelar",
