@@ -226,9 +226,7 @@ func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, iss
 
 	entries := h.mergeTimelineDesc(r, comments, activities, limit)
 	resp := TimelineResponse{Entries: entries}
-	// has_more_before: the page is full → there are likely more older. If the
-	// page is partial it means we hit the bottom of one or both tables.
-	resp.HasMoreBefore = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -270,7 +268,7 @@ func (h *Handler) listTimelineBefore(w http.ResponseWriter, r *http.Request, iss
 		Entries:      entries,
 		HasMoreAfter: true, // we're paging older from a known position, so newer exists
 	}
-	resp.HasMoreBefore = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -311,7 +309,7 @@ func (h *Handler) listTimelineAfter(w http.ResponseWriter, r *http.Request, issu
 	// reverse to DESC for the response.
 	entries := h.mergeTimelineAscThenReverse(r, comments, activities, limit)
 	resp := TimelineResponse{Entries: entries, HasMoreBefore: true}
-	resp.HasMoreAfter = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	resp.HasMoreAfter = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
 	if resp.HasMoreAfter && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
 		resp.PrevCursor = &c
@@ -419,8 +417,8 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 
 	resp := TimelineResponse{
 		Entries:       entries,
-		HasMoreBefore: len(olderComments) >= beforeLimit || len(olderActivities) >= beforeLimit,
-		HasMoreAfter:  len(newerComments) >= afterLimit || len(newerActivities) >= afterLimit,
+		HasMoreBefore: hasMoreBeyond(len(olderComments), len(olderActivities), len(olderEntries), beforeLimit),
+		HasMoreAfter:  hasMoreBeyond(len(newerComments), len(newerActivities), len(newerEntries), afterLimit),
 		TargetIndex:   &targetIdx,
 	}
 	if resp.HasMoreBefore {
@@ -449,6 +447,23 @@ func (h *Handler) fetchSingleEntry(r *http.Request, issue db.Issue, id pgtype.UU
 		return activityToEntry(a), true
 	}
 	return TimelineEntry{}, false
+}
+
+// hasMoreBeyond reports whether entries exist beyond the page on the side the
+// caller is paginating away from (older for "before", newer for "after").
+//
+// Three independent signals, any of which means "more rows exist":
+//  1. comments >= limit — the comments query was capped, DB has more.
+//  2. activities >= limit — the activities query was capped, DB has more.
+//  3. comments+activities > entries — the in-memory merge dropped rows that
+//     could not all fit in the page (#2192). This is the case the original
+//     formula missed, which made older comments unreachable when neither
+//     individual query hit the limit but their combined total exceeded it.
+func hasMoreBeyond(comments, activities, entries, limit int) bool {
+	if limit <= 0 {
+		return false
+	}
+	return comments >= limit || activities >= limit || comments+activities > entries
 }
 
 // mergeTimelineDesc takes comments + activities sorted DESC by (created_at, id)

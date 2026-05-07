@@ -272,8 +272,7 @@ RETURNING *;
 -- in dispatched/running.
 UPDATE agent_task_queue
 SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
-    work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir),
-    last_heartbeat_at = now()
+    work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running');
 
 -- name: RecoverOrphanedTasksForRuntime :many

@@ -90,6 +90,9 @@ catalogs:
     vitest:
       specifier: ^4.1.0
       version: 4.1.0
+    zod:
+      specifier: ^4.1.5
+      version: 4.3.6
     zustand:
       specifier: ^5.0.0
       version: 5.0.12
@@ -510,6 +513,9 @@ importers:
       react-i18next:
         specifier: 'catalog:'
         version: 17.0.6(i18next@26.0.8(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
       zustand:
         specifier: 'catalog:'
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))

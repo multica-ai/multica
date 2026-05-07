@@ -516,10 +516,7 @@ export function useRealtimeSync(
     };
     const invalidateSessionLists = () => {
       const id = getCurrentWsId();
-      if (id) {
-        qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
-        qc.invalidateQueries({ queryKey: chatKeys.allSessions(id) });
-      }
+      if (id) qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
     };
 
     const unsubChatMessage = ws.on("chat:message", (p) => {
@@ -656,7 +653,6 @@ export function useRealtimeSync(
         const drop = (old?: { id: string }[]) =>
           old?.filter((s) => s.id !== payload.chat_session_id);
         qc.setQueryData(chatKeys.sessions(id), drop);
-        qc.setQueryData(chatKeys.allSessions(id), drop);
       }
       qc.removeQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });

@@ -1053,6 +1053,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                           <div className="flex min-w-0 flex-1 items-center gap-1">
                             <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
                             <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+                            {/* Coalesce badge for non-task actions: task_completed / task_failed already
+                                bake the count into their translation, so suppress the badge there to
+                                avoid showing "×N" twice. */}
+                            {(entry.coalesced_count ?? 1) > 1 &&
+                              entry.action !== "task_completed" &&
+                              entry.action !== "task_failed" && (
+                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                                  {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                                </span>
+                              )}
                             <Tooltip>
                               <TooltipTrigger
                                 render={

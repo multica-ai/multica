@@ -23,6 +23,7 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
@@ -201,7 +202,10 @@ export function StepWorkspace({
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
           placeholder={t(($) => $.step_workspace.name_placeholder)}
-          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
+            if (e.key === "Enter") handleCreate();
+          }}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -222,7 +226,10 @@ export function StepWorkspace({
             onChange={(e) => handleSlugChange(e.target.value)}
             placeholder={t(($) => $.step_workspace.slug_placeholder)}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") handleCreate();
+            }}
           />
         </div>
         {slugError && <p className="text-xs text-destructive">{slugError}</p>}

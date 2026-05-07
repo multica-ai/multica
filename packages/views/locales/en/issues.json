@@ -155,7 +155,8 @@
     "task_completed_one": "completed the task",
     "task_completed_other": "completed the task ({{count}} times)",
     "task_failed_one": "task failed",
-    "task_failed_other": "task failed ({{count}} times)"
+    "task_failed_other": "task failed ({{count}} times)",
+    "coalesced_badge": "×{{count}}"
   },
   "comment": {
     "delete_title": "Delete comment",

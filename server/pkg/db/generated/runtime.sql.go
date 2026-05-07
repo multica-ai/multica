@@ -84,7 +84,7 @@ WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
 `
 
 // Marks dispatched/running tasks as failed when their runtime is offline.
@@ -121,7 +121,6 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 			&i.MaxAttempts,
 			&i.ParentTaskID,
 			&i.FailureReason,
-			&i.LastHeartbeatAt,
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 		); err != nil {
@@ -554,6 +553,29 @@ WHERE id = $1 AND status = 'online'
 // MarkAgentRuntimeOnline to flip the row back online.
 func (q *Queries) TouchAgentRuntimeLastSeen(ctx context.Context, id pgtype.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, touchAgentRuntimeLastSeen, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :execrows
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = ANY($1::uuid[]) AND status = 'online'
+`
+
+// Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
+// coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
+// fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
+//
+// Same load-bearing predicate as the single-id form: status='online' avoids
+// silently un-deleting a sweeper-flipped offline row, and we deliberately do
+// NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
+// means some IDs raced to offline between Schedule and flush; their next beat
+// will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, touchAgentRuntimesLastSeenBatch, ids)
 	if err != nil {
 		return 0, err
 	}

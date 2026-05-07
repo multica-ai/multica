@@ -22,6 +22,7 @@ import {
 } from "@multica/core/inbox/mutations";
 
 import { IssueDetail } from "../../issues/components";
+import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
 import {
@@ -260,23 +261,25 @@ export function InboxPage() {
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
-    <IssueDetail
-      key={selected.issue_id}
-      issueId={selected.issue_id}
-      defaultSidebarOpen={false}
-      layoutId="multica_inbox_issue_detail_layout"
-      highlightCommentId={selected.details?.comment_id ?? undefined}
-      onDelete={() => {
-        // Issue deletion CASCADE-deletes the inbox item server-side, and the
-        // issue:deleted WS event prunes it from the inbox cache. Just clear
-        // the selection — calling archive here would 404 on a row that no
-        // longer exists.
-        setSelectedKey("");
-      }}
-      onDone={() => {
-        handleArchive(selected.id);
-      }}
-    />
+    <ErrorBoundary resetKeys={[selected.issue_id]}>
+      <IssueDetail
+        key={selected.issue_id}
+        issueId={selected.issue_id}
+        defaultSidebarOpen={false}
+        layoutId="multica_inbox_issue_detail_layout"
+        highlightCommentId={selected.details?.comment_id ?? undefined}
+        onDelete={() => {
+          // Issue deletion CASCADE-deletes the inbox item server-side, and the
+          // issue:deleted WS event prunes it from the inbox cache. Just clear
+          // the selection — calling archive here would 404 on a row that no
+          // longer exists.
+          setSelectedKey("");
+        }}
+        onDone={() => {
+          handleArchive(selected.id);
+        }}
+      />
+    </ErrorBoundary>
   ) : selected ? (
     <div className="p-6">
       <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
