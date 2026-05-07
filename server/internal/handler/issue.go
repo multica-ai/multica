@@ -378,16 +378,23 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 7 END"
 
-	// Status priority: active issues first
+	// Status priority: active issues first.
+	// PUL-13: shifted to make room for new lifecycle statuses (waiting,
+	// planned, developing, deployed). Ordering matters, absolute values
+	// don't — this CASE is internal to the query, no external contract.
 	statusRank := `CASE i.status
 		WHEN 'in_progress' THEN 0
-		WHEN 'in_review' THEN 1
-		WHEN 'todo' THEN 2
-		WHEN 'blocked' THEN 3
-		WHEN 'backlog' THEN 4
-		WHEN 'done' THEN 5
-		WHEN 'cancelled' THEN 6
-		ELSE 7
+		WHEN 'developing' THEN 0
+		WHEN 'waiting' THEN 1
+		WHEN 'in_review' THEN 2
+		WHEN 'planned' THEN 3
+		WHEN 'todo' THEN 4
+		WHEN 'blocked' THEN 5
+		WHEN 'backlog' THEN 6
+		WHEN 'deployed' THEN 7
+		WHEN 'done' THEN 8
+		WHEN 'cancelled' THEN 9
+		ELSE 10
 	END`
 
 	// --- match_source expression ---
@@ -1501,8 +1508,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Trigger the assigned agent when a member moves an issue out of backlog.
 	// Backlog acts as a parking lot — moving to an active status signals the
 	// issue is ready for work.
+	// PUL-13: exclude new terminal/post-agent states from auto-enqueue.
+	// User dragging from backlog directly to deployed/developing/planned/waiting
+	// is a manual override, not "ready for autopilot work". Only todo (and
+	// in_progress / in_review for legacy) should kick off a task.
 	if statusChanged && !assigneeChanged && actorType == "member" &&
-		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+		prevIssue.Status == "backlog" &&
+		issue.Status != "done" && issue.Status != "deployed" &&
+		issue.Status != "cancelled" && issue.Status != "blocked" &&
+		issue.Status != "waiting" && issue.Status != "planned" &&
+		issue.Status != "developing" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}

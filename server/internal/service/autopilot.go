@@ -244,7 +244,12 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	wsID := util.UUIDToString(issue.WorkspaceID)
 
 	switch issue.Status {
-	case "done", "in_review":
+	// PUL-13: any post-in_progress lifecycle status counts as "agent's part is
+	// done" for autopilot bookkeeping. Legacy done/in_review still accepted
+	// during 30-day grace; new states (waiting, planned, developing, deployed)
+	// all signal the agent run can be marked completed and downstream actors
+	// (human, /pickup-plan, Forge webhook) take over from here.
+	case "done", "in_review", "waiting", "planned", "developing", "deployed":
 		if _, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		}); err != nil {
