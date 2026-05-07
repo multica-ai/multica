@@ -186,7 +186,13 @@ function EntryRow({
  */
 export function MyTimePage() {
   const { data: currentEntry } = useCurrentTimerQuery();
-  const { data: listData, isLoading } = useTimeEntriesQuery({ limit: 200 });
+
+  // Query the current month's entries so we never miss data due to a fixed limit.
+  const _d = new Date();
+  const monthStart = new Date(_d.getFullYear(), _d.getMonth(), 1).toISOString();
+  // First day of next month = exclusive upper bound.
+  const monthEnd = new Date(_d.getFullYear(), _d.getMonth() + 1, 1).toISOString();
+  const { data: listData, isLoading } = useTimeEntriesQuery({ since: monthStart, until: monthEnd });
 
   // Controls which entry is open in the edit sheet.
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
@@ -194,13 +200,18 @@ export function MyTimePage() {
   // API returns TimeEntry[] directly
   const entries: TimeEntry[] = listData ?? [];
 
+  // Exclude the running entry from the list view — it is already shown in RunningTimerCard above.
+  const listEntries = currentEntry
+    ? entries.filter((e) => e.id !== currentEntry.id)
+    : entries;
+
   // Sort entries newest-first and group by day.
   const grouped = useMemo(() => {
-    const sorted = [...entries].sort(
+    const sorted = [...listEntries].sort(
       (a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime(),
     );
     return groupByDay(sorted);
-  }, [entries]);
+  }, [listEntries]);
 
   const days = Array.from(grouped.keys());
 
