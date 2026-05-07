@@ -37,14 +37,14 @@ const channelDescriptions: Record<NotificationChannel, string> = {
   inbox: "In-app notification delivered through the existing Inbox and websocket flow.",
   dingtalk: "External notification sent to your linked DingTalk account once that channel is enabled.",
   email: "Email notification sent to your linked email address when you are mentioned.",
-  custom_webhook: "POST notification payloads to your own webhook endpoint.",
+  custom_webhook: "POST @ mentions, assignments, and subscribed issue updates to your own webhook endpoint.",
 };
 
-const eventLabels: Record<NotificationEventType, string> = {
-  mentioned: "@ mentions",
-  issue_assigned: "Assigned to me",
-  subscribed_issue_updated: "Subscribed issue updates",
-};
+const customWebhookEvents: NotificationEventType[] = [
+  "mentioned",
+  "issue_assigned",
+  "subscribed_issue_updated",
+];
 
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
@@ -110,6 +110,53 @@ export function NotificationsTab() {
         current.map((candidate) =>
           preferenceKey(candidate) === key ? updated : candidate,
         ),
+      );
+    } catch (err) {
+      setPreferences(previous);
+      toast.error(err instanceof Error ? err.message : "Failed to update notification preference");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleToggleCustomWebhook = async (enabled: boolean) => {
+    const key = "custom_webhook";
+    const previous = preferences;
+    const targets = customWebhookEvents.map((eventType) => {
+      const existing = preferences.find(
+        (pref) => pref.channel === "custom_webhook" && pref.event_type === eventType,
+      );
+      return (
+        existing ?? {
+          channel: "custom_webhook" as const,
+          event_type: eventType,
+          enabled: false,
+          binding_id: null,
+          requires_binding: false,
+        }
+      );
+    });
+
+    setSavingKey(key);
+    setPreferences((current) =>
+      current.map((candidate) =>
+        candidate.channel === "custom_webhook" ? { ...candidate, enabled } : candidate,
+      ),
+    );
+
+    try {
+      const updated = await Promise.all(
+        targets.map((pref) =>
+          api.updateNotificationPreference({
+            channel: pref.channel,
+            event_type: pref.event_type,
+            enabled,
+          }),
+        ),
+      );
+      const updatedByKey = new Map(updated.map((pref) => [preferenceKey(pref), pref]));
+      setPreferences((current) =>
+        current.map((candidate) => updatedByKey.get(preferenceKey(candidate)) ?? candidate),
       );
     } catch (err) {
       setPreferences(previous);
@@ -292,38 +339,72 @@ export function NotificationsTab() {
         <h3 className="text-sm font-semibold">Channels</h3>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Event delivery</CardTitle>
+            <CardTitle className="text-base">Delivery channels</CardTitle>
             <CardDescription>
-              Enable external targets per event type.
+              Enable notification delivery targets.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {preferences.map((pref) => {
-              const binding = bindingByProvider.get(pref.channel);
-              const needsBinding = pref.requires_binding && !binding;
-              const needsWebhook = pref.channel === "custom_webhook" && webhooks.length === 0;
-              const key = preferenceKey(pref);
+            {preferences
+              .filter((pref) => pref.channel !== "custom_webhook")
+              .map((pref) => {
+                const binding = bindingByProvider.get(pref.channel);
+                const needsBinding = pref.requires_binding && !binding;
+                const key = preferenceKey(pref);
 
-              return (
-                <div key={key} className="flex items-start justify-between gap-4 rounded-lg border p-4">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{eventLabels[pref.event_type]}</span>
-                      <Badge variant="outline">{channelLabels[pref.channel]}</Badge>
-                      {binding ? (
-                        <Badge variant="secondary">{binding.status}</Badge>
-                      ) : pref.requires_binding ? (
-                        <Badge variant="outline">not connected</Badge>
+                return (
+                  <div key={key} className="flex items-start justify-between gap-4 rounded-lg border p-4">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{channelLabels[pref.channel]}</span>
+                        {binding ? (
+                          <Badge variant="secondary">{binding.status}</Badge>
+                        ) : pref.requires_binding ? (
+                          <Badge variant="outline">not connected</Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {channelDescriptions[pref.channel]}
+                      </p>
+                      {needsBinding ? (
+                        <p className="text-xs text-muted-foreground">
+                          Link your account from Profile → Linked Accounts before enabling this channel.
+                        </p>
                       ) : null}
                     </div>
+                    <div className="flex items-center gap-3 pt-1">
+                      {savingKey === key ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : null}
+                      <Switch
+                        checked={pref.enabled}
+                        disabled={savingKey !== null || needsBinding}
+                        onCheckedChange={(checked) => {
+                          void handleToggle(pref, checked);
+                        }}
+                        aria-label={`Toggle ${channelLabels[pref.channel]}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            {(() => {
+              const customWebhookPrefs = preferences.filter(
+                (pref) => pref.channel === "custom_webhook",
+              );
+              const needsWebhook = webhooks.length === 0;
+              const enabled =
+                customWebhookPrefs.length > 0 && customWebhookPrefs.every((pref) => pref.enabled);
+
+              return (
+                <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{channelLabels.custom_webhook}</span>
+                    </div>
                     <p className="text-sm text-muted-foreground">
-                      {channelDescriptions[pref.channel]}
+                      {channelDescriptions.custom_webhook}
                     </p>
-                    {needsBinding ? (
-                      <p className="text-xs text-muted-foreground">
-                        Link your account from Profile → Linked Accounts before enabling this channel.
-                      </p>
-                    ) : null}
                     {needsWebhook ? (
                       <p className="text-xs text-muted-foreground">
                         Add a webhook endpoint before enabling this channel.
@@ -331,21 +412,21 @@ export function NotificationsTab() {
                     ) : null}
                   </div>
                   <div className="flex items-center gap-3 pt-1">
-                    {savingKey === key ? (
+                    {savingKey === "custom_webhook" ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     ) : null}
                     <Switch
-                      checked={pref.enabled}
-                      disabled={savingKey !== null || needsBinding || needsWebhook}
+                      checked={enabled}
+                      disabled={savingKey !== null || needsWebhook}
                       onCheckedChange={(checked) => {
-                        void handleToggle(pref, checked);
+                        void handleToggleCustomWebhook(checked);
                       }}
-                      aria-label={`Toggle ${channelLabels[pref.channel]} ${eventLabels[pref.event_type]}`}
+                      aria-label="Toggle Custom Webhook"
                     />
                   </div>
                 </div>
               );
-            })}
+            })()}
           </CardContent>
         </Card>
         <p className="text-sm text-muted-foreground">
