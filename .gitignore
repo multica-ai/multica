@@ -69,3 +69,4 @@ connect/sync
 .deploy/logs/
 .deploy/*.key
 .deploy/*.crt
+.gstack/
