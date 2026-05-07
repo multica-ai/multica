@@ -10,6 +10,7 @@ dist
 out
 build
 bin
+artifacts/
 dist-electron
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
