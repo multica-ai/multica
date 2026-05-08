@@ -9,10 +9,12 @@ import { useT } from "../../../i18n";
 
 export function InstructionsTab({
   agent,
+  readOnly = false,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
+  readOnly?: boolean;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -55,7 +57,10 @@ export function InstructionsTab({
         // flex-1 min-h-0 so the wrapper claims the leftover height in the
         // column. overflow-y-auto so very long prompts scroll inside the
         // editor instead of pushing the Save row down.
-        className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
+        // ContentEditor has no `editable` prop — use pointer-events-none to
+        // block interaction when readOnly (see content-editor.tsx comment).
+        className={`flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input ${readOnly ? "pointer-events-none opacity-60" : ""}`}
+        aria-disabled={readOnly || undefined}
       >
         <ContentEditor
           // Keyed by agent id so navigating between agents fully remounts the
@@ -77,23 +82,25 @@ export function InstructionsTab({
         />
       </div>
 
-      <div className="flex items-center justify-end gap-3">
-        {isDirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
-        )}
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!isDirty || saving}
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
+      {!readOnly && (
+        <div className="flex items-center justify-end gap-3">
+          {isDirty && (
+            <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
           )}
-          {t(($) => $.tab_body.common.save)}
-        </Button>
-      </div>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={!isDirty || saving}
+          >
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            {t(($) => $.tab_body.common.save)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
