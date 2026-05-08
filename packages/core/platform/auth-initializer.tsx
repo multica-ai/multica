@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getApi } from "../api";
+import { ApiError, getApi } from "../api";
 import { useAuthStore } from "../auth";
 import {
   captureSignupSource,
@@ -50,9 +50,20 @@ export function AuthInitializer({
       .getConfig()
       .then((cfg) => {
         if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+        const oauthProviders = cfg.oauth_providers ?? (cfg.google_client_id
+          ? [{
+              id: "google",
+              label: "Google",
+              client_id: cfg.google_client_id,
+              authorization_url: "https://accounts.google.com/o/oauth2/v2/auth",
+              scope: "openid email profile",
+              extra_auth_params: { access_type: "offline", prompt: "select_account" },
+            }]
+          : []);
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          oauthProviders,
         });
         if (cfg.posthog_key) {
           initAnalytics({
@@ -92,6 +103,11 @@ export function AuthInitializer({
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
         .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) {
+            logger.debug("cookie auth init skipped: unauthenticated session");
+            onAuthFailure();
+            return;
+          }
           logger.error("cookie auth init failed", err);
           onAuthFailure();
         });

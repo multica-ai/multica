@@ -1,12 +1,12 @@
 ---
 title: 登录与注册配置
-description: 配 Email 验证码登录、Google OAuth、注册白名单和本地测试验证码。
+description: 配 Email 验证码登录、OAuth provider、注册白名单和本地测试验证码。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-Multica 支持两种登录方式：**Email + 验证码**（默认）和 **Google OAuth**（可选）。登录成功后 server 签发一个 30 天有效期的 JWT cookie。这一页讲怎么配、怎么限制谁能注册、以及本地测试验证码怎么安全使用。
+Multica 支持 **Email + 验证码**（默认）和可选的 **OAuth provider**，例如 Google、飞书/Lark。登录成功后 server 签发一个 30 天有效期的 JWT cookie。这一页讲怎么配、怎么限制谁能注册、以及本地测试验证码怎么安全使用。
 
 上面用到的环境变量的清单见 [环境变量](/environment-variables)；token 怎么用、生命周期细节见 [认证与令牌](/auth-tokens)。
 
@@ -48,7 +48,7 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 
 ## 怎么配 Google OAuth
 
-可选。不配就只有 Email + 验证码登录；配了后登录页会多出「用 Google 登录」按钮。
+可选。不配就只有 Email + 验证码登录；配了后登录页会多出「用 Google 登录」按钮。`GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET` 都配置后，该 provider 才会出现在 `/api/config`。
 
 1. 去 [Google Cloud Console](https://console.cloud.google.com/) 创建一个 OAuth 2.0 client
 2. **授权的回调 URI**（Authorized redirect URIs）填你的 Multica 前端地址加 `/auth/callback`，例如：
@@ -72,6 +72,50 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 <Callout type="warning">
 **回调 URI 在 Google Console 和 `GOOGLE_REDIRECT_URI` 两处必须完全一致**，包括协议（`http` vs `https`）、尾部斜杠、端口。不一致 Google 会拒绝整个 OAuth 流程，用户看到的错误是 `redirect_uri_mismatch`。
 </Callout>
+
+## 怎么配飞书/Lark OAuth
+
+飞书/Lark OAuth 和 Google OAuth 是同一类流程：浏览器跳转到飞书/Lark，server 用回调里的 code 换取 user access token，读取登录用户资料，然后签发 Multica 自己的 JWT cookie。Multica **不会**把飞书/Lark access token 持久化用于产品功能。
+
+1. 在对应开放平台创建应用：
+
+    - 飞书中国版：`https://open.feishu.cn`
+    - Lark 国际版：`https://open.larksuite.com`
+    - 私有化飞书/Lark：使用你的私有 OpenAPI base URL
+
+2. 在飞书/Lark 应用的安全设置中配置 OAuth 回调地址：
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. 开通登录用户资料所需权限，尤其是 email / enterprise email 字段可见权限；如果租户要求发布后权限才生效，记得发布应用。
+
+4. 设置环境变量并重启 server：
+
+    ```bash
+    LARK_OAUTH_CLIENT_ID=cli_xxxxxxxxxxxxxxxx
+    LARK_OAUTH_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    LARK_OAUTH_BASE_URL=https://open.feishu.cn
+    LARK_OAUTH_LABEL="飞书/Lark"
+    LARK_OAUTH_SCOPE=contact:user.email:readonly
+    ```
+
+Lark 国际版使用 `LARK_OAUTH_BASE_URL=https://open.larksuite.com`。私有化部署则把 `LARK_OAUTH_BASE_URL` 指向私有 OpenAPI host。如果你的私有化环境路径不标准，可以进一步用 `LARK_OAUTH_AUTHORIZATION_URL`、`LARK_OAUTH_TOKEN_URL`、`LARK_OAUTH_USERINFO_URL` 覆盖派生出来的三个 endpoint。
+
+默认情况下，授权页使用飞书中国版的 `https://accounts.feishu.cn`，或 Lark 国际版的 `https://accounts.larksuite.com`；token 和 user-info 请求使用 OpenAPI base URL。私有化部署里如果授权 host 和 OpenAPI host 不同，请设置 `LARK_OAUTH_ACCOUNT_BASE_URL`，或直接设置完整的 `LARK_OAUTH_AUTHORIZATION_URL`。
+
+server 兼容 `LARK_APP_ID` / `LARK_APP_SECRET` 作为 `LARK_OAUTH_CLIENT_ID` / `LARK_OAUTH_CLIENT_SECRET` 的别名，但新部署建议使用显式 OAuth 名称。
+
+<Callout type="warning">
+**飞书/Lark 账号必须能返回邮箱。** Multica 用邮箱把 OAuth 身份映射到用户，这样注册白名单、邀请和已有账号都能沿用。如果飞书/Lark 不返回 `enterprise_email` 或 `email`，登录会被拒绝；请在飞书/Lark 应用里开通相关字段权限。
+</Callout>
+
+## 验证码登录 vs 直接 OAuth 登录
+
+Email 验证码登录是最通用的兜底：适合外部协作者，不要求组织已经有统一身份源；缺点是依赖邮件可达性，`RESEND_API_KEY` 没配时生产体验很差。飞书/Lark OAuth 更适合企业内部 self-host：身份校验交给现有飞书/Lark 租户，避免验证码投递问题，也能通过 endpoint 配置兼容公网 SaaS 和私有化飞书/Lark。
+
+生产建议：保留邮箱验证码作为外部用户和管理员兜底；内部员工优先使用飞书/Lark OAuth。若实例严格内用、飞书/Lark 租户稳定，可以把 OAuth 作为主入口，只保留邮箱作为管理员恢复通道。
 
 ## 怎么限制谁能注册
 

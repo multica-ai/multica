@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,11 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -431,16 +432,10 @@ type GoogleLoginRequest struct {
 	RedirectURI string `json:"redirect_uri"`
 }
 
-type googleTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
-	TokenType   string `json:"token_type"`
-}
-
-type googleUserInfo struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+type OAuthLoginRequest struct {
+	Code         string `json:"code"`
+	RedirectURI  string `json:"redirect_uri"`
+	CodeVerifier string `json:"code_verifier,omitempty"`
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
@@ -455,80 +450,62 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+	h.loginWithOAuthProvider(w, r, service.OAuthProviderGoogle, OAuthLoginRequest{
+		Code:        req.Code,
+		RedirectURI: firstNonEmpty(req.RedirectURI, os.Getenv("GOOGLE_REDIRECT_URI")),
+	})
+}
+
+func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
+	providerID := strings.TrimSpace(chi.URLParam(r, "provider"))
+	if providerID == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
-	redirectURI := req.RedirectURI
-	if redirectURI == "" {
-		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
+	var req OAuthLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
 	}
 
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"code":          {req.Code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
+	h.loginWithOAuthProvider(w, r, providerID, req)
+}
+
+func (h *Handler) oauthProviderRegistry() *service.OAuthProviderRegistry {
+	if h.OAuthProviders != nil {
+		return h.OAuthProviders
+	}
+	return service.NewOAuthProviderRegistryFromEnv(http.DefaultClient)
+}
+
+func (h *Handler) loginWithOAuthProvider(w http.ResponseWriter, r *http.Request, providerID string, req OAuthLoginRequest) {
+	provider, ok := h.oauthProviderRegistry().Get(providerID)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "OAuth login provider is not configured")
+		return
+	}
+
+	identity, err := provider.Exchange(r.Context(), service.OAuthExchangeRequest{
+		Code:         req.Code,
+		RedirectURI:  req.RedirectURI,
+		CodeVerifier: req.CodeVerifier,
 	})
 	if err != nil {
-		slog.Error("google oauth token exchange failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
-		return
-	}
-	defer tokenResp.Body.Close()
-
-	tokenBody, err := io.ReadAll(tokenResp.Body)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to read Google token response")
+		slog.Error("oauth provider login failed", append(logger.RequestAttrs(r), "provider", providerID, "error", err)...)
+		writeError(w, http.StatusBadGateway, "failed to sign in with OAuth provider")
 		return
 	}
 
-	if tokenResp.StatusCode != http.StatusOK {
-		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+	email := strings.ToLower(strings.TrimSpace(identity.Email))
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "OAuth account has no email")
 		return
 	}
-
-	var gToken googleTokenResponse
-	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
-
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
-		slog.Error("google userinfo fetch failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
-		return
-	}
-
-	if gUser.Email == "" {
-		writeError(w, http.StatusBadRequest, "Google account has no email")
-		return
-	}
-
-	email := strings.ToLower(strings.TrimSpace(gUser.Email))
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
@@ -542,22 +519,22 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNew {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
-		evt.Properties["auth_method"] = "google"
+		evt.Properties["auth_method"] = providerID
 		h.Analytics.Capture(evt)
 	}
 
-	// Update name and avatar from Google profile if the user was just created
+	// Update name and avatar from the provider profile if the user was just created
 	// (default name is email prefix) or has no avatar yet.
 	needsUpdate := false
 	newName := user.Name
 	newAvatar := user.AvatarUrl
 
-	if gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
-		newName = gUser.Name
+	if identity.Name != "" && user.Name == strings.Split(email, "@")[0] {
+		newName = identity.Name
 		needsUpdate = true
 	}
-	if gUser.Picture != "" && !user.AvatarUrl.Valid {
-		newAvatar = pgtype.Text{String: gUser.Picture, Valid: true}
+	if identity.AvatarURL != "" && !user.AvatarUrl.Valid {
+		newAvatar = pgtype.Text{String: identity.AvatarURL, Valid: true}
 		needsUpdate = true
 	}
 
@@ -574,7 +551,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		slog.Warn("oauth login failed", append(logger.RequestAttrs(r), "provider", providerID, "error", err, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
@@ -589,11 +566,20 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	slog.Info("user logged in via oauth", append(logger.RequestAttrs(r), "provider", providerID, "user_id", uuidToString(user.ID), "email", user.Email)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  userToResponse(user),
 	})
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // IssueCliToken returns a fresh JWT for the authenticated user.

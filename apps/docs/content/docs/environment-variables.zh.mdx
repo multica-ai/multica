@@ -44,9 +44,11 @@ Multica 用 [Resend](https://resend.com/) 发验证码和邀请邮件。
 
 **不设 `RESEND_API_KEY` 时的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发时方便——你从 server 日志里抄验证码；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
 
-## 怎么配 Google OAuth
+## 怎么配 OAuth provider
 
-可选。不设则只有邮箱 + 验证码登录；设了就在登录页出现「用 Google 登录」。
+可选。不设则只有邮箱 + 验证码登录；配置一个或多个 provider 后，登录页会显示对应 OAuth 按钮。前端通过 `/api/config` 运行时读取 provider 列表，所以改完重启 server 即可，不需要重建前端。
+
+### Google
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -54,9 +56,22 @@ Multica 用 [Resend](https://resend.com/) 发验证码和邀请邮件。
 | `GOOGLE_CLIENT_SECRET` | 空 | Google Cloud OAuth secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth 回调地址（self-host 换成你的前端域名）|
 
-**热生效**：前端在运行时通过 `/api/config` 拿这些配置，**改了不用重启前端也不用重建镜像**——改完重启 server 即可。
+### 飞书/Lark
 
-完整配置步骤（含 Google Cloud Console 操作）详见 [登录与注册配置](/auth-setup#怎么配-google-oauth)。
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `LARK_OAUTH_CLIENT_ID` | 空 | 飞书/Lark app ID，通常是 `cli_...`。兼容别名 `LARK_APP_ID` |
+| `LARK_OAUTH_CLIENT_SECRET` | 空 | 飞书/Lark app secret。兼容别名 `LARK_APP_SECRET` |
+| `LARK_OAUTH_BASE_URL` | `https://open.feishu.cn` | token 和 user-info API 使用的 OpenAPI base URL。Lark 国际版用 `https://open.larksuite.com`，私有化部署填私有 OpenAPI host |
+| `LARK_OAUTH_ACCOUNT_BASE_URL` | `https://accounts.feishu.cn` 或 `https://accounts.larksuite.com` | 授权页 base URL，会根据 `LARK_OAUTH_BASE_URL` 自动派生；如果私有化环境的认证 host 和 OpenAPI host 不同，请显式设置 |
+| `LARK_OAUTH_LABEL` | `Feishu/Lark` | 登录按钮上的 provider 名称 |
+| `LARK_OAUTH_SCOPE` | 空 | 可选 OAuth scope；为空时使用应用已开通的授权范围 |
+| `LARK_OAUTH_PKCE` | `true` | 浏览器授权请求是否带 PKCE |
+| `LARK_OAUTH_AUTHORIZATION_URL` | 从 account base URL 派生 | 私有化/非标准路径的高级覆盖 |
+| `LARK_OAUTH_TOKEN_URL` | 从 base URL 派生 | 私有化/非标准路径的高级覆盖 |
+| `LARK_OAUTH_USERINFO_URL` | 从 base URL 派生 | 私有化/非标准路径的高级覆盖 |
+
+完整配置步骤见 [Google OAuth 配置](/auth-setup#怎么配-google-oauth) 和 [飞书/Lark OAuth 配置](/auth-setup#怎么配飞书lark-oauth)。
 
 ## 怎么配文件存储
 

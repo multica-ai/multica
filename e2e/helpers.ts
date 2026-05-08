@@ -21,12 +21,12 @@ export async function loginAsDefault(page: Page): Promise<string> {
   );
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
+  await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
   await page.goto(`/${workspace.slug}/issues`);
   await page.waitForURL("**/issues", { timeout: 10000 });
+  await page.getByRole("button", { name: "Start blank workspace" }).click({ timeout: 2000 }).catch(() => {});
   return workspace.slug;
 }
 
@@ -43,7 +43,7 @@ export async function createTestApi(): Promise<TestApiClient> {
 
 export async function openWorkspaceMenu(page: Page) {
   // Click the workspace switcher button (has ChevronDown icon)
-  await page.locator("aside button").first().click();
+  await page.getByRole("button", { name: /E2E Workspace/ }).click();
   // Wait for dropdown to appear
-  await page.locator('[class*="popover"]').waitFor({ state: "visible" });
+  await page.getByRole("menuitem", { name: "Log out" }).waitFor({ state: "visible" });
 }

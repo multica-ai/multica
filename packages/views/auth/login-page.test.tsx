@@ -389,6 +389,47 @@ describe("LoginPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders a generic browser sign-in button for desktop handoff", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} onGoogleLogin={vi.fn()} />);
+
+    expect(
+      screen.getByRole("button", { name: /continue in browser/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /continue with google/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders configured OAuth provider buttons and redirects with provider state", async () => {
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        oauthProviders={[
+          {
+            id: "feishu_lark",
+            label: "Feishu/Lark",
+            clientId: "cli_lark",
+            authorizationUrl: "https://open.feishu.cn/open-apis/authen/v1/authorize",
+            scope: "contact:user.email:readonly",
+          },
+        ]}
+        oauthState="next:/invite/abc123"
+        oauthRedirectUri="https://app.example.test/auth/callback"
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /continue with feishu\/lark/i }));
+
+    const redirected = new URL(window.location.href);
+    expect(`${redirected.origin}${redirected.pathname}`).toBe("https://open.feishu.cn/open-apis/authen/v1/authorize");
+    expect(redirected.searchParams.get("client_id")).toBe("cli_lark");
+    expect(redirected.searchParams.get("response_type")).toBe("code");
+    expect(redirected.searchParams.get("redirect_uri")).toBe("https://app.example.test/auth/callback");
+    expect(redirected.searchParams.get("scope")).toBe("contact:user.email:readonly");
+    expect(redirected.searchParams.get("state")).toBe("provider:feishu_lark,next:/invite/abc123");
+  });
+
   // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------

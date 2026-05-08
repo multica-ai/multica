@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { renderToString } from "react-dom/server";
 import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
@@ -84,6 +85,8 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+import { configStore } from "@multica/core/config";
+import { getBrowserOAuthRedirectUri } from "./oauth-redirect";
 import LoginPage from "./page";
 
 describe("LoginPage", () => {
@@ -92,6 +95,7 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    configStore.getState().setAuthConfig({ allowSignup: true, oauthProviders: [] });
   });
 
   it("renders login form with email input and continue button", () => {
@@ -163,6 +167,65 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Network error")).toBeInTheDocument();
     });
+  });
+
+  it("renders OAuth providers from runtime config", () => {
+    configStore.getState().setAuthConfig({
+      allowSignup: true,
+      oauthProviders: [
+        {
+          id: "feishu_lark",
+          label: "Feishu/Lark",
+          client_id: "cli_lark",
+          authorization_url: "https://open.feishu.cn/open-apis/authen/v1/authorize",
+        },
+      ],
+    });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      screen.getByRole("button", { name: "Continue with Feishu/Lark" }),
+    ).toBeInTheDocument();
+  });
+
+  it("server-renders without reading window during render", () => {
+    configStore.getState().setAuthConfig({
+      allowSignup: true,
+      oauthProviders: [
+        {
+          id: "feishu_lark",
+          label: "Feishu/Lark",
+          client_id: "cli_lark",
+          authorization_url: "https://accounts.feishu.cn/open-apis/authen/v1/authorize",
+        },
+      ],
+    });
+
+    const originalWindow = globalThis.window;
+    vi.stubGlobal("window", undefined);
+    try {
+      expect(window).toBeUndefined();
+      expect(() =>
+        renderToString(
+          createWrapper()({
+            children: <LoginPage />,
+          }),
+        ),
+      ).not.toThrow();
+    } finally {
+      vi.stubGlobal("window", originalWindow);
+    }
+  });
+
+  it("returns no OAuth redirect URI when there is no browser window", () => {
+    const originalWindow = globalThis.window;
+    vi.stubGlobal("window", undefined);
+    try {
+      expect(getBrowserOAuthRedirectUri()).toBeUndefined();
+    } finally {
+      vi.stubGlobal("window", originalWindow);
+    }
   });
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
