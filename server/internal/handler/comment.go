@@ -255,7 +255,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(r.Context(), issue, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  authorType,
@@ -268,6 +268,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
+	}
+	if updatedIssue != nil {
+		issue = *updatedIssue
+		h.publishIssueStatusChangedFromComment(r, issue, prevIssueStatus, authorType, authorID)
 	}
 
 	// Link uploaded attachments to this comment.
@@ -313,6 +317,83 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	h.trackMentionFrequency(r.Context(), issue.WorkspaceID, authorType, authorID, comment.Content)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) createCommentWithIssueProgress(ctx context.Context, issue db.Issue, params db.CreateCommentParams) (db.Comment, *db.Issue, string, error) {
+	if h.TxStarter == nil {
+		comment, err := h.Queries.CreateComment(ctx, params)
+		if err != nil {
+			return db.Comment{}, nil, "", err
+		}
+		updatedIssue, prevStatus, err := h.markIssueInProgressForComment(ctx, h.Queries, issue, params.Type)
+		return comment, updatedIssue, prevStatus, err
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Comment{}, nil, "", err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	comment, err := qtx.CreateComment(ctx, params)
+	if err != nil {
+		return db.Comment{}, nil, "", err
+	}
+	updatedIssue, prevStatus, err := h.markIssueInProgressForComment(ctx, qtx, issue, params.Type)
+	if err != nil {
+		return db.Comment{}, nil, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Comment{}, nil, "", err
+	}
+
+	return comment, updatedIssue, prevStatus, nil
+}
+
+func (h *Handler) markIssueInProgressForComment(ctx context.Context, qtx *db.Queries, issue db.Issue, commentType string) (*db.Issue, string, error) {
+	if commentType != "comment" {
+		return nil, "", nil
+	}
+	switch issue.Status {
+	case "in_progress", "done", "cancelled":
+		return nil, "", nil
+	}
+
+	prevStatus := issue.Status
+	updatedIssue, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:     issue.ID,
+		Status: "in_progress",
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return &updatedIssue, prevStatus, nil
+}
+
+func (h *Handler) publishIssueStatusChangedFromComment(r *http.Request, issue db.Issue, prevStatus, actorType, actorID string) {
+	workspaceID := uuidToString(issue.WorkspaceID)
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(issue, prefix)
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		"issue":               resp,
+		"app_origin":          requestAppOrigin(r),
+		"assignee_changed":    false,
+		"status_changed":      true,
+		"priority_changed":    false,
+		"due_date_changed":    false,
+		"description_changed": false,
+		"title_changed":       false,
+		"prev_title":          issue.Title,
+		"prev_assignee_type":  textToPtr(issue.AssigneeType),
+		"prev_assignee_id":    uuidToPtr(issue.AssigneeID),
+		"prev_status":         prevStatus,
+		"prev_priority":       issue.Priority,
+		"prev_due_date":       timestampToPtr(issue.DueDate),
+		"prev_description":    textToPtr(issue.Description),
+		"creator_type":        issue.CreatorType,
+		"creator_id":          uuidToString(issue.CreatorID),
+	})
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
