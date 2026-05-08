@@ -282,35 +282,35 @@ func fetchAutopilotCandidates(ctx context.Context, client *cli.APIClient) ([]idC
 	return candidates, nil
 }
 
-func resolveTaskRunID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "task run", input, fetchTaskRunCandidates)
+func resolveTaskRunID(ctx context.Context, client *cli.APIClient, issueID, input string) (resolvedID, error) {
+	trimmed := strings.TrimSpace(input)
+	if uuidRegexp.MatchString(trimmed) {
+		return resolvedID{ID: trimmed, Display: trimmed}, nil
+	}
+	if strings.TrimSpace(issueID) == "" {
+		return resolvedID{}, fmt.Errorf("short task run prefixes require --issue <issue-id>; pass a full task UUID or run `multica issue runs <issue-id> --full-id`")
+	}
+	fetch := func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+		return fetchTaskRunCandidatesForIssue(ctx, client, issueID)
+	}
+	return resolveIDByPrefix(ctx, client, "task run", input, fetch)
 }
 
-func fetchTaskRunCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
-	issues, err := fetchIssueCandidates(ctx, client)
-	if err != nil {
+func fetchTaskRunCandidatesForIssue(ctx context.Context, client *cli.APIClient, issueID string) ([]idCandidate, error) {
+	var runs []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/task-runs", &runs); err != nil {
 		return nil, err
 	}
-	candidates := []idCandidate{}
-	for _, issue := range issues {
-		if issue.ID == "" {
+	candidates := make([]idCandidate, 0, len(runs))
+	for _, r := range runs {
+		id := strVal(r, "id")
+		if id == "" {
 			continue
 		}
-		var runs []map[string]any
-		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issue.ID)+"/task-runs", &runs); err != nil {
-			return nil, fmt.Errorf("list task runs for issue %s: %w", issue.ID, err)
-		}
-		for _, r := range runs {
-			id := strVal(r, "id")
-			if id == "" {
-				continue
-			}
-			candidates = append(candidates, idCandidate{
-				ID:      id,
-				Display: id,
-				Detail:  issue.ID,
-			})
-		}
+		candidates = append(candidates, idCandidate{
+			ID:      id,
+			Display: id,
+		})
 	}
 	return candidates, nil
 }

@@ -399,13 +399,14 @@ multica issue runs <issue-id> --output json
 
 # View messages for a specific execution run
 multica issue run-messages <task-id>
+multica issue run-messages <short-task-id> --issue <issue-id>
 multica issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
 
-The `runs` command shows all past and current executions for an issue, including running tasks. Table output uses short task UUID prefixes by default; pass `--full-id` to print canonical task UUIDs. The `run-messages` command accepts copied task prefixes when they are unique in the current workspace and shows the detailed message log (tool calls, thinking, text, errors) for a single run. Use `--since` for efficient polling of in-progress runs.
+The `runs` command shows all past and current executions for an issue, including running tasks. Table output uses short task UUID prefixes by default; pass `--full-id` to print canonical task UUIDs. The `run-messages` command accepts full task UUIDs directly; copied short task prefixes must be scoped with `--issue <issue-id>` so the CLI only checks that issue's runs. It shows the detailed message log (tool calls, thinking, text, errors) for a single run. Use `--since` for efficient polling of in-progress runs.
 
 ## Projects
 

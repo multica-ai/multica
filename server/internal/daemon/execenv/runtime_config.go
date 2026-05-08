@@ -115,7 +115,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
 	b.WriteString("- `multica issue runs <issue-id> [--full-id] --output json` — List all execution runs for an issue (status, timestamps, errors); table task IDs are short prefixes unless `--full-id` is set\n")
-	b.WriteString("- `multica issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run; copied task ID prefixes are accepted when unique in the current workspace\n")
+	b.WriteString("- `multica issue run-messages <task-id> [--issue <issue-id>] [--since <seq>] --output json` — List messages for a specific execution run; full task UUIDs work directly, copied short task prefixes must be scoped with `--issue <issue-id>`\n")
 	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
 	b.WriteString("- `multica autopilot list [--status X] [--full-id] [--output json]` — List autopilots (scheduled/triggered agent automations) in the workspace; copied short IDs are accepted by autopilot subcommands when unique\n")
 	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")

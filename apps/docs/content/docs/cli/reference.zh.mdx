@@ -316,13 +316,14 @@ multica issue runs <issue-id> --output json
 
 # View messages for a specific execution run
 multica issue run-messages <task-id>
+multica issue run-messages <short-task-id> --issue <issue-id>
 multica issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
 
-`runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 接受从 `runs` 表格复制出来的唯一短前缀。
+`runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 可直接接受完整 task UUID；从 `runs` 表格复制短前缀时需要同时传 `--issue <issue-id>`，CLI 只会在该 issue 的 runs 内解析。
 
 ## Projects
 

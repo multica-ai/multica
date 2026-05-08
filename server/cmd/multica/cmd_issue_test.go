@@ -413,15 +413,6 @@ func TestResolveTaskRunID(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/issues":
-			json.NewEncoder(w).Encode(map[string]any{
-				"issues": []map[string]any{{
-					"id":         issueID,
-					"identifier": "MUL-1852",
-					"title":      "Issue with run",
-				}},
-				"total": 1,
-			})
 		case "/api/issues/" + issueID + "/task-runs":
 			json.NewEncoder(w).Encode([]map[string]any{{
 				"id":       taskID,
@@ -435,12 +426,17 @@ func TestResolveTaskRunID(t *testing.T) {
 	defer srv.Close()
 
 	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
-	got, err := resolveTaskRunID(context.Background(), client, "abcd")
+	got, err := resolveTaskRunID(context.Background(), client, issueID, "abcd")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.ID != taskID {
 		t.Fatalf("got %#v, want task id %s", got, taskID)
+	}
+
+	_, err = resolveTaskRunID(context.Background(), client, "", "abcd")
+	if err == nil || !strings.Contains(err.Error(), "--issue") {
+		t.Fatalf("expected missing --issue error for short prefix, got %v", err)
 	}
 }
 
@@ -451,13 +447,10 @@ func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/issues":
+		case "/api/issues/MUL-1852":
 			json.NewEncoder(w).Encode(map[string]any{
-				"issues": []map[string]any{{
-					"id":         issueID,
-					"identifier": "MUL-1852",
-				}},
-				"total": 1,
+				"id":         issueID,
+				"identifier": "MUL-1852",
 			})
 		case "/api/issues/" + issueID + "/task-runs":
 			json.NewEncoder(w).Encode([]map[string]any{{"id": taskID}})
@@ -481,6 +474,8 @@ func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
 	cmd := &cobra.Command{Use: "run-messages"}
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().Int("since", 0, "")
+	cmd.Flags().String("issue", "", "")
+	_ = cmd.Flags().Set("issue", "MUL-1852")
 	if err := runIssueRunMessages(cmd, []string{"abcd"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
