@@ -2300,6 +2300,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	if slot < len(d.cfg.AvailableSlots) {
+		agentEnv["MULTICA_TASK_SLOT_VALUE"] = d.cfg.AvailableSlots[slot]
+	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}

@@ -171,6 +171,7 @@ Daemon behavior is configured via flags or environment variables:
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `2h` |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
+| Available slot values | — | `MULTICA_AVAILABLE_SLOTS` | — |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
@@ -222,6 +223,15 @@ Agent-specific overrides:
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 
 `MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
+
+The following variables are injected by the daemon into every spawned agent process at task start:
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_TASK_SLOT` | Slot index in the daemon concurrency pool (0-based, range `[0, max_concurrent_tasks)`) |
+| `MULTICA_TASK_SLOT_VALUE` | Value from `MULTICA_AVAILABLE_SLOTS` at the slot index. Not set if `MULTICA_AVAILABLE_SLOTS` is unset or the slot index is out of range. |
+
+These can be referenced in per-agent `custom_env` values using `${VAR}` syntax (e.g. `CUDA_VISIBLE_DEVICES = ${MULTICA_TASK_SLOT_VALUE}`).
 
 ### Self-Hosted Server
 
