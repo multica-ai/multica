@@ -188,12 +188,14 @@ export function AgentsPage() {
 
   // Layer 2 — workspace-only toggle. When active in the "all" scope,
   // hides personal-visibility agents so only workspace-shared ones remain.
+  // Skipped in Archived view — that view has no toggle to undo it, so
+  // applying it would silently hide private archived agents.
   const afterWorkspaceFilter = useMemo(() => {
-    if (scope === "all" && workspaceOnly) {
+    if (view === "active" && scope === "all" && workspaceOnly) {
       return inScope.filter((a) => a.visibility === "workspace");
     }
     return inScope;
-  }, [inScope, scope, workspaceOnly]);
+  }, [inScope, scope, workspaceOnly, view]);
 
   // Final cut — availability chip + search.
   const filteredAgents = useMemo(() => {
