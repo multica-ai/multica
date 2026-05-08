@@ -28,14 +28,24 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
+const mockSetListenMode = vi.hoisted(() => vi.fn());
+
 vi.mock("@multica/core/channels", () => ({
   channelDetailOptions: () => ({
     queryKey: ["channels", "ws", "detail", "c1"],
     queryFn: () => Promise.resolve(undefined),
   }),
+  channelAgentSettingsOptions: () => ({
+    queryKey: ["channels", "ws", "agent-settings", "c1"],
+    queryFn: () => Promise.resolve({ settings: [] }),
+  }),
   useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
   useUpdateChannel: () => ({ mutate: mockUpdateChannel }),
   useToggleChannelParticipant: () => ({ mutate: mockToggleParticipant }),
+  useSetChannelAgentListenMode: () => ({
+    mutate: mockSetListenMode,
+    isPending: false,
+  }),
 }));
 
 vi.mock("@multica/core/inbox/queries", () => ({

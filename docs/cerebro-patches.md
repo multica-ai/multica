@@ -77,6 +77,19 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `cerebro-inbox-folders` | server/internal/handler/inbox.go | 0 | Cerebro modification (see file for details) |
 | `cerebro-inbox-routes` | server/cmd/server/router.go | 0 | Mounts cerebro inbox routes (active-issue-tasks; mute / unmute / mark-unread) |
 | `cerebro-listeners` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing.go | 0 | Cerebro modification (see file for details) |
+| `channel-listen-mode` | server/internal/handler/comment.go | 4 | JEH-699 — invoke cerebro channel listen-mode service so non-mentioned, non-assignee agents subscribed to a channel are triggered when their listen_mode is 'always' |
+| `channel-listen-routes` | server/cmd/server/router.go | 3 | JEH-699 — channel listen-mode list/upsert HTTP routes |
+| `router-channel-listen` | server/cmd/server/router.go | 5 | JEH-699 — wire cerebro channel-listen service into the upstream Handler so the comment trigger path can dispatch always-listening agents |
+| `handler-channel-listen` | server/internal/handler/handler.go | 1 | JEH-699 — ChannelListen field on Handler struct |
+| `handler-channel-listen-iface` | server/internal/handler/handler.go | 4 | JEH-699 — ChannelListenInvoker interface seam (avoids handler→cerebro import cycle) |
+| `channel-listen-client` | packages/core/api/client.ts | 2 | JEH-699 — listChannelAgentSettings + setChannelAgentListenMode methods |
+| `core-channels-index` | packages/core/channels/index.ts | 5 | JEH-699 — re-export listen-mode queries/mutations |
+| `core-channels-listen-mut` | packages/core/channels/mutations.ts | 36 | JEH-699 — useSetChannelAgentListenMode optimistic mutation |
+| `core-channels-listen-q` | packages/core/channels/queries.ts | 11 | JEH-699 — channelAgentSettingsOptions query factory |
+| `core-types-channel-listen` | packages/core/types/channel.ts | 13 | JEH-699 — ChannelAgentListenMode + response/setting shapes |
+| `core-types-index-channel-listen` | packages/core/types/index.ts | 3 | JEH-699 — re-export listen-mode types |
+| `channel-detail-listeners` | packages/views/channels/components/channel-detail.tsx | 2 | JEH-699 — render Listeners popover in channel header |
+| `channel-listeners-panel` | packages/views/channels/components/channel-listeners-panel.tsx | 3 | JEH-699 — net-new Listeners popover (Switch per agent) |
 | `chat-handler-chat` | server/internal/handler/chat.go | 87 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-attachment-test` | server/internal/handler/chat_attachment_test.go | 263 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-cancel-test` | server/internal/handler/chat_cancel_test.go | 154 | Chat handler additions (cancel/coalesce/attachment) |

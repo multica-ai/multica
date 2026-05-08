@@ -45,3 +45,18 @@ export interface CreateChannelRequest {
   member_ids: string[];
   agent_ids: string[];
 }
+
+// CEREBRO-PATCH(core-types-channel-listen): JEH-699 — per (channel ×
+// agent) listen-mode toggle. 'always' (default) means the agent reacts
+// to every comment in the channel; 'mention_only' falls back to the
+// upstream behaviour of only triggering on explicit @-mention.
+export type ChannelAgentListenMode = "always" | "mention_only";
+
+export interface ChannelAgentSetting {
+  agent_id: string;
+  listen_mode: ChannelAgentListenMode;
+}
+
+export interface ChannelAgentSettingsResponse {
+  settings: ChannelAgentSetting[];
+}

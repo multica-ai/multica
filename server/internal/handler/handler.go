@@ -76,7 +76,21 @@ type Handler struct {
 	BudgetService *service.BudgetService
 	PushService   *service.PushService
 	PingStore     *PingStore
+	// CEREBRO-PATCH(handler-channel-listen): channel-listener (per-(channel,agent)
+	// listen-mode) service. Set by the router after construction so the upstream
+	// handler.New signature stays unchanged.
+	ChannelListen ChannelListenInvoker
 	cfg           Config
+}
+
+// ChannelListenInvoker is the upstream-side seam that the cerebro
+// channel-listen service plugs into. The interface lets the upstream comment
+// handler call the cerebro service without importing it (which would create
+// an import cycle: handler → cerebro/channels → uses TaskService → ...).
+//
+// CEREBRO-PATCH(handler-channel-listen-iface): seam for cerebro listen-mode.
+type ChannelListenInvoker interface {
+	EnqueueChannelListenerTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string)
 }
 
 // New constructs a Handler. The pushService argument is cerebro-specific

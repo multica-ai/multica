@@ -16,6 +16,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
@@ -148,6 +149,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// don't conflict on router wiring.
 	cerebroQueries := cerebrodb.New(pool)
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(router-channel-listen): wire the cerebro channel-listen
+	// service into the upstream handler so the comment trigger path can
+	// dispatch always-listening agents in channels.
+	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
+	h.ChannelListen = channelListenSvc
 	// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only inbox handlers
 	// (ListActiveIssueTasks; future folders/archive endpoints) live in their
 	// own package so this wiring line is the only conflict surface upstream
@@ -628,6 +634,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateChannel)
 				r.Get("/{id}", h.GetChannel)
 				r.Post("/{id}/read", h.MarkChannelRead)
+				// CEREBRO-PATCH(channel-listen-routes): per-(channel, agent)
+				// listen-mode toggle.
+				r.Get("/{id}/agent-settings", channelListenSvc.ListSettings)
+				r.Put("/{id}/agents/{agentId}/listen-mode", channelListenSvc.SetListenModeHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

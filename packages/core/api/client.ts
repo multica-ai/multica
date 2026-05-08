@@ -74,6 +74,9 @@ import type {
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Channel,
+  ChannelAgentListenMode,
+  ChannelAgentSetting,
+  ChannelAgentSettingsResponse,
   CreateChannelRequest,
   Project,
   ProjectMember,
@@ -922,6 +925,30 @@ export class ApiClient {
 
   async markChannelRead(id: string): Promise<{ count: number }> {
     return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
+  // CEREBRO-PATCH(channel-listen-client): JEH-699 — per (channel × agent)
+  // listen-mode endpoints. Default 'always' applies when no explicit row
+  // exists for an agent; the response only contains overrides, so the
+  // consumer fills the default itself.
+  async listChannelAgentSettings(
+    channelId: string,
+  ): Promise<ChannelAgentSettingsResponse> {
+    return this.fetch(`/api/channels/${channelId}/agent-settings`);
+  }
+
+  async setChannelAgentListenMode(
+    channelId: string,
+    agentId: string,
+    listenMode: ChannelAgentListenMode,
+  ): Promise<ChannelAgentSetting> {
+    return this.fetch(
+      `/api/channels/${channelId}/agents/${agentId}/listen-mode`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ listen_mode: listenMode }),
+      },
+    );
   }
 
   // Inbox

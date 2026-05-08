@@ -85,7 +85,18 @@ export type {
   ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
-export type { Channel, ChannelKind, ChannelMember, CreateChannelRequest } from "./channel";
+// CEREBRO-PATCH(core-types-index-channel-listen): JEH-699 — re-export
+// listen-mode types alongside the upstream channel types.
+export type {
+  Channel,
+  ChannelAgentListenMode,
+  ChannelAgentSetting,
+  ChannelAgentSettingsResponse,
+  ChannelKind,
+  ChannelLastMessage,
+  ChannelMember,
+  CreateChannelRequest,
+} from "./channel";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,

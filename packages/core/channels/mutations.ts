@@ -1,4 +1,4 @@
-// CEREBRO-PATCH(channels-mutations): channel-rename + participant add/remove mutations (JEH-700)
+// CEREBRO-PATCH(channels-mutations): channel-rename + participant add/remove mutations (JEH-700) + listen-mode toggle (JEH-699)
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
@@ -8,6 +8,8 @@ import { issueKeys } from "../issues/queries";
 import { createLogger } from "../logger";
 import type {
   Channel,
+  ChannelAgentListenMode,
+  ChannelAgentSettingsResponse,
   ChannelMember,
   CreateChannelRequest,
   InboxItem,
@@ -191,6 +193,43 @@ export function useToggleChannelParticipant() {
       qc.invalidateQueries({ queryKey: channelKeys.detail(wsId, channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(channelId) });
+    },
+  });
+}
+
+// JEH-699 — flip an agent's listen-mode for one channel. Optimistic: the
+// cache is updated before the request returns so the toggle is responsive;
+// the onError path restores the prior list if the server rejects.
+export function useSetChannelAgentListenMode(channelId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const queryKey = channelKeys.agentSettings(wsId, channelId);
+
+  return useMutation({
+    mutationFn: ({
+      agentId,
+      listenMode,
+    }: {
+      agentId: string;
+      listenMode: ChannelAgentListenMode;
+    }) => api.setChannelAgentListenMode(channelId, agentId, listenMode),
+    onMutate: async ({ agentId, listenMode }) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<ChannelAgentSettingsResponse>(queryKey);
+      const next: ChannelAgentSettingsResponse = {
+        settings: [
+          ...(prev?.settings ?? []).filter((s) => s.agent_id !== agentId),
+          { agent_id: agentId, listen_mode: listenMode },
+        ],
+      };
+      qc.setQueryData<ChannelAgentSettingsResponse>(queryKey, next);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey });
     },
   });
 }

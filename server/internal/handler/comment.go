@@ -312,6 +312,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 
+	// CEREBRO-PATCH(channel-listen-mode): trigger non-mentioned, non-assignee
+	// agents subscribed to the channel whose listen_mode is 'always'.
+	if h.ChannelListen != nil {
+		h.ChannelListen.EnqueueChannelListenerTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

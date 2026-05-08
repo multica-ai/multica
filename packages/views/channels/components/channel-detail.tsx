@@ -26,6 +26,8 @@ import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { Input } from "@multica/ui/components/ui/input";
 import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
+// CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
+import { ChannelListenersPanel } from "./channel-listeners-panel";
 
 interface ChannelDetailProps {
   channelId: string;
@@ -135,6 +137,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
             </button>
           )}
           <div className="ml-auto flex items-center gap-1">
+            <ChannelListenersPanel channel={channel} />
             <Tooltip>
               <TooltipTrigger
                 render={
