@@ -38,6 +38,10 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // a detail page on row click without nesting an <a> around <tr>,
   // which is invalid HTML.
   onRowClick?: (row: Row<TData>) => void;
+  // Optional content rendered before the table rows (inside the scroll
+  // container). Used for pinned/virtual rows that don't fit the table's
+  // TData type — e.g. defaults entries on the agents page.
+  prependRows?: React.ReactNode;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -62,6 +66,7 @@ export function DataTable<TData>({
   actionBar,
   emptyMessage = "No results.",
   onRowClick,
+  prependRows,
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -163,6 +168,7 @@ export function DataTable<TData>({
       {...props}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-background">
+        {prependRows}
         <table
           className="w-full table-fixed caption-bottom text-sm"
           style={{ minWidth: `${table.getTotalSize()}px` }}

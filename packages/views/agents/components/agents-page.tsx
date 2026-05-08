@@ -450,6 +450,7 @@ export function AgentsPage() {
   }
 
   const showEmpty = totalActiveCount === 0 && archivedCount === 0;
+  const defaultsRowsVisible = view === "active";
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -459,19 +460,6 @@ export function AgentsPage() {
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
-        {/* ── Agent Defaults cards ─────────────────────────────────── */}
-        {view === "active" && (
-          <DefaultsCardsRow
-            scope={scope}
-            isAdmin={isWorkspaceAdmin}
-            allDefaults={allDefaults}
-            currentUserId={currentUser?.id ?? null}
-            onOpenPersonal={() => setDefaultsSheet("personal")}
-            onOpenSystem={() => setDefaultsSheet("system")}
-            onOpenOther={(d) => setDefaultsSheet({ configId: d.id!, defaults: d })}
-          />
-        )}
-
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState onCreate={() => setShowCreate(true)} />
@@ -511,13 +499,26 @@ export function AgentsPage() {
               />
             )}
 
-            {sortedAgents.length === 0 ? (
+            {sortedAgents.length === 0 && !defaultsRowsVisible ? (
               <NoMatches view={view} search={search} scope={scope} workspaceOnly={workspaceOnly} />
             ) : (
               <DataTable
                 table={table}
                 onRowClick={(row) =>
                   navigation.push(paths.agentDetail(row.original.agent.id))
+                }
+                prependRows={
+                  defaultsRowsVisible ? (
+                    <DefaultsInlineRows
+                      scope={scope}
+                      isAdmin={isWorkspaceAdmin}
+                      allDefaults={allDefaults}
+                      currentUserId={currentUser?.id ?? null}
+                      onOpenPersonal={() => setDefaultsSheet("personal")}
+                      onOpenSystem={() => setDefaultsSheet("system")}
+                      onOpenOther={(d) => setDefaultsSheet({ configId: d.id!, defaults: d })}
+                    />
+                  ) : undefined
                 }
               />
             )}
@@ -545,7 +546,7 @@ export function AgentsPage() {
         open={defaultsSheet !== null}
         onOpenChange={(open) => { if (!open) setDefaultsSheet(null); }}
       >
-        <SheetContent side="right" className="sm:max-w-xl p-0">
+        <SheetContent side="right" className="sm:max-w-3xl p-0">
           <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
           <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
           {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
@@ -563,12 +564,12 @@ export function AgentsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Defaults cards — shown above the agent table in Active view.
-// Mine scope: Personal Defaults + System Defaults (admin only).
-// All scope: All users' defaults.
+// Defaults inline rows — rendered inside the DataTable scroll container as
+// pinned pseudo-rows. Mine scope: Personal + System (admin). All scope:
+// shows every user's defaults (with owner marked).
 // ---------------------------------------------------------------------------
 
-function DefaultsCardsRow({
+function DefaultsInlineRows({
   scope,
   isAdmin,
   allDefaults,
@@ -589,61 +590,93 @@ function DefaultsCardsRow({
 
   if (scope === "mine") {
     return (
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="border-b">
         <button
           type="button"
           onClick={onOpenPersonal}
-          className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-left transition-colors hover:bg-accent/50"
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-            <Sliders className="h-4 w-4 text-blue-500" />
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-500/10">
+            <Sliders className="h-3.5 w-3.5 text-blue-500" />
           </div>
-          <div className="min-w-0">
-            <div className="text-sm font-medium">{t(($) => $.defaults.personal_title)}</div>
-            <p className="text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</p>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium">{t(($) => $.defaults.personal_title)}</span>
+            <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</span>
           </div>
+          <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+            {t(($) => $.defaults.badge_label)}
+          </span>
         </button>
         {isAdmin && (
           <button
             type="button"
             onClick={onOpenSystem}
-            className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-left transition-colors hover:bg-accent/50"
+            className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-              <Settings2 className="h-4 w-4 text-amber-500" />
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+              <Settings2 className="h-3.5 w-3.5 text-amber-500" />
             </div>
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{t(($) => $.defaults.system_title)}</div>
-              <p className="text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</p>
+            <div className="min-w-0 flex-1">
+              <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
             </div>
+            <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              {t(($) => $.defaults.badge_label)}
+            </span>
           </button>
         )}
       </div>
     );
   }
 
-  // "All" scope: show all users' defaults
-  if (allDefaults.length === 0) return null;
+  // "All" scope: show system defaults + all users' defaults
+  if (allDefaults.length === 0 && !isAdmin) return null;
 
   return (
-    <div className="flex shrink-0 items-center gap-3 overflow-x-auto">
-      <span className="shrink-0 text-xs font-medium text-muted-foreground">{t(($) => $.defaults.section_label)}</span>
-      {allDefaults.map((d) => (
+    <div className="border-b">
+      {isAdmin && (
         <button
-          key={d.id}
           type="button"
-          onClick={() => onOpenOther(d)}
-          className="flex shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-accent/50"
+          onClick={onOpenSystem}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
         >
-          <ActorAvatar actorType="member" actorId={d.user_id} size={24} />
-          <div className="min-w-0">
-            <span className="text-sm font-medium truncate">{d.user_name}</span>
-            {d.user_id === currentUserId && (
-              <span className="ml-1 text-xs text-muted-foreground">{t(($) => $.defaults.you_label)}</span>
-            )}
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+            <Settings2 className="h-3.5 w-3.5 text-amber-500" />
           </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
+            <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
+          </div>
+          <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            {t(($) => $.defaults.badge_label)}
+          </span>
         </button>
-      ))}
+      )}
+      {allDefaults.map((d) => {
+        const isMine = d.user_id === currentUserId;
+        return (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => (isMine ? onOpenPersonal() : onOpenOther(d))}
+            className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+          >
+            <ActorAvatar actorType="member" actorId={d.user_id} size={28} className="shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <span className="text-sm font-medium truncate">{d.user_name}</span>
+              {isMine && (
+                <span className="ml-1.5 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+                  {t(($) => $.defaults.you_label)}
+                </span>
+              )}
+              <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</span>
+            </div>
+            <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              {t(($) => $.defaults.badge_label)}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
