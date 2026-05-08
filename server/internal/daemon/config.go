@@ -432,7 +432,10 @@ func patternsFromEnv(name string, defaults []string) []string {
 
 func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 	// CEREBRO-PATCH(daemon-config-firtal-gateway): register managed gateway runtime from central credentials.
-	enabled, explicit := boolFromEnv("MULTICA_FIRTAL_GATEWAY_ENABLED")
+	enabled, explicit, err := boolFromEnv("MULTICA_FIRTAL_GATEWAY_ENABLED")
+	if err != nil {
+		return AgentEntry{}, false, err
+	}
 	if explicit && !enabled {
 		return AgentEntry{}, false, nil
 	}
@@ -466,17 +469,18 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 	}, true, nil
 }
 
-func boolFromEnv(name string) (bool, bool) {
+// CEREBRO-PATCH(daemon-config-firtal-gateway-strict-bool): refuse to silently disable on garbage env values.
+func boolFromEnv(name string) (bool, bool, error) {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	switch raw {
 	case "":
-		return false, false
+		return false, false, nil
 	case "1", "true", "yes", "on":
-		return true, true
+		return true, true, nil
 	case "0", "false", "no", "off":
-		return false, true
+		return false, true, nil
 	default:
-		return false, true
+		return false, false, fmt.Errorf("%s: unrecognized boolean value %q (use 1/0, true/false, yes/no, on/off)", name, raw)
 	}
 }
 

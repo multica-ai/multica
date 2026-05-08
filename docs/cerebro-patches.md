@@ -174,7 +174,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-client` | server/internal/daemon/client.go | 6 | Daemon additions (sandbox/prompt/types) |
 | `daemon-config` | server/internal/cerebro/runtime/config.go<br>server/internal/daemon/config.go | 0 | Daemon additions (sandbox/prompt/types) |
 | `daemon-config-firtal-gateway` | server/internal/daemon/config.go | 66 | Register the managed gateway runtime from central URL/key/model environment variables |
-| `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 31 | Tests for explicit and inferred managed gateway runtime registration |
+| `daemon-config-firtal-gateway-strict-bool` | server/internal/daemon/config.go | 1 | Refuse to silently disable the gateway on unrecognized `MULTICA_FIRTAL_GATEWAY_ENABLED` values |
+| `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 41 | Tests for explicit / inferred / strict-bool managed gateway runtime registration |
 | `daemon-daemon` | server/internal/daemon/daemon.go | 31 | Daemon additions (sandbox/prompt/types) |
 | `daemon-daemon-firtal-gateway-usage-cost` | server/internal/daemon/daemon.go | 11 | Include exact gateway spend when converting backend usage into task usage reports |
 | `daemon-daemon-test-timing` | server/internal/daemon/daemon_test.go | 39 | Scheduler-tolerant polling assertion for cancellation watcher tests |

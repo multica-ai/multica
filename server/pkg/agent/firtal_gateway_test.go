@@ -98,7 +98,17 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 }
 
 func TestFirtalGatewayExecuteRequiresConfig(t *testing.T) {
-	t.Parallel()
+	// CEREBRO-PATCH(agent-firtal-gateway-tests): clear inherited env so the missing-config check is deterministic in CI.
+	for _, key := range []string{
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
+		"FIRTAL_AE_GATEWAY_URL",
+		"FIRTAL_DATA_REGISTRY_URL",
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
+		"FIRTAL_AE_GATEWAY_KEY",
+		"FIRTAL_DATA_REGISTRY_API_KEY",
+	} {
+		t.Setenv(key, "")
+	}
 
 	backend := &firtalGatewayBackend{cfg: Config{}}
 	session, err := backend.Execute(context.Background(), "hej", ExecOptions{Timeout: time.Second})

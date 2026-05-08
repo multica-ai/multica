@@ -127,8 +127,8 @@ type TaskUsageEntry struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	// CEREBRO-PATCH(daemon-types-firtal-gateway-usage-cost): forward exact gateway spend to the server rollup.
-	CostCents int64 `json:"cost_cents,omitempty"`
+	// CEREBRO-PATCH(daemon-types-firtal-gateway-usage-cost): forward exact gateway spend (always emit, matches TaskUsagePayload shape).
+	CostCents int64 `json:"cost_cents"`
 }
 
 // TaskResult is the outcome of executing a task.

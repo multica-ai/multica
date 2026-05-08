@@ -58,3 +58,13 @@ func TestFirtalGatewayAgentEntryFailsFastWhenExplicitlyEnabledWithoutKey(t *test
 		t.Fatal("expected missing key error")
 	}
 }
+
+func TestFirtalGatewayAgentEntryRejectsUnknownEnabledValue(t *testing.T) {
+	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): refuse to silently disable on garbage MULTICA_FIRTAL_GATEWAY_ENABLED.
+	t.Setenv("MULTICA_FIRTAL_GATEWAY_ENABLED", "maybe")
+
+	_, _, err := firtalGatewayAgentEntry()
+	if err == nil {
+		t.Fatal("expected error for unrecognized boolean value")
+	}
+}
