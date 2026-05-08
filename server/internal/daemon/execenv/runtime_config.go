@@ -102,54 +102,32 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Available Commands\n\n")
-	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
+	b.WriteString("**Always use `--output json` for read commands.** This is a quick reference for the high-frequency commands. Full flag-level documentation for every `multica` subcommand (autopilots, labels, subscribers, project resources, run-messages, etc.) lives in the `multica-cli` skill — load that skill, or run `multica <command> --help`, when you need a flag or command not listed below.\n\n")
 	b.WriteString("### Read\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
-	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X | --assignee-id <uuid>] [--limit N] [--offset N] --output json` — List issues in workspace (default limit: 50; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true). Prefer `--assignee-id <uuid>` when scripting from `multica workspace members --output json` / `multica agent list --output json`.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--limit N] [--offset N] [--since <RFC3339>] --output json` — List comments on an issue (supports pagination; includes id, parent_id for threading)\n")
-	b.WriteString("- `multica issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
-	b.WriteString("- `multica issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
-	b.WriteString("- `multica label list --output json` — List all labels defined in the workspace (returns id + name + color)\n")
-	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
-	b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
-	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
-	b.WriteString("- `multica issue runs <issue-id> --output json` — List all execution runs for an issue (status, timestamps, errors)\n")
-	b.WriteString("- `multica issue run-messages <task-id> [--since <seq>] --output json` — List messages for a specific execution run (supports incremental fetch)\n")
-	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
-	b.WriteString("- `multica autopilot list [--status X] --output json` — List autopilots (scheduled/triggered agent automations) in the workspace\n")
-	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
-	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n")
-	b.WriteString("- `multica project get <id> --output json` — Get project details. Includes `resource_count`; the resources themselves live at the sub-collection below.\n")
-	b.WriteString("- `multica project resource list <project-id> --output json` — List resources (e.g. github_repo) attached to a project. Use this when `resource_count > 0` and you need the actual refs.\n\n")
+	b.WriteString("- `multica issue get <id> --output json` — Issue details (title, description, status, priority, assignee)\n")
+	b.WriteString("- `multica issue list [--status X] [--assignee X | --assignee-id <uuid>] [--limit N] --output json` — List issues (default limit 50; paginate with `--offset` when `has_more`)\n")
+	b.WriteString("- `multica issue comment list <issue-id> [--limit N] [--since <RFC3339>] --output json` — Issue comments (paginate large threads)\n")
+	b.WriteString("- `multica workspace get --output json` / `multica workspace members --output json` / `multica agent list --output json` — Workspace context\n")
+	b.WriteString("- `multica label list --output json` — All workspace labels (id + name + color)\n")
+	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repo as a git worktree with a dedicated branch\n")
+	b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment locally\n\n")
 
 	b.WriteString("### Write\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign an issue to a member or agent. `--to <name>` does fuzzy name matching; pass `--to-id <uuid>` (mutually exclusive with `--to`) to assign by canonical UUID, e.g. when names overlap. Use `--unassign` to clear the assignee.\n")
-	b.WriteString("- `multica issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `multica label list`)\n")
-	b.WriteString("- `multica issue label remove <issue-id> <label-id>` — Detach a label from an issue\n")
-	b.WriteString("- `multica issue subscriber add <issue-id> [--user <name>|--user-id <uuid>]` — Subscribe a member or agent to issue updates (defaults to the caller when neither flag is set; the two flags are mutually exclusive)\n")
-	b.WriteString("- `multica issue subscriber remove <issue-id> [--user <name>|--user-id <uuid>]` — Unsubscribe a member or agent\n")
-	b.WriteString("- `multica issue comment add <issue-id> --content-stdin [--parent <comment-id>] [--attachment <path>]` — Post a comment. Agent-authored comments should always pipe content via stdin, even for short single-line replies. Use `--parent` to reply to a specific comment; `--attachment` may be repeated.\n")
-	b.WriteString("  - **For comment content, you MUST pipe via stdin; this is mandatory for multi-line content (anything with line breaks, paragraphs, code blocks, backticks, or quotes).** Do not use inline `--content` and do not write `\\n` escapes. Use a HEREDOC instead:\n")
+	b.WriteString("- `multica issue status <id> <status>` — Flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign to member/agent (`--unassign` clears)\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <id>] [--project <id>] [--attachment <path>]` — Create an issue (`--attachment` repeatable)\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description-stdin] [--priority X] [--status X] [--assignee X] [--parent <id>] [--project <id>]` — Update issue fields (use `--parent \"\"` to clear)\n")
+	b.WriteString("- `multica issue label add|remove <issue-id> <label-id>` — Attach/detach a label (look up id via `multica label list`)\n")
+	b.WriteString("- `multica issue comment add <issue-id> --content-stdin [--parent <comment-id>] [--attachment <path>]` — Post a comment (always pipe via stdin)\n\n")
+
+	b.WriteString("**multi-line content (CRITICAL — see MUL-1467):** `multica issue comment add` and `--description` on `multica issue create` / `multica issue update` MUST pipe via stdin (`--content-stdin` / `--description-stdin`) with a HEREDOC for any content that has line breaks, paragraphs, code blocks, backticks, or quotes. Inline `--content \"...\"` and literal `\\n` escapes will store the 4-char sequence `\\n` instead of a real newline. This rule applies to agent-authored comments even when the reply is a single line.\n\n")
+	b.WriteString("```\n")
+	b.WriteString("cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin\n")
+	b.WriteString("First paragraph.\n")
 	b.WriteString("\n")
-	b.WriteString("    ```\n")
-	b.WriteString("    cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin\n")
-	b.WriteString("    First paragraph.\n")
-	b.WriteString("\n")
-	b.WriteString("    Second paragraph with `code` and \"quotes\".\n")
-	b.WriteString("    COMMENT\n")
-	b.WriteString("    ```\n")
-	b.WriteString("\n")
-	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
-	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
-	b.WriteString("- `multica label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `multica label list` first)\n")
-	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
-	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
-	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("Second paragraph with `code` and \"quotes\".\n")
+	b.WriteString("COMMENT\n")
+	b.WriteString("```\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
@@ -267,27 +245,29 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
-	if len(ctx.AgentSkills) > 0 {
-		b.WriteString("## Skills\n\n")
-		switch provider {
-		case "claude":
-			// Claude discovers skills natively from .claude/skills/ — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini", "hermes":
-			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
-			// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
-			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-		default:
-			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-		}
-		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
+	// The built-in multica-cli skill is always installed alongside any
+	// user-defined agent skills (see MUL-1821), so the Skills section is
+	// always rendered.
+	b.WriteString("## Skills\n\n")
+	switch provider {
+	case "claude":
+		// Claude discovers skills natively from .claude/skills/ — just list names.
+		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
+		// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
+		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+	case "gemini", "hermes":
+		// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
+		// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
+		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
+	default:
+		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
+	fmt.Fprintf(&b, "- **%s** — full reference for the `multica` CLI; load when you need a flag or subcommand not in the quick reference above.\n", multicaCLISkillName)
+	for _, skill := range ctx.AgentSkills {
+		fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+	}
+	b.WriteString("\n")
 
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")

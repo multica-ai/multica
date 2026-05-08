@@ -197,10 +197,12 @@ func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logge
 }
 
 func writeCodexWorkspaceSkills(codexHome string, skills []SkillContextForEnv) error {
-	if len(skills) == 0 {
-		return nil
-	}
-	return writeSkillFiles(filepath.Join(codexHome, "skills"), skills)
+	// The built-in multica-cli skill is always installed alongside the
+	// agent's user-defined skills so the lazy-loaded full CLI manual is
+	// available even when the agent has no other skills attached
+	// (MUL-1821).
+	all := append([]SkillContextForEnv{builtinMulticaCLISkill()}, skills...)
+	return writeSkillFiles(filepath.Join(codexHome, "skills"), all)
 }
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop

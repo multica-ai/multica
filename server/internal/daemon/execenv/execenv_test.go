@@ -669,8 +669,13 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	if !strings.Contains(s, "multica issue get") {
 		t.Error("should reference multica CLI even without skills")
 	}
-	if strings.Contains(s, "## Skills") {
-		t.Error("should not have Skills section when there are no skills")
+	// The built-in multica-cli skill is always installed (MUL-1821) so the
+	// Skills section is always rendered even without user-defined skills.
+	if !strings.Contains(s, "## Skills") {
+		t.Error("expected Skills section listing the built-in multica-cli skill")
+	}
+	if !strings.Contains(s, multicaCLISkillName) {
+		t.Errorf("Skills section missing built-in skill %q", multicaCLISkillName)
 	}
 }
 
@@ -894,14 +899,16 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	// Workdir should only contain expected entries.
+	// Workdir should only contain expected entries. `.opencode` is created
+	// because the built-in multica-cli skill is installed natively under
+	// `.opencode/skills/` (MUL-1821).
 	entries, err := os.ReadDir(env.WorkDir)
 	if err != nil {
 		t.Fatalf("failed to read workdir: %v", err)
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "AGENTS.md" {
+		if name != ".agent_context" && name != "AGENTS.md" && name != ".opencode" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}

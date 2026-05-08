@@ -33,16 +33,20 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 		return fmt.Errorf("write issue_context.md: %w", err)
 	}
 
-	if len(ctx.AgentSkills) > 0 {
+	// Codex skills are written to codex-home in Prepare; skip writing them
+	// into the workdir's skills dir here. The built-in multica-cli skill is
+	// always installed (regardless of whether the agent has user-defined
+	// skills) so the agent can lazy-load the full CLI manual on demand —
+	// see MUL-1821 for why the manual is no longer inlined into the runtime
+	// config.
+	if provider != "codex" {
 		skillsDir, err := resolveSkillsDir(workDir, provider)
 		if err != nil {
 			return fmt.Errorf("resolve skills dir: %w", err)
 		}
-		// Codex skills are written to codex-home in Prepare; skip here.
-		if provider != "codex" {
-			if err := writeSkillFiles(skillsDir, ctx.AgentSkills); err != nil {
-				return fmt.Errorf("write skill files: %w", err)
-			}
+		skills := append([]SkillContextForEnv{builtinMulticaCLISkill()}, ctx.AgentSkills...)
+		if err := writeSkillFiles(skillsDir, skills); err != nil {
+			return fmt.Errorf("write skill files: %w", err)
 		}
 	}
 
