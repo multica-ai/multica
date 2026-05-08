@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(chat-input-mcp-onboarding): cerebro modification of upstream file
 
 import type { ReactNode } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -42,6 +42,10 @@ interface ChatInputProps {
   /** Rendered inside the rounded container, above the editor — attached
    *  context cards, drafts, etc. */
   topSlot?: ReactNode;
+  // CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor on
+  // mount and on session/agent switch so the user can start typing without
+  // an extra click. Skipped if a dialog is in front.
+  autoFocus?: boolean;
 }
 
 export function ChatInput({
@@ -54,6 +58,7 @@ export function ChatInput({
   leftAdornment,
   rightAdornment,
   topSlot,
+  autoFocus = false,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -79,6 +84,27 @@ export function ChatInput({
     (file: File) => uploadWithToast(file),
     [uploadWithToast],
   );
+
+  // CEREBRO-PATCH(input-autofocus): JEH-756 — autofocus on mount + on
+  // session/agent switch. RAF defers past the agent-picker dropdown's
+  // close + focus restoration so the focus lands on the editor, not the
+  // trigger button. Skipped if an open dialog is trapping focus.
+  useEffect(() => {
+    if (!autoFocus || disabled || noAgent) return;
+    const id = requestAnimationFrame(() => {
+      const active =
+        typeof document !== "undefined" ? document.activeElement : null;
+      if (
+        active &&
+        active !== document.body &&
+        active.closest('[role="dialog"], [role="alertdialog"]')
+      ) {
+        return;
+      }
+      editorRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus, draftKey, disabled, noAgent]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: !disabled,

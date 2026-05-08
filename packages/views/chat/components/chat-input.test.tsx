@@ -11,6 +11,7 @@ import { forwardRef, useImperativeHandle, type Ref } from "react";
 // ---------------------------------------------------------------------------
 
 const editorMarkdown = vi.hoisted(() => ({ value: "hello agent" }));
+const editorFocus = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/chat", () => ({
   DRAFT_NEW_SESSION: "draft:new-session",
@@ -52,7 +53,7 @@ vi.mock("../../editor", () => {
         defaultValue?: string;
         placeholder?: string;
       },
-      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void }>,
+      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void; focus: () => void }>,
     ) => {
       useImperativeHandle(ref, () => ({
         getMarkdown: () => editorMarkdown.value,
@@ -61,6 +62,7 @@ vi.mock("../../editor", () => {
         },
         uploadFile: () => {},
         blur: () => {},
+        focus: () => editorFocus(),
       }));
       return (
         <div>
@@ -88,6 +90,7 @@ import { ChatInput } from "./chat-input";
 
 beforeEach(() => {
   editorMarkdown.value = "hello agent";
+  editorFocus.mockClear();
 });
 
 describe("ChatInput — JEH-330 lock removal", () => {
@@ -131,5 +134,55 @@ describe("ChatInput — JEH-330 lock removal", () => {
   it("hides the Stop button when no turn is in flight", () => {
     render(<ChatInput onSend={vi.fn()} isRunning={false} onStop={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatInput — JEH-756 autofocus", () => {
+  // Resolve the next requestAnimationFrame so the autofocus effect can run.
+  const flushRaf = () =>
+    new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+
+  it("focuses the editor on mount when autoFocus is set", async () => {
+    render(<ChatInput onSend={vi.fn()} autoFocus />);
+    await flushRaf();
+    expect(editorFocus).toHaveBeenCalled();
+  });
+
+  it("does not focus on mount when autoFocus is omitted", async () => {
+    render(<ChatInput onSend={vi.fn()} />);
+    await flushRaf();
+    expect(editorFocus).not.toHaveBeenCalled();
+  });
+
+  it("does not focus when the session is archived (disabled)", async () => {
+    render(<ChatInput onSend={vi.fn()} autoFocus disabled />);
+    await flushRaf();
+    expect(editorFocus).not.toHaveBeenCalled();
+  });
+
+  it("does not focus when no agent is available", async () => {
+    render(<ChatInput onSend={vi.fn()} autoFocus noAgent />);
+    await flushRaf();
+    expect(editorFocus).not.toHaveBeenCalled();
+  });
+
+  it("yields focus to an open dialog (does not steal from a focus-trapping overlay)", async () => {
+    // Simulate an open dialog with the active element inside it. Tiptap's
+    // editor is portaled into our component, but document.activeElement
+    // points at the dialog's input — the autofocus effect should bail.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const dialogInput = document.createElement("input");
+    dialog.appendChild(dialogInput);
+    document.body.appendChild(dialog);
+    dialogInput.focus();
+
+    render(<ChatInput onSend={vi.fn()} autoFocus />);
+    await flushRaf();
+    expect(editorFocus).not.toHaveBeenCalled();
+
+    document.body.removeChild(dialog);
   });
 });

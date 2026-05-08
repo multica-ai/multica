@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(comment-input-cerebro): cerebro modification of upstream file
 
-import { useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -17,9 +17,13 @@ import { useT } from "../../i18n";
 interface CommentInputProps {
   issueId: string;
   onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
+  // CEREBRO-PATCH(input-autofocus): JEH-756 — opt-in autofocus for surfaces
+  // where the user expects to start typing on entry (channels, DMs). Issue
+  // pages stay opt-out: opening an issue is read-first.
+  autoFocus?: boolean;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProps) {
   const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const submitOnEnter = useSubmitOnEnter();
@@ -39,6 +43,26 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     }
     return result;
   }, [uploadWithToast, issueId]);
+
+  // CEREBRO-PATCH(input-autofocus): JEH-756 — focus the editor on mount and
+  // when switching between channels/DMs so the user can start typing right
+  // away. Skipped if an open dialog is trapping focus.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const id = requestAnimationFrame(() => {
+      const active =
+        typeof document !== "undefined" ? document.activeElement : null;
+      if (
+        active &&
+        active !== document.body &&
+        active.closest('[role="dialog"], [role="alertdialog"]')
+      ) {
+        return;
+      }
+      editorRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus, issueId]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();

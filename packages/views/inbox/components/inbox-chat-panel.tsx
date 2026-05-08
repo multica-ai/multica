@@ -205,7 +205,12 @@ export function InboxChatPanel({
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
+        noAgent={!activeAgent}
         agentName={activeAgent?.name}
+        // CEREBRO-PATCH(input-autofocus): JEH-756 — the panel only mounts
+        // when the user enters a chat or starts a new one, so always claim
+        // focus; ChatInput's own RAF + dialog-aware guard handles the rest.
+        autoFocus
         leftAdornment={
           <AgentPicker
             agents={availableAgents}

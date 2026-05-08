@@ -206,7 +206,9 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
       </div>
 
       <div className="shrink-0 border-t px-4 py-3">
-        <CommentInput issueId={channelId} onSubmit={submitComment} />
+        {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
+            chat-like; entering one should land the caret in the input. */}
+        <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus />
       </div>
     </div>
   );
