@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -74,6 +76,68 @@ func cleanupChatTestFixture(t *testing.T, sessionID string) {
 	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID)); err != nil {
 		t.Logf("warning: failed to cleanup chat session: %v", err)
 	}
+}
+
+func createChatSessionForAgent(t *testing.T, agentID, creatorID, title string) string {
+	t.Helper()
+
+	var sessionID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, $4, 'active')
+		RETURNING id
+	`, testWorkspaceID, agentID, creatorID, title).Scan(&sessionID); err != nil {
+		t.Fatalf("failed to create chat session: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID))
+	})
+
+	return sessionID
+}
+
+func createOtherUserPrivateAgent(t *testing.T, name string) (agentID, ownerID string) {
+	t.Helper()
+
+	ctx := context.Background()
+	emailLocal := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	email := fmt.Sprintf("%s-%s@multica.ai", emailLocal, strings.ToLower(strings.ReplaceAll(name, " ", "-")))
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, name, email).Scan(&ownerID); err != nil {
+		t.Fatalf("failed to create other user: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, util.ParseUUID(testWorkspaceID), util.ParseUUID(ownerID)); err != nil {
+		t.Fatalf("failed to add other user to workspace: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '{}'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, name, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("failed to create private agent: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.ParseUUID(agentID))
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, util.ParseUUID(testWorkspaceID), util.ParseUUID(ownerID))
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.ParseUUID(ownerID))
+	})
+
+	return agentID, ownerID
 }
 
 // TestCreateChatSession_Error_PrivateAgentNotOwned verifies that creating a
@@ -171,6 +235,79 @@ func TestCreateChatSession_Success_OwnPrivateAgent(t *testing.T) {
 		t.Cleanup(func() {
 			testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sid))
 		})
+	}
+}
+
+func TestListChatSessions_FiltersPrivateSessionsOwnedByOthers(t *testing.T) {
+	t.Parallel()
+
+	visibleAgentID := createHandlerTestAgent(t, "Visible Private Chat Agent", []byte("{}"))
+	visibleSessionID := createChatSessionForAgent(t, visibleAgentID, testUserID, "Visible chat")
+
+	hiddenAgentID, _ := createOtherUserPrivateAgent(t, "Hidden Private Chat Agent")
+	hiddenSessionID := createChatSessionForAgent(t, hiddenAgentID, testUserID, "Hidden chat")
+
+	assertVisibleSessions := func(path string) {
+		t.Helper()
+
+		req := newRequest("GET", path, nil)
+		req = withWorkspaceContext(req, testWorkspaceID)
+
+		rr := httptest.NewRecorder()
+		testHandler.ListChatSessions(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var sessions []ChatSessionResponse
+		if err := json.NewDecoder(rr.Body).Decode(&sessions); err != nil {
+			t.Fatalf("failed to decode sessions: %v", err)
+		}
+
+		foundVisible := false
+		for _, session := range sessions {
+			if session.ID == hiddenSessionID {
+				t.Fatalf("hidden private session should not be listed for %s", path)
+			}
+			if session.ID == visibleSessionID {
+				foundVisible = true
+			}
+		}
+		if !foundVisible {
+			t.Fatalf("visible private session missing for %s", path)
+		}
+	}
+
+	assertVisibleSessions("/api/chat/sessions?workspace_id=" + testWorkspaceID)
+	assertVisibleSessions("/api/chat/sessions?workspace_id=" + testWorkspaceID + "&status=all")
+}
+
+func TestSendChatMessage_Error_PrivateSessionOwnedByOtherUser(t *testing.T) {
+	t.Parallel()
+
+	hiddenAgentID, _ := createOtherUserPrivateAgent(t, "Hidden Session Agent")
+	sessionID := createChatSessionForAgent(t, hiddenAgentID, testUserID, "Old hidden session")
+
+	req := newRequest("POST", "/api/chat/sessions/"+sessionID+"/messages", map[string]any{
+		"content": "should fail",
+	})
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withWorkspaceContext(req, testWorkspaceID)
+
+	rr := httptest.NewRecorder()
+	testHandler.SendChatMessage(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["error"] != "private agent belongs to another user" {
+		t.Fatalf("expected private-agent error, got %q", resp["error"])
 	}
 }
 
