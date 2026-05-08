@@ -10,6 +10,12 @@ import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { Serwist } from "serwist";
 import { applyAppBadge, resolveBadgeCount, type BadgingNavigator } from "./sw-badge";
+import {
+  newDraftToken,
+  saveShareDraft,
+  type ShareDraft,
+  type ShareDraftFile,
+} from "./cerebro-share-draft-idb";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -122,6 +128,87 @@ self.addEventListener("message", (event) => {
   if (promise && "waitUntil" in event) {
     (event as ExtendableMessageEvent).waitUntil(promise);
   }
+});
+
+// --- Web Share Target --------------------------------------------------------
+// The OS share-sheet POSTs multipart form-data to /share/issue (the action
+// declared in manifest.webmanifest). Intercepting it here lets us stash the
+// payload locally and hand control off to a normal GET page — the canonical
+// Web Share Target pattern. Without the SW the POST would hit the Next.js
+// server, which has no way to ferry binary files into the user's browser
+// session post-auth.
+//
+// Files larger than this cap are dropped from the draft; the page surfaces a
+// banner listing what was skipped. The cap matches the acceptance criterion
+// in JEH-734 — graceful handling, not a crash. Server-side attachment limits
+// are higher (100MB), so this is purely a share-flow concession to keep IDB
+// quota usage modest on phones.
+const SHARE_TARGET_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+async function handleShareTargetPOST(request: Request): Promise<Response> {
+  const token = newDraftToken();
+  const redirectURL = new URL("/share/issue", self.location.origin);
+  redirectURL.searchParams.set("draft", token);
+
+  try {
+    const form = await request.formData();
+    const title = stringFromForm(form, "title");
+    const text = stringFromForm(form, "text");
+    const url = stringFromForm(form, "url");
+
+    const files: ShareDraftFile[] = [];
+    const oversized: string[] = [];
+    for (const value of form.getAll("files")) {
+      if (!(value instanceof File)) continue;
+      if (value.size === 0) continue;
+      if (value.size > SHARE_TARGET_MAX_FILE_BYTES) {
+        oversized.push(value.name || "untitled");
+        continue;
+      }
+      files.push({
+        name: value.name || "untitled",
+        type: value.type || "application/octet-stream",
+        // Reading into a Blob detaches us from the streaming Request; IDB
+        // stores Blobs natively and the page reconstructs File objects from
+        // them when re-uploading via the regular attachments endpoint.
+        blob: await value.arrayBuffer().then((buf) => new Blob([buf], { type: value.type })),
+      });
+    }
+
+    const draft: ShareDraft = {
+      token,
+      title,
+      text,
+      url,
+      files,
+      createdAt: Date.now(),
+    };
+    await saveShareDraft(draft);
+
+    if (oversized.length > 0) {
+      redirectURL.searchParams.set("oversized", oversized.join("|"));
+    }
+  } catch {
+    // Persisting failed — most likely IDB quota or a malformed multipart
+    // body. Surface as an error param so the page shows a friendly message
+    // instead of a blank screen.
+    redirectURL.searchParams.set("error", "save_failed");
+  }
+  return Response.redirect(redirectURL.toString(), 303);
+}
+
+function stringFromForm(form: FormData, key: string): string {
+  const v = form.get(key);
+  return typeof v === "string" ? v : "";
+}
+
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "POST") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname !== "/share/issue") return;
+  event.respondWith(handleShareTargetPOST(request));
 });
 
 self.addEventListener("notificationclick", (event) => {
