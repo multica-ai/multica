@@ -11,7 +11,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SERVER_DIR="${REPO_ROOT}/server"
-VERSION_FILE="${CLI_VERSION_FILE:-${REPO_ROOT}/release/cli-version.txt}"
 OUT_DIR="${CLI_ARTIFACTS_DIR:-${REPO_ROOT}/artifacts/cli}"
 OBS_ARTIFACTS_DIR="${OBS_ARTIFACTS_DIR:-${REPO_ROOT}/artifacts/obs}"
 RELEASES_DIR="${OUT_DIR}/releases"
@@ -109,21 +108,6 @@ validate_version() {
   fi
 }
 
-latest_cli_tag() {
-  git -C "$REPO_ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname 2>/dev/null | while IFS= read -r tag; do
-    if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-      printf '%s\n' "$tag"
-      return 0
-    fi
-  done
-}
-
-read_version_file() {
-  local path="$1"
-  [[ -f "$path" ]] || fail "version file not found: ${path}"
-  trim "$(tr -d '\r\n' < "$path")"
-}
-
 resolve_version() {
   if [[ -n "${CLI_VERSION:-}" ]]; then
     VERSION_RAW="$(trim "$CLI_VERSION")"
@@ -131,20 +115,8 @@ resolve_version() {
     return
   fi
 
-  if [[ -n "${CLI_VERSION_FILE:-}" ]]; then
-    VERSION_RAW="$(read_version_file "$VERSION_FILE")"
-    VERSION_SOURCE="$VERSION_FILE"
-    return
-  fi
-
-  VERSION_RAW="$(latest_cli_tag)"
-  if [[ -n "$VERSION_RAW" ]]; then
-    VERSION_SOURCE="latest git tag"
-    return
-  fi
-
-  VERSION_RAW="$(read_version_file "$VERSION_FILE")"
-  VERSION_SOURCE="$VERSION_FILE"
+  VERSION_RAW="$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null || true)"
+  VERSION_SOURCE="git describe"
 }
 
 target_supported() {

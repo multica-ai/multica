@@ -3,6 +3,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
 } from "@multica/core/types";
+export { isCliVersionNewer as isVersionNewer } from "@multica/core/runtimes";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -75,28 +76,6 @@ const ARCH_LABEL: Record<string, string> = {
   "386": "x86",
   arm: "arm",
 };
-
-// Strip leading "v" from version strings — GitHub releases ship `v0.2.17`,
-// daemon metadata reports `0.2.15`; normalising lets us compare both.
-function stripVersionPrefix(v: string): string {
-  return v.replace(/^v/, "");
-}
-
-// True iff `latest` is strictly newer than `current` by dotted-numeric
-// comparison. Non-numeric / missing segments compare as 0 ("0.2" < "0.2.1").
-// Used by the runtime-list CLI column to decide whether to surface the ↑
-// marker; same logic also lives inline in update-section.tsx for now.
-export function isVersionNewer(latest: string, current: string): boolean {
-  const l = stripVersionPrefix(latest).split(".").map(Number);
-  const c = stripVersionPrefix(current).split(".").map(Number);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const lv = l[i] ?? 0;
-    const cv = c[i] ?? 0;
-    if (lv > cv) return true;
-    if (lv < cv) return false;
-  }
-  return false;
-}
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) {

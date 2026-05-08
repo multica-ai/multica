@@ -23,6 +23,7 @@ export interface CliVersionCheck {
 }
 
 const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
+const CLI_RELEASE_VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)(?:-[0-9A-Za-z.-]+)?)?$/;
 
 // Matches the `git describe --tags --always --dirty` output for a build past
 // the latest tag, e.g. `v0.2.15-235-gdaf0e935` or `v0.2.15-235-gdaf0e935-dirty`.
@@ -42,6 +43,35 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
   if (a[0] !== b[0]) return a[0] < b[0];
   if (a[1] !== b[1]) return a[1] < b[1];
   return a[2] < b[2];
+}
+
+interface ParsedCliReleaseVersion {
+  major: number;
+  minor: number;
+  patch: number;
+  commits: number;
+}
+
+function parseCliReleaseVersion(raw: string): ParsedCliReleaseVersion | null {
+  const match = CLI_RELEASE_VERSION_RE.exec(raw.trim());
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    commits: match[4] ? Number(match[4]) : 0,
+  };
+}
+
+export function isCliVersionNewer(latest: string, current: string): boolean {
+  const l = parseCliReleaseVersion(latest);
+  const c = parseCliReleaseVersion(current);
+  if (!l || !c) return false;
+
+  if (l.major !== c.major) return l.major > c.major;
+  if (l.minor !== c.minor) return l.minor > c.minor;
+  if (l.patch !== c.patch) return l.patch > c.patch;
+  return l.commits > c.commits;
 }
 
 /**

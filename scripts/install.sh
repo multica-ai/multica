@@ -342,7 +342,6 @@ upgrade_cli_brew() {
     ok "Multica CLI is already the latest version"
   fi
 }
-}
 
 get_latest_version() {
   local tmp_dir manifest_path
@@ -354,6 +353,39 @@ get_latest_version() {
   fi
   json_get "version" < "$manifest_path" || true
   rm -rf "$tmp_dir"
+}
+
+cli_version_parts() {
+  local version="$1"
+  VERSION="$version" python3 <<'PY'
+import os
+import re
+import sys
+
+version = os.environ.get("VERSION", "").strip()
+match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)(?:-[0-9A-Za-z.-]+)?)?", version)
+if not match:
+    sys.exit(1)
+major, minor, patch, commits = match.groups()
+print(f"{int(major)} {int(minor)} {int(patch)} {int(commits or 0)}")
+PY
+}
+
+is_cli_version_at_least() {
+  local current="$1"
+  local latest="$2"
+  local current_parts latest_parts
+
+  current_parts=$(cli_version_parts "$current" 2>/dev/null) || return 1
+  latest_parts=$(cli_version_parts "$latest" 2>/dev/null) || return 1
+
+  python3 - "$current_parts" "$latest_parts" <<'PY'
+import sys
+
+current = tuple(int(part) for part in sys.argv[1].split())
+latest = tuple(int(part) for part in sys.argv[2].split())
+sys.exit(0 if current >= latest else 1)
+PY
 }
 
 install_cli() {
@@ -370,11 +402,7 @@ install_cli() {
     local latest_ver
     latest_ver=$(get_latest_version)
 
-    # Normalize: strip leading 'v' for comparison
-    local current_cmp="${current_ver#v}"
-    local latest_cmp="${latest_ver#v}"
-
-    if [ -z "$latest_ver" ] || [ "$current_cmp" = "$latest_cmp" ]; then
+    if [ -z "$latest_ver" ] || is_cli_version_at_least "$current_ver" "$latest_ver"; then
       ok "Multica CLI is up to date ($current_ver)"
       return 0
     fi

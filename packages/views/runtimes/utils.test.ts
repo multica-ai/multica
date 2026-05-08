@@ -10,7 +10,15 @@ import {
   aggregateCostByHour,
   aggregateCostByModel,
   countInputOutputTokens,
+  isVersionNewer,
 } from "./utils";
+
+describe("runtime CLI version comparison", () => {
+  it("uses commit counts when semantic versions match", () => {
+    expect(isVersionNewer("v0.2.11-124-bbbb", "v0.2.11-123-aaaa")).toBe(true);
+    expect(isVersionNewer("v0.2.11-123-bbbb", "v0.2.11-124-aaaa")).toBe(false);
+  });
+});
 
 describe("runtime token aggregation", () => {
   it("counts only input and output tokens in displayed totals", () => {
