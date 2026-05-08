@@ -181,7 +181,7 @@ multica daemon start --profile staging
 multica daemon start
 ```
 
-Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root.
+Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, and health port. All profiles share the same workspaces root (`~/multica_workspaces/`) so the same workspace's local files are reachable from any client (Desktop, Web, CLI). Override with `MULTICA_WORKSPACES_ROOT` if you need per-profile isolation.
 
 ## Workspaces
 

@@ -325,6 +325,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
+	// One-shot migration: relocate pre-change `~/multica_workspaces_<profile>/`
+	// contents into the unified `~/multica_workspaces/` so Desktop, Web, and
+	// CLI share the same local files. Best-effort; never blocks startup.
+	daemon.MigrateLegacyWorkspacesRoot(cfg, logger)
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.
