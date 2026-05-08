@@ -43,9 +43,12 @@ function FileUploadButton({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length) return;
+    // CEREBRO-PATCH(file-upload-live-filelist): snapshot to a real array
+    // BEFORE resetting the input — `e.target.files` is a live FileList that
+    // empties out the moment we clear `value`.
+    const arr = Array.from(files);
     e.target.value = "";
 
-    const arr = Array.from(files);
     if (!onEmbed) {
       onAttach(arr);
       return;

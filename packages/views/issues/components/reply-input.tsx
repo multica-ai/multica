@@ -114,9 +114,10 @@ function ReplyInput({
             />
           </div>
         </div>
-        {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
-            onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
-        <div className="absolute bottom-0 right-0 flex items-center gap-2 sm:gap-1">
+        {/* CEREBRO-PATCH(file-upload-button-api): wide mobile gap separates
+            paperclip from the send button on touch screens, with the new
+            onAttach/onEmbed FileUploadButton API. */}
+        <div className="absolute bottom-0 right-0 flex items-center gap-4 sm:gap-1">
           <Tooltip>
             <TooltipTrigger
               render={

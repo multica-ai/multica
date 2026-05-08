@@ -205,9 +205,10 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
-            onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
-        <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
+        {/* CEREBRO-PATCH(file-upload-button-api): wide mobile gap separates
+            paperclip from the send button on touch screens, with the new
+            onAttach/onEmbed FileUploadButton API. */}
+        <div className="absolute bottom-1 right-1.5 flex items-center gap-4 sm:gap-1">
           <FileUploadButton
             size="sm"
             disabled={!!disabled}

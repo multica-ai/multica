@@ -103,8 +103,16 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
           submitOnEnter={submitOnEnter}
         />
       </div>
-      {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
-          onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
+      {/* CEREBRO-PATCH(file-upload-button-api): paperclip on the left, well
+          away from the send button on touch screens, with the new
+          onAttach/onEmbed FileUploadButton API. */}
+      <div className="absolute bottom-1 left-1.5 flex items-center">
+        <FileUploadButton
+          size="sm"
+          onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+          onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
+        />
+      </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
         <Tooltip>
           <TooltipTrigger
@@ -123,11 +131,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
           />
           <TooltipContent side="top">{isExpanded ? t(($) => $.comment.collapse_tooltip) : t(($) => $.comment.expand_tooltip)}</TooltipContent>
         </Tooltip>
-        <FileUploadButton
-          size="sm"
-          onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-          onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
-        />
         <Button
           size="icon-sm"
           disabled={isEmpty || submitting}
