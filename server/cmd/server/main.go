@@ -15,6 +15,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -299,6 +301,9 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
+	// CEREBRO-PATCH(server-firtal-gateway-runtime): server-side HTTPS runtime
+	// claims chat tasks directly without a local daemon.
+	gatewayRuntimeCtx, gatewayRuntimeCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
@@ -317,6 +322,13 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
+		slog.Error("invalid firtal gateway server runtime config", "error", err)
+		os.Exit(1)
+	} else if gatewayCfg.Enabled {
+		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil)
+		go gatewayExecutor.Run(gatewayRuntimeCtx)
+	}
 
 	if metricsServer != nil {
 		go func() {
@@ -342,6 +354,7 @@ func main() {
 	slog.Info("shutting down server")
 	sweepCancel()
 	autopilotCancel()
+	gatewayRuntimeCancel()
 
 	apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := srv.Shutdown(apiShutdownCtx); err != nil {

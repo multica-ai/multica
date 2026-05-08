@@ -332,6 +332,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `runtimes-utils-cerebro` | packages/views/runtimes/utils.ts | 4 | Runtime view cerebro additions |
 | `server-integration-test-cerebro` | server/cmd/server/integration_test.go | 157 | Server bootstrapping additions |
 | `server-listeners-cerebro` | server/cmd/server/listeners.go | 9 | Server bootstrapping additions |
+| `server-firtal-gateway-runtime` | server/cmd/server/main.go | 12 | Start the Cerebro server-side Firtal Gateway HTTPS runtime worker for daemonless chat tasks |
 | `server-main-cerebro` | server/cmd/server/main.go | 6 | Server bootstrapping additions |
 | `server-setup-jwt-test` | server/cmd/server/setup_jwt_test.go | 9 | Server bootstrapping additions |
 | `service-budget` | server/internal/service/budget.go | 125 | Service-layer additions (budget/task/workspace-pause) |
