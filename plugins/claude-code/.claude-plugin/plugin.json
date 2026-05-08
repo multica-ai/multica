@@ -1,0 +1,17 @@
+{
+  "name": "multica",
+  "version": "0.1.0",
+  "description": "Manage Multica issues, projects, and agents from Claude Code — for developers who prefer the terminal",
+  "author": {
+    "name": "Multica"
+  },
+  "homepage": "https://multica.ai",
+  "repository": "https://github.com/multica-ai/multica",
+  "license": "Apache-2.0",
+  "userConfig": {
+    "server_url": {
+      "description": "Multica server URL (e.g. https://multica.ai or http://localhost:8080)",
+      "sensitive": false
+    }
+  }
+}
