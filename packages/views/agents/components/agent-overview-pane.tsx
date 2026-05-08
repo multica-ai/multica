@@ -55,6 +55,7 @@ const detailTabs: {
 interface AgentOverviewPaneProps {
   agent: Agent;
   runtimes: AgentRuntime[];
+  canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -83,6 +84,7 @@ interface AgentOverviewPaneProps {
 export function AgentOverviewPane({
   agent,
   runtimes,
+  canEdit,
   onUpdate,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
@@ -142,6 +144,7 @@ export function AgentOverviewPane({
           <TabContent>
             <InstructionsTab
               agent={agent}
+              readOnly={!canEdit}
               onSave={(instructions) => onUpdate(agent.id, { instructions })}
               onDirtyChange={setActiveDirty}
             />
@@ -149,14 +152,14 @@ export function AgentOverviewPane({
         )}
         {activeTab === "skills" && (
           <TabContent>
-            <SkillsTab agent={agent} />
+            <SkillsTab agent={agent} readOnly={!canEdit} />
           </TabContent>
         )}
         {activeTab === "env" && (
           <TabContent>
             <EnvTab
               agent={agent}
-              readOnly={agent.custom_env_redacted}
+              readOnly={!canEdit || agent.custom_env_redacted}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
@@ -166,6 +169,7 @@ export function AgentOverviewPane({
           <TabContent>
             <CustomArgsTab
               agent={agent}
+              readOnly={!canEdit}
               runtimeDevice={runtime ?? undefined}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
