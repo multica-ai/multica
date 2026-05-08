@@ -367,6 +367,7 @@
     "section_label": "Agent Defaults",
     "you_label": "(you)",
     "sheet_title": "Agent Defaults",
-    "sheet_desc": "Configure default agent settings"
+    "sheet_desc": "Configure default agent settings",
+    "duplicate_action": "Duplicate to Mine"
   }
 }
