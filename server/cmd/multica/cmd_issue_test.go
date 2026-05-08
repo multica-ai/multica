@@ -121,6 +121,10 @@ func TestTruncateID(t *testing.T) {
 }
 
 func TestFormatAssignee(t *testing.T) {
+	actors := actorDisplayLookup{
+		members: map[string]string{"abcdefgh-1234": "Alice"},
+		agents:  map[string]string{"xyz": "CodeBot"},
+	}
 	tests := []struct {
 		name  string
 		issue map[string]any
@@ -129,17 +133,131 @@ func TestFormatAssignee(t *testing.T) {
 		{"empty", map[string]any{}, ""},
 		{"no type", map[string]any{"assignee_id": "abc"}, ""},
 		{"no id", map[string]any{"assignee_type": "member"}, ""},
-		{"member", map[string]any{"assignee_type": "member", "assignee_id": "abcdefgh-1234"}, "member:abcdefgh"},
-		{"agent", map[string]any{"assignee_type": "agent", "assignee_id": "xyz"}, "agent:xyz"},
+		{"member", map[string]any{"assignee_type": "member", "assignee_id": "abcdefgh-1234"}, "member:Alice"},
+		{"agent", map[string]any{"assignee_type": "agent", "assignee_id": "xyz"}, "agent:CodeBot"},
+		{"unknown fallback", map[string]any{"assignee_type": "agent", "assignee_id": "missing"}, "agent:missing"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatAssignee(tt.issue)
+			got := formatAssignee(tt.issue, actors)
 			if got != tt.want {
 				t.Errorf("formatAssignee() = %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+func TestResolveIDByPrefix(t *testing.T) {
+	client := cli.NewAPIClient("http://example.invalid", "ws-1", "test-token")
+	ctx := context.Background()
+	fetch := func(context.Context, *cli.APIClient) ([]idCandidate, error) {
+		return []idCandidate{
+			{ID: "aaaaaaaa-1111-2222-3333-444444444444", Display: "Alpha"},
+			{ID: "bbbbbbbb-1111-2222-3333-444444444444", Display: "Beta"},
+			{ID: "aaaabbbb-1111-2222-3333-444444444444", Display: "Alpha Two"},
+		}, nil
+	}
+
+	t.Run("full UUID passes through", func(t *testing.T) {
+		got, err := resolveIDByPrefix(ctx, client, "thing", "bbbbbbbb-1111-2222-3333-444444444444", fetch)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.ID != "bbbbbbbb-1111-2222-3333-444444444444" {
+			t.Fatalf("got %q", got.ID)
+		}
+	})
+
+	t.Run("unique short prefix resolves", func(t *testing.T) {
+		got, err := resolveIDByPrefix(ctx, client, "thing", "bbbb", fetch)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.ID != "bbbbbbbb-1111-2222-3333-444444444444" || got.Display != "Beta" {
+			t.Fatalf("got %#v", got)
+		}
+	})
+
+	t.Run("short prefix can include dashes", func(t *testing.T) {
+		got, err := resolveIDByPrefix(ctx, client, "thing", "bbbb-b", fetch)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.ID != "bbbbbbbb-1111-2222-3333-444444444444" {
+			t.Fatalf("got %#v", got)
+		}
+	})
+
+	t.Run("ambiguous prefix is rejected", func(t *testing.T) {
+		if _, err := resolveIDByPrefix(ctx, client, "thing", "aaaa", fetch); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("expected ambiguous error, got %v", err)
+		}
+	})
+
+	t.Run("too short prefix is rejected", func(t *testing.T) {
+		if _, err := resolveIDByPrefix(ctx, client, "thing", "aaa", fetch); err == nil || !strings.Contains(err.Error(), "at least 4") {
+			t.Fatalf("expected short prefix error, got %v", err)
+		}
+	})
+}
+
+func TestResolveIssueRef(t *testing.T) {
+	issue := map[string]any{
+		"id":         "1881a167-4bb6-4602-944b-f40ce4192fe6",
+		"identifier": "MUL-1852",
+		"title":      "Short ID bug",
+	}
+
+	t.Run("identifier is resolved before prefix lookup", func(t *testing.T) {
+		listCalled := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/issues/MUL-1852":
+				json.NewEncoder(w).Encode(issue)
+			case "/api/issues":
+				listCalled = true
+				http.Error(w, "should not list", http.StatusTeapot)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		got, err := resolveIssueRef(context.Background(), client, "MUL-1852")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if listCalled {
+			t.Fatal("identifier path should not call issue list")
+		}
+		if got.ID != issue["id"] || got.Display != "MUL-1852" {
+			t.Fatalf("got %#v", got)
+		}
+	})
+
+	t.Run("short UUID prefix resolves from workspace issue list", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/issues" {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"issues": []map[string]any{issue},
+				"total":  1,
+			})
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		got, err := resolveIssueRef(context.Background(), client, "1881")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.ID != issue["id"] || got.Display != "MUL-1852" {
+			t.Fatalf("got %#v", got)
+		}
+	})
 }
 
 func TestResolveAssignee(t *testing.T) {
