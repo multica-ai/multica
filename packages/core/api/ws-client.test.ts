@@ -85,6 +85,11 @@ describe("WSClient", () => {
       onerror: (() => void) | null = null;
       readyState = 0;
       constructor(_url: string) {
+        // Test-only: capture the most recently constructed fake for the
+        // surrounding describe block. Not a true `self = this` aliasing
+        // pattern (lastFake is module-scoped, not a local rebind), so
+        // @typescript-eslint/no-this-alias is a false positive here.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         lastFake = this;
       }
       close() {}
