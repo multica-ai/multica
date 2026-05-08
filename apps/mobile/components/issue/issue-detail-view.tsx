@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -7,10 +8,13 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useToggleCommentReaction } from "@multica/core/issues/mutations";
 import { STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
 import { useActorName } from "@multica/core/workspace/hooks";
+import type { TimelineEntry } from "@multica/core/types";
 
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -18,7 +22,9 @@ import { PriorityIcon } from "@/components/ui/priority-icon";
 import { Markdown } from "@/components/ui/markdown";
 import { CommentList } from "@/components/issue/comment-list";
 import { CommentComposer } from "@/components/issue/comment-composer";
+import { IssueDetailHeader } from "@/components/issue/issue-detail-header";
 import { ReactionList } from "@/components/issue/reaction-list";
+import { EmojiQuickPicker } from "@/components/issue/emoji-quick-picker";
 
 interface Props {
   issueId: string;
@@ -26,10 +32,20 @@ interface Props {
 
 export function IssueDetailView({ issueId }: Props) {
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const { data: issue, isLoading, error } = useQuery(
     issueDetailOptions(wsId, issueId),
   );
   const { getActorName } = useActorName();
+
+  // Reply-to state lives at this level so the composer (sibling) can show the
+  // quote bar while CommentList only needs to fire `setReplyTo`.
+  const [replyTo, setReplyTo] = useState<TimelineEntry | null>(null);
+  // Reaction picker target: comment id for which the picker is open. Mutation
+  // looks up "did the user already react with this emoji" by reading the live
+  // entry from the timeline cache via useToggleCommentReaction.
+  const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
+  const toggleReaction = useToggleCommentReaction(issueId);
 
   if (isLoading) {
     return (
@@ -61,28 +77,16 @@ export function IssueDetailView({ issueId }: Props) {
       style={{ flex: 1, backgroundColor: "white" }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <IssueDetailHeader
+        identifier={issue.identifier}
+        title={issue.title}
+      />
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
         className="flex-1 bg-background"
         keyboardShouldPersistTaps="handled"
-        // composer (~64) + iOS UITabBar (49) + safe-area home indicator (~34) + buffer
-        contentContainerStyle={{ paddingBottom: 160 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
         <View className="px-4 pt-4 pb-6 gap-4">
-          {/* Identifier */}
-          <Text className="text-muted-foreground text-xs uppercase tracking-wider">
-            {issue.identifier}
-          </Text>
-
-          {/* Title */}
-          <Text
-            selectable
-            className="text-foreground text-2xl font-semibold leading-tight"
-          >
-            {issue.title}
-          </Text>
-
-          {/* Meta chips: status / priority / assignee */}
           <View className="flex-row flex-wrap gap-2">
             <Chip>
               <StatusIcon status={issue.status} size={14} />
@@ -114,7 +118,6 @@ export function IssueDetailView({ issueId }: Props) {
             )}
           </View>
 
-          {/* Description */}
           {issue.description ? (
             <View className="mt-2">
               <Markdown content={issue.description} />
@@ -125,20 +128,46 @@ export function IssueDetailView({ issueId }: Props) {
             </Text>
           )}
 
-          {/* Issue-level reactions */}
           {issue.reactions && issue.reactions.length > 0 && (
             <ReactionList reactions={issue.reactions} />
           )}
         </View>
 
-        {/* Divider */}
         <View className="h-px bg-border mx-4" />
 
-        {/* Comments + Activity */}
-        <CommentList issueId={issueId} />
+        <CommentList
+          issueId={issueId}
+          currentUserId={currentUserId}
+          onReplyPress={setReplyTo}
+          onReactPress={setReactPickerFor}
+        />
       </ScrollView>
 
-      <CommentComposer issueId={issueId} />
+      <CommentComposer
+        issueId={issueId}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+      />
+
+      <EmojiQuickPicker
+        visible={reactPickerFor !== null}
+        onClose={() => setReactPickerFor(null)}
+        onSelect={(emoji) => {
+          if (!reactPickerFor) return;
+          // We don't have direct access to the existing reactions array here,
+          // but useToggleCommentReaction expects an `existing` Reaction to
+          // know whether to remove vs add. The "+" button means the user is
+          // adding a new emoji — when they tap an emoji they don't yet own
+          // it, so existing=undefined. Toggling an already-owned emoji from
+          // the picker is a degenerate case; the chip-tap path handles toggle
+          // off correctly.
+          toggleReaction.mutate({
+            commentId: reactPickerFor,
+            emoji,
+            existing: undefined,
+          });
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }

@@ -8,8 +8,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Swipeable } from "react-native-gesture-handler";
-import { Stack, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -26,11 +27,15 @@ import {
 } from "@multica/core/inbox/mutations";
 
 import { InboxRow } from "@/components/inbox/inbox-row";
-import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  HeaderMenuButton,
+  ScreenHeader,
+} from "@/components/ui/screen-header";
 
 export default function InboxScreen() {
   const wsId = useWorkspaceId();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const markRead = useMarkInboxRead();
   const archive = useArchiveInbox();
   const markAllRead = useMarkAllInboxRead();
@@ -69,76 +74,65 @@ export default function InboxScreen() {
     );
   };
 
-  if (isLoading) {
-    return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View className="flex-1 bg-background items-center justify-center px-8">
-        <Text className="text-destructive text-center">
-          {error instanceof Error ? error.message : String(error)}
-        </Text>
-      </View>
-    );
-  }
-
   return (
-    <>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable onPress={showBulkMenu} hitSlop={8}>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              <IconSymbol name={"ellipsis" as any} size={20} color="hsl(220 60% 50%)" />
-            </Pressable>
-          ),
-        }}
+    <View
+      className="flex-1 bg-background"
+      style={{ paddingTop: insets.top }}
+    >
+      <ScreenHeader
+        title="Inbox"
+        right={<HeaderMenuButton onPress={showBulkMenu} />}
       />
-      <FlatList
-        contentInsetAdjustmentBehavior="automatic"
-        className="bg-background"
-        data={items}
-        keyExtractor={(it) => it.id}
-        renderItem={({ item }) => (
-          <Swipeable
-            renderRightActions={() => (
-              <Pressable
-                onPress={() => archive.mutate(item.id)}
-                className="bg-destructive justify-center items-center"
-                style={{ width: 88 }}
-              >
-                <Text className="text-white font-medium">Archive</Text>
-              </Pressable>
-            )}
-            overshootRight={false}
-          >
-            <InboxRow
-              item={item}
-              onPress={() => {
-                if (!item.read) markRead.mutate(item.id);
-                if (!item.issue_id) return;
-                router.push(`/(app)/(inbox)/issue/${item.issue_id}`);
-              }}
-            />
-          </Swipeable>
-        )}
-        ItemSeparatorComponent={() => (
-          <View className="h-px bg-border ml-16" />
-        )}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} />
-        }
-        ListEmptyComponent={
-          <View className="px-8 pt-16 items-center">
-            <Text className="text-muted-foreground">No notifications yet</Text>
-          </View>
-        }
-      />
-    </>
+      {isLoading ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator />
+        </View>
+      ) : error ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-destructive text-center">
+            {error instanceof Error ? error.message : String(error)}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(it) => it.id}
+          renderItem={({ item }) => (
+            <Swipeable
+              renderRightActions={() => (
+                <Pressable
+                  onPress={() => archive.mutate(item.id)}
+                  className="bg-destructive justify-center items-center"
+                  style={{ width: 88 }}
+                >
+                  <Text className="text-white font-medium">Archive</Text>
+                </Pressable>
+              )}
+              overshootRight={false}
+            >
+              <InboxRow
+                item={item}
+                onPress={() => {
+                  if (!item.read) markRead.mutate(item.id);
+                  if (!item.issue_id) return;
+                  router.push(`/(app)/(inbox)/issue/${item.issue_id}`);
+                }}
+              />
+            </Swipeable>
+          )}
+          ItemSeparatorComponent={() => (
+            <View className="h-px bg-border ml-16" />
+          )}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} />
+          }
+          ListEmptyComponent={
+            <View className="px-8 pt-16 items-center">
+              <Text className="text-muted-foreground">No notifications yet</Text>
+            </View>
+          }
+        />
+      )}
+    </View>
   );
 }

@@ -52,6 +52,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { buildTimelineGroups } from "@multica/core/issues/timeline-view";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -285,62 +286,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     isAtLatest, newEntriesBelowCount,
   } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
 
-  // Memoized timeline grouping. The same Map / groups references are reused
-  // across re-renders that don't change `timeline`, so React.memo on
-  // CommentCard can skip re-rendering when the only thing that moved was
-  // unrelated parent state (e.g. composer draft, sidebar toggle).
-  const timelineView = useMemo(() => {
-    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
-    const repliesByParent = new Map<string, TimelineEntry[]>();
-    for (const e of timeline) {
-      if (e.type === "comment" && e.parent_id) {
-        const list = repliesByParent.get(e.parent_id) ?? [];
-        list.push(e);
-        repliesByParent.set(e.parent_id, list);
-      }
-    }
-
-    // Coalesce consecutive activities from the same actor + action.
-    // - task_completed / task_failed: no time limit (these repeat across runs)
-    // - all other actions: within a 2-minute window
-    const COALESCE_MS = 2 * 60 * 1000;
-    const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-    const coalesced: TimelineEntry[] = [];
-    for (const entry of topLevel) {
-      if (entry.type === "activity") {
-        const prev = coalesced[coalesced.length - 1];
-        if (
-          prev?.type === "activity" &&
-          prev.action === entry.action &&
-          prev.actor_type === entry.actor_type &&
-          prev.actor_id === entry.actor_id &&
-          (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
-            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
-        ) {
-          coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
-          continue;
-        }
-      }
-      coalesced.push(entry);
-    }
-
-    // Group consecutive activities together so the connector line works
-    const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
-    for (const entry of coalesced) {
-      if (entry.type === "activity") {
-        const last = groups[groups.length - 1];
-        if (last?.type === "activities") {
-          last.entries.push(entry);
-        } else {
-          groups.push({ type: "activities", entries: [entry] });
-        }
-      } else {
-        groups.push({ type: "comment", entries: [entry] });
-      }
-    }
-
-    return { repliesByParent, groups };
-  }, [timeline]);
+  // Memoized timeline grouping. Pure logic lives in @multica/core so mobile
+  // and web render the same shape from the same input — see
+  // packages/core/issues/timeline-view.ts.
+  const timelineView = useMemo(() => buildTimelineGroups(timeline), [timeline]);
 
   const {
     reactions: issueReactions,
@@ -1006,8 +955,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )}
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
-                if (group.type === "comment") {
-                  const entry = group.entries[0]!;
+                if (group.kind === "comment") {
+                  const entry = group.parent;
                   return (
                     <div key={entry.id} id={`comment-${entry.id}`}>
                       <CommentCard
