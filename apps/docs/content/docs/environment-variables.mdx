@@ -60,9 +60,11 @@ STARTTLS is upgraded automatically when the server advertises it. The dial timeo
 
 **Behavior when neither is set**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
 
-## Google OAuth configuration
+## OAuth provider configuration
 
-Optional. Leave unset for email + verification code only; configure it to add "Sign in with Google" on the sign-in page.
+Optional. Leave unset for email + verification code only; configure one or more providers to add OAuth buttons on the sign-in page. Providers are returned by `/api/config` at runtime, so frontend rebuilds are not required after server restart.
+
+### Google
 
 | Variable | Default | Description |
 |---|---|---|
@@ -70,9 +72,22 @@ Optional. Leave unset for email + verification code only; configure it to add "S
 | `GOOGLE_CLIENT_SECRET` | empty | Google Cloud OAuth secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth callback URL (self-host: replace with your frontend domain) |
 
-**Takes effect at runtime**: the frontend reads these settings via `/api/config` at runtime, so **changing them requires no frontend rebuild or redeploy** — restart the server and they apply.
+### Feishu/Lark
 
-Full setup (including Google Cloud Console steps) is in [Sign-in and signup configuration](/auth-setup#google-oauth-configuration).
+| Variable | Default | Description |
+|---|---|---|
+| `LARK_OAUTH_CLIENT_ID` | empty | Feishu/Lark app ID, usually `cli_...`. `LARK_APP_ID` is accepted as an alias |
+| `LARK_OAUTH_CLIENT_SECRET` | empty | Feishu/Lark app secret. `LARK_APP_SECRET` is accepted as an alias |
+| `LARK_OAUTH_BASE_URL` | `https://open.feishu.cn` | OpenAPI base URL for token and user-info APIs. Use `https://open.larksuite.com` for Lark international, or your private OpenAPI host for private deployments |
+| `LARK_OAUTH_ACCOUNT_BASE_URL` | `https://accounts.feishu.cn` or `https://accounts.larksuite.com` | Authorization-page base URL derived from `LARK_OAUTH_BASE_URL`; set explicitly for private deployments whose auth host differs from OpenAPI |
+| `LARK_OAUTH_LABEL` | `Feishu/Lark` | Button label provider name |
+| `LARK_OAUTH_SCOPE` | empty | Optional OAuth scope string. When empty, Feishu/Lark authorizes the app's granted scopes |
+| `LARK_OAUTH_PKCE` | `true` | Whether the browser authorization request includes PKCE |
+| `LARK_OAUTH_AUTHORIZATION_URL` | derived from account base URL | Advanced override for private/non-standard deployments |
+| `LARK_OAUTH_TOKEN_URL` | derived from base URL | Advanced override for private/non-standard deployments |
+| `LARK_OAUTH_USERINFO_URL` | derived from base URL | Advanced override for private/non-standard deployments |
+
+Full setup is in [Google OAuth configuration](/auth-setup#google-oauth-configuration) and [Feishu/Lark OAuth configuration](/auth-setup#feishulark-oauth-configuration).
 
 ## File storage configuration
 

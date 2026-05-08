@@ -1,12 +1,12 @@
 ---
 title: Sign-in and signup configuration
-description: Configure email + verification code sign-in, Google OAuth, signup allowlists, and local test codes.
+description: Configure email + verification code sign-in, OAuth providers, signup allowlists, and local test codes.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-Multica supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
+Multica supports **email + verification code** (default) and optional **OAuth providers** such as Google and Feishu/Lark. On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
 
 For the list of environment variables referenced below, see [Environment variables](/environment-variables); for token usage and lifecycle details, see [Authentication and tokens](/auth-tokens).
 
@@ -106,7 +106,7 @@ Production deployments should leave `MULTICA_DEV_VERIFICATION_CODE` empty and se
 
 ## Google OAuth configuration
 
-Optional. Without it, only email + verification code is available; with it, the sign-in page gets a "Sign in with Google" button.
+Optional. Without it, only email + verification code is available; with it, the sign-in page gets a "Sign in with Google" button. Both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` must be set before the provider appears in `/api/config`.
 
 1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/)
 2. Set the **Authorized redirect URIs** to your Multica frontend address plus `/auth/callback`, for example:
@@ -130,6 +130,50 @@ Optional. Without it, only email + verification code is available; with it, the 
 <Callout type="warning">
 **The redirect URI must match exactly in both the Google Console and `GOOGLE_REDIRECT_URI`** — including protocol (`http` vs `https`), trailing slash, and port. Any mismatch and Google rejects the entire OAuth flow; the error shown to the user is `redirect_uri_mismatch`.
 </Callout>
+
+## Feishu/Lark OAuth configuration
+
+Feishu/Lark OAuth works like Google OAuth: the browser redirects to Feishu/Lark, the server exchanges the returned code for a user access token, reads the user's profile, then issues Multica's own JWT cookie. Multica does **not** persist the Feishu/Lark access token for product use.
+
+1. Create a Feishu/Lark app in the matching open platform:
+
+    - Feishu China: `https://open.feishu.cn`
+    - Lark international: `https://open.larksuite.com`
+    - Private Feishu/Lark: use your private OpenAPI base URL
+
+2. Configure the OAuth redirect URL in the Feishu/Lark app security settings:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. Enable the permissions needed for the login user profile, especially email / enterprise email visibility, then publish the app if your tenant requires publication before permissions take effect.
+
+4. Set environment variables and restart the server:
+
+    ```bash
+    LARK_OAUTH_CLIENT_ID=cli_xxxxxxxxxxxxxxxx
+    LARK_OAUTH_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    LARK_OAUTH_BASE_URL=https://open.feishu.cn
+    LARK_OAUTH_LABEL="Feishu/Lark"
+    LARK_OAUTH_SCOPE=contact:user.email:readonly
+    ```
+
+For Lark international, set `LARK_OAUTH_BASE_URL=https://open.larksuite.com`. For private deployments, set `LARK_OAUTH_BASE_URL` to the private OpenAPI host. If your private deployment exposes non-standard paths, override the derived endpoints with `LARK_OAUTH_AUTHORIZATION_URL`, `LARK_OAUTH_TOKEN_URL`, and `LARK_OAUTH_USERINFO_URL`.
+
+By default, the authorization page uses `https://accounts.feishu.cn` for Feishu China and `https://accounts.larksuite.com` for Lark international, while token and user-info requests use the OpenAPI base URL. For private deployments where the authorization host differs from the OpenAPI host, set `LARK_OAUTH_ACCOUNT_BASE_URL` or the full `LARK_OAUTH_AUTHORIZATION_URL`.
+
+The server accepts `LARK_APP_ID` / `LARK_APP_SECRET` as aliases for `LARK_OAUTH_CLIENT_ID` / `LARK_OAUTH_CLIENT_SECRET`, but the explicit OAuth names are preferred for new deployments.
+
+<Callout type="warning">
+**The Feishu/Lark account must expose an email.** Multica maps OAuth identities to users by email so signup allowlists, invitations, and existing accounts keep working. If Feishu/Lark does not return `enterprise_email` or `email`, login is rejected; enable the relevant field permission in the Feishu/Lark app.
+</Callout>
+
+## Verification code vs direct OAuth login
+
+Email verification code sign-in is the most universal fallback: it works for external collaborators and does not require every organization to run an identity provider, but it depends on deliverability and is awkward when `RESEND_API_KEY` is missing. Feishu/Lark OAuth is better for internal self-hosted deployments because it delegates identity proof to the company's existing tenant, avoids one-time-code delivery problems, and supports both SaaS and private Feishu/Lark through endpoint configuration.
+
+Recommended production posture: keep email verification available as a fallback for external users and break-glass access, and prefer Feishu/Lark OAuth for employees on private/internal instances. If the instance is strictly internal and the Feishu/Lark tenant is reliable, you can make OAuth the primary visible path and retain email only for admin recovery.
 
 ## Restricting who can sign up
 

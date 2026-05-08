@@ -90,4 +90,29 @@ describe("authStore.initialize — token mode", () => {
     expect(store.getState().user).toEqual(fakeUser);
     expect(storage.snapshot().multica_token).toBe("t");
   });
+
+  it("logs in with a selected OAuth provider and persists the returned token", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      oauthLogin: vi.fn().mockResolvedValue({ token: "oauth-jwt", user: fakeUser }),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage });
+
+    const user = await store.getState().loginWithOAuthProvider(
+      "feishu_lark",
+      "oauth-code",
+      "https://app.example.test/auth/callback",
+      "pkce-verifier",
+    );
+
+    expect(api.oauthLogin).toHaveBeenCalledWith("feishu_lark", {
+      code: "oauth-code",
+      redirectUri: "https://app.example.test/auth/callback",
+      codeVerifier: "pkce-verifier",
+    });
+    expect(storage.snapshot().multica_token).toBe("oauth-jwt");
+    expect(api.setToken).toHaveBeenCalledWith("oauth-jwt");
+    expect(user).toEqual(fakeUser);
+  });
 });

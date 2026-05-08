@@ -102,6 +102,7 @@ type Handler struct {
 	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
+	OAuthProviders        *service.OAuthProviderRegistry
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore

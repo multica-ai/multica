@@ -27,12 +27,23 @@ export interface AppConfigResponse {
   cdn_domain: string;
   allow_signup: boolean;
   google_client_id?: string;
+  oauth_providers?: OAuthProviderPublicConfig[];
   posthog_key?: string;
   posthog_host?: string;
   analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+}
+
+export interface OAuthProviderPublicConfig {
+  id: string;
+  label: string;
+  client_id: string;
+  authorization_url: string;
+  scope?: string;
+  pkce?: boolean;
+  extra_auth_params?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,10 +163,21 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
     z.boolean().default(fallback),
   );
 
+const OAuthProviderPublicConfigSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  client_id: z.string(),
+  authorization_url: z.string(),
+  scope: z.string().optional(),
+  pkce: z.boolean().optional(),
+  extra_auth_params: z.record(z.string(), z.string()).optional(),
+}).loose();
+
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
+  oauth_providers: z.array(OAuthProviderPublicConfigSchema).optional(),
   posthog_key: OptionalStringSchema,
   posthog_host: OptionalStringSchema,
   analytics_environment: OptionalStringSchema,
@@ -168,6 +190,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
   allow_signup: true,
   google_client_id: "",
+  oauth_providers: [],
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
