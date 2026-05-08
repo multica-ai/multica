@@ -284,14 +284,38 @@ type openclawEventResult struct {
 // log overflow and is captured separately by the caller. The stream may
 // contain:
 //
+//   - A final result JSON (with payloads + meta) — the format openclaw 2026.5.x
+//     emits today, typically pretty-printed across many lines
 //   - NDJSON streaming events (type: "text", "tool_use", "tool_result", "error",
-//     "step_start", "step_finish") — emitted in real time as the agent works
-//   - A final result JSON (with payloads + meta) — the legacy single-blob format
+//     "step_start", "step_finish") — supported for forward compatibility and
+//     other backends sharing this code path; openclaw does not emit these today
 //
-// We scan line-by-line, emitting messages as events arrive so streaming
-// consumers get real-time feedback instead of waiting for the final blob.
+// Implementation note (WOR-10 follow-up): we previously scanned line-by-line
+// only, then tried a whole-buffer parse in a fallback path. Under load
+// (daemon shutdown racing the scanner, partial chunked reads) the line
+// scanner could see truncated input that never reassembled, surfacing the
+// generic "openclaw returned no parseable output" error even though the
+// agent's work succeeded. We now read the full buffer first and try a
+// single whole-buffer parse against the final-result schema. Only if that
+// fails do we fall through to the line-by-line NDJSON scanner. This makes
+// the dominant happy path (one pretty-printed JSON blob) deterministic
+// while keeping NDJSON event support intact.
 func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclawEventResult {
-	scanner := bufio.NewScanner(r)
+	buf, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", readErr)}
+	}
+
+	// Whole-buffer fast path: openclaw 2026.5.x emits a single pretty-printed
+	// JSON result blob. Try parsing the entire buffer (after trimming whitespace
+	// and any preceding non-JSON log lines) as the final-result schema. If it
+	// matches, we're done — no need to involve the line scanner at all.
+	if result, ok := parseWholeBufferOpenclawResult(buf); ok {
+		var output strings.Builder
+		return b.buildOpenclawEventResult(result, ch, &output)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(buf)))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var output strings.Builder
@@ -395,30 +419,20 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", err)}
 	}
 
-	// If we got no events at all, fall back to raw output.
+	// If we got no events at all, fall back to raw output. The whole-buffer
+	// fast path above already tried the structured-result parse — by the time
+	// we reach here the buffer truly is unstructured (just log lines, plain
+	// text, or empty). Surface either the trimmed text as a completed run or
+	// a failure with a buffer preview so debugging isn't blind.
 	if !gotEvents {
-		// OpenClaw may output pretty-printed (multi-line) JSON. No single line
-		// would parse, so try parsing the accumulated output as a whole.
-		// Log lines may precede the JSON, so find the first '{' at line start.
 		trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
 		if trimmed != "" {
-			if result, ok := tryParseOpenclawResult(trimmed); ok {
-				return b.buildOpenclawEventResult(result, ch, &output)
-			}
-			// Log lines may precede the JSON blob. Find the first line that
-			// starts with '{' and try parsing from there.
-			for i, line := range rawLines {
-				if len(line) > 0 && line[0] == '{' {
-					candidate := strings.TrimSpace(strings.Join(rawLines[i:], "\n"))
-					if result, ok := tryParseOpenclawResult(candidate); ok {
-						return b.buildOpenclawEventResult(result, ch, &output)
-					}
-					break
-				}
-			}
 			return openclawEventResult{status: "completed", output: trimmed}
 		}
-		return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
+		return openclawEventResult{
+			status: "failed",
+			errMsg: openclawNoParseableOutputError(buf),
+		}
 	}
 
 	return openclawEventResult{
@@ -429,6 +443,62 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		usage:     usage,
 		model:     model,
 	}
+}
+
+// parseWholeBufferOpenclawResult attempts to parse the entire stdout buffer
+// as a single openclaw final-result JSON blob (the format openclaw 2026.5.x
+// emits today, almost always pretty-printed across multiple lines).
+//
+// It first tries the buffer as-is, then strips any leading non-JSON log
+// lines (lines that don't start with '{' at column 0) so a daemon log
+// preamble doesn't defeat the parse. It does NOT scan into the middle of
+// log lines: only line starts that begin with '{' are considered candidate
+// JSON entry points, mirroring the conservative behaviour of
+// tryParseOpenclawResult.
+func parseWholeBufferOpenclawResult(buf []byte) (openclawResult, bool) {
+	trimmed := strings.TrimSpace(string(buf))
+	if trimmed == "" {
+		return openclawResult{}, false
+	}
+	if result, ok := tryParseOpenclawResult(trimmed); ok {
+		return result, true
+	}
+	// Strip any leading log lines that precede the JSON blob.
+	lines := strings.Split(trimmed, "\n")
+	for i, line := range lines {
+		if len(line) > 0 && line[0] == '{' {
+			candidate := strings.TrimSpace(strings.Join(lines[i:], "\n"))
+			if result, ok := tryParseOpenclawResult(candidate); ok {
+				return result, true
+			}
+			return openclawResult{}, false
+		}
+	}
+	return openclawResult{}, false
+}
+
+// openclawNoParseableOutputError formats the error message returned when
+// neither the whole-buffer parse nor the NDJSON line scanner extracted any
+// usable content. It includes a short preview of the captured stdout so
+// daemon logs surface enough context to debug parse failures without
+// dumping potentially huge buffers.
+func openclawNoParseableOutputError(buf []byte) string {
+	const previewLimit = 200
+	preview := strings.TrimSpace(string(buf))
+	if preview == "" {
+		return "openclaw returned no parseable output"
+	}
+	truncated := false
+	if len(preview) > previewLimit {
+		preview = preview[:previewLimit]
+		truncated = true
+	}
+	// Collapse newlines so the message stays single-line in logs.
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	if truncated {
+		return fmt.Sprintf("openclaw returned no parseable output (got %d bytes; preview: %q...)", len(buf), preview)
+	}
+	return fmt.Sprintf("openclaw returned no parseable output (got %d bytes; preview: %q)", len(buf), preview)
 }
 
 // tryParseOpenclawEvent attempts to parse a line as a streaming NDJSON event.
