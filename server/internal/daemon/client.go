@@ -303,6 +303,59 @@ func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCS
 	return &resp, nil
 }
 
+// ChatSessionGCStatus mirrors IssueGCStatus for chat sessions.
+type ChatSessionGCStatus struct {
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetChatSessionGCCheck returns the status of a chat session for GC decisions.
+// A 404 from this endpoint indicates the session row was hard-deleted (the
+// user explicitly removed it), which the caller treats as an immediate-clean
+// signal.
+func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*ChatSessionGCStatus, error) {
+	var resp ChatSessionGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/chat-sessions/%s/gc-check", sessionID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
+// is the run's terminal timestamp (zero for non-terminal runs); the GC loop
+// uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
+// have no updated_at column.
+type AutopilotRunGCStatus struct {
+	Status      string    `json:"status"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// GetAutopilotRunGCCheck returns the status of an autopilot run for GC decisions.
+func (c *Client) GetAutopilotRunGCCheck(ctx context.Context, runID string) (*AutopilotRunGCStatus, error) {
+	var resp AutopilotRunGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/autopilot-runs/%s/gc-check", runID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// TaskGCStatus carries the agent_task_queue status for quick-create cleanup.
+// Quick-create tasks have no separate parent record, so GC keys directly on
+// the task itself.
+type TaskGCStatus struct {
+	Status      string    `json:"status"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// GetTaskGCCheck returns the status of an agent task for GC decisions.
+func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStatus, error) {
+	var resp TaskGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/gc-check", taskID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
 		"runtime_ids": runtimeIDs,

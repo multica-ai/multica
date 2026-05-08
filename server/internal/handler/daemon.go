@@ -2070,3 +2070,80 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		"updated_at": issue.UpdatedAt.Time,
 	})
 }
+
+// GetChatSessionGCCheck returns the status and updated_at of a chat session
+// for the daemon GC loop. A 404 here means the session was hard-deleted
+// (DeleteChatSession in chat.go runs a real DELETE), which the daemon treats
+// as an immediate-clean signal — the user's explicit delete is the strongest
+// reclaim authorization we can get.
+//
+// Same anti-enumeration shape as GetIssueGCCheck: workspace mismatch returns
+// the same 404 so a scoped daemon token can't probe other workspaces.
+func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	sessionUUID, ok := parseUUIDOrBadRequest(w, sessionID, "session_id")
+	if !ok {
+		return
+	}
+	session, err := h.Queries.GetChatSession(r.Context(), sessionUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "chat session not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(session.WorkspaceID)) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     session.Status,
+		"updated_at": session.UpdatedAt.Time,
+	})
+}
+
+// GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
+// run for the daemon GC loop. autopilot_run has no updated_at column; the
+// daemon uses completed_at as the TTL anchor for terminal runs, and treats
+// non-terminal status as a skip signal regardless of timestamp.
+//
+// Workspace ownership is resolved via the parent autopilot row.
+func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run_id")
+	if !ok {
+		return
+	}
+	run, err := h.Queries.GetAutopilotRun(r.Context(), runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "autopilot run not found")
+		return
+	}
+	autopilot, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID)
+	if err != nil {
+		// Parent autopilot is gone — treat as not found rather than 500
+		// so the daemon can fall through to its orphan-by-mtime path.
+		writeError(w, http.StatusNotFound, "autopilot run not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(autopilot.WorkspaceID)) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       run.Status,
+		"completed_at": run.CompletedAt.Time,
+	})
+}
+
+// GetTaskGCCheck returns the agent_task_queue status for quick-create cleanup.
+// Quick-create tasks have no parent record (no issue_id at WriteGCMeta time,
+// no chat session, no autopilot run) so the daemon keys GC directly on the
+// task row itself.
+func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       task.Status,
+		"completed_at": task.CompletedAt.Time,
+	})
+}

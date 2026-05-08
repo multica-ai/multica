@@ -259,7 +259,9 @@
       "remove_failed_toast": "Failed to remove skill",
       "add_dialog_title": "Add skill",
       "add_dialog_description": "Select a workspace skill to assign to this agent.",
+      "add_dialog_search_placeholder": "Search skills",
       "add_dialog_empty": "All workspace skills are already assigned.",
+      "add_dialog_no_match": "No skills match your search.",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
     },

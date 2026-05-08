@@ -55,39 +55,103 @@ type TimelineResponse struct {
 }
 
 const (
+	// timelineDefaultLimit governs the per-page COMMENT budget. Activities are
+	// fetched at the same per-call cap but do not consume the budget (#1857) —
+	// they decorate the comment stream. Without that split, an issue with
+	// sparse comments but dense activity (agent runs, status flips) triggered
+	// "show older" prematurely and felt like comments had vanished.
 	timelineDefaultLimit = 50
 	timelineMaxLimit     = 100
 )
 
-// timelineCursor encodes a (created_at, id) keyset position as opaque base64
-// JSON. The format is intentionally hidden from clients so future schema
-// evolution (e.g. switching to a sequence column) can replace the cursor
-// payload without breaking API consumers.
-type timelineCursor struct {
-	CreatedAt time.Time `json:"t"`
-	ID        string    `json:"i"`
+// cursorPos is a single (created_at, id) keyset position. Used per-pool —
+// see timelineCursor.
+type cursorPos struct {
+	T  pgtype.Timestamptz
+	ID pgtype.UUID
 }
 
-func encodeTimelineCursor(t pgtype.Timestamptz, id pgtype.UUID) string {
-	c := timelineCursor{CreatedAt: t.Time, ID: uuidToString(id)}
+// timelineCursor encodes per-pool keyset positions as opaque base64 JSON.
+// Comments and activities walk independently (#1857 follow-up): a single
+// shared cursor anchored on the merged-page boundary would let an activity
+// older than every visible comment hide all unreturned comments behind it,
+// since `ListCommentsBefore(activityCursor)` would skip the in-between rows.
+// The format is intentionally hidden from clients so future schema evolution
+// can replace the payload without breaking API consumers.
+type timelineCursor struct {
+	CommentT   time.Time `json:"ct"`
+	CommentID  string    `json:"ci"`
+	ActivityT  time.Time `json:"at"`
+	ActivityID string    `json:"ai"`
+}
+
+func encodeTimelineCursor(comment, activity cursorPos) string {
+	c := timelineCursor{
+		CommentT:   comment.T.Time,
+		CommentID:  uuidToString(comment.ID),
+		ActivityT:  activity.T.Time,
+		ActivityID: uuidToString(activity.ID),
+	}
 	b, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func decodeTimelineCursor(s string) (pgtype.Timestamptz, pgtype.UUID, error) {
+func decodeTimelineCursor(s string) (comment, activity cursorPos, err error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return pgtype.Timestamptz{}, pgtype.UUID{}, err
+		return cursorPos{}, cursorPos{}, err
 	}
 	var c timelineCursor
-	if err := json.Unmarshal(raw, &c); err != nil {
-		return pgtype.Timestamptz{}, pgtype.UUID{}, err
+	if err = json.Unmarshal(raw, &c); err != nil {
+		return cursorPos{}, cursorPos{}, err
 	}
-	id, err := parseUUIDStrict(c.ID)
+	cid, err := parseUUIDStrict(c.CommentID)
 	if err != nil {
-		return pgtype.Timestamptz{}, pgtype.UUID{}, err
+		return cursorPos{}, cursorPos{}, err
 	}
-	return pgtype.Timestamptz{Time: c.CreatedAt, Valid: true}, id, nil
+	aid, err := parseUUIDStrict(c.ActivityID)
+	if err != nil {
+		return cursorPos{}, cursorPos{}, err
+	}
+	return cursorPos{T: pgtype.Timestamptz{Time: c.CommentT, Valid: true}, ID: cid},
+		cursorPos{T: pgtype.Timestamptz{Time: c.ActivityT, Valid: true}, ID: aid},
+		nil
+}
+
+// commentBoundsDesc returns (oldest, newest) cursor positions from a DESC-
+// ordered comment slice. If the slice is empty, returns the supplied carry
+// position so the cursor walker keeps advancing the empty pool past
+// boundaries the caller already paged through.
+func commentBoundsDesc(rows []db.Comment, carry cursorPos) (oldest, newest cursorPos) {
+	if len(rows) == 0 {
+		return carry, carry
+	}
+	return cursorPos{T: rows[len(rows)-1].CreatedAt, ID: rows[len(rows)-1].ID},
+		cursorPos{T: rows[0].CreatedAt, ID: rows[0].ID}
+}
+
+func commentBoundsAsc(rows []db.Comment, carry cursorPos) (oldest, newest cursorPos) {
+	if len(rows) == 0 {
+		return carry, carry
+	}
+	return cursorPos{T: rows[0].CreatedAt, ID: rows[0].ID},
+		cursorPos{T: rows[len(rows)-1].CreatedAt, ID: rows[len(rows)-1].ID}
+}
+
+func activityBoundsDesc(rows []db.ActivityLog, carry cursorPos) (oldest, newest cursorPos) {
+	if len(rows) == 0 {
+		return carry, carry
+	}
+	return cursorPos{T: rows[len(rows)-1].CreatedAt, ID: rows[len(rows)-1].ID},
+		cursorPos{T: rows[0].CreatedAt, ID: rows[0].ID}
+}
+
+func activityBoundsAsc(rows []db.ActivityLog, carry cursorPos) (oldest, newest cursorPos) {
+	if len(rows) == 0 {
+		return carry, carry
+	}
+	return cursorPos{T: rows[0].CreatedAt, ID: rows[0].ID},
+		cursorPos{T: rows[len(rows)-1].CreatedAt, ID: rows[len(rows)-1].ID}
 }
 
 // parseUUIDStrict mirrors util.ParseUUID but returns a pgtype.UUID directly
@@ -190,7 +254,10 @@ func (h *Handler) listTimelineLegacy(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	entries := h.mergeTimelineDesc(r, comments, activities, legacyTimelineCap)
+	entries := h.mergeTimelineDesc(r, comments, activities)
+	if len(entries) > legacyTimelineCap {
+		entries = entries[:legacyTimelineCap]
+	}
 	// Old contract: ASC (oldest → newest).
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
@@ -203,19 +270,24 @@ func (h *Handler) listTimelineLegacy(w http.ResponseWriter, r *http.Request, iss
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// listTimelineLatest fetches the most recent <limit> entries (no cursor).
-// Both tables are queried for <limit> rows each; the merge picks the top
-// <limit> overall. Any item the merge didn't include cannot rank higher than
-// the worst kept item in either pool, so this is exact, not approximate.
+// listTimelineLatest fetches the latest page (no cursor). <limit> is the
+// COMMENT page size (#1857); activity rows ride along at the same per-call
+// SQL cap but do not consume the page budget — has_more_before is gated on
+// comments alone, so a chatty agent's status flips can't push real comments
+// off-page.
 func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, issue db.Issue, limit int) {
 	ctx := r.Context()
-	comments, err := h.Queries.ListCommentsLatest(ctx, db.ListCommentsLatestParams{
-		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: int32(limit),
+	// Over-fetch comments by one so commentOverflow can distinguish "exactly
+	// <limit> comments exist" (no Show older needed) from ">limit comments
+	// exist" (Show older required).
+	rawComments, err := h.Queries.ListCommentsLatest(ctx, db.ListCommentsLatestParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Limit: int32(limit + 1),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
 		return
 	}
+	comments, hasMoreComments := commentOverflow(rawComments, limit)
 	activities, err := h.Queries.ListActivitiesLatest(ctx, db.ListActivitiesLatestParams{
 		IssueID: issue.ID, Limit: int32(limit),
 	})
@@ -224,15 +296,30 @@ func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, iss
 		return
 	}
 
-	entries := h.mergeTimelineDesc(r, comments, activities, limit)
+	entries := h.mergeTimelineDesc(r, comments, activities)
 	resp := TimelineResponse{Entries: entries}
-	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreBefore = hasMoreComments
+
+	// Per-pool boundaries. For latest mode there is no input cursor; if a
+	// pool returned no rows it carries from the other pool so the encoded
+	// payload stays self-contained. Future calls won't fetch new rows for
+	// the empty pool anyway (latest with 0 of one type means the issue has
+	// none), so the carry value is purely cosmetic.
+	cOldest, cNewest := commentBoundsDesc(comments, cursorPos{})
+	aOldest, aNewest := activityBoundsDesc(activities, cursorPos{})
+	if len(comments) == 0 {
+		cOldest, cNewest = aOldest, aNewest
+	}
+	if len(activities) == 0 {
+		aOldest, aNewest = cOldest, cNewest
+	}
+
 	if resp.HasMoreBefore && len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
+		c := encodeTimelineCursor(cOldest, aOldest)
 		resp.NextCursor = &c
 	}
 	if len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
+		c := encodeTimelineCursor(cNewest, aNewest)
 		resp.PrevCursor = &c
 	}
 	// has_more_after is always false on the latest page by definition.
@@ -241,40 +328,48 @@ func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, iss
 
 func (h *Handler) listTimelineBefore(w http.ResponseWriter, r *http.Request, issue db.Issue, cursor string, limit int) {
 	ctx := r.Context()
-	t, id, err := decodeTimelineCursor(cursor)
+	inComment, inActivity, err := decodeTimelineCursor(cursor)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return
 	}
 
-	comments, err := h.Queries.ListCommentsBefore(ctx, db.ListCommentsBeforeParams{
+	rawComments, err := h.Queries.ListCommentsBefore(ctx, db.ListCommentsBeforeParams{
 		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Column3: t, Column4: id, Limit: int32(limit),
+		Column3: inComment.T, Column4: inComment.ID, Limit: int32(limit + 1),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
 		return
 	}
+	comments, hasMoreComments := commentOverflow(rawComments, limit)
 	activities, err := h.Queries.ListActivitiesBefore(ctx, db.ListActivitiesBeforeParams{
-		IssueID: issue.ID, Column2: t, Column3: id, Limit: int32(limit),
+		IssueID: issue.ID, Column2: inActivity.T, Column3: inActivity.ID, Limit: int32(limit),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
 
-	entries := h.mergeTimelineDesc(r, comments, activities, limit)
+	entries := h.mergeTimelineDesc(r, comments, activities)
 	resp := TimelineResponse{
 		Entries:      entries,
 		HasMoreAfter: true, // we're paging older from a known position, so newer exists
 	}
-	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreBefore = hasMoreComments
+
+	// Per-pool boundaries. Empty pool carries forward from the input cursor
+	// so subsequent older pages keep advancing past previously-paginated rows
+	// in that pool.
+	cOldest, cNewest := commentBoundsDesc(comments, inComment)
+	aOldest, aNewest := activityBoundsDesc(activities, inActivity)
+
 	if resp.HasMoreBefore && len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
+		c := encodeTimelineCursor(cOldest, aOldest)
 		resp.NextCursor = &c
 	}
 	if len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
+		c := encodeTimelineCursor(cNewest, aNewest)
 		resp.PrevCursor = &c
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -282,40 +377,49 @@ func (h *Handler) listTimelineBefore(w http.ResponseWriter, r *http.Request, iss
 
 func (h *Handler) listTimelineAfter(w http.ResponseWriter, r *http.Request, issue db.Issue, cursor string, limit int) {
 	ctx := r.Context()
-	t, id, err := decodeTimelineCursor(cursor)
+	inComment, inActivity, err := decodeTimelineCursor(cursor)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return
 	}
 
-	comments, err := h.Queries.ListCommentsAfter(ctx, db.ListCommentsAfterParams{
+	rawComments, err := h.Queries.ListCommentsAfter(ctx, db.ListCommentsAfterParams{
 		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Column3: t, Column4: id, Limit: int32(limit),
+		Column3: inComment.T, Column4: inComment.ID, Limit: int32(limit + 1),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
 		return
 	}
+	// ASC fetch returns oldest-first; trimming to the first <limit> keeps
+	// the rows closest to the cursor and drops the (limit+1)th newest as the
+	// overflow probe.
+	comments, hasMoreComments := commentOverflow(rawComments, limit)
 	activities, err := h.Queries.ListActivitiesAfter(ctx, db.ListActivitiesAfterParams{
-		IssueID: issue.ID, Column2: t, Column3: id, Limit: int32(limit),
+		IssueID: issue.ID, Column2: inActivity.T, Column3: inActivity.ID, Limit: int32(limit),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
 
-	// Both queries returned ASC (older→newer). Merge ASC, take the limit
-	// closest to the cursor (i.e. the oldest of the "after" set), then
-	// reverse to DESC for the response.
-	entries := h.mergeTimelineAscThenReverse(r, comments, activities, limit)
+	// Both queries returned ASC (older→newer); reverse to DESC for the
+	// response. No outer truncation: each pool is already capped by the SQL
+	// LIMIT, and dropping rows here would re-introduce the comments-pushed-
+	// off-page bug (#1857).
+	entries := h.mergeTimelineAscThenReverse(r, comments, activities)
 	resp := TimelineResponse{Entries: entries, HasMoreBefore: true}
-	resp.HasMoreAfter = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreAfter = hasMoreComments
+
+	cOldest, cNewest := commentBoundsAsc(comments, inComment)
+	aOldest, aNewest := activityBoundsAsc(activities, inActivity)
+
 	if resp.HasMoreAfter && len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
+		c := encodeTimelineCursor(cNewest, aNewest)
 		resp.PrevCursor = &c
 	}
 	if len(entries) > 0 {
-		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
+		c := encodeTimelineCursor(cOldest, aOldest)
 		resp.NextCursor = &c
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -365,15 +469,17 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 		afterLimit = 0
 	}
 
-	// Older half: keyset Before (anchor exclusive).
-	olderComments, err := h.Queries.ListCommentsBefore(ctx, db.ListCommentsBeforeParams{
+	// Older half: keyset Before (anchor exclusive). Over-fetch comments by
+	// one to detect overflow exactly.
+	rawOlderComments, err := h.Queries.ListCommentsBefore(ctx, db.ListCommentsBeforeParams{
 		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Column3: anchorTime, Column4: anchorID, Limit: int32(beforeLimit),
+		Column3: anchorTime, Column4: anchorID, Limit: int32(beforeLimit + 1),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
 		return
 	}
+	olderComments, hasMoreOlderComments := commentOverflow(rawOlderComments, beforeLimit)
 	olderActivities, err := h.Queries.ListActivitiesBefore(ctx, db.ListActivitiesBeforeParams{
 		IssueID: issue.ID, Column2: anchorTime, Column3: anchorID, Limit: int32(beforeLimit),
 	})
@@ -381,17 +487,18 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	olderEntries := h.mergeTimelineDesc(r, olderComments, olderActivities, beforeLimit)
+	olderEntries := h.mergeTimelineDesc(r, olderComments, olderActivities)
 
 	// Newer half: keyset After (anchor exclusive).
-	newerComments, err := h.Queries.ListCommentsAfter(ctx, db.ListCommentsAfterParams{
+	rawNewerComments, err := h.Queries.ListCommentsAfter(ctx, db.ListCommentsAfterParams{
 		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Column3: anchorTime, Column4: anchorID, Limit: int32(afterLimit),
+		Column3: anchorTime, Column4: anchorID, Limit: int32(afterLimit + 1),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list comments")
 		return
 	}
+	newerComments, hasMoreNewerComments := commentOverflow(rawNewerComments, afterLimit)
 	newerActivities, err := h.Queries.ListActivitiesAfter(ctx, db.ListActivitiesAfterParams{
 		IssueID: issue.ID, Column2: anchorTime, Column3: anchorID, Limit: int32(afterLimit),
 	})
@@ -399,7 +506,7 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	newerEntries := h.mergeTimelineAscThenReverse(r, newerComments, newerActivities, afterLimit)
+	newerEntries := h.mergeTimelineAscThenReverse(r, newerComments, newerActivities)
 
 	// Build the anchor entry inline using the existing single-entry path.
 	anchorEntry, ok := h.fetchSingleEntry(r, issue, target)
@@ -417,16 +524,26 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 
 	resp := TimelineResponse{
 		Entries:       entries,
-		HasMoreBefore: hasMoreBeyond(len(olderComments), len(olderActivities), len(olderEntries), beforeLimit),
-		HasMoreAfter:  hasMoreBeyond(len(newerComments), len(newerActivities), len(newerEntries), afterLimit),
+		HasMoreBefore: hasMoreOlderComments,
+		HasMoreAfter:  hasMoreNewerComments,
 		TargetIndex:   &targetIdx,
 	}
+
+	// Per-pool boundaries on each half. Empty pools fall back to the anchor
+	// position, which is exclusive on both sides — so a follow-up Before /
+	// After call against the anchor returns no duplicates.
+	anchor := cursorPos{T: anchorTime, ID: anchorID}
+	olderCommentOldest, _ := commentBoundsDesc(olderComments, anchor)
+	olderActivityOldest, _ := activityBoundsDesc(olderActivities, anchor)
+	_, newerCommentNewest := commentBoundsAsc(newerComments, anchor)
+	_, newerActivityNewest := activityBoundsAsc(newerActivities, anchor)
+
 	if resp.HasMoreBefore {
-		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
+		c := encodeTimelineCursor(olderCommentOldest, olderActivityOldest)
 		resp.NextCursor = &c
 	}
 	if resp.HasMoreAfter {
-		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
+		c := encodeTimelineCursor(newerCommentNewest, newerActivityNewest)
 		resp.PrevCursor = &c
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -449,28 +566,32 @@ func (h *Handler) fetchSingleEntry(r *http.Request, issue db.Issue, id pgtype.UU
 	return TimelineEntry{}, false
 }
 
-// hasMoreBeyond reports whether entries exist beyond the page on the side the
-// caller is paginating away from (older for "before", newer for "after").
+// commentOverflow trims an over-fetched comment slice to <limit> and reports
+// whether the SQL returned more rows than the visible budget. Callers
+// over-fetch by one (limit+1) so the boolean is exact even when the issue has
+// EXACTLY <limit> comments — the prior `len >= limit` check returned true in
+// that case and rendered a "Show older" affordance that revealed nothing.
 //
-// Three independent signals, any of which means "more rows exist":
-//  1. comments >= limit — the comments query was capped, DB has more.
-//  2. activities >= limit — the activities query was capped, DB has more.
-//  3. comments+activities > entries — the in-memory merge dropped rows that
-//     could not all fit in the page (#2192). This is the case the original
-//     formula missed, which made older comments unreachable when neither
-//     individual query hit the limit but their combined total exceeded it.
-func hasMoreBeyond(comments, activities, entries, limit int) bool {
+// Activity rows do not gate pagination (#1857): a dense activity stream from
+// agent runs / status flips would otherwise trigger "show older" on issues
+// with only a handful of real comments. Activities therefore stay capped at
+// <limit> with no overflow probe.
+func commentOverflow(rows []db.Comment, limit int) ([]db.Comment, bool) {
 	if limit <= 0 {
-		return false
+		return rows, false
 	}
-	return comments >= limit || activities >= limit || comments+activities > entries
+	if len(rows) > limit {
+		return rows[:limit], true
+	}
+	return rows, false
 }
 
-// mergeTimelineDesc takes comments + activities sorted DESC by (created_at, id)
-// and returns the top <limit> merged entries, also DESC. Items the merge does
-// not include cannot rank higher than the worst kept item in either pool, so
-// the result is exact.
-func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, activities []db.ActivityLog, limit int) []TimelineEntry {
+// mergeTimelineDesc returns comments + activities merged DESC by
+// (created_at, id). No truncation: both pools are individually capped at the
+// SQL layer, and dropping rows here would re-introduce the bug where dense
+// activity pushed real comments off-page (#1857). Callers that need an outer
+// safety cap (legacy compat path) apply it themselves.
+func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, activities []db.ActivityLog) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(comments)+len(activities))
 	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
@@ -482,17 +603,14 @@ func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, acti
 		}
 		return out[i].ID > out[j].ID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	return out
 }
 
 // mergeTimelineAscThenReverse takes comments + activities sorted ASC by
-// (created_at, id) — the natural shape of an "after" keyset query — picks
-// the <limit> closest to the cursor (i.e. earliest of the after-set), and
-// returns them DESC for response consistency.
-func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Comment, activities []db.ActivityLog, limit int) []TimelineEntry {
+// (created_at, id) — the natural shape of an "after" keyset query — and
+// returns them DESC for response consistency. No truncation, same reason as
+// mergeTimelineDesc.
+func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Comment, activities []db.ActivityLog) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(comments)+len(activities))
 	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
@@ -504,9 +622,6 @@ func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Com
 		}
 		return out[i].ID < out[j].ID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	// Reverse to DESC.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -565,19 +680,6 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
 	}
-}
-
-// entryTimestamp / entryID extract the cursor components for an emitted
-// TimelineEntry. CreatedAt is already an RFC3339 string at this point;
-// re-parse it for cursor encoding.
-func entryTimestamp(e TimelineEntry) pgtype.Timestamptz {
-	t, _ := time.Parse(time.RFC3339Nano, e.CreatedAt)
-	return pgtype.Timestamptz{Time: t, Valid: true}
-}
-
-func entryID(e TimelineEntry) pgtype.UUID {
-	id, _ := parseUUIDStrict(e.ID)
-	return id
 }
 
 // AssigneeFrequencyEntry represents how often a user assigns to a specific target.

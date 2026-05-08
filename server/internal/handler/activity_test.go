@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // fetchTimeline issues a GET /timeline request with the given query string and
@@ -92,19 +95,22 @@ func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) 
 
 func TestListTimeline_DefaultLatestPage(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Latest page test")
-	seedTimelineEntries(t, issueID, 60, 60) // 120 total; default limit is 50
+	// 80 comments triggers the comment overflow signal; activities are
+	// excluded so the per-page count is unambiguous (#1857: activities don't
+	// gate has_more_before).
+	seedTimelineEntries(t, issueID, 80, 0)
 
 	// Empty query string is now reserved for the legacy compat path; new
 	// client always sends ?limit=... so emulate that here.
-	resp, code := fetchTimeline(t, issueID, "limit=50")
+	resp, code := fetchTimeline(t, issueID, "limit=30")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
-	if len(resp.Entries) != 50 {
-		t.Fatalf("expected 50 entries on default page, got %d", len(resp.Entries))
+	if len(resp.Entries) != 30 {
+		t.Fatalf("expected 30 entries on default page, got %d", len(resp.Entries))
 	}
 	if !resp.HasMoreBefore {
-		t.Fatalf("expected has_more_before=true with 120 total entries")
+		t.Fatalf("expected has_more_before=true with 80 comments")
 	}
 	if resp.HasMoreAfter {
 		t.Fatalf("latest page must report has_more_after=false")
@@ -121,7 +127,9 @@ func TestListTimeline_DefaultLatestPage(t *testing.T) {
 
 func TestListTimeline_BeforeCursorWalksOlder(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Before cursor test")
-	seedTimelineEntries(t, issueID, 30, 30) // 60 total
+	// Comments-only so the page-count assertions are stable. limit=20 →
+	// 20 comments per page, no activities to inflate the totals.
+	seedTimelineEntries(t, issueID, 60, 0)
 
 	first, _ := fetchTimeline(t, issueID, "limit=20")
 	if len(first.Entries) != 20 {
@@ -152,7 +160,9 @@ func TestListTimeline_BeforeCursorWalksOlder(t *testing.T) {
 
 func TestListTimeline_AfterCursorWalksNewer(t *testing.T) {
 	issueID := createIssueForTimeline(t, "After cursor test")
-	seedTimelineEntries(t, issueID, 30, 30)
+	// Comments-only seed so cursor walking depends on comment overflow alone
+	// (#1857: activities don't gate has_more_after either).
+	seedTimelineEntries(t, issueID, 60, 0)
 
 	first, _ := fetchTimeline(t, issueID, "limit=20")
 	if first.NextCursor == nil {
@@ -331,98 +341,226 @@ func TestListTimeline_LegacyShapeForPreCursorClients(t *testing.T) {
 	}
 }
 
-// TestHasMoreBeyond covers the truth table for the page-boundary helper. The
-// 8 rows enumerate every meaningful combination of (per-table cap hit) ×
-// (merge truncation), including the #2192 shape (case "merge truncation
-// without per-table cap") which the original formula missed.
-func TestHasMoreBeyond(t *testing.T) {
-	cases := []struct {
-		name                                 string
-		comments, activities, entries, limit int
-		want                                 bool
+// TestTimelineCursor_RoundTrip pins the dual-pool cursor format. Cursors carry
+// independent comment and activity positions (#1857 follow-up) so future
+// pages walk each pool past its own boundary instead of skipping rows when
+// one pool's oldest is older than the other's.
+func TestTimelineCursor_RoundTrip(t *testing.T) {
+	cT := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	aT := time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC)
+	cID, _ := parseUUIDStrict("11111111-1111-1111-1111-111111111111")
+	aID, _ := parseUUIDStrict("22222222-2222-2222-2222-222222222222")
+
+	in := struct {
+		comment, activity cursorPos
 	}{
-		{"empty page", 0, 0, 0, 50, false},
-		{"partial page no truncation", 5, 3, 8, 50, false},
-		{"comments hit limit only", 50, 3, 50, 50, true},
-		{"activities hit limit only", 3, 50, 50, 50, true},
-		{"both hit limit", 50, 50, 50, 50, true},
-		// #2192: 48 comments + 49 activities, neither alone hits 50, merge
-		// truncated 47 rows. Old formula reported false; new reports true.
-		{"#2192 merge truncation", 48, 49, 50, 50, true},
-		{"exact-fit merge no truncation", 30, 20, 50, 50, false},
-		{"limit zero rejects", 100, 100, 0, 0, false},
+		comment:  cursorPos{T: pgtype.Timestamptz{Time: cT, Valid: true}, ID: cID},
+		activity: cursorPos{T: pgtype.Timestamptz{Time: aT, Valid: true}, ID: aID},
+	}
+
+	encoded := encodeTimelineCursor(in.comment, in.activity)
+	gotC, gotA, err := decodeTimelineCursor(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !gotC.T.Time.Equal(cT) || !gotA.T.Time.Equal(aT) {
+		t.Fatalf("timestamps did not round-trip: comment=%s activity=%s", gotC.T.Time, gotA.T.Time)
+	}
+	if uuidToString(gotC.ID) != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("comment id did not round-trip: %s", uuidToString(gotC.ID))
+	}
+	if uuidToString(gotA.ID) != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("activity id did not round-trip: %s", uuidToString(gotA.ID))
+	}
+
+	// Garbage cursor → error, never panics.
+	if _, _, err := decodeTimelineCursor("not-base64"); err == nil {
+		t.Fatalf("expected decode error for garbage input")
+	}
+}
+
+// TestCommentOverflow pins the over-fetch / trim contract that gates "Show
+// older". Callers query the SQL with limit+1 and pass the raw rows in; the
+// helper trims to <limit> and reports hasMore. The boundary the user flagged
+// — exactly <limit> comments exist — must report hasMore=false so no
+// affordance appears for content that doesn't exist.
+func TestCommentOverflow(t *testing.T) {
+	mk := func(n int) []db.Comment {
+		out := make([]db.Comment, n)
+		return out
+	}
+	cases := []struct {
+		name        string
+		fetched     int // rows the SQL returned (caller asked for limit+1)
+		limit       int
+		wantTrimmed int
+		wantMore    bool
+	}{
+		{"empty page", 0, 30, 0, false},
+		{"partial page", 5, 30, 5, false},
+		// Issue has exactly limit comments — caller asked for limit+1 and got
+		// only limit back. No older content; "Show older" must NOT appear.
+		{"exactly limit comments", 30, 30, 30, false},
+		// Issue has more than limit — caller asked for limit+1 and got
+		// limit+1 back. Trim the probe row, set hasMore=true.
+		{"one over limit", 31, 30, 30, true},
+		{"well over limit", 100, 30, 30, true},
+		{"limit zero rejects", 100, 0, 100, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasMoreBeyond(tc.comments, tc.activities, tc.entries, tc.limit); got != tc.want {
-				t.Fatalf("hasMoreBeyond(c=%d, a=%d, e=%d, lim=%d) = %v, want %v",
-					tc.comments, tc.activities, tc.entries, tc.limit, got, tc.want)
+			rows, more := commentOverflow(mk(tc.fetched), tc.limit)
+			if len(rows) != tc.wantTrimmed {
+				t.Fatalf("trimmed length: got %d, want %d", len(rows), tc.wantTrimmed)
+			}
+			if more != tc.wantMore {
+				t.Fatalf("hasMore: got %v, want %v", more, tc.wantMore)
 			}
 		})
 	}
 }
 
-// TestListTimeline_MergeTruncationKeepsOlderReachable reproduces #2192 against
-// real DB rows: 48 comments dated older than 49 activities, default limit 50.
-// Pre-fix, the latest page reported has_more_before=false and the 47 older
-// comments were unreachable. Post-fix, the cursor + has_more_before flag let
-// the client walk to page 2 and recover them.
-func TestListTimeline_MergeTruncationKeepsOlderReachable(t *testing.T) {
-	issueID := createIssueForTimeline(t, "2192 merge truncation regression")
+// TestListTimeline_PerPoolCursorWalksAllComments reproduces the GPT-Boy
+// blocker on PR #2253: when activities sit older than every fetched comment,
+// a single shared cursor anchored on the merged-page boundary points at the
+// oldest activity, and the next "show older" call's `ListCommentsBefore` hits
+// activity time → skips every unreturned comment in between. The dual-pool
+// cursor walks each pool independently so the full comment list stays
+// reachable.
+func TestListTimeline_PerPoolCursorWalksAllComments(t *testing.T) {
+	issueID := createIssueForTimeline(t, "GPT-Boy per-pool cursor regression")
 	ctx := context.Background()
 
-	// 48 older comments, then 49 newer activities. The seedTimelineEntries
-	// helper inserts comments first (older block) then activities (newer
-	// block) — exactly the #2192 shape.
-	commentIDs, _ := seedTimelineEntries(t, issueID, 48, 49)
+	// Seed 30 activities in the older block, then 80 comments strictly newer
+	// than every activity. seedTimelineEntries inserts comments first then
+	// activities, which is the wrong order for this scenario, so seed manually.
+	const activityN, commentN = 30, 80
+	base := time.Now().UTC().Add(-time.Duration(activityN+commentN) * time.Minute)
 
-	first, code := fetchTimeline(t, issueID, "limit=50")
-	if code != http.StatusOK {
-		t.Fatalf("first page: expected 200, got %d", code)
-	}
-	if len(first.Entries) != 50 {
-		t.Fatalf("first page should be full at 50 entries, got %d", len(first.Entries))
-	}
-	if !first.HasMoreBefore {
-		t.Fatalf("first page must report has_more_before=true (47 older comments dropped by merge)")
-	}
-	if first.NextCursor == nil {
-		t.Fatalf("first page must emit next_cursor when has_more_before=true")
-	}
-
-	// Page 2: walk older. Must surface the 47 older comments that the merge
-	// dropped on page 1.
-	second, code := fetchTimeline(t, issueID, "limit=50&before="+*first.NextCursor)
-	if code != http.StatusOK {
-		t.Fatalf("second page: expected 200, got %d", code)
-	}
-	if len(second.Entries) != 47 {
-		t.Fatalf("second page should return the 47 dropped older comments, got %d", len(second.Entries))
-	}
-
-	// Spot-check: every entry on page 2 must be a comment (the activities
-	// block was strictly newer).
-	for i, e := range second.Entries {
-		if e.Type != "comment" {
-			t.Fatalf("page 2 entry %d: expected comment, got %s", i, e.Type)
+	for i := 0; i < activityN; i++ {
+		ts := base.Add(time.Duration(i) * time.Minute)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+			VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"todo","to":"in_progress"}'::jsonb, $4)
+		`, testWorkspaceID, issueID, testUserID, ts); err != nil {
+			t.Fatalf("seed activity %d: %v", i, err)
 		}
 	}
+	commentIDs := make([]string, 0, commentN)
+	for i := 0; i < commentN; i++ {
+		var id string
+		ts := base.Add(time.Duration(activityN+i) * time.Minute)
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $5)
+			RETURNING id
+		`, issueID, testWorkspaceID, testUserID, fmt.Sprintf("comment %d", i), ts).Scan(&id); err != nil {
+			t.Fatalf("seed comment %d: %v", i, err)
+		}
+		commentIDs = append(commentIDs, id)
+	}
 
-	// Spot-check: page 2 must include the very oldest comment we seeded —
-	// otherwise the cursor walk lost data, which is precisely what #2192
-	// was about.
-	oldestSeeded := commentIDs[0]
-	found := false
-	for _, e := range second.Entries {
-		if e.ID == oldestSeeded {
-			found = true
+	// Walk older pages until exhausted, collecting every comment id seen.
+	seen := map[string]bool{}
+	cursor := ""
+	for page := 0; page < 10; page++ { // safety bound — true exit is has_more_before=false
+		query := "limit=30"
+		if cursor != "" {
+			query += "&before=" + cursor
+		}
+		resp, code := fetchTimeline(t, issueID, query)
+		if code != http.StatusOK {
+			t.Fatalf("page %d: expected 200, got %d", page, code)
+		}
+		for _, e := range resp.Entries {
+			if e.Type == "comment" {
+				seen[e.ID] = true
+			}
+		}
+		if !resp.HasMoreBefore {
 			break
 		}
-	}
-	if !found {
-		t.Fatalf("page 2 missing the oldest seeded comment %s — cursor walk lost data", oldestSeeded)
+		if resp.NextCursor == nil {
+			t.Fatalf("page %d: has_more_before=true but next_cursor missing", page)
+		}
+		cursor = *resp.NextCursor
 	}
 
-	// Sanity: don't leak DB internals if something later changes the helper.
-	_ = ctx
+	// All 80 seeded comments must be reachable through the cursor walk —
+	// pre-fix, the 50 unreturned comments after page 1 stayed hidden because
+	// the shared cursor skipped past them via the activity timestamp.
+	if len(seen) != commentN {
+		missing := []string{}
+		for _, id := range commentIDs {
+			if !seen[id] {
+				missing = append(missing, id)
+			}
+		}
+		t.Fatalf("expected to see all %d comments via cursor walk, saw %d. Missing: %v",
+			commentN, len(seen), missing)
+	}
+}
+
+// TestListTimeline_ExactlyLimitCommentsHidesShowOlder pins the boundary the
+// user flagged: an issue with exactly <limit> comments must NOT report
+// has_more_before. Pre-fix the gate was `len(comments) >= limit`, which
+// returned true and rendered a "Show older" button that revealed nothing —
+// older clicks fetched zero rows. The over-fetch + trim probe makes the
+// boundary exact.
+func TestListTimeline_ExactlyLimitCommentsHidesShowOlder(t *testing.T) {
+	issueID := createIssueForTimeline(t, "exactly limit comments boundary")
+	seedTimelineEntries(t, issueID, 30, 0)
+
+	resp, code := fetchTimeline(t, issueID, "limit=30")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if len(resp.Entries) != 30 {
+		t.Fatalf("expected 30 entries on first page, got %d", len(resp.Entries))
+	}
+	if resp.HasMoreBefore {
+		t.Fatalf("has_more_before must be false when comments == limit (issue has nothing older)")
+	}
+	if resp.NextCursor != nil {
+		t.Fatalf("next_cursor must be nil when has_more_before is false, got %q", *resp.NextCursor)
+	}
+}
+
+// TestListTimeline_DenseActivityDoesNotHideComments reproduces #1857: an issue
+// with sparse comments but dense activity (status flips, agent runs) used to
+// trigger has_more_before because activities consumed the same page budget.
+// Real comments would get pushed off the visible page and users would think
+// the discussion had vanished. Post-fix, has_more_before is gated on comments
+// alone, so the entire conversation stays visible without "show older".
+func TestListTimeline_DenseActivityDoesNotHideComments(t *testing.T) {
+	issueID := createIssueForTimeline(t, "1857 sparse comments dense activity")
+
+	// 10 comments — well under the 30-comment page budget — paired with 60
+	// activities (an agent that flipped status / completed runs many times).
+	// seedTimelineEntries inserts comments first (older block), then activities
+	// (newer block), matching the typical "issue created → discussion → many
+	// agent runs" timeline shape.
+	commentIDs, _ := seedTimelineEntries(t, issueID, 10, 60)
+
+	resp, code := fetchTimeline(t, issueID, "limit=30")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if resp.HasMoreBefore {
+		t.Fatalf("has_more_before must be false when comments < limit, even if activities are dense (#1857)")
+	}
+
+	// Every seeded comment must be on the first page — none should be hidden
+	// behind a "show older" gate on an issue with so few comments.
+	commentSeen := map[string]bool{}
+	for _, e := range resp.Entries {
+		if e.Type == "comment" {
+			commentSeen[e.ID] = true
+		}
+	}
+	for _, id := range commentIDs {
+		if !commentSeen[id] {
+			t.Fatalf("comment %s missing from latest page — #1857 regressed", id)
+		}
+	}
 }

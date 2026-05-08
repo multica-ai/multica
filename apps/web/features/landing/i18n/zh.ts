@@ -284,6 +284,33 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.28",
+        date: "2026-05-08",
+        title: "Daemon 磁盘占用 CLI、Timeline 打磨与任务用量聚合提速",
+        changes: [],
+        features: [
+          "新增 `multica daemon disk-usage` CLI，按 task / workspace 维度查看磁盘占用",
+          "Skill Picker 弹窗新增搜索框，Agent 设置里挑技能更快",
+          "Daemon GC 覆盖扩展到 chat、autopilot、quick-create 任务",
+          "Issue 详情页面包屑直接显示 MUL-xxxx identifier",
+        ],
+        improvements: [
+          "Timeline 分页 size 提到 50，评论与活动按池独立 keyset 游标，长 Issue 翻页更顺",
+          "Show older / newer 按钮在边界场景也能正确出现，且视觉上更明显是可点击的",
+          "服务端 `task_usage` 聚合到每日 rollup 表，DB 负载明显下降",
+          "Daemon health check 在 repo 查询时不再阻塞，始终保持响应",
+          "Runtime 统计排除已归档的 agent，活跃数字更准",
+        ],
+        fixes: [
+          "Linux 上 daemon self-restart 改走 `brew prefix` 软链，Homebrew Cellar 删除后不再让 runtime 失联",
+          "CLI 短 ID 现在可以正确路由，复制粘贴的短前缀不再 404",
+          "Windows 上非 ASCII 字符评论 / 描述输入新增 `--content-file` / `--description-file`",
+          "Windows / Linux 桌面端用 Multica asterisk 替换 Electron 默认占位图标",
+          "Timeline 中孤立的 reply 现在会被正确捞回展示",
+          "Timeline 评论分页预算不再把 activity 算进去，避免活动多时挤掉真实评论",
+        ],
+      },
+      {
         version: "0.2.27",
         date: "2026-05-07",
         title: "Chat 更顺手，Skill 支持 GitHub 导入，稳定性更好",

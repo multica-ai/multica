@@ -284,6 +284,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.28",
+        date: "2026-05-08",
+        title: "Daemon Disk-Usage CLI, Timeline Polish & Task Usage Rollup",
+        changes: [],
+        features: [
+          "New `multica daemon disk-usage` CLI surfaces per-task and per-workspace disk footprint",
+          "Skill picker in agent settings has a search box for fast lookup",
+          "Daemon GC extends to chat, autopilot, and quick-create tasks",
+          "Issue detail breadcrumb now shows the MUL-xxxx identifier for quick reference",
+        ],
+        improvements: [
+          "Timeline page size bumped to 50, with per-pool keyset cursors for comments and activities",
+          "'Show older / newer' affordances now appear in edge cases and look clearly clickable",
+          "Server `task_usage` rolls up into a daily aggregate table, dropping DB load significantly",
+          "Daemon health check stays responsive while repo lookups are in flight",
+          "Runtime stats exclude archived agents for accurate active counts",
+        ],
+        fixes: [
+          "Linux daemon self-restart uses `brew prefix` symlinks, so Homebrew Cellar deletion no longer orphans runtimes",
+          "CLI short IDs now route correctly — copied prefixes no longer 404",
+          "Windows non-ASCII comment / description input lands via new `--content-file` / `--description-file` flags",
+          "Windows / Linux desktop replaces the Electron placeholder icon with the Multica asterisk",
+          "Orphaned timeline replies are now correctly surfaced",
+          "Timeline comment pagination budget excludes activities, so heavy activity no longer crowds out real comments",
+        ],
+      },
+      {
         version: "0.2.27",
         date: "2026-05-07",
         title: "Smoother Chat, GitHub Skill Import & Stability Fixes",

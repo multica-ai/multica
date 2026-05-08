@@ -244,10 +244,11 @@ multica issue list
 multica issue list --status in_progress
 multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+multica issue list --full-id
 multica issue list --limit 20 --output json
 ```
 
-Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
+表格输出默认显示可直接复制到后续命令的 issue `KEY`（例如 `MUL-123`）；需要完整 UUID 时使用 `--full-id`。Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
 
 ### Get Issue
 
@@ -310,15 +311,19 @@ multica issue comment delete <comment-id>
 ```bash
 # List all execution runs for an issue
 multica issue runs <issue-id>
+multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
 # View messages for a specific execution run
 multica issue run-messages <task-id>
+multica issue run-messages <short-task-id> --issue <issue-id>
 multica issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
+
+`runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 可直接接受完整 task UUID；从 `runs` 表格复制短前缀时需要同时传 `--issue <issue-id>`，CLI 只会在该 issue 的 runs 内解析。
 
 ## Projects
 
