@@ -3,12 +3,13 @@
 // CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
 
 import { useEffect, useState } from "react";
-import { Save, LogOut } from "lucide-react";
+import { Cloud, KeyRound, LogOut, Save } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -41,6 +42,21 @@ import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { KillSwitchSection } from "@multica/cerebro-budgets/views";
 import { useT } from "../../i18n";
+
+interface FirtalGatewaySettings {
+  enabled?: boolean;
+  gateway_url?: string;
+  api_key_configured?: boolean;
+  model?: string;
+}
+
+function getFirtalGatewaySettings(workspace: Workspace | null): FirtalGatewaySettings {
+  const settings = workspace?.settings?.firtal_gateway;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return {};
+  }
+  return settings as FirtalGatewaySettings;
+}
 
 export function WorkspaceTab() {
   const { t } = useT("settings");
@@ -102,6 +118,12 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [saving, setSaving] = useState(false);
+  const initialGatewaySettings = getFirtalGatewaySettings(workspace);
+  const [gatewayEnabled, setGatewayEnabled] = useState(initialGatewaySettings.enabled === true);
+  const [gatewayUrl, setGatewayUrl] = useState(initialGatewaySettings.gateway_url ?? "");
+  const [gatewayApiKey, setGatewayApiKey] = useState("");
+  const [gatewayModel, setGatewayModel] = useState(initialGatewaySettings.model ?? "");
+  const [savingGateway, setSavingGateway] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -114,6 +136,12 @@ export function WorkspaceTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  const gatewaySettings = getFirtalGatewaySettings(workspace);
+  const gatewayApiKeyConfigured = gatewaySettings.api_key_configured === true;
+  const gatewaySaveDisabled =
+    !isOwner ||
+    savingGateway ||
+    (gatewayEnabled && (!gatewayUrl.trim() || (!gatewayApiKey.trim() && !gatewayApiKeyConfigured)));
   // Mirror the backend invariant (server/internal/handler/workspace.go:569):
   // a workspace must always have at least one owner, so the sole owner can't
   // leave. Pre-flight here instead of letting the 400 round-trip become a
@@ -126,6 +154,11 @@ export function WorkspaceTab() {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
+    const gatewaySettings = getFirtalGatewaySettings(workspace);
+    setGatewayEnabled(gatewaySettings.enabled === true);
+    setGatewayUrl(gatewaySettings.gateway_url ?? "");
+    setGatewayApiKey("");
+    setGatewayModel(gatewaySettings.model ?? "");
   }, [workspace]);
 
   const handleSave = async () => {
@@ -145,6 +178,37 @@ export function WorkspaceTab() {
       toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_save_failed));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveGatewaySettings = async () => {
+    if (!workspace) return;
+    setSavingGateway(true);
+    try {
+      const nextGateway: Record<string, unknown> = {
+        enabled: gatewayEnabled,
+        gateway_url: gatewayUrl.trim(),
+        model: gatewayModel.trim(),
+      };
+      if (gatewayApiKey.trim()) {
+        nextGateway.api_key = gatewayApiKey.trim();
+      }
+
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: {
+          ...workspace.settings,
+          firtal_gateway: nextGateway,
+        },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setGatewayApiKey("");
+      toast.success(t(($) => $.workspace.gateway_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.gateway_toast_failed));
+    } finally {
+      setSavingGateway(false);
     }
   };
 
@@ -247,6 +311,103 @@ export function WorkspaceTab() {
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.workspace.manage_hint)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Cloud className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">{t(($) => $.workspace.gateway_section)}</h2>
+        </div>
+
+        <Card>
+          <CardContent className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="firtal-gateway-enabled" className="text-sm font-medium">
+                  {t(($) => $.workspace.gateway_enabled_label)}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.gateway_enabled_hint)}
+                </p>
+              </div>
+              <Switch
+                id="firtal-gateway-enabled"
+                checked={gatewayEnabled}
+                disabled={!isOwner || savingGateway}
+                onCheckedChange={setGatewayEnabled}
+                aria-label={t(($) => $.workspace.gateway_enabled_label)}
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Label className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.gateway_url_label)}
+                </Label>
+                <Input
+                  value={gatewayUrl}
+                  onChange={(e) => setGatewayUrl(e.target.value)}
+                  disabled={!isOwner || savingGateway}
+                  className="mt-1"
+                  placeholder="https://registry.example"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.gateway_model_label)}
+                </Label>
+                <Input
+                  value={gatewayModel}
+                  onChange={(e) => setGatewayModel(e.target.value)}
+                  disabled={!isOwner || savingGateway}
+                  className="mt-1"
+                  placeholder="claude-sonnet-4-6"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <KeyRound className="h-3 w-3" />
+                {t(($) => $.workspace.gateway_key_label)}
+              </Label>
+              <Input
+                type="password"
+                value={gatewayApiKey}
+                onChange={(e) => setGatewayApiKey(e.target.value)}
+                disabled={!isOwner || savingGateway}
+                className="mt-1"
+                placeholder={
+                  gatewayApiKeyConfigured
+                    ? t(($) => $.workspace.gateway_key_placeholder_configured)
+                    : "FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY"
+                }
+                autoComplete="off"
+              />
+              {gatewayApiKeyConfigured && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t(($) => $.workspace.gateway_key_configured)}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                onClick={handleSaveGatewaySettings}
+                disabled={gatewaySaveDisabled}
+              >
+                <Save className="h-3 w-3" />
+                {savingGateway ? t(($) => $.workspace.gateway_saving) : t(($) => $.workspace.gateway_save)}
+              </Button>
+            </div>
+            {!isOwner && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.gateway_owner_hint)}
               </p>
             )}
           </CardContent>

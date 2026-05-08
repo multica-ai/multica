@@ -4,14 +4,17 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -19,6 +22,11 @@ import (
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+const (
+	firtalGatewaySettingsKey = "firtal_gateway"
+	firtalGatewayAPIKeyMask  = "********"
+)
 
 // generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
 // Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
@@ -55,6 +63,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
+	settings = sanitizeWorkspaceSettingsForResponse(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -74,6 +83,288 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
+}
+
+func sanitizeWorkspaceSettingsForResponse(settings any) any {
+	settingsMap, err := settingsMapFromAny(settings)
+	if err != nil {
+		return map[string]any{}
+	}
+	if gateway, ok := mapFromAny(settingsMap[firtalGatewaySettingsKey]); ok {
+		if gatewayString(gateway, "api_key") != "" {
+			delete(gateway, "api_key")
+			gateway["api_key_configured"] = true
+		}
+		settingsMap[firtalGatewaySettingsKey] = gateway
+	}
+	return settingsMap
+}
+
+func sanitizeWorkspaceSettingsJSON(raw []byte) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var settings any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	sanitized, err := json.Marshal(sanitizeWorkspaceSettingsForResponse(settings))
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(sanitized)
+}
+
+func prepareWorkspaceSettingsUpdate(currentRaw []byte, incoming any) ([]byte, bool, error) {
+	current := settingsMapFromJSON(currentRaw)
+	next, err := settingsMapFromAny(incoming)
+	if err != nil {
+		return nil, false, fmt.Errorf("settings must be an object")
+	}
+
+	currentGateway, hasCurrentGateway := mapFromAny(current[firtalGatewaySettingsKey])
+	incomingGateway, hasIncomingGateway := next[firtalGatewaySettingsKey]
+	gatewayChanged := false
+
+	if hasIncomingGateway {
+		normalized, changed, err := normalizeFirtalGatewaySettingsForStorage(currentGateway, incomingGateway)
+		if err != nil {
+			return nil, false, err
+		}
+		gatewayChanged = changed
+		if normalized == nil {
+			delete(next, firtalGatewaySettingsKey)
+		} else {
+			next[firtalGatewaySettingsKey] = normalized
+		}
+	} else if hasCurrentGateway {
+		next[firtalGatewaySettingsKey] = cloneMap(currentGateway)
+	}
+
+	raw, err := json.Marshal(next)
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal settings: %w", err)
+	}
+	return raw, gatewayChanged, nil
+}
+
+func normalizeFirtalGatewaySettingsForStorage(current map[string]any, incoming any) (map[string]any, bool, error) {
+	if incoming == nil {
+		return nil, current != nil, nil
+	}
+	next, ok := mapFromAny(incoming)
+	if !ok {
+		return nil, false, fmt.Errorf("firtal gateway settings must be an object")
+	}
+	next = cloneMap(next)
+	delete(next, "api_key_configured")
+
+	if err := normalizeBoolField(next, "enabled"); err != nil {
+		return nil, false, err
+	}
+	if err := normalizeStringField(next, "gateway_url"); err != nil {
+		return nil, false, err
+	}
+	if err := normalizeStringField(next, "model"); err != nil {
+		return nil, false, err
+	}
+
+	gatewayURL := gatewayString(next, "gateway_url")
+	if gatewayURL != "" {
+		normalizedURL, err := firtalgateway.ValidateBaseURL(gatewayURL)
+		if err != nil {
+			return nil, false, fmt.Errorf("firtal gateway URL %w", err)
+		}
+		next["gateway_url"] = normalizedURL
+	}
+	preserveCurrentKey := !gatewayHostChanged(current, next)
+	if err := normalizeGatewayAPIKey(next, gatewayString(current, "api_key"), preserveCurrentKey); err != nil {
+		return nil, false, err
+	}
+	if enabled, _ := next["enabled"].(bool); enabled {
+		if gatewayString(next, "gateway_url") == "" {
+			return nil, false, fmt.Errorf("firtal gateway URL is required when enabled")
+		}
+		if gatewayString(next, "api_key") == "" {
+			return nil, false, fmt.Errorf("firtal gateway API key is required when enabled")
+		}
+	}
+
+	return next, !reflect.DeepEqual(gatewayComparable(current), gatewayComparable(next)), nil
+}
+
+func normalizeBoolField(values map[string]any, key string) error {
+	value, ok := values[key]
+	if !ok {
+		return nil
+	}
+	if value == nil {
+		delete(values, key)
+		return nil
+	}
+	if _, ok := value.(bool); !ok {
+		return fmt.Errorf("%s must be a boolean", key)
+	}
+	return nil
+}
+
+func normalizeStringField(values map[string]any, key string) error {
+	value, ok := values[key]
+	if !ok {
+		return nil
+	}
+	if value == nil {
+		delete(values, key)
+		return nil
+	}
+	str, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string", key)
+	}
+	str = strings.TrimSpace(str)
+	if str == "" {
+		delete(values, key)
+		return nil
+	}
+	if key == "gateway_url" {
+		str = strings.TrimRight(str, "/")
+	}
+	values[key] = str
+	return nil
+}
+
+func normalizeGatewayAPIKey(values map[string]any, currentKey string, preserveCurrent bool) error {
+	value, ok := values["api_key"]
+	if !ok {
+		if preserveCurrent && currentKey != "" {
+			values["api_key"] = currentKey
+		}
+		return nil
+	}
+	if value == nil {
+		delete(values, "api_key")
+		return nil
+	}
+	apiKey, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("api_key must be a string")
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" || apiKey == firtalGatewayAPIKeyMask {
+		if preserveCurrent && currentKey != "" {
+			values["api_key"] = currentKey
+		} else {
+			delete(values, "api_key")
+		}
+		return nil
+	}
+	values["api_key"] = apiKey
+	return nil
+}
+
+func gatewayHostChanged(current, next map[string]any) bool {
+	currentURL := gatewayString(current, "gateway_url")
+	nextURL := gatewayString(next, "gateway_url")
+	if currentURL == "" || nextURL == "" {
+		return currentURL != nextURL
+	}
+	currentHost, currentOK := gatewayHost(currentURL)
+	nextHost, nextOK := gatewayHost(nextURL)
+	if !currentOK || !nextOK {
+		return currentURL != nextURL
+	}
+	return currentHost != nextHost
+}
+
+func gatewayHost(raw string) (string, bool) {
+	host, err := firtalgateway.BaseURLHost(raw)
+	return host, err == nil
+}
+
+func gatewayComparable(values map[string]any) map[string]any {
+	if values == nil {
+		return nil
+	}
+	out := cloneMap(values)
+	delete(out, "api_key_configured")
+	_ = normalizeBoolField(out, "enabled")
+	_ = normalizeStringField(out, "gateway_url")
+	_ = normalizeStringField(out, "model")
+	_ = normalizeStringField(out, "api_key")
+	return out
+}
+
+func settingsMapFromJSON(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func settingsMapFromAny(value any) (map[string]any, error) {
+	if value == nil {
+		return map[string]any{}, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out, nil
+}
+
+func mapFromAny(value any) (map[string]any, bool) {
+	if value == nil {
+		return nil, false
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed, true
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func gatewayString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 type MemberResponse struct {
@@ -266,8 +557,22 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
-		s, _ := json.Marshal(req.Settings)
-		params.Settings = s
+		current, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		settingsJSON, gatewayChanged, err := prepareWorkspaceSettingsUpdate(current.Settings, req.Settings)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if gatewayChanged {
+			if _, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner"); !ok {
+				return
+			}
+		}
+		params.Settings = settingsJSON
 	}
 	if req.Repos != nil {
 		reposJSON, _ := json.Marshal(req.Repos)

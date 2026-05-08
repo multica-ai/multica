@@ -2,12 +2,188 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"testing"
 )
+
+func TestWorkspaceSettingsSanitizesFirtalGatewayKey(t *testing.T) {
+	settings := sanitizeWorkspaceSettingsForResponse(map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":     true,
+			"gateway_url": "https://registry.example",
+			"api_key":     "rk_secret",
+			"model":       "gpt-5.5",
+		},
+	}).(map[string]any)
+
+	gateway := settings["firtal_gateway"].(map[string]any)
+	if _, ok := gateway["api_key"]; ok {
+		t.Fatal("api_key leaked in sanitized workspace settings")
+	}
+	if gateway["api_key_configured"] != true {
+		t.Fatalf("api_key_configured = %#v, want true", gateway["api_key_configured"])
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdatePreservesGatewaySecretFromSanitizedInput(t *testing.T) {
+	current := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example","api_key":"rk_secret","model":"gpt-5.5"}}`)
+	raw, changed, err := prepareWorkspaceSettingsUpdate(current, map[string]any{
+		"co_authored_by_enabled": true,
+		"firtal_gateway": map[string]any{
+			"enabled":            true,
+			"gateway_url":        "https://registry.example",
+			"api_key_configured": true,
+			"model":              "gpt-5.5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareWorkspaceSettingsUpdate() error = %v", err)
+	}
+	if changed {
+		t.Fatal("gateway settings should not be marked changed when sanitized input matches stored config")
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	gateway := stored["firtal_gateway"].(map[string]any)
+	if gateway["api_key"] != "rk_secret" {
+		t.Fatalf("api_key = %#v, want preserved secret", gateway["api_key"])
+	}
+	if _, ok := gateway["api_key_configured"]; ok {
+		t.Fatal("api_key_configured should not be persisted")
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateRequiresCompleteEnabledGateway(t *testing.T) {
+	_, _, err := prepareWorkspaceSettingsUpdate(nil, map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":     true,
+			"gateway_url": "https://registry.example",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected enabled gateway without API key to fail")
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateRejectsUnsafeGatewayURL(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://registry.example",
+		"https://localhost",
+		"https://127.0.0.1",
+		"https://169.254.169.254",
+		"https://registry.internal",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			_, _, err := prepareWorkspaceSettingsUpdate(nil, map[string]any{
+				"firtal_gateway": map[string]any{
+					"enabled":     true,
+					"gateway_url": rawURL,
+					"api_key":     "rk_secret",
+				},
+			})
+			if err == nil {
+				t.Fatal("expected unsafe gateway URL to fail")
+			}
+		})
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateNormalizesGatewayURL(t *testing.T) {
+	raw, _, err := prepareWorkspaceSettingsUpdate(nil, map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":     true,
+			"gateway_url": " https://Registry.Example.Com/ ",
+			"api_key":     "rk_secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareWorkspaceSettingsUpdate() error = %v", err)
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	gateway := stored["firtal_gateway"].(map[string]any)
+	if gateway["gateway_url"] != "https://registry.example.com" {
+		t.Fatalf("gateway_url = %#v", gateway["gateway_url"])
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateRequiresFreshKeyWhenGatewayHostChanges(t *testing.T) {
+	current := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example.com","api_key":"rk_secret","model":"gpt-5.5"}}`)
+
+	_, _, err := prepareWorkspaceSettingsUpdate(current, map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":            true,
+			"gateway_url":        "https://other-registry.example.com",
+			"api_key_configured": true,
+			"model":              "gpt-5.5",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected host change without fresh API key to fail")
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateClearsStoredKeyWhenDisabledHostChanges(t *testing.T) {
+	current := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example.com","api_key":"rk_secret","model":"gpt-5.5"}}`)
+
+	raw, _, err := prepareWorkspaceSettingsUpdate(current, map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":            false,
+			"gateway_url":        "https://other-registry.example.com",
+			"api_key_configured": true,
+			"model":              "gpt-5.5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareWorkspaceSettingsUpdate() error = %v", err)
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	gateway := stored["firtal_gateway"].(map[string]any)
+	if _, ok := gateway["api_key"]; ok {
+		t.Fatal("api_key should be cleared when host changes without a fresh key")
+	}
+}
+
+func TestPrepareWorkspaceSettingsUpdateDetectsGatewayRotation(t *testing.T) {
+	current := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example","api_key":"rk_old","model":"gpt-5.5"}}`)
+	raw, changed, err := prepareWorkspaceSettingsUpdate(current, map[string]any{
+		"firtal_gateway": map[string]any{
+			"enabled":     true,
+			"gateway_url": "https://registry.example",
+			"api_key":     "rk_new",
+			"model":       "gpt-5.5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareWorkspaceSettingsUpdate() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("gateway rotation should be marked changed")
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	gateway := stored["firtal_gateway"].(map[string]any)
+	if gateway["api_key"] != "rk_new" {
+		t.Fatalf("api_key = %#v, want rotated secret", gateway["api_key"])
+	}
+}
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 	// Drive the test off the actual reservedSlugs map so the test can never
