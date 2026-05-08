@@ -21,6 +21,15 @@ WHERE id = $1;
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetIssueForUpdate :one
+-- Locks the issue row for the duration of the surrounding tx. Used by the
+-- comment-create handler (PUL-13 P1 hook_comment auto-flip) to serialize
+-- concurrent writers (other comments, manual status sets) against this issue.
+-- The lock is released when the tx commits or rolls back.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
