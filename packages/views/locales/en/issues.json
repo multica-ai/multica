@@ -128,7 +128,12 @@
     "sidebar_tooltip": "Toggle sidebar",
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
-    "link_copy_failed": "Failed to copy link"
+    "link_copy_failed": "Failed to copy link",
+    "clear_history": "Clear history",
+    "clear_history_title": "Clear all history?",
+    "clear_history_description": "This will permanently delete all comments and task run records. This action cannot be undone.",
+    "clear_history_cancel": "Cancel",
+    "clear_history_confirm": "Clear"
   },
   "timeline": {
     "show_older": "Show older",
