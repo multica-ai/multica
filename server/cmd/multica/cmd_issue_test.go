@@ -717,10 +717,19 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 }
 
 func TestValidIssueStatuses(t *testing.T) {
+	// Mirror the canonical CLI whitelist (validIssueStatuses in cmd_issue.go).
+	// PUL-13 P0 (migration 070_issue_status_flow_p0) extended the lifecycle to
+	// 11 values: the original 7 plus waiting/planned/developing/deployed.
+	// in_review and done remain in the whitelist as legacy CLI aliases for the
+	// 30-day grace window before PR7 cleanup removes them.
 	expected := map[string]bool{
 		"backlog":     true,
 		"todo":        true,
 		"in_progress": true,
+		"waiting":     true,
+		"planned":     true,
+		"developing":  true,
+		"deployed":    true,
 		"in_review":   true,
 		"done":        true,
 		"blocked":     true,

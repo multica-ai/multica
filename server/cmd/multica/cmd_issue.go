@@ -92,6 +92,40 @@ var issueStatusCmd = &cobra.Command{
 	RunE:  runIssueStatus,
 }
 
+// PUL-13 P1: handoff and keep-working are user-facing primitives over the
+// type-tagged comment payload. handoff posts a regular comment and lets the
+// server's hook_comment auto-flip Rule B move the ticket from in_progress to
+// waiting. keep-working posts a progress_update comment that explicitly opts
+// out of Rule B — used when the agent wants to leave an interim note without
+// handing the ball back to the human yet.
+
+var issueHandoffCmd = &cobra.Command{
+	Use:   "handoff <id>",
+	Short: "Hand the ticket back to the owner (posts a comment; status flips in_progress → waiting)",
+	Long: `Post a comment on the given issue marking the agent's turn as complete.
+
+If the issue is currently in_progress and assigned to the agent calling this
+command, the server automatically flips the status to waiting on the comment
+hook. Use 'keep-working' instead to post an interim note that should NOT flip
+the status.`,
+	Args: exactArgs(1),
+	RunE: runIssueHandoff,
+}
+
+var issueKeepWorkingCmd = &cobra.Command{
+	Use:   "keep-working <id>",
+	Short: "Post an interim agent update without flipping the status",
+	Long: `Post a progress_update comment on the given issue. The server's
+hook_comment auto-flip skips progress_update comments by design (Rule B
+opt-out), so the issue stays in_progress and the owner does not see a
+"your turn" signal.
+
+Use 'handoff' instead when the agent's turn is actually complete and the
+ball should return to the human.`,
+	Args: exactArgs(1),
+	RunE: runIssueKeepWorking,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -197,6 +231,8 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueHandoffCmd)
+	issueCmd.AddCommand(issueKeepWorkingCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -301,6 +337,12 @@ func init() {
 	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (fuzzy match; defaults to the caller)")
 	issueSubscriberRemoveCmd.Flags().String("user-id", "", "Member or agent UUID to unsubscribe (mutually exclusive with --user)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue handoff / keep-working (PUL-13 P1)
+	issueHandoffCmd.Flags().String("message", "", "Custom comment body (default: \"[handoff]\")")
+	issueHandoffCmd.Flags().String("output", "json", "Output format: table or json")
+	issueKeepWorkingCmd.Flags().String("message", "", "Custom comment body (default: \"[keep-working]\")")
+	issueKeepWorkingCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +959,51 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// PUL-13 P1: handoff and keep-working share most plumbing — they differ only
+// in the comment.type they post and the default body. postFlipComment factors
+// out the common path so each command is a thin descriptor.
+
+func postFlipComment(cmd *cobra.Command, issueID, commentType, defaultBody string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	message, _ := cmd.Flags().GetString("message")
+	body := defaultBody
+	if message != "" {
+		body = message
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	payload := map[string]any{
+		"content": body,
+		"type":    commentType,
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", payload, &result); err != nil {
+		return fmt.Errorf("post comment: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintf(os.Stderr, "Comment posted on issue %s.\n", truncateID(issueID))
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runIssueHandoff(cmd *cobra.Command, args []string) error {
+	return postFlipComment(cmd, args[0], "comment", "[handoff]")
+}
+
+func runIssueKeepWorking(cmd *cobra.Command, args []string) error {
+	return postFlipComment(cmd, args[0], "progress_update", "[keep-working]")
 }
 
 func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
