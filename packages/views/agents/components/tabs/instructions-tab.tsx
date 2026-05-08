@@ -9,12 +9,10 @@ import { useT } from "../../../i18n";
 
 export function InstructionsTab({
   agent,
-  readOnly = false,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
-  readOnly?: boolean;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -79,33 +77,23 @@ export function InstructionsTab({
         />
       </div>
 
-      <textarea
-        value={value}
-        onChange={(e) => { if (!readOnly) setValue(e.target.value); }}
-        readOnly={readOnly}
-        placeholder={readOnly ? "No instructions set" : `Define this agent's role, expertise, and working style.\n\nExample:\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/`}
-        className={`w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y ${readOnly ? "cursor-default bg-muted/50" : ""}`}
-      />
-
-      {!readOnly && (
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            {value.length > 0 ? `${value.length} characters` : "No instructions set"}
-          </span>
-          <Button
-            size="xs"
-            onClick={handleSave}
-            disabled={!isDirty || saving}
-          >
-            {saving ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Save className="h-3 w-3" />
-            )}
-            Save
-          </Button>
-        </div>
-      )}
+      <div className="flex items-center justify-end gap-3">
+        {isDirty && (
+          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+        )}
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={!isDirty || saving}
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.tab_body.common.save)}
+        </Button>
+      </div>
     </div>
   );
 }
