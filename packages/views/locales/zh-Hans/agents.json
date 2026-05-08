@@ -350,5 +350,15 @@
   "workspace_filter": {
     "show_all": "显示所有智能体",
     "show_workspace": "仅显示工作区智能体"
+  },
+  "defaults": {
+    "personal_title": "个人默认配置",
+    "personal_desc": "你的默认 Agent 配置",
+    "system_title": "系统默认配置",
+    "system_desc": "工作区级别默认配置",
+    "section_label": "Agent 默认配置",
+    "you_label": "（你）",
+    "sheet_title": "Agent 默认配置",
+    "sheet_desc": "配置默认 Agent 设置"
   }
 }

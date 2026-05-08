@@ -9,10 +9,12 @@ import {
   Globe,
   Plus,
   Search,
+  Sliders,
+  Settings2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
+import type { Agent, AgentRuntime, CreateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
@@ -41,11 +43,24 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { DataTable } from "@multica/ui/components/ui/data-table";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+} from "@multica/ui/components/ui/sheet";
+import { toast } from "sonner";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
+import {
+  PersonalDefaultsDetail,
+  SystemDefaultsDetail,
+  OtherDefaultsDetail,
+} from "./defaults-detail";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
 // Filter axes:
@@ -118,6 +133,27 @@ export function AgentsPage() {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
+
+  // ── Agent Defaults state ──────────────────────────────────────────────
+  type DefaultsSheet = "personal" | "system" | { configId: string; defaults: AgentDefaultsWithUser } | null;
+  const [defaultsSheet, setDefaultsSheet] = useState<DefaultsSheet>(null);
+
+  const { data: allDefaults = [] } = useQuery({
+    queryKey: ["workspaces", wsId, "all-agent-defaults"],
+    queryFn: () => api.listAllAgentDefaults(wsId),
+    enabled: scope === "all",
+  });
+
+  const handleDuplicateDefaults = async (configId: string) => {
+    try {
+      await api.duplicateAgentDefaults(wsId, configId);
+      qc.invalidateQueries({ queryKey: ["workspaces", wsId, "personal-agent-defaults"] });
+      toast.success("Defaults duplicated to your personal config");
+      setDefaultsSheet(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to duplicate defaults");
+    }
+  };
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -423,6 +459,19 @@ export function AgentsPage() {
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+        {/* ── Agent Defaults cards ─────────────────────────────────── */}
+        {view === "active" && (
+          <DefaultsCardsRow
+            scope={scope}
+            isAdmin={isWorkspaceAdmin}
+            allDefaults={allDefaults}
+            currentUserId={currentUser?.id ?? null}
+            onOpenPersonal={() => setDefaultsSheet("personal")}
+            onOpenSystem={() => setDefaultsSheet("system")}
+            onOpenOther={(d) => setDefaultsSheet({ configId: d.id!, defaults: d })}
+          />
+        )}
+
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState onCreate={() => setShowCreate(true)} />
@@ -490,6 +539,111 @@ export function AgentsPage() {
           onCreate={handleCreate}
         />
       )}
+
+      {/* ── Agent Defaults sheet ───────────────────────────────── */}
+      <Sheet
+        open={defaultsSheet !== null}
+        onOpenChange={(open) => { if (!open) setDefaultsSheet(null); }}
+      >
+        <SheetContent side="right" className="sm:max-w-xl p-0">
+          <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
+          <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
+          {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
+          {defaultsSheet === "system" && <SystemDefaultsDetail />}
+          {defaultsSheet !== null && typeof defaultsSheet === "object" && (
+            <OtherDefaultsDetail
+              defaults={defaultsSheet.defaults}
+              onDuplicate={() => handleDuplicateDefaults(defaultsSheet.configId)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Defaults cards — shown above the agent table in Active view.
+// Mine scope: Personal Defaults + System Defaults (admin only).
+// All scope: All users' defaults.
+// ---------------------------------------------------------------------------
+
+function DefaultsCardsRow({
+  scope,
+  isAdmin,
+  allDefaults,
+  currentUserId,
+  onOpenPersonal,
+  onOpenSystem,
+  onOpenOther,
+}: {
+  scope: Scope;
+  isAdmin: boolean;
+  allDefaults: AgentDefaultsWithUser[];
+  currentUserId: string | null;
+  onOpenPersonal: () => void;
+  onOpenSystem: () => void;
+  onOpenOther: (d: AgentDefaultsWithUser) => void;
+}) {
+  const { t } = useT("agents");
+
+  if (scope === "mine") {
+    return (
+      <div className="flex shrink-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={onOpenPersonal}
+          className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-left transition-colors hover:bg-accent/50"
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
+            <Sliders className="h-4 w-4 text-blue-500" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t(($) => $.defaults.personal_title)}</div>
+            <p className="text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</p>
+          </div>
+        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={onOpenSystem}
+            className="flex items-center gap-3 rounded-lg border bg-background px-4 py-3 text-left transition-colors hover:bg-accent/50"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
+              <Settings2 className="h-4 w-4 text-amber-500" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{t(($) => $.defaults.system_title)}</div>
+              <p className="text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</p>
+            </div>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // "All" scope: show all users' defaults
+  if (allDefaults.length === 0) return null;
+
+  return (
+    <div className="flex shrink-0 items-center gap-3 overflow-x-auto">
+      <span className="shrink-0 text-xs font-medium text-muted-foreground">{t(($) => $.defaults.section_label)}</span>
+      {allDefaults.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          onClick={() => onOpenOther(d)}
+          className="flex shrink-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-accent/50"
+        >
+          <ActorAvatar actorType="member" actorId={d.user_id} size={24} />
+          <div className="min-w-0">
+            <span className="text-sm font-medium truncate">{d.user_name}</span>
+            {d.user_id === currentUserId && (
+              <span className="ml-1 text-xs text-muted-foreground">{t(($) => $.defaults.you_label)}</span>
+            )}
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
