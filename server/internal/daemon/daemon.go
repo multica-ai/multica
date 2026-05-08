@@ -1664,6 +1664,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Auto-inject KUBECONFIG for per-agent cluster identity. The runtime
+	// pod projects /etc/multica/kube/<slug>.kubeconfig per dispatched
+	// agent so that audit logs in the target cluster attribute API calls
+	// to a distinct ServiceAccount (e.g. "boris" vs "doug") rather than a
+	// shared one. Skipped silently when no matching file exists.
+	if task.Agent != nil {
+		if kc := kubeconfigPathForAgent(task.Agent.Name); kc != "" {
+			agentEnv["KUBECONFIG"] = kc
+			taskLog.Debug("agent kubeconfig auto-injected",
+				"agent", task.Agent.Name, "path", kc)
+		}
+	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
@@ -2218,7 +2230,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "KUBECONFIG":
 		return true
 	}
 	return false
