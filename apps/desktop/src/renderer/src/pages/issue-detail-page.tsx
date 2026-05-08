@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { IssueDetail } from "@multica/views/issues/components";
+import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -13,5 +14,9 @@ export function IssueDetailPage() {
   useDocumentTitle(issue ? `${issue.identifier}: ${issue.title}` : "Issue");
 
   if (!id) return null;
-  return <IssueDetail issueId={id} />;
+  return (
+    <ErrorBoundary resetKeys={[id]}>
+      <IssueDetail issueId={id} />
+    </ErrorBoundary>
+  );
 }

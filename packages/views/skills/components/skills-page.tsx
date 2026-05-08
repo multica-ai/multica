@@ -12,6 +12,7 @@ import type {
   AgentRuntime,
   MemberWithUser,
   Skill,
+  SkillSummary,
 } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
@@ -219,7 +220,7 @@ export default function SkillsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const byAssignment = (s: Skill) =>
+    const byAssignment = (s: SkillSummary) =>
       (assignments.get(s.id)?.length ?? 0) > 0;
 
     return skills.filter((s) => {

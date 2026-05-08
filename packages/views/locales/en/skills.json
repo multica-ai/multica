@@ -48,7 +48,8 @@
     "source_runtime_provider": "From {{provider}} runtime",
     "source_runtime_unknown": "From a runtime",
     "source_clawhub": "From ClawHub",
-    "source_skills_sh": "From Skills.sh"
+    "source_skills_sh": "From Skills.sh",
+    "source_github": "From GitHub"
   },
   "detail": {
     "all_skills": "All skills",
@@ -70,6 +71,7 @@
       "origin_runtime_unknown": "Local runtime",
       "origin_clawhub": "Imported · ClawHub",
       "origin_skills_sh": "Imported · Skills.sh",
+      "origin_github": "Imported · GitHub",
       "origin_workspace": "Workspace",
       "updated_label": "Updated {{when}}",
       "by_creator": "by {{name}}"
@@ -104,6 +106,7 @@
       "imported_runtime": "Imported from local runtime",
       "imported_clawhub": "Imported from ClawHub",
       "imported_skills_sh": "Imported from Skills.sh",
+      "imported_github": "Imported from GitHub",
       "provider": "provider · {{provider}}"
     },
     "not_found": {
@@ -189,6 +192,7 @@
       "importing": "Importing…",
       "importing_clawhub": "Importing from ClawHub…",
       "importing_skills_sh": "Importing from Skills.sh…",
+      "importing_github": "Importing from GitHub…",
       "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
       "fallback_error": "Import failed",
       "cancel": "Cancel",

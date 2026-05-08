@@ -330,3 +330,99 @@ func TestListTimeline_LegacyShapeForPreCursorClients(t *testing.T) {
 		t.Fatalf("empty issue must render as [], got %q", got)
 	}
 }
+
+// TestHasMoreBeyond covers the truth table for the page-boundary helper. The
+// 8 rows enumerate every meaningful combination of (per-table cap hit) ×
+// (merge truncation), including the #2192 shape (case "merge truncation
+// without per-table cap") which the original formula missed.
+func TestHasMoreBeyond(t *testing.T) {
+	cases := []struct {
+		name                                 string
+		comments, activities, entries, limit int
+		want                                 bool
+	}{
+		{"empty page", 0, 0, 0, 50, false},
+		{"partial page no truncation", 5, 3, 8, 50, false},
+		{"comments hit limit only", 50, 3, 50, 50, true},
+		{"activities hit limit only", 3, 50, 50, 50, true},
+		{"both hit limit", 50, 50, 50, 50, true},
+		// #2192: 48 comments + 49 activities, neither alone hits 50, merge
+		// truncated 47 rows. Old formula reported false; new reports true.
+		{"#2192 merge truncation", 48, 49, 50, 50, true},
+		{"exact-fit merge no truncation", 30, 20, 50, 50, false},
+		{"limit zero rejects", 100, 100, 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasMoreBeyond(tc.comments, tc.activities, tc.entries, tc.limit); got != tc.want {
+				t.Fatalf("hasMoreBeyond(c=%d, a=%d, e=%d, lim=%d) = %v, want %v",
+					tc.comments, tc.activities, tc.entries, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestListTimeline_MergeTruncationKeepsOlderReachable reproduces #2192 against
+// real DB rows: 48 comments dated older than 49 activities, default limit 50.
+// Pre-fix, the latest page reported has_more_before=false and the 47 older
+// comments were unreachable. Post-fix, the cursor + has_more_before flag let
+// the client walk to page 2 and recover them.
+func TestListTimeline_MergeTruncationKeepsOlderReachable(t *testing.T) {
+	issueID := createIssueForTimeline(t, "2192 merge truncation regression")
+	ctx := context.Background()
+
+	// 48 older comments, then 49 newer activities. The seedTimelineEntries
+	// helper inserts comments first (older block) then activities (newer
+	// block) — exactly the #2192 shape.
+	commentIDs, _ := seedTimelineEntries(t, issueID, 48, 49)
+
+	first, code := fetchTimeline(t, issueID, "limit=50")
+	if code != http.StatusOK {
+		t.Fatalf("first page: expected 200, got %d", code)
+	}
+	if len(first.Entries) != 50 {
+		t.Fatalf("first page should be full at 50 entries, got %d", len(first.Entries))
+	}
+	if !first.HasMoreBefore {
+		t.Fatalf("first page must report has_more_before=true (47 older comments dropped by merge)")
+	}
+	if first.NextCursor == nil {
+		t.Fatalf("first page must emit next_cursor when has_more_before=true")
+	}
+
+	// Page 2: walk older. Must surface the 47 older comments that the merge
+	// dropped on page 1.
+	second, code := fetchTimeline(t, issueID, "limit=50&before="+*first.NextCursor)
+	if code != http.StatusOK {
+		t.Fatalf("second page: expected 200, got %d", code)
+	}
+	if len(second.Entries) != 47 {
+		t.Fatalf("second page should return the 47 dropped older comments, got %d", len(second.Entries))
+	}
+
+	// Spot-check: every entry on page 2 must be a comment (the activities
+	// block was strictly newer).
+	for i, e := range second.Entries {
+		if e.Type != "comment" {
+			t.Fatalf("page 2 entry %d: expected comment, got %s", i, e.Type)
+		}
+	}
+
+	// Spot-check: page 2 must include the very oldest comment we seeded —
+	// otherwise the cursor walk lost data, which is precisely what #2192
+	// was about.
+	oldestSeeded := commentIDs[0]
+	found := false
+	for _, e := range second.Entries {
+		if e.ID == oldestSeeded {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("page 2 missing the oldest seeded comment %s — cursor walk lost data", oldestSeeded)
+	}
+
+	// Sanity: don't leak DB internals if something later changes the helper.
+	_ = ctx
+}

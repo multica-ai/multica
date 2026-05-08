@@ -56,6 +56,20 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
+-- name: TouchAgentRuntimesLastSeenBatch :execrows
+-- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
+-- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
+-- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
+--
+-- Same load-bearing predicate as the single-id form: status='online' avoids
+-- silently un-deleting a sweeper-flipped offline row, and we deliberately do
+-- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
+-- means some IDs raced to offline between Schedule and flush; their next beat
+-- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
 -- registration). Writes status, last_seen_at, and updated_at because the

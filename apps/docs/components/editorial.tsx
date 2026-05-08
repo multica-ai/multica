@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useDocsLocale } from "@/components/locale-link";
+import { prefixLocale } from "@/lib/locale-link";
 
 /**
  * Byline — editorial metadata strip with ruled top + bottom borders.
@@ -55,9 +59,10 @@ export function NumberedCard({
   tag?: string;
   children: ReactNode;
 }) {
+  const lang = useDocsLocale();
   return (
     <Link
-      href={href}
+      href={prefixLocale(href, lang)}
       className="group flex flex-col gap-2.5 border-r border-border px-0 py-5 pr-4 no-underline last:border-r-0 md:px-4 md:first:pl-0 md:last:pr-0"
     >
       <div className="font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted-foreground">

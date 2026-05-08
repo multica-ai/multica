@@ -12,6 +12,7 @@ import type {
   MemberWithUser,
   CreateAgentRequest,
 } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import {
   Dialog,
   DialogContent,
@@ -172,7 +173,10 @@ export function CreateAgentDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder={t(($) => $.create_dialog.name_placeholder)}
               className="mt-1"
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
+                if (e.key === "Enter") handleSubmit();
+              }}
             />
           </div>
 

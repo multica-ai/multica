@@ -8,6 +8,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import {
   WORKSPACE_SLUG_REGEX,
   isWorkspaceSlugConflict,
@@ -79,7 +80,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
             value={name}
             onChange={(e) => handleNameChange(e.target.value)}
             placeholder={t(($) => $.create_form.name_placeholder)}
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") handleCreate();
+            }}
           />
         </div>
         <div className="space-y-1.5">
@@ -96,7 +100,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
               onChange={(e) => handleSlugChange(e.target.value)}
               placeholder={t(($) => $.create_form.url_placeholder)}
               className="border-0 shadow-none focus-visible:ring-0"
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
+                if (e.key === "Enter") handleCreate();
+              }}
             />
           </div>
           {slugError && (
