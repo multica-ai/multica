@@ -24,6 +24,7 @@ function item(overrides: Partial<InboxItem>): InboxItem {
     issue_status: null,
     read: false,
     archived: false,
+    muted_until: null,
     created_at: "2026-04-29T12:00:00Z",
     details: null,
     ...overrides,

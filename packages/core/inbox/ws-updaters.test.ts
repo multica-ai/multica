@@ -28,6 +28,7 @@ function makeItem(
     issue_status: null,
     read: false,
     archived: false,
+    muted_until: null,
     created_at: "2025-01-01T00:00:00Z",
     details: null,
     ...overrides,

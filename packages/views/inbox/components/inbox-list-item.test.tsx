@@ -18,6 +18,24 @@ vi.mock("@multica/core/auth", () => ({
     selector({ user: { id: "me" } }),
 }));
 
+// Stub the cerebro row-actions surface — it pulls in feature-flag hooks +
+// query client + workspace context that aren't booted in this view-level
+// test. The simple archive button is sufficient for the list-row assertions.
+vi.mock("@multica/cerebro-inbox", () => ({
+  CerebroInboxRowActions: ({ onArchive }: { onArchive: () => void }) => (
+    <button
+      type="button"
+      title="Archive"
+      onClick={(e) => {
+        e.stopPropagation();
+        onArchive();
+      }}
+    >
+      archive
+    </button>
+  ),
+}));
+
 // Translate the few strings this test asserts on (titles / labels). The
 // component uses the selector form t(($) => $.list.archive_tooltip), so we
 // resolve against the same shape the en/inbox.json bundle exposes.
@@ -64,6 +82,7 @@ function makeIssueInboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
     issue_status: "todo",
     read: false,
     archived: false,
+    muted_until: null,
     created_at: new Date().toISOString(),
     details: null,
     ...overrides,

@@ -1,6 +1,15 @@
-// Cerebro extensions over upstream's inbox. The cerebro-flavored InboxPage
-// (Phase 6 chunk 10) was retired in the origin/main merge — upstream's
-// channel-first inbox is now the single rendering path. The inbox-folders
-// feature was dropped in JEH-650 (migration 9012); this package is now an
-// empty placeholder for future cerebro-only inbox extensions.
-export {};
+// Cerebro extensions over upstream's inbox.
+//
+// History: this package previously held inbox-folders + a cerebro-flavored
+// InboxPage; both were retired during the upstream channel-first inbox merge
+// (JEH-650, migration 9012). The package is now home to the cerebro-only
+// row-actions surface (mute, mark-unread, hover menu, swipe gestures, long-
+// press) and its supporting hooks.
+export { CerebroInboxRowActions } from "./components/cerebro-inbox-row-actions";
+export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
+export {
+  useMuteInbox,
+  useUnmuteInbox,
+  useMarkInboxUnread,
+} from "./mutations";
+export { isMuted, nextLocalEightAm } from "./mute-time";

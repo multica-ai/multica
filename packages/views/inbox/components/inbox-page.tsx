@@ -24,6 +24,8 @@ import {
 } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
+import { useInboxKeyboardShortcuts } from "@multica/cerebro-inbox";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { ChannelDetail, NewMessageModal } from "../../channels";
@@ -359,6 +361,8 @@ export function InboxPage() {
       onError: () => toast.error(t(($) => $.errors.archive_failed)),
     });
   };
+  // CEREBRO-PATCH(inbox-keyboard-shortcuts): wires `e` = archive selection.
+  useInboxKeyboardShortcuts({ selectedId: selected?.id ?? null, onArchive: handleArchive });
 
   const handleMarkAllRead = () => {
     markAllReadMutation.mutate(undefined, {

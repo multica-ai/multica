@@ -944,6 +944,24 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(cerebro-inbox-actions): per-item mute / unmute / mark-unread.
+  // Server returns the partial item (id + flags) — clients merge it into the
+  // cached row optimistically and re-fetch on settle.
+  async muteInbox(id: string, mutedUntil: Date): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ muted_until: mutedUntil.toISOString() }),
+    });
+  }
+
+  async unmuteInbox(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/mute`, { method: "DELETE" });
+  }
+
+  async markInboxUnread(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/unread`, { method: "POST" });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }

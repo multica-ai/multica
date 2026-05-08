@@ -97,7 +97,9 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
-  AND read = false AND archived = false AND route = 'inbox';
+  AND read = false AND archived = false AND route = 'inbox'
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
+  AND (muted_until IS NULL OR muted_until <= NOW());
 
 -- name: CountUnreadInboxForUserAllWorkspaces :one
 -- Number of unread inbox "threads" for a member across every workspace.
@@ -115,18 +117,22 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
 -- 'read' flag is false. recipient_type is fixed to 'member' — agents have
 -- no OS badge.
 SELECT count(*) FROM (
-    SELECT DISTINCT ON (COALESCE(issue_id, id)) read
+    SELECT DISTINCT ON (COALESCE(issue_id, id)) read, muted_until
     FROM inbox_item
     WHERE recipient_type = 'member' AND recipient_id = $1
       AND archived = false AND route = 'inbox'
     ORDER BY COALESCE(issue_id, id), created_at DESC
 ) latest
-WHERE read = false;
+WHERE read = false
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the OS badge.
+  AND (muted_until IS NULL OR muted_until <= NOW());
 
 -- name: CountUnreadNotifications :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
-  AND read = false AND archived = false AND route = 'notifications';
+  AND read = false AND archived = false AND route = 'notifications'
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
+  AND (muted_until IS NULL OR muted_until <= NOW());
 
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true

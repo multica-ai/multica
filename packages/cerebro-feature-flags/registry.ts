@@ -13,7 +13,8 @@ export type CerebroFlagKey =
   | "cerebro_mcp_guide"
   | "cerebro_channels"
   | "cerebro_web_push"
-  | "cerebro_dashboard";
+  | "cerebro_dashboard"
+  | "cerebro_inbox_row_actions";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -27,6 +28,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_channels: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
+  cerebro_inbox_row_actions: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -81,5 +83,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Cerebro dashboard",
     description:
       "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
+  },
+  {
+    key: "cerebro_inbox_row_actions",
+    label: "Inbox row actions",
+    description:
+      "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
   },
 ];

@@ -44,6 +44,9 @@ export interface InboxItem {
   issue_status: IssueStatus | null;
   read: boolean;
   archived: boolean;
+  // CEREBRO-PATCH(core-types-inbox): mute until this RFC3339 timestamp;
+  // null when the item is not muted.
+  muted_until: string | null;
   created_at: string;
   details: Record<string, string> | null;
 }

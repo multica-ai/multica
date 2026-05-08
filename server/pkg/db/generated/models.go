@@ -324,6 +324,7 @@ type InboxItem struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
 }
 
 type Issue struct {

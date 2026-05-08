@@ -116,7 +116,7 @@ func (q *Queries) ArchiveInboxByIssue(ctx context.Context, arg ArchiveInboxByIss
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
 `
 
 func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -139,6 +139,7 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.ActorID,
 		&i.Details,
 		&i.Route,
+		&i.MutedUntil,
 	)
 	return i, err
 }
@@ -147,6 +148,8 @@ const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
   AND read = false AND archived = false AND route = 'inbox'
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
+  AND (muted_until IS NULL OR muted_until <= NOW())
 `
 
 type CountUnreadInboxParams struct {
@@ -164,13 +167,15 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 
 const countUnreadInboxForUserAllWorkspaces = `-- name: CountUnreadInboxForUserAllWorkspaces :one
 SELECT count(*) FROM (
-    SELECT DISTINCT ON (COALESCE(issue_id, id)) read
+    SELECT DISTINCT ON (COALESCE(issue_id, id)) read, muted_until
     FROM inbox_item
     WHERE recipient_type = 'member' AND recipient_id = $1
       AND archived = false AND route = 'inbox'
     ORDER BY COALESCE(issue_id, id), created_at DESC
 ) latest
 WHERE read = false
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the OS badge.
+  AND (muted_until IS NULL OR muted_until <= NOW())
 `
 
 // Number of unread inbox "threads" for a member across every workspace.
@@ -198,6 +203,8 @@ const countUnreadNotifications = `-- name: CountUnreadNotifications :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
   AND read = false AND archived = false AND route = 'notifications'
+  -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
+  AND (muted_until IS NULL OR muted_until <= NOW())
 `
 
 type CountUnreadNotificationsParams struct {
@@ -219,7 +226,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, route
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
 `
 
 type CreateInboxItemParams struct {
@@ -270,12 +277,13 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		&i.ActorID,
 		&i.Details,
 		&i.Route,
+		&i.MutedUntil,
 	)
 	return i, err
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until FROM inbox_item
 WHERE id = $1
 `
 
@@ -299,12 +307,13 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 		&i.ActorID,
 		&i.Details,
 		&i.Route,
+		&i.MutedUntil,
 	)
 	return i, err
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until FROM inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -333,12 +342,13 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.ActorID,
 		&i.Details,
 		&i.Route,
+		&i.MutedUntil,
 	)
 	return i, err
 }
 
 const listArchivedInboxFeed = `-- name: ListArchivedInboxFeed :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -374,6 +384,7 @@ type ListArchivedInboxFeedRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -406,6 +417,7 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 			&i.ActorID,
 			&i.Details,
 			&i.Route,
+			&i.MutedUntil,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -420,7 +432,7 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 }
 
 const listInboxFeed = `-- name: ListInboxFeed :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -456,6 +468,7 @@ type ListInboxFeedRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -488,6 +501,7 @@ func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([
 			&i.ActorID,
 			&i.Details,
 			&i.Route,
+			&i.MutedUntil,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -502,7 +516,7 @@ func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -533,6 +547,7 @@ type ListInboxItemsRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 }
 
@@ -566,6 +581,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.ActorID,
 			&i.Details,
 			&i.Route,
+			&i.MutedUntil,
 			&i.IssueStatus,
 		); err != nil {
 			return nil, err
@@ -579,7 +595,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 }
 
 const listNotificationsItems = `-- name: ListNotificationsItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -615,6 +631,7 @@ type ListNotificationsItemsRow struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -647,6 +664,7 @@ func (q *Queries) ListNotificationsItems(ctx context.Context, arg ListNotificati
 			&i.ActorID,
 			&i.Details,
 			&i.Route,
+			&i.MutedUntil,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -701,7 +719,7 @@ func (q *Queries) MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotif
 const markInboxRead = `-- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
 `
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -724,6 +742,7 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 		&i.ActorID,
 		&i.Details,
 		&i.Route,
+		&i.MutedUntil,
 	)
 	return i, err
 }

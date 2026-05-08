@@ -72,9 +72,10 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `board-view-cerebro` | packages/views/issues/components/board-view.tsx | 4 | Issues board/list view cerebro additions |
 | `budget-handler` | server/internal/handler/budget_test.go<br>server/internal/handler/budget_preclaim_test.go | 371 | Budget/spending caps (cerebro feature) |
 | `cerebro-inbox-*` | server/internal/cerebro/notifications/handler.go | 0 | Cerebro modification (see file for details) |
-| `cerebro-inbox-fields` | server/internal/handler/inbox.go | 0 | Cerebro modification (see file for details) |
+| `cerebro-inbox-actions` | packages/core/api/client.ts | 16 | API-client wrappers for the cerebro mute / unmute / mark-unread inbox endpoints (JEH-663) |
+| `cerebro-inbox-fields` | server/internal/handler/inbox.go<br>server/internal/handler/notifications.go | 0 | Cerebro modification (see file for details) — adds Route, ProjectID, MutedUntil response fields |
 | `cerebro-inbox-folders` | server/internal/handler/inbox.go | 0 | Cerebro modification (see file for details) |
-| `cerebro-inbox-routes` | server/cmd/server/router.go | 0 | Mounts cerebro inbox routes |
+| `cerebro-inbox-routes` | server/cmd/server/router.go | 0 | Mounts cerebro inbox routes (active-issue-tasks; mute / unmute / mark-unread) |
 | `cerebro-listeners` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing.go | 0 | Cerebro modification (see file for details) |
 | `chat-handler-chat` | server/internal/handler/chat.go | 87 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-attachment-test` | server/internal/handler/chat_attachment_test.go | 263 | Chat handler additions (cancel/coalesce/attachment) |
@@ -152,7 +153,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `handler-cerebro-routes` | server/internal/handler/handler.go | 37 | Server handler additions |
 | `inbox-chat-panel` | packages/views/inbox/components/inbox-chat-panel.tsx | 298 | Inbox view additions |
 | `inbox-folder-handler` | server/internal/handler/inbox_folder.go | 413 | Inbox-folder server handler (cerebro-only feature) |
+| `inbox-keyboard-shortcuts` | packages/views/inbox/components/inbox-page.tsx | 4 | Mounts cerebro `e` = archive shortcut for the inbox page (JEH-663) |
 | `inbox-list-item-cerebro` | packages/views/inbox/components/inbox-list-item.tsx | 17 | Inbox view additions |
+| `inbox-row-actions-mount` | packages/views/inbox/components/inbox-list-item.tsx | 8 | Mounts the cerebro inbox row-actions surface (mute, mark-unread, hover menu, mobile swipe + long-press) on issue rows (JEH-663) |
 | `inbox-mobile-detail-flex-height` | packages/views/inbox/components/inbox-page.tsx | 1 | Mobile inbox detail wrapper must be a flex column so embedded IssueDetail/ChannelDetail/InboxChatPanel get a defined height — overflow-y-auto block parent collapsed the body to zero height (JEH-697) |
 | `inbox-page-stub` | packages/views/inbox/components/inbox-page.tsx | 0 | Routes to cerebro inbox-page when feature flag enabled |
 | `install-runtime-script` | server/internal/handler/install_runtime.sh<br>server/internal/handler/install_runtime_embed.go | 236 | Runtime-setup token + install script (cerebro feature) |

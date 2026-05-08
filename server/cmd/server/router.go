@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
+	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -152,6 +153,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// own package so this wiring line is the only conflict surface upstream
 	// merges hit.
 	cerebroNotificationsHandler := cerebronotifications.New(queries)
+	// CEREBRO-PATCH(cerebro-inbox-routes): mounts cerebro-only inbox actions
+	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
+	// surface to a single line per cerebro inbox feature.
+	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries)
 
 	r := chi.NewRouter()
 
@@ -682,6 +687,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only mute/unread actions.
+				r.Post("/{id}/mute", cerebroInboxHandler.MuteInboxItem)
+				r.Delete("/{id}/mute", cerebroInboxHandler.UnmuteInboxItem)
+				r.Post("/{id}/unread", cerebroInboxHandler.MarkInboxUnread)
 
 				// Notifications (route='notifications'). Single-item operations
 				// (mark-read, archive) reuse the inbox endpoints above; only the

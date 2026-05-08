@@ -4,20 +4,22 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts",
-    "./core/folders": "./core/folders.ts"
+    ".": "./index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/core": "workspace:*"
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
-    "react": "catalog:"
+    "react": "catalog:",
+    "react-i18next": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",

@@ -15,9 +15,9 @@ import (
 
 // InboxItemResponse is the JSON shape returned for an inbox_item row.
 //
-// CEREBRO-PATCH(cerebro-inbox-fields): Route and ProjectID are cerebro-only
-// inbox_item columns added by cerebro DB migrations; the rest of this struct
-// is upstream.
+// CEREBRO-PATCH(cerebro-inbox-fields): Route, ProjectID, and MutedUntil are
+// cerebro-only inbox_item columns added by cerebro DB migrations; the rest
+// of this struct is upstream.
 type InboxItemResponse struct {
 	ID            string          `json:"id"`
 	WorkspaceID   string          `json:"workspace_id"`
@@ -32,6 +32,7 @@ type InboxItemResponse struct {
 	Body          *string         `json:"body"`
 	Read          bool            `json:"read"`
 	Archived      bool            `json:"archived"`
+	MutedUntil    *string         `json:"muted_until"`
 	CreatedAt     string          `json:"created_at"`
 	IssueStatus   *string         `json:"issue_status"`
 	ActorType     *string         `json:"actor_type"`
@@ -53,6 +54,7 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		Body:          textToPtr(i.Body),
 		Read:          i.Read,
 		Archived:      i.Archived,
+		MutedUntil:    timestampToPtr(i.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
 		CreatedAt:     timestampToString(i.CreatedAt),
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
@@ -74,6 +76,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		Body:          textToPtr(r.Body),
 		Read:          r.Read,
 		Archived:      r.Archived,
+		MutedUntil:    timestampToPtr(r.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
 		CreatedAt:     timestampToString(r.CreatedAt),
 		IssueStatus:   textToPtr(r.IssueStatus),
 		ActorType:     textToPtr(r.ActorType),
@@ -131,6 +134,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 				Body:          textToPtr(item.Body),
 				Read:          item.Read,
 				Archived:      item.Archived,
+				MutedUntil:    timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
 				CreatedAt:     timestampToString(item.CreatedAt),
 				IssueStatus:   textToPtr(item.IssueStatus),
 				ActorType:     textToPtr(item.ActorType),

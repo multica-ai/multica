@@ -858,9 +858,15 @@ importers:
 
   packages/cerebro-inbox:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -870,6 +876,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      react-i18next:
+        specifier: 'catalog:'
+        version: 17.0.6(i18next@26.0.9(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
