@@ -124,8 +124,12 @@ func TestTruncateID(t *testing.T) {
 
 func TestFormatAssignee(t *testing.T) {
 	actors := actorDisplayLookup{
-		members: map[string]string{"abcdefgh-1234": "Alice"},
-		agents:  map[string]string{"xyz": "CodeBot"},
+		state: &actorDisplayLookupState{
+			members:       map[string]string{"abcdefgh-1234": "Alice"},
+			agents:        map[string]string{"xyz": "CodeBot"},
+			membersLoaded: true,
+			agentsLoaded:  true,
+		},
 	}
 	tests := []struct {
 		name  string
@@ -146,6 +150,45 @@ func TestFormatAssignee(t *testing.T) {
 				t.Errorf("formatAssignee() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestActorDisplayLookupLazyLoads(t *testing.T) {
+	var memberCalls, agentCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberCalls++
+			json.NewEncoder(w).Encode([]map[string]any{{"user_id": "user-1", "name": "Alice"}})
+		case "/api/agents":
+			agentCalls++
+			json.NewEncoder(w).Encode([]map[string]any{{"id": "agent-1", "name": "CodeBot"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	lookup := loadActorDisplayLookup(context.Background(), client)
+
+	if got := lookup.agent("agent-1"); got != "CodeBot" {
+		t.Fatalf("agent() = %q, want CodeBot", got)
+	}
+	if memberCalls != 0 || agentCalls != 1 {
+		t.Fatalf("after agent lookup: memberCalls=%d agentCalls=%d, want 0/1", memberCalls, agentCalls)
+	}
+	if got := lookup.actor("member", "user-1"); got != "member:Alice" {
+		t.Fatalf("actor(member) = %q, want member:Alice", got)
+	}
+	if memberCalls != 1 || agentCalls != 1 {
+		t.Fatalf("after member lookup: memberCalls=%d agentCalls=%d, want 1/1", memberCalls, agentCalls)
+	}
+	if got := lookup.actor("member", "missing"); got != "member:missing" {
+		t.Fatalf("actor(missing member) = %q", got)
+	}
+	if memberCalls != 1 || agentCalls != 1 {
+		t.Fatalf("lookup should cache per type: memberCalls=%d agentCalls=%d", memberCalls, agentCalls)
 	}
 }
 
@@ -191,8 +234,12 @@ func TestResolveIDByPrefix(t *testing.T) {
 	})
 
 	t.Run("ambiguous prefix is rejected", func(t *testing.T) {
-		if _, err := resolveIDByPrefix(ctx, client, "thing", "aaaa", fetch); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		_, err := resolveIDByPrefix(ctx, client, "thing", "aaaa", fetch)
+		if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 			t.Fatalf("expected ambiguous error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "Alpha") || strings.Contains(err.Error(), "Beta") {
+			t.Fatalf("ambiguous error exposed candidate display/detail: %v", err)
 		}
 	})
 
@@ -269,6 +316,33 @@ func TestResolveIssueRef(t *testing.T) {
 			t.Fatalf("got %#v", got)
 		}
 	})
+
+	t.Run("bare issue number is not resolved as issue number", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/issues" {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"issues": []map[string]any{{
+					"id":         "aaaaaaaa-4bb6-4602-944b-f40ce4192fe6",
+					"identifier": "MUL-1852",
+					"title":      "Should not resolve by number",
+				}},
+				"total": 1,
+			})
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		_, err := resolveIssueRef(context.Background(), client, "1852")
+		if err == nil {
+			t.Fatal("expected bare number to be treated only as a UUID prefix")
+		}
+		if got := err.Error(); !strings.Contains(got, "id prefix") {
+			t.Fatalf("expected prefix error, got: %s", got)
+		}
+	})
 }
 
 func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
@@ -330,6 +404,88 @@ func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
 	}
 	if got[len(got)-1].ID != "bbbbbbbb-0000-0000-0000-000000000000" {
 		t.Fatalf("last candidate = %#v", got[len(got)-1])
+	}
+}
+
+func TestResolveTaskRunID(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	taskID := "abcd1234-0000-0000-0000-000000000000"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues":
+			json.NewEncoder(w).Encode(map[string]any{
+				"issues": []map[string]any{{
+					"id":         issueID,
+					"identifier": "MUL-1852",
+					"title":      "Issue with run",
+				}},
+				"total": 1,
+			})
+		case "/api/issues/" + issueID + "/task-runs":
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"id":       taskID,
+				"agent_id": "agent-1",
+				"status":   "completed",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	got, err := resolveTaskRunID(context.Background(), client, "abcd")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != taskID {
+		t.Fatalf("got %#v, want task id %s", got, taskID)
+	}
+}
+
+func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	taskID := "abcd1234-0000-0000-0000-000000000000"
+	var messagePath string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues":
+			json.NewEncoder(w).Encode(map[string]any{
+				"issues": []map[string]any{{
+					"id":         issueID,
+					"identifier": "MUL-1852",
+				}},
+				"total": 1,
+			})
+		case "/api/issues/" + issueID + "/task-runs":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": taskID}})
+		case "/api/tasks/" + taskID + "/messages":
+			messagePath = r.URL.Path
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"seq":     1,
+				"type":    "text",
+				"content": "done",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "run-messages"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Int("since", 0, "")
+	if err := runIssueRunMessages(cmd, []string{"abcd"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if messagePath != "/api/tasks/"+taskID+"/messages" {
+		t.Fatalf("message path = %q, want user-facing task messages path", messagePath)
 	}
 }
 

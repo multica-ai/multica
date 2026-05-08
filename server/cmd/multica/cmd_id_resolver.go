@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strconv"
@@ -36,7 +37,11 @@ func issueDisplayKey(issue map[string]any) string {
 	if key := strVal(issue, "identifier"); key != "" {
 		return key
 	}
-	return strVal(issue, "id")
+	id := strVal(issue, "id")
+	if id != "" {
+		slog.Warn("issue response missing identifier", "issue_id", id)
+	}
+	return id
 }
 
 func issueCandidate(issue map[string]any) idCandidate {
@@ -113,21 +118,11 @@ func resolveIDByPrefix(ctx context.Context, client *cli.APIClient, kind, input s
 
 func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
 	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Display == matches[j].Display {
-			return matches[i].ID < matches[j].ID
-		}
-		return matches[i].Display < matches[j].Display
+		return matches[i].ID < matches[j].ID
 	})
 	parts := make([]string, 0, len(matches))
 	for _, m := range matches {
-		label := m.Display
-		if label == "" {
-			label = m.ID
-		}
-		if m.Detail != "" {
-			label += " — " + m.Detail
-		}
-		parts = append(parts, fmt.Sprintf("  %s (%s)", label, m.ID))
+		parts = append(parts, "  "+m.ID)
 	}
 	return fmt.Errorf("ambiguous %s id prefix %q; matches:\n%s\nUse more characters or run the list command with --full-id", kind, input, strings.Join(parts, "\n"))
 }
@@ -143,15 +138,6 @@ func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (
 	// strings like MUL-1852 as a UUID prefix.
 	if looksLikeIssueIdentifier(trimmed) {
 		return fetchIssueRef(ctx, client, trimmed)
-	}
-	if n, ok := parsePositiveInt(trimmed); ok {
-		resolved, err := resolveIssueNumber(ctx, client, n)
-		if err == nil {
-			return resolved, nil
-		}
-		if _, prefixErr := normalizeUUIDPrefix(trimmed); prefixErr != nil {
-			return resolvedID{}, err
-		}
 	}
 	if uuidRegexp.MatchString(trimmed) {
 		return fetchIssueRef(ctx, client, trimmed)
@@ -195,20 +181,6 @@ func parsePositiveInt(input string) (int, bool) {
 		return 0, false
 	}
 	return n, true
-}
-
-func resolveIssueNumber(ctx context.Context, client *cli.APIClient, number int) (resolvedID, error) {
-	candidates, err := fetchIssueCandidates(ctx, client)
-	if err != nil {
-		return resolvedID{}, fmt.Errorf("resolve issue number: %w", err)
-	}
-	want := strconv.Itoa(number)
-	for _, c := range candidates {
-		if strings.HasSuffix(c.Display, "-"+want) {
-			return resolvedID{ID: c.ID, Display: c.Display}, nil
-		}
-	}
-	return resolvedID{}, fmt.Errorf("no issue found with number %d", number)
 }
 
 func fetchIssueCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
@@ -294,6 +266,9 @@ func fetchAutopilotCandidates(ctx context.Context, client *cli.APIClient) ([]idC
 		if pageLen == 0 || added == 0 {
 			break
 		}
+		if pageLen < limit {
+			break
+		}
 		if resp.HasMore {
 			continue
 		}
@@ -303,8 +278,38 @@ func fetchAutopilotCandidates(ctx context.Context, client *cli.APIClient) ([]idC
 			}
 			continue
 		}
-		if pageLen < limit {
-			break
+	}
+	return candidates, nil
+}
+
+func resolveTaskRunID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
+	return resolveIDByPrefix(ctx, client, "task run", input, fetchTaskRunCandidates)
+}
+
+func fetchTaskRunCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+	issues, err := fetchIssueCandidates(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	candidates := []idCandidate{}
+	for _, issue := range issues {
+		if issue.ID == "" {
+			continue
+		}
+		var runs []map[string]any
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issue.ID)+"/task-runs", &runs); err != nil {
+			return nil, fmt.Errorf("list task runs for issue %s: %w", issue.ID, err)
+		}
+		for _, r := range runs {
+			id := strVal(r, "id")
+			if id == "" {
+				continue
+			}
+			candidates = append(candidates, idCandidate{
+				ID:      id,
+				Display: id,
+				Detail:  issue.ID,
+			})
 		}
 	}
 	return candidates, nil
@@ -429,36 +434,63 @@ func fetchLabelCandidates(ctx context.Context, client *cli.APIClient) ([]idCandi
 }
 
 type actorDisplayLookup struct {
-	members map[string]string
-	agents  map[string]string
+	ctx    context.Context
+	client *cli.APIClient
+	state  *actorDisplayLookupState
+}
+
+type actorDisplayLookupState struct {
+	members       map[string]string
+	agents        map[string]string
+	membersLoaded bool
+	agentsLoaded  bool
 }
 
 func loadActorDisplayLookup(ctx context.Context, client *cli.APIClient) actorDisplayLookup {
-	lookup := actorDisplayLookup{
-		members: map[string]string{},
-		agents:  map[string]string{},
+	return actorDisplayLookup{
+		ctx:    ctx,
+		client: client,
+		state:  &actorDisplayLookupState{},
 	}
-	if client.WorkspaceID == "" {
-		return lookup
+}
+
+func (l actorDisplayLookup) loadMembers() {
+	if l.state == nil || l.state.membersLoaded {
+		return
+	}
+	l.state.membersLoaded = true
+	l.state.members = map[string]string{}
+	if l.client == nil || l.client.WorkspaceID == "" {
+		return
 	}
 	var members []map[string]any
-	if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err == nil {
+	if err := l.client.GetJSON(l.ctx, "/api/workspaces/"+url.PathEscape(l.client.WorkspaceID)+"/members", &members); err == nil {
 		for _, m := range members {
 			if id := strVal(m, "user_id"); id != "" {
-				lookup.members[id] = strVal(m, "name")
+				l.state.members[id] = strVal(m, "name")
 			}
 		}
+	}
+}
+
+func (l actorDisplayLookup) loadAgents() {
+	if l.state == nil || l.state.agentsLoaded {
+		return
+	}
+	l.state.agentsLoaded = true
+	l.state.agents = map[string]string{}
+	if l.client == nil || l.client.WorkspaceID == "" {
+		return
 	}
 	var agents []map[string]any
-	agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-	if err := client.GetJSON(ctx, agentPath, &agents); err == nil {
+	agentPath := "/api/agents?" + url.Values{"workspace_id": {l.client.WorkspaceID}}.Encode()
+	if err := l.client.GetJSON(l.ctx, agentPath, &agents); err == nil {
 		for _, a := range agents {
 			if id := strVal(a, "id"); id != "" {
-				lookup.agents[id] = strVal(a, "name")
+				l.state.agents[id] = strVal(a, "name")
 			}
 		}
 	}
-	return lookup
 }
 
 func (l actorDisplayLookup) actor(actorType, id string) string {
@@ -467,12 +499,18 @@ func (l actorDisplayLookup) actor(actorType, id string) string {
 	}
 	switch actorType {
 	case "member":
-		if name := l.members[id]; name != "" {
-			return "member:" + name
+		l.loadMembers()
+		if l.state != nil && l.state.members != nil {
+			if name := l.state.members[id]; name != "" {
+				return "member:" + name
+			}
 		}
 	case "agent":
-		if name := l.agents[id]; name != "" {
-			return "agent:" + name
+		l.loadAgents()
+		if l.state != nil && l.state.agents != nil {
+			if name := l.state.agents[id]; name != "" {
+				return "agent:" + name
+			}
 		}
 	}
 	return actorType + ":" + id
@@ -482,8 +520,11 @@ func (l actorDisplayLookup) agent(id string) string {
 	if id == "" {
 		return ""
 	}
-	if name := l.agents[id]; name != "" {
-		return name
+	l.loadAgents()
+	if l.state != nil && l.state.agents != nil {
+		if name := l.state.agents[id]; name != "" {
+			return name
+		}
 	}
 	return id
 }

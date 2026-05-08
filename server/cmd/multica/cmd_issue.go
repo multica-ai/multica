@@ -262,6 +262,7 @@ func init() {
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
+	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1011,6 +1012,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	actors := loadActorDisplayLookup(ctx, client)
+	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
@@ -1028,7 +1030,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			errMsg = string(runes[:47]) + "..."
 		}
 		rows = append(rows, []string{
-			strVal(r, "id"),
+			displayID(strVal(r, "id"), fullID),
 			actors.agent(strVal(r, "agent_id")),
 			strVal(r, "status"),
 			started,
@@ -1049,7 +1051,12 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	path := "/api/daemon/tasks/" + args[0] + "/messages"
+	taskRef, err := resolveTaskRunID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve task run: %w", err)
+	}
+
+	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/messages"
 	if since, _ := cmd.Flags().GetInt("since"); since > 0 {
 		path += fmt.Sprintf("?since=%d", since)
 	}

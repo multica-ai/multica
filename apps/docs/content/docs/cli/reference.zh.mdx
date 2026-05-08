@@ -311,6 +311,7 @@ multica issue comment delete <comment-id>
 ```bash
 # List all execution runs for an issue
 multica issue runs <issue-id>
+multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
 # View messages for a specific execution run
@@ -320,6 +321,8 @@ multica issue run-messages <task-id> --output json
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
+
+`runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 接受从 `runs` 表格复制出来的唯一短前缀。
 
 ## Projects
 
