@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -242,6 +244,15 @@ func TestResolveIssueRef(t *testing.T) {
 				http.NotFound(w, r)
 				return
 			}
+			if got := r.URL.Query().Get("workspace_id"); got != "ws-1" {
+				t.Errorf("workspace_id = %q, want ws-1", got)
+			}
+			if got := r.URL.Query().Get("include_closed"); got != "true" {
+				t.Errorf("include_closed = %q, want true", got)
+			}
+			if got := r.URL.Query().Get("limit"); got != strconv.Itoa(resolverListPageLimit) {
+				t.Errorf("limit = %q, want %d", got, resolverListPageLimit)
+			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"issues": []map[string]any{issue},
 				"total":  1,
@@ -258,6 +269,68 @@ func TestResolveIssueRef(t *testing.T) {
 			t.Fatalf("got %#v", got)
 		}
 	})
+}
+
+func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
+	page1 := make([]map[string]any, 0, resolverListPageLimit)
+	for i := 0; i < resolverListPageLimit; i++ {
+		page1 = append(page1, map[string]any{
+			"id":     fmt.Sprintf("aaaaaaaa-0000-0000-0000-%012x", i),
+			"title":  fmt.Sprintf("autopilot-%d", i),
+			"status": "active",
+		})
+	}
+	page2 := []map[string]any{{
+		"id":     "bbbbbbbb-0000-0000-0000-000000000000",
+		"title":  "final autopilot",
+		"status": "paused",
+	}}
+
+	var offsets []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("workspace_id"); got != "ws-1" {
+			t.Errorf("workspace_id = %q, want ws-1", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != strconv.Itoa(resolverListPageLimit) {
+			t.Errorf("limit = %q, want %d", got, resolverListPageLimit)
+		}
+		offset := r.URL.Query().Get("offset")
+		offsets = append(offsets, offset)
+		switch offset {
+		case "":
+			json.NewEncoder(w).Encode(map[string]any{
+				"autopilots": page1,
+				"total":      resolverListPageLimit + 1,
+			})
+		case strconv.Itoa(resolverListPageLimit):
+			json.NewEncoder(w).Encode(map[string]any{
+				"autopilots": page2,
+				"total":      resolverListPageLimit + 1,
+			})
+		default:
+			t.Fatalf("unexpected offset %q", offset)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	got, err := fetchAutopilotCandidates(context.Background(), client)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != resolverListPageLimit+1 {
+		t.Fatalf("got %d candidates, want %d", len(got), resolverListPageLimit+1)
+	}
+	if len(offsets) != 2 || offsets[0] != "" || offsets[1] != strconv.Itoa(resolverListPageLimit) {
+		t.Fatalf("offsets = %#v, want [\"\", %q]", offsets, strconv.Itoa(resolverListPageLimit))
+	}
+	if got[len(got)-1].ID != "bbbbbbbb-0000-0000-0000-000000000000" {
+		t.Fatalf("last candidate = %#v", got[len(got)-1])
+	}
 }
 
 func TestResolveAssignee(t *testing.T) {

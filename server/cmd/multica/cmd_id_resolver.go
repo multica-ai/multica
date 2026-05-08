@@ -12,6 +12,7 @@ import (
 )
 
 const minShortIDPrefixLen = 4
+const resolverListPageLimit = 50
 
 type resolvedID struct {
 	ID      string
@@ -214,11 +215,12 @@ func fetchIssueCandidates(ctx context.Context, client *cli.APIClient) ([]idCandi
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve issue id prefixes")
 	}
-	const limit = 100
+	const limit = resolverListPageLimit
 	candidates := []idCandidate{}
-	for offset := 0; ; offset += limit {
+	for offset := 0; ; {
 		params := url.Values{}
 		params.Set("workspace_id", client.WorkspaceID)
+		params.Set("include_closed", "true")
 		params.Set("limit", strconv.Itoa(limit))
 		if offset > 0 {
 			params.Set("offset", strconv.Itoa(offset))
@@ -235,8 +237,9 @@ func fetchIssueCandidates(ctx context.Context, client *cli.APIClient) ([]idCandi
 			}
 			candidates = append(candidates, issueCandidate(issue))
 		}
+		offset += len(issuesRaw)
 		total, _ := result["total"].(float64)
-		if len(issuesRaw) == 0 || offset+len(issuesRaw) >= int(total) {
+		if len(issuesRaw) == 0 || (total > 0 && offset >= int(total)) || (total == 0 && len(issuesRaw) < limit) {
 			break
 		}
 	}
@@ -251,19 +254,58 @@ func fetchAutopilotCandidates(ctx context.Context, client *cli.APIClient) ([]idC
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve autopilot id prefixes")
 	}
-	var resp struct {
-		Autopilots []map[string]any `json:"autopilots"`
-	}
-	if err := client.GetJSON(ctx, "/api/autopilots", &resp); err != nil {
-		return nil, err
-	}
-	candidates := make([]idCandidate, 0, len(resp.Autopilots))
-	for _, a := range resp.Autopilots {
-		candidates = append(candidates, idCandidate{
-			ID:      strVal(a, "id"),
-			Display: strVal(a, "title"),
-			Detail:  strVal(a, "status"),
-		})
+	const limit = resolverListPageLimit
+	candidates := []idCandidate{}
+	seen := map[string]struct{}{}
+	for offset := 0; ; {
+		params := url.Values{}
+		params.Set("workspace_id", client.WorkspaceID)
+		params.Set("limit", strconv.Itoa(limit))
+		if offset > 0 {
+			params.Set("offset", strconv.Itoa(offset))
+		}
+		var resp struct {
+			Autopilots []map[string]any `json:"autopilots"`
+			Total      int              `json:"total"`
+			HasMore    bool             `json:"has_more"`
+		}
+		if err := client.GetJSON(ctx, "/api/autopilots?"+params.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		added := 0
+		for _, a := range resp.Autopilots {
+			id := strVal(a, "id")
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			added++
+			candidates = append(candidates, idCandidate{
+				ID:      id,
+				Display: strVal(a, "title"),
+				Detail:  strVal(a, "status"),
+			})
+		}
+		pageLen := len(resp.Autopilots)
+		offset += pageLen
+		if pageLen == 0 || added == 0 {
+			break
+		}
+		if resp.HasMore {
+			continue
+		}
+		if resp.Total > 0 {
+			if offset >= resp.Total {
+				break
+			}
+			continue
+		}
+		if pageLen < limit {
+			break
+		}
 	}
 	return candidates, nil
 }
