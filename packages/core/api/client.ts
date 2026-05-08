@@ -463,6 +463,11 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-dashboard-client): JEH-684 dashboard overview endpoint
+  async getCerebroDashboardOverview<T = unknown>(range: "24h" | "7d" | "30d"): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/dashboard?range=${encodeURIComponent(range)}`);
+  }
+
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.

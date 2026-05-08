@@ -1,6 +1,7 @@
 export type ActorScope = "all" | "members" | "agents";
 
-export type TimeRange = "24h" | "7d" | "30d";
+export type { TimeRange } from "./api";
+import type { TimeRange } from "./api";
 
 export interface DashboardFilter {
   scope: ActorScope;

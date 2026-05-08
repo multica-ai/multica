@@ -26,6 +26,7 @@
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
+    "recharts": "*",
     "zustand": "catalog:"
   },
   "devDependencies": {

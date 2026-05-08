@@ -1,49 +1,25 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
-import { api } from "@multica/core/api";
-import type { Agent, AgentTask } from "@multica/core/types";
+import { useNavigation } from "@multica/views/navigation";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
-import { useDashboardStore } from "../../core/store";
-import { timeRangeToDays } from "../../core/types";
+import type { DashboardOverview, RecentTask } from "../../core/api";
 
 interface RecentTasksListProps {
-  wsId: string;
+  data: DashboardOverview | undefined;
+  isLoading: boolean;
+  workspaceSlug: string;
 }
 
-const EMPTY_AGENTS: Agent[] = [];
-
-export function RecentTasksList({ wsId }: RecentTasksListProps) {
-  const range = useDashboardStore((s) => s.range);
-  const { data: snapshot = [], isLoading } = useQuery(
-    agentTaskSnapshotOptions(wsId),
-  );
-  const { data: agents = EMPTY_AGENTS } = useQuery({
-    queryKey: ["workspaces", wsId, "agents", "list"],
-    queryFn: () => api.listAgents({ workspace_id: wsId }),
-    enabled: !!wsId,
-    staleTime: 60 * 1000,
-  });
-
-  const cutoff = Date.now() - timeRangeToDays(range) * 24 * 60 * 60 * 1000;
-  const tasks = snapshot
-    .filter((t) => {
-      const ts = t.completed_at ?? t.started_at ?? t.dispatched_at;
-      if (!ts) return t.status === "queued" || t.status === "running";
-      return new Date(ts).getTime() >= cutoff;
-    })
-    .sort((a, b) => {
-      const at = a.completed_at ?? a.started_at ?? a.dispatched_at ?? "";
-      const bt = b.completed_at ?? b.started_at ?? b.dispatched_at ?? "";
-      return bt.localeCompare(at);
-    })
-    .slice(0, 12);
-
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id.slice(0, 8);
-  const agentForId = (id: string) => agents.find((a) => a.id === id) ?? null;
+// Recent agent tasks across the workspace, joined with agent names + issue
+// titles so each row reads like a sentence rather than a UUID.
+export function RecentTasksList({
+  data,
+  isLoading,
+  workspaceSlug,
+}: RecentTasksListProps) {
+  const tasks = data?.recent_tasks ?? [];
 
   return (
     <Card>
@@ -51,7 +27,9 @@ export function RecentTasksList({ wsId }: RecentTasksListProps) {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Recent tasks
         </h3>
-        <span className="text-[11px] text-muted-foreground">{range}</span>
+        {tasks.length > 0 && (
+          <span className="text-[11px] text-muted-foreground">{tasks.length}</span>
+        )}
       </div>
       <CardContent className="p-0">
         {isLoading ? (
@@ -62,37 +40,13 @@ export function RecentTasksList({ wsId }: RecentTasksListProps) {
           </div>
         ) : tasks.length === 0 ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            Ingen tasks i den valgte periode.
+            Ingen tasks endnu.
           </p>
         ) : (
           <ul className="divide-y">
-            {tasks.map((task) => {
-              const agent = agentForId(task.agent_id);
-              return (
-                <li
-                  key={task.id}
-                  className="flex items-center gap-2 px-3 py-2 text-xs"
-                >
-                  <StatusDot status={task.status} />
-                  {agent && (
-                    <ActorAvatar
-                      name={agent.name}
-                      initials={agent.name.charAt(0).toUpperCase()}
-                      avatarUrl={agent.avatar_url}
-                      size={16}
-                    />
-                  )}
-                  <span className="font-medium">{agentName(task.agent_id)}</span>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="truncate text-muted-foreground">
-                    {task.issue_id ? `task ${task.id.slice(0, 8)}` : "no linked issue"}
-                  </span>
-                  <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {task.status}
-                  </span>
-                </li>
-              );
-            })}
+            {tasks.map((t) => (
+              <Row key={t.task_id} task={t} workspaceSlug={workspaceSlug} />
+            ))}
           </ul>
         )}
       </CardContent>
@@ -100,7 +54,48 @@ export function RecentTasksList({ wsId }: RecentTasksListProps) {
   );
 }
 
-function StatusDot({ status }: { status: AgentTask["status"] }) {
+function Row({ task, workspaceSlug }: { task: RecentTask; workspaceSlug: string }) {
+  const { push } = useNavigation();
+  const onClick = () => {
+    if (task.issue_id) push(`/${workspaceSlug}/issues/${task.issue_id}`);
+  };
+  const ts = task.completed_at ?? task.started_at ?? task.created_at;
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!task.issue_id}
+        className={cn(
+          "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+          task.issue_id && "hover:bg-accent/40",
+        )}
+      >
+        <StatusDot status={task.status} />
+        <ActorAvatar
+          name={task.agent_name}
+          initials={task.agent_name.charAt(0).toUpperCase()}
+          avatarUrl={task.agent_avatar_url}
+          size={16}
+        />
+        <span className="font-medium">{task.agent_name}</span>
+        <span className="text-muted-foreground">·</span>
+        <span className="truncate text-muted-foreground">
+          {task.issue_title ?? "ingen issue"}
+        </span>
+        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+          {task.status}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {relativeTime(ts)}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function StatusDot({ status }: { status: string }) {
   const tone =
     status === "running" || status === "dispatched"
       ? "bg-blue-500"
@@ -112,4 +107,17 @@ function StatusDot({ status }: { status: AgentTask["status"] }) {
             ? "bg-muted-foreground"
             : "bg-amber-500";
   return <span className={cn("size-1.5 rounded-full", tone)} aria-hidden />;
+}
+
+function relativeTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  } catch {
+    return "";
+  }
 }

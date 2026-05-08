@@ -17,6 +17,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
+	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
+	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
@@ -163,6 +165,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
 	// surface to a single line per cerebro inbox feature.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries)
+	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
+	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 
 	r := chi.NewRouter()
 
@@ -716,6 +720,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
+			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
 		})
 	})
 

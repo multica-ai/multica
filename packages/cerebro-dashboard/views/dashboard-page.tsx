@@ -1,29 +1,34 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { PageHeader } from "@multica/views/layout/page-header";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ActorTabs } from "./components/actor-tabs";
 import { TimeRangePicker } from "./components/time-range-picker";
-import { AgentStrip } from "./components/agent-strip";
-import { MemberStrip } from "./components/member-strip";
 import { KpiCards } from "./components/kpi-cards";
+import { ActivityChart } from "./components/activity-chart";
+import { IssuesDonut } from "./components/issues-donut";
+import { TopActors } from "./components/top-actors";
+import { ActivityFeed } from "./components/activity-feed";
 import { RecentTasksList } from "./components/recent-tasks-list";
 import { useDashboardStore } from "../core/store";
+import { dashboardOverviewOptions } from "../core/queries";
 
-// Workspace operations dashboard. JEH-684. Fase 1 ships skeleton + KPI cards
-// + recent tasks; charts and activity feed are placeholders. Layout follows
-// the SidebarInset pattern: PageHeader at top (sticky), scrollable content
-// below — matches the inbox/agents/issues pages.
+// Workspace operations dashboard. JEH-684. v2 — replaces the v1 placeholder
+// version with a single /api/cerebro/dashboard overview query that drives
+// every panel: KPIs (with prior-period delta), per-day activity chart,
+// issues-by-status/priority donuts, top actors, activity feed, recent tasks.
 export function DashboardPage() {
   const enabled = useFeatureFlag("cerebro_dashboard");
   const workspace = useCurrentWorkspace();
+  const range = useDashboardStore((s) => s.range);
   const scope = useDashboardStore((s) => s.scope);
 
-  if (!enabled) {
-    return null;
-  }
+  const wsId = workspace?.id ?? "";
+  const overview = useQuery(dashboardOverviewOptions(wsId, range));
+
+  if (!enabled) return null;
 
   if (!workspace) {
     return (
@@ -33,13 +38,17 @@ export function DashboardPage() {
     );
   }
 
+  const data = overview.data;
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <h1 className="text-sm font-semibold">Dashboard</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Overblik over hvad der sker i forretningen
+            {data
+              ? `${formatPeriodLabel(data.period_start, data.period_end)} — overblik`
+              : "Henter overblik…"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -50,71 +59,53 @@ export function DashboardPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-6 p-6">
-          {scope !== "members" && (
-            <section aria-label="Agents">
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Agents
-              </h2>
-              <AgentStrip wsId={workspace.id} />
-            </section>
-          )}
-
-          {scope !== "agents" && (
-            <section aria-label="Members">
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Members
-              </h2>
-              <MemberStrip wsId={workspace.id} />
-            </section>
-          )}
-
           <section aria-label="KPIs">
-            <KpiCards wsId={workspace.id} workspaceSlug={workspace.slug} />
-          </section>
-
-          <section aria-label="Charts" className="grid gap-3 lg:grid-cols-2">
-            <PlaceholderCard
-              title="Run activity"
-              hint="Line chart over agent task throughput. Kommer i Fase 3 (JEH-704)."
-            />
-            <PlaceholderCard
-              title="Issues by priority"
-              hint="Donut. Kommer i Fase 3 (JEH-704)."
-            />
-            <PlaceholderCard
-              title="Issues by status"
-              hint="Donut. Kommer i Fase 3 (JEH-704)."
-            />
-            <PlaceholderCard
-              title="Success rate"
-              hint="completed / (completed + failed). Kommer i Fase 3 (JEH-704)."
+            <KpiCards
+              data={data}
+              isLoading={overview.isLoading}
+              workspaceSlug={workspace.slug}
+              wsId={workspace.id}
             />
           </section>
 
-          <section aria-label="Detail" className="grid gap-3 lg:grid-cols-2">
-            <PlaceholderCard
-              title="Recent activity"
-              hint="Activity feed fra activity_log. Kommer i Fase 2 (JEH-703)."
-            />
-            <RecentTasksList wsId={workspace.id} />
+          <section aria-label="Activity over time" className="grid gap-3 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <ActivityChart data={data} isLoading={overview.isLoading} />
+            </div>
+            <IssuesDonut data={data} isLoading={overview.isLoading} kind="status" />
           </section>
+
+          <section aria-label="Breakdown" className="grid gap-3 lg:grid-cols-3">
+            <IssuesDonut data={data} isLoading={overview.isLoading} kind="priority" />
+            <TopActors data={data} isLoading={overview.isLoading} kind="agents" />
+            <TopActors data={data} isLoading={overview.isLoading} kind="members" />
+          </section>
+
+          <section aria-label="Recent" className="grid gap-3 lg:grid-cols-2">
+            <ActivityFeed data={data} isLoading={overview.isLoading} scope={scope} />
+            <RecentTasksList data={data} isLoading={overview.isLoading} workspaceSlug={workspace.slug} />
+          </section>
+
+          {overview.isError && (
+            <p className="text-xs text-destructive">
+              Kunne ikke hente dashboard:{" "}
+              {overview.error instanceof Error ? overview.error.message : "ukendt fejl"}
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function PlaceholderCard({ title, hint }: { title: string; hint: string }) {
-  return (
-    <Card className="border-dashed">
-      <div className="border-b border-dashed px-3 py-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </h3>
-      </div>
-      <CardContent className="flex h-32 items-center justify-center p-3 text-center text-xs text-muted-foreground">
-        {hint}
-      </CardContent>
-    </Card>
-  );
+function formatPeriodLabel(start: string, end: string): string {
+  try {
+    const s = new Date(start);
+    const e = new Date(end);
+    const fmt = (d: Date) =>
+      d.toLocaleDateString("da-DK", { day: "2-digit", month: "short" });
+    return `${fmt(s)} – ${fmt(e)}`;
+  } catch {
+    return "";
+  }
 }
