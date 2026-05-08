@@ -50,6 +50,7 @@ TriggerCommentContent   string                `json:"trigger_comment_content,omi
 TriggerSource           string                `json:"trigger_source,omitempty"`
 TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
 TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
+TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
 TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks

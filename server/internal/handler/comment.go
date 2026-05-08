@@ -465,11 +465,23 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private agents can only be mentioned by the agent owner.
-		// Workspace admin/owner roles grant governance rights (archive, delete)
-		// but not invocation rights — only the agent's owner can trigger it.
-		if agent.Visibility == "private" && authorType == "member" {
-			if uuidToString(agent.OwnerID) != authorID {
+		// Private agents can only be triggered by the agent owner (member)
+		// or by another agent that shares the same owner.
+		if agent.Visibility == "private" {
+			targetOwner := uuidToString(agent.OwnerID)
+			switch authorType {
+			case "member":
+				if targetOwner != authorID {
+					continue
+				}
+			case "agent":
+				// Look up the triggering agent's owner to see if it
+				// matches the target private agent's owner.
+				triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(authorID))
+				if err != nil || uuidToString(triggerAgent.OwnerID) != targetOwner {
+					continue
+				}
+			default:
 				continue
 			}
 		}
@@ -483,7 +495,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		// Always use the current comment as the trigger so the agent reads the
 		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, buildTriggerActor("mention", "member", uuidToString(comment.AuthorID)), comment.ID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, buildTriggerActor("mention", authorType, uuidToString(comment.AuthorID)), comment.ID); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}

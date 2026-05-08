@@ -188,6 +188,7 @@ type AgentTaskResponse struct {
 	TriggerSource           string                `json:"trigger_source,omitempty"`
 	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
 	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
+	TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`
