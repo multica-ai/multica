@@ -4,12 +4,13 @@ import { useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
+  Copy,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, UpdateAgentRequest } from "@multica/core/types";
+import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -47,6 +48,7 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewPane } from "./agent-overview-pane";
+import { CreateAgentDialog } from "./create-agent-dialog";
 import { useT } from "../../i18n";
 
 interface AgentDetailPageProps {
@@ -85,6 +87,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [showDuplicate, setShowDuplicate] = useState(false);
+
+  const handleDuplicate = async (data: CreateAgentRequest) => {
+    const created = await api.createAgent(data);
+    if (agent?.skills.length) {
+      try {
+        await api.setAgentSkills(created.id, {
+          skill_ids: agent.skills.map((s) => s.id),
+        });
+      } catch {
+        // Skills copy is best-effort
+      }
+    }
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    setShowDuplicate(false);
+    navigation.push(paths.agentDetail(created.id));
+  };
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     try {
@@ -175,6 +194,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         backHref={paths.agents()}
         canArchive={canEdit.allowed}
         onArchive={() => setConfirmArchive(true)}
+        onDuplicate={() => setShowDuplicate(true)}
       />
 
       {!canEdit.allowed && (
@@ -269,6 +289,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           </DialogContent>
         </Dialog>
       )}
+
+      {showDuplicate && (
+        <CreateAgentDialog
+          runtimes={runtimes}
+          runtimesLoading={false}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          template={agent}
+          onClose={() => setShowDuplicate(false)}
+          onCreate={handleDuplicate}
+        />
+      )}
     </div>
   );
 }
@@ -279,12 +311,14 @@ function DetailHeader({
   backHref,
   canArchive,
   onArchive,
+  onDuplicate,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
   backHref: string;
   canArchive: boolean;
   onArchive: () => void;
+  onDuplicate: () => void;
 }) {
   const { t } = useT("agents");
   const isArchived = !!agent.archived_at;
@@ -318,7 +352,7 @@ function DetailHeader({
         )}
       </div>
 
-      {!isArchived && canArchive && (
+      {!isArchived && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" />}
@@ -326,13 +360,19 @@ function DetailHeader({
             <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={onArchive}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.more_archive)}
+            <DropdownMenuItem onClick={onDuplicate}>
+              <Copy className="h-3.5 w-3.5" />
+              {t(($) => $.detail.more_duplicate)}
             </DropdownMenuItem>
+            {canArchive && (
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={onArchive}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.more_archive)}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
