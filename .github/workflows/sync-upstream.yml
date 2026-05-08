@@ -1,0 +1,41 @@
+name: Daily Sync from Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 0:00 (北京时间 8:00)
+  workflow_dispatch:      # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: v0.x-bump
+
+      - name: Set up Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/multica-ai/multica.git
+          git fetch upstream
+
+      - name: Merge upstream/main into v0.x-bump
+        run: |
+          git merge upstream/main --no-edit || {
+            echo "Merge conflict detected, creating PR for manual resolution"
+            git checkout -b sync/$(date +%Y%m%d)
+            git add -A
+            git commit -m "chore: resolve merge conflicts $(date +%Y%m%d)"
+            git push origin sync/$(date +%Y%m%d) \
+              -o merge_request.create \
+              -o merge_request.title="Sync: resolve merge conflicts $(date +%Y%m%d)"
+            exit 1
+          }
+
+      - name: Push to origin
+        run: git push origin v0.x-bump
