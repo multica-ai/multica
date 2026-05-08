@@ -13,6 +13,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/huaweicloud/huaweicloud-sdk-go-obs v3.26.3+incompatible
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-shellwords v1.0.13

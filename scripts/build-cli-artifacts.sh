@@ -13,6 +13,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SERVER_DIR="${REPO_ROOT}/server"
 VERSION_FILE="${CLI_VERSION_FILE:-${REPO_ROOT}/release/cli-version.txt}"
 OUT_DIR="${CLI_ARTIFACTS_DIR:-${REPO_ROOT}/artifacts/cli}"
+OBS_ARTIFACTS_DIR="${OBS_ARTIFACTS_DIR:-${REPO_ROOT}/artifacts/obs}"
 RELEASES_DIR="${OUT_DIR}/releases"
 MANIFEST_FILE="${OUT_DIR}/manifest.json"
 DOWNLOAD_BASE_URL="${CLI_DOWNLOAD_BASE_URL:-https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases}"
@@ -104,8 +105,46 @@ download_url_for() {
 validate_version() {
   local version="$1"
   if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-    fail "invalid CLI version in ${VERSION_FILE}: ${version}"
+    fail "invalid CLI version: ${version}"
   fi
+}
+
+latest_cli_tag() {
+  git -C "$REPO_ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname 2>/dev/null | while IFS= read -r tag; do
+    if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done
+}
+
+read_version_file() {
+  local path="$1"
+  [[ -f "$path" ]] || fail "version file not found: ${path}"
+  trim "$(tr -d '\r\n' < "$path")"
+}
+
+resolve_version() {
+  if [[ -n "${CLI_VERSION:-}" ]]; then
+    VERSION_RAW="$(trim "$CLI_VERSION")"
+    VERSION_SOURCE="CLI_VERSION"
+    return
+  fi
+
+  if [[ -n "${CLI_VERSION_FILE:-}" ]]; then
+    VERSION_RAW="$(read_version_file "$VERSION_FILE")"
+    VERSION_SOURCE="$VERSION_FILE"
+    return
+  fi
+
+  VERSION_RAW="$(latest_cli_tag)"
+  if [[ -n "$VERSION_RAW" ]]; then
+    VERSION_SOURCE="latest git tag"
+    return
+  fi
+
+  VERSION_RAW="$(read_version_file "$VERSION_FILE")"
+  VERSION_SOURCE="$VERSION_FILE"
 }
 
 target_supported() {
@@ -125,9 +164,10 @@ need_cmd tar
 need_cmd zip
 validate_download_base_url "$DOWNLOAD_BASE_URL"
 
-[[ -f "$VERSION_FILE" ]] || fail "version file not found: ${VERSION_FILE}"
-VERSION_RAW="$(trim "$(tr -d '\r\n' < "$VERSION_FILE")")"
-[[ -n "$VERSION_RAW" ]] || fail "version file is empty: ${VERSION_FILE}"
+VERSION_RAW=""
+VERSION_SOURCE=""
+resolve_version
+[[ -n "$VERSION_RAW" ]] || fail "CLI version is empty"
 validate_version "$VERSION_RAW"
 ARCHIVE_VERSION="$(normalize_archive_version "$VERSION_RAW")"
 
@@ -154,9 +194,11 @@ ASSET_ROWS=()
 
 printf 'Building Multica CLI artifacts\n'
 printf '  version:   %s\n' "$VERSION_RAW"
+printf '  source:    %s\n' "$VERSION_SOURCE"
 printf '  commit:    %s\n' "$COMMIT"
 printf '  date:      %s\n' "$DATE"
 printf '  output:    %s\n' "$OUT_DIR"
+printf '  obs tool:  %s\n' "$OBS_ARTIFACTS_DIR"
 printf '  releases:  %s\n' "$RELEASES_DIR"
 printf '  manifest:  %s\n' "$MANIFEST_FILE"
 printf '\n'
@@ -227,6 +269,18 @@ done
   printf '  ]\n'
   printf '}\n'
 } > "$MANIFEST_FILE"
+
+printf '\nBuilding OBS release publisher\n'
+mkdir -p "$OBS_ARTIFACTS_DIR"
+(
+  cd "$SERVER_DIR"
+  go build \
+    -trimpath \
+    -ldflags "$LDFLAGS" \
+    -o "${OBS_ARTIFACTS_DIR}/multica-obs-release" \
+    ./cmd/obs-release
+)
+printf 'Done. OBS release publisher: %s\n' "${OBS_ARTIFACTS_DIR}/multica-obs-release"
 
 printf '\nDone. Manifest: %s\n' "$MANIFEST_FILE"
 printf 'Done. Checksums: %s\n' "$CHECKSUMS_FILE"
