@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Bot,
+  Globe,
   Plus,
   Search,
 } from "lucide-react";
@@ -108,6 +109,7 @@ export function AgentsPage() {
     useState<AvailabilityFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
+  const [workspaceOnly, setWorkspaceOnly] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   // When set, the Create dialog opens pre-populated with this agent's
   // config — driven by the row-level "Duplicate" action. We keep this
@@ -184,10 +186,21 @@ export function AgentsPage() {
     return visibleInView.filter((a) => a.owner_id === currentUser.id);
   }, [visibleInView, scope, currentUser, view]);
 
+  // Layer 2 — workspace-only toggle. When active in the "all" scope,
+  // hides personal-visibility agents so only workspace-shared ones remain.
+  // Skipped in Archived view — that view has no toggle to undo it, so
+  // applying it would silently hide private archived agents.
+  const afterWorkspaceFilter = useMemo(() => {
+    if (view === "active" && scope === "all" && workspaceOnly) {
+      return inScope.filter((a) => a.visibility === "workspace");
+    }
+    return inScope;
+  }, [inScope, scope, workspaceOnly, view]);
+
   // Final cut — availability chip + search.
   const filteredAgents = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return inScope.filter((a) => {
+    return afterWorkspaceFilter.filter((a) => {
       // Availability chip filter only applies to the Active view —
       // archived agents have no presence to match against.
       if (view === "active" && availabilityFilter !== "all") {
@@ -204,25 +217,25 @@ export function AgentsPage() {
       }
       return true;
     });
-  }, [inScope, view, availabilityFilter, presenceMap, search]);
+  }, [afterWorkspaceFilter, view, availabilityFilter, presenceMap, search]);
 
   // Per-availability counts for the chip badges. Computed against
-  // `inScope` (ignoring the availability filter itself) so the numbers
-  // reflect "if I clicked this chip, this many agents would match"
-  // rather than collapsing to 0 for the unselected chips.
+  // `afterWorkspaceFilter` (ignoring the availability filter itself) so
+  // the numbers reflect "if I clicked this chip, this many agents would
+  // match" rather than collapsing to 0 for the unselected chips.
   const availabilityCounts = useMemo(() => {
     const counts: Record<AgentAvailability, number> = {
       online: 0,
       unstable: 0,
       offline: 0,
     };
-    for (const a of inScope) {
+    for (const a of afterWorkspaceFilter) {
       const detail = presenceMap.get(a.id);
       if (!detail) continue;
       counts[detail.availability] += 1;
     }
     return counts;
-  }, [inScope, presenceMap]);
+  }, [afterWorkspaceFilter, presenceMap]);
 
   const sortedAgents = useMemo(() => {
     const xs = [...filteredAgents];
@@ -422,12 +435,14 @@ export function AgentsPage() {
                   scope={scope}
                   setScope={setScope}
                   scopeCounts={scopeCounts}
+                  workspaceOnly={workspaceOnly}
+                  setWorkspaceOnly={setWorkspaceOnly}
                   sort={sort}
                   setSort={setSort}
                   search={search}
                   setSearch={setSearch}
                   visibleCount={sortedAgents.length}
-                  totalCount={inScope.length}
+                  totalCount={afterWorkspaceFilter.length}
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
                 />
@@ -435,7 +450,7 @@ export function AgentsPage() {
                   value={availabilityFilter}
                   onChange={setAvailabilityFilter}
                   counts={availabilityCounts}
-                  totalCount={inScope.length}
+                  totalCount={afterWorkspaceFilter.length}
                 />
               </>
             ) : (
@@ -448,7 +463,7 @@ export function AgentsPage() {
             )}
 
             {sortedAgents.length === 0 ? (
-              <NoMatches view={view} search={search} scope={scope} />
+              <NoMatches view={view} search={search} scope={scope} workspaceOnly={workspaceOnly} />
             ) : (
               <DataTable
                 table={table}
@@ -566,6 +581,8 @@ function ActiveToolbarRow({
   scope,
   setScope,
   scopeCounts,
+  workspaceOnly,
+  setWorkspaceOnly,
   sort,
   setSort,
   search,
@@ -578,6 +595,8 @@ function ActiveToolbarRow({
   scope: Scope;
   setScope: (v: Scope) => void;
   scopeCounts: { all: number; mine: number };
+  workspaceOnly: boolean;
+  setWorkspaceOnly: (v: boolean) => void;
   sort: SortKey;
   setSort: (v: SortKey) => void;
   search: string;
@@ -600,6 +619,16 @@ function ActiveToolbarRow({
         />
       </div>
       <ScopeSegment scope={scope} setScope={setScope} counts={scopeCounts} />
+      {scope === "all" && (
+        <Button
+          variant={workspaceOnly ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setWorkspaceOnly(!workspaceOnly)}
+          title={workspaceOnly ? t(($) => $.workspace_filter.show_all) : t(($) => $.workspace_filter.show_workspace)}
+        >
+          <Globe className={workspaceOnly ? "text-foreground" : "text-muted-foreground"} />
+        </Button>
+      )}
       <div className="ml-auto flex items-center gap-3">
         {archivedCount > 0 && (
           <button
@@ -858,20 +887,24 @@ function NoMatches({
   view,
   search,
   scope,
+  workspaceOnly,
 }: {
   view: View;
   search: string;
   scope: Scope;
+  workspaceOnly: boolean;
 }) {
   const { t } = useT("agents");
   const hasSearch = search.length > 0;
-  const hasFilter = scope === "mine";
+  const hasFilter = scope === "mine" || workspaceOnly;
 
   let body: string;
   if (view === "archived") {
     body = hasSearch
       ? t(($) => $.no_matches.search_archived, { query: search })
       : t(($) => $.no_matches.no_archived);
+  } else if (workspaceOnly && !hasSearch) {
+    body = t(($) => $.no_matches.no_workspace_agents);
   } else if (hasSearch) {
     body = hasFilter
       ? t(($) => $.no_matches.search_active_filtered, { query: search })

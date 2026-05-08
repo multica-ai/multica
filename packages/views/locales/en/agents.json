@@ -46,7 +46,8 @@
     "no_archived": "No archived agents yet.",
     "search_active": "No agents match \"{{query}}\".",
     "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
-    "no_filter_match": "No agents match this filter."
+    "no_filter_match": "No agents match this filter.",
+    "no_workspace_agents": "No workspace agents match this filter."
   },
   "columns": {
     "agent": "Agent",
@@ -353,5 +354,9 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "workspace_filter": {
+    "show_all": "Show all agents",
+    "show_workspace": "Show workspace agents only"
   }
 }

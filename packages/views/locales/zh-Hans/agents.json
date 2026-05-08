@@ -46,7 +46,8 @@
     "no_archived": "还没有已归档智能体。",
     "search_active": "没有智能体匹配\"{{query}}\"。",
     "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
-    "no_filter_match": "该筛选下没有匹配的智能体。"
+    "no_filter_match": "该筛选下没有匹配的智能体。",
+    "no_workspace_agents": "没有匹配的工作区智能体。"
   },
   "columns": {
     "agent": "智能体",
@@ -345,5 +346,9 @@
     "runtime_offline": "守护进程离线",
     "runtime_recovery": "守护进程已重启",
     "manual": "用户取消"
+  },
+  "workspace_filter": {
+    "show_all": "显示所有智能体",
+    "show_workspace": "仅显示工作区智能体"
   }
 }
